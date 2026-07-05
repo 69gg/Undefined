@@ -119,6 +119,10 @@ def _parse_chat_model_config(data: dict[str, Any]) -> ChatModelConfig:
             _get_value(data, ("models", "chat", "model_name"), "CHAT_MODEL_NAME"),
             "",
         ),
+        use_proxy=_coerce_bool(
+            _get_value(data, ("models", "chat", "use_proxy"), "CHAT_MODEL_USE_PROXY"),
+            False,
+        ),
         context_window_tokens=context_window_tokens,
         max_tokens=_coerce_int(
             _get_value(data, ("models", "chat", "max_tokens"), "CHAT_MODEL_MAX_TOKENS"),

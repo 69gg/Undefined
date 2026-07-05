@@ -10,6 +10,7 @@ import httpx
 from Undefined.bilibili.wbi import parse_cookie_string
 from Undefined.bilibili.wbi_request import request_with_wbi_fallback
 from Undefined.config import get_config
+from Undefined.skills.http_config import build_httpx_client_kwargs
 
 logger = logging.getLogger(__name__)
 
@@ -267,12 +268,15 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
     endpoint = _endpoint_for_mode(mode)
 
     try:
-        async with httpx.AsyncClient(
+        client_kwargs = build_httpx_client_kwargs(
+            endpoint,
+            proxy_scope="bilibili",
             headers=_HEADERS,
             cookies=cookies,
             timeout=timeout,
             follow_redirects=True,
-        ) as client:
+        )
+        async with httpx.AsyncClient(**client_kwargs) as client:
             payload = await request_with_wbi_fallback(
                 client,
                 endpoint=endpoint,

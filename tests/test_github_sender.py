@@ -66,7 +66,9 @@ async def test_send_github_repo_card_renders_and_sends_image(
     monkeypatch.setattr(
         sender_module, "render_html_to_image", fake_render_html_to_image
     )
-    monkeypatch.setattr(sender_module, "get_request_proxy", lambda _url: None)
+    monkeypatch.setattr(
+        sender_module, "get_request_proxy", lambda *_args, **_kwargs: None
+    )
     monkeypatch.setattr(sender_module, "RENDER_CACHE_DIR", tmp_path)
 
     sender: Any = SimpleNamespace(

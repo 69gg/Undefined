@@ -9,6 +9,7 @@ from typing import Any
 
 
 from ..coercers import (
+    _coerce_bool,
     _coerce_float,
     _coerce_int,
     _coerce_str,
@@ -46,6 +47,14 @@ def _parse_embedding_model_config(data: dict[str, Any]) -> EmbeddingModelConfig:
                 data, ("models", "embedding", "model_name"), "EMBEDDING_MODEL_NAME"
             ),
             "",
+        ),
+        use_proxy=_coerce_bool(
+            _get_value(
+                data,
+                ("models", "embedding", "use_proxy"),
+                "EMBEDDING_MODEL_USE_PROXY",
+            ),
+            False,
         ),
         queue_interval_seconds=_normalize_queue_interval(
             _coerce_float(
@@ -94,6 +103,12 @@ def _parse_rerank_model_config(data: dict[str, Any]) -> RerankModelConfig:
         model_name=_coerce_str(
             _get_value(data, ("models", "rerank", "model_name"), "RERANK_MODEL_NAME"),
             "",
+        ),
+        use_proxy=_coerce_bool(
+            _get_value(
+                data, ("models", "rerank", "use_proxy"), "RERANK_MODEL_USE_PROXY"
+            ),
+            False,
         ),
         queue_interval_seconds=queue_interval_seconds,
         context_window_tokens=_resolve_context_window_tokens(

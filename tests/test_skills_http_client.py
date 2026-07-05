@@ -104,7 +104,7 @@ class TestRequestProxy:
             http_config_module,
             "get_config",
             lambda strict=False: SimpleNamespace(
-                use_proxy=True,
+                search_use_proxy=True,
                 http_proxy="http://http-proxy.local:7890",
                 https_proxy="http://https-proxy.local:7890",
             ),
@@ -128,7 +128,7 @@ class TestRequestProxy:
             http_config_module,
             "get_config",
             lambda strict=False: SimpleNamespace(
-                use_proxy=False,
+                search_use_proxy=False,
                 http_proxy="http://http-proxy.local:7890",
                 https_proxy="http://https-proxy.local:7890",
             ),
@@ -139,6 +139,40 @@ class TestRequestProxy:
                 "https://api.github.com/repos/69gg/Undefined"
             )
             is None
+        )
+
+    def test_uses_scope_specific_proxy_switch(self) -> None:
+        config = SimpleNamespace(
+            search_use_proxy=False,
+            github_use_proxy=True,
+            http_proxy="http://http-proxy.local:7890",
+            https_proxy="http://https-proxy.local:7890",
+            models_image_gen=SimpleNamespace(use_proxy=True),
+        )
+
+        assert (
+            http_config_module.get_request_proxy(
+                "https://api.github.com/repos/69gg/Undefined",
+                proxy_scope="search",
+                config=config,
+            )
+            is None
+        )
+        assert (
+            http_config_module.get_request_proxy(
+                "https://api.github.com/repos/69gg/Undefined",
+                proxy_scope="github",
+                config=config,
+            )
+            == "http://https-proxy.local:7890"
+        )
+        assert (
+            http_config_module.get_request_proxy(
+                "https://api.openai.com/v1/images/generations",
+                proxy_scope="model:image_gen",
+                config=config,
+            )
+            == "http://https-proxy.local:7890"
         )
 
 
@@ -178,7 +212,7 @@ class TestRequestWithRetryProxy:
         monkeypatch.setattr(
             http_client_module,
             "get_request_proxy",
-            lambda _url: "http://proxy.local:7890",
+            lambda *_args, **_kwargs: "http://proxy.local:7890",
         )
         monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
 
@@ -224,7 +258,9 @@ class TestRequestWithRetryProxy:
         monkeypatch.setattr(
             http_client_module, "get_request_retries", lambda _default: 0
         )
-        monkeypatch.setattr(http_client_module, "get_request_proxy", lambda _url: None)
+        monkeypatch.setattr(
+            http_client_module, "get_request_proxy", lambda *_args, **_kwargs: None
+        )
         monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
 
         await http_client_module.request_with_retry(

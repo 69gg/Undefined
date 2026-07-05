@@ -9,6 +9,7 @@ from typing import Any
 
 
 from ..coercers import (
+    _coerce_bool,
     _coerce_float,
     _coerce_int,
     _coerce_str,
@@ -52,6 +53,14 @@ def _parse_image_gen_model_config(data: dict[str, Any]) -> ImageGenModelConfig:
             ),
             0,
         ),
+        use_proxy=_coerce_bool(
+            _get_value(
+                data,
+                ("models", "image_gen", "use_proxy"),
+                "IMAGE_GEN_MODEL_USE_PROXY",
+            ),
+            False,
+        ),
         request_params=_get_model_request_params(data, "image_gen"),
     )
 
@@ -91,6 +100,14 @@ def _parse_image_edit_model_config(data: dict[str, Any]) -> ImageGenModelConfig:
             ),
             0,
         ),
+        use_proxy=_coerce_bool(
+            _get_value(
+                data,
+                ("models", "image_edit", "use_proxy"),
+                "IMAGE_EDIT_MODEL_USE_PROXY",
+            ),
+            False,
+        ),
         request_params=_get_model_request_params(data, "image_edit"),
     )
 
@@ -116,5 +133,9 @@ def _parse_image_gen_config(data: dict[str, Any]) -> ImageGenConfig:
         ),
         openai_timeout=_coerce_float(
             _get_value(data, ("image_gen", "openai_timeout"), None), 120.0
+        ),
+        use_proxy=_coerce_bool(
+            _get_value(data, ("image_gen", "use_proxy"), "IMAGE_GEN_USE_PROXY"),
+            False,
         ),
     )

@@ -35,7 +35,6 @@ from pathlib import Path
 from typing import Any
 
 import chromadb
-import httpx
 
 # 将项目 src 加入 sys.path，使脚本可以直接 uv run 执行
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -205,9 +204,8 @@ def _build_embedder(config: Config) -> Embedder:
         )
         sys.exit(1)
 
-    http_client = httpx.AsyncClient(timeout=120.0)
     token_storage = TokenUsageStorage()
-    model_requester = ModelRequester(http_client, token_storage)
+    model_requester = ModelRequester(None, token_storage)
     embedder = Embedder(model_requester, embedding_config, batch_size=64)
     embedder.start()
     return embedder

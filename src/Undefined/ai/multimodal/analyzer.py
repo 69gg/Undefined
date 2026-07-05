@@ -8,12 +8,15 @@ import hashlib
 import json
 import logging
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 from urllib.parse import urlsplit
 
 import aiofiles
 import httpx
+
+from Undefined.skills.http_config import build_httpx_client_kwargs
 
 from Undefined.ai.llm import ModelRequester
 import Undefined.ai.multimodal as _multimodal_pkg
@@ -54,6 +57,7 @@ class MultimodalAnalyzer:
         requester: ModelRequester,
         vision_config: VisionModelConfig,
         prompt_path: str = "res/prompts/analyze_multimodal.txt",
+        config_getter: Callable[[], Any] | None = None,
     ) -> None:
         """初始化多模态分析器。
 
@@ -65,6 +69,7 @@ class MultimodalAnalyzer:
         self._requester = requester
         self._vision_config = vision_config
         self._prompt_path = prompt_path
+        self._config_getter = config_getter
         self._cache: dict[str, dict[str, str]] = {}
         # 按文件名索引的 Q&A 历史：{filename: [{q: ..., a: ...}, ...]}
         self._file_history: dict[str, list[dict[str, str]]] = {}
@@ -153,9 +158,14 @@ class MultimodalAnalyzer:
         )
         try:
             timeout = httpx.Timeout(_multimodal_pkg._MEDIA_URL_DOWNLOAD_TIMEOUT_SECONDS)
-            async with httpx.AsyncClient(
-                timeout=timeout, follow_redirects=True
-            ) as client:
+            client_kwargs = build_httpx_client_kwargs(
+                media_url,
+                proxy_scope="attachments",
+                timeout=timeout,
+                follow_redirects=True,
+                config=self._config_getter() if self._config_getter else None,
+            )
+            async with httpx.AsyncClient(**client_kwargs) as client:
                 response = await client.get(media_url)
                 response.raise_for_status()
                 async with aiofiles.open(tmp_path, "wb") as f:

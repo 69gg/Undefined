@@ -97,6 +97,7 @@ class Config:
     history_summary_time_fetch_limit: int
     history_onebot_fetch_limit: int
     history_group_analysis_limit: int
+    attachment_use_proxy: bool
     attachment_remote_download_max_size_mb: int
     attachment_cache_max_total_size_mb: int
     attachment_cache_max_records: int
@@ -116,12 +117,13 @@ class Config:
     firecrawl_search_enabled: bool
     firecrawl_api_key: str
     firecrawl_base_url: str
-    use_proxy: bool
+    search_use_proxy: bool
     http_proxy: str
     https_proxy: str
     network_request_timeout: float
     network_request_retries: int
     render_browser_max_concurrency: int
+    render_use_proxy: bool
     api_xxapi_base_url: str
     api_xingzhige_base_url: str
     api_jkyai_base_url: str
@@ -154,6 +156,7 @@ class Config:
     code_delivery_container_cpu_limit: str
     code_delivery_command_blacklist: list[str]
     # messages 工具集
+    messages_use_proxy: bool
     messages_send_text_file_max_size_kb: int
     messages_send_url_file_max_size_mb: int
     # 嵌入模型
@@ -172,6 +175,7 @@ class Config:
     knowledge_enable_rerank: bool
     knowledge_rerank_top_k: int
     # Bilibili 视频提取
+    bilibili_use_proxy: bool
     bilibili_auto_extract_enabled: bool
     bilibili_cookie: str
     bilibili_prefer_quality: int
@@ -184,6 +188,7 @@ class Config:
     bilibili_auto_extract_group_ids: list[int]
     bilibili_auto_extract_private_ids: list[int]
     # arXiv 论文提取
+    arxiv_use_proxy: bool
     arxiv_auto_extract_enabled: bool
     arxiv_max_file_size: int
     arxiv_auto_extract_group_ids: list[int]
@@ -192,6 +197,7 @@ class Config:
     arxiv_author_preview_limit: int
     arxiv_summary_preview_chars: int
     # GitHub 仓库自动提取
+    github_use_proxy: bool
     github_auto_extract_enabled: bool
     github_request_timeout_seconds: float
     github_request_retries: int

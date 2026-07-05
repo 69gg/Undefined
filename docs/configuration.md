@@ -240,6 +240,7 @@ model_name = "gpt-4o-mini"
 | `max_tokens` | 最大输出 token（vision 无此字段） |
 | `context_window_tokens` | 模型上下文窗口上限（token），用于 `/summary` 分块与 Prompt 预算；解析默认 `8192`，须按上游模型能力配置 |
 | `queue_interval_seconds` | 该模型请求队列发车间隔（秒，`0` 表示立即发车） |
+| `use_proxy` | 是否让该模型请求使用 `[proxy]` 中配置的代理地址；默认 `false`，各模型种类独立配置 |
 | `api_mode` | 请求模式：`chat_completions` 或 `responses` |
 | `reasoning_enabled` | 是否启用 `reasoning.effort` |
 | `reasoning_effort` | `reasoning.effort` 档位：`none` / `minimal` / `low` / `medium` / `high` / `xhigh` |
@@ -314,6 +315,7 @@ Prompt caching 补充：
 - `thinking_tool_call_compat=true`
 - `responses_tool_choice_compat=false`
 - `responses_force_stateless_replay=false`
+- `use_proxy=false`
 
 补充：
 - 若上游只对 `/v1/responses` 识别自定义参数，可将 `api_mode` 切到 `responses`。
@@ -330,16 +332,17 @@ Prompt caching 补充：
 - `thinking_tool_call_compat=true`
 - `responses_tool_choice_compat=false`
 - `responses_force_stateless_replay=false`
+- `use_proxy=false`
 
 ### 4.4.4 `[models.security]` 安全模型
 
 字段：
 - 额外开关：`enabled=true`
-- 默认：`max_tokens=100`、`queue_interval_seconds=1.0`（`0` 表示立即发车，`<0` 回退 `1.0`）、`api_mode="chat_completions"`、`reasoning_enabled=false`、`reasoning_effort="medium"`、`thinking_budget_tokens=0`、`thinking_tool_call_compat=true`、`responses_tool_choice_compat=false`、`responses_force_stateless_replay=false`
+- 默认：`max_tokens=100`、`queue_interval_seconds=1.0`（`0` 表示立即发车，`<0` 回退 `1.0`）、`api_mode="chat_completions"`、`reasoning_enabled=false`、`reasoning_effort="medium"`、`thinking_budget_tokens=0`、`thinking_tool_call_compat=true`、`responses_tool_choice_compat=false`、`responses_force_stateless_replay=false`、`use_proxy=false`
 
 关键回退逻辑：
 - 若 `api_url/api_key/model_name` 任一缺失，会自动回退为 chat 模型（并告警）。
-- 回退时会继承 chat 的 `api_mode`、`reasoning_*`、`responses_tool_choice_compat`、`responses_force_stateless_replay` 与 `request_params`；旧 `thinking_*` 仍保持安全模型自身默认值。
+- 回退时会继承 chat 的 `api_mode`、`reasoning_*`、`responses_tool_choice_compat`、`responses_force_stateless_replay` 与 `request_params`；旧 `thinking_*` 仍保持安全模型自身默认值；`use_proxy` 仍只读取 `[models.security]` 自身配置，默认 `false`。
 
 ### 4.4.5 `[models.naga]` Naga 审核模型
 
@@ -358,9 +361,10 @@ Prompt caching 补充：
 - `thinking_tool_call_compat=true`
 - `responses_tool_choice_compat=false`
 - `responses_force_stateless_replay=false`
+- `use_proxy=false`
 
 关键回退逻辑：
-- 若整个节缺失或 `api_url/api_key/model_name` 任一缺失：完整回退到 `models.security`，并沿用安全模型的请求参数。
+- 若整个节缺失或 `api_url/api_key/model_name` 任一缺失：完整回退到 `models.security`，并沿用安全模型的请求参数；`use_proxy` 仍只读取 `[models.naga]` 自身配置，默认 `false`。
 
 ### 4.4.6 `[models.agent]` Agent 执行模型
 
@@ -373,13 +377,22 @@ Prompt caching 补充：
 - `thinking_tool_call_compat=true`
 - `responses_tool_choice_compat=false`
 - `responses_force_stateless_replay=false`
+- `use_proxy=false`
 
 ### 4.4.7 `[models.historian]` 史官模型
 
 - 用于认知记忆后台改写。
 - 若整个节缺失或为空：完整回退到 `models.agent`。
 - 若部分字段缺失：逐项继承 agent 配置，包括 `api_mode`、`reasoning_*`、`thinking_*`、`responses_tool_choice_compat`、`responses_force_stateless_replay` 与 `request_params`。
+- `use_proxy` 不继承 agent；`[models.historian]` 存在时未显式配置仍默认 `false`。
 - `queue_interval_seconds=0` 时立即发车，`<0` 时回退到 agent 的间隔。
+
+#### `[models.summary]` 消息总结模型
+
+- 用于 `/summary`、`/sum` 与内部 SummaryService；主 AI 对话中的 `summary_agent` 仍走 `[models.agent]`。
+- 若整个节缺失或为空：完整回退到 `models.agent`。
+- 若部分字段缺失：逐项继承 agent 配置，包括 `api_mode`、`reasoning_*`、`thinking_*`、`responses_tool_choice_compat`、`responses_force_stateless_replay` 与 `request_params`。
+- `use_proxy` 不继承 agent；`[models.summary]` 存在时未显式配置仍默认 `false`。
 
 ### 4.4.8 `[models.grok]` Grok 搜索模型
 
@@ -397,6 +410,7 @@ Prompt caching 补充：
 - `thinking_budget_tokens=20000`
 - `thinking_include_budget=true`
 - `reasoning_effort_style="openai"`
+- `use_proxy=false`
 
 补充：
 - 该模型节不提供 `api_mode`。
@@ -425,6 +439,7 @@ Prompt caching 补充：
 - `api_mode` / `reasoning_enabled` / `reasoning_effort` / `responses_tool_choice_compat` / `responses_force_stateless_replay`
 - `thinking_*` / `request_params`
 - 以上可选字段缺省继承主模型
+- `use_proxy` 是每个池条目独立开关，默认 `false`，不继承主模型，也没有池级总开关
 - `queue_interval_seconds=0` 表示立即发车；`<0` 时回退到主模型间隔。
 
 `request_params` 继承规则：
@@ -443,6 +458,7 @@ Prompt caching 补充：
 | `api_url` | `""` | 嵌入 API 地址 |
 | `api_key` | `""` | API Key |
 | `model_name` | `""` | 模型名 |
+| `use_proxy` | `false` | 是否使用 `[proxy]` 中的代理地址 |
 | `queue_interval_seconds` | `0.0` | 发车间隔（`0` 立即发车，`<0` 回退 `0.0`） |
 | `dimensions` | `0` | 向量维度；`0`/空视为 `None`（模型默认） |
 | `query_instruction` | `""` | 查询前缀 |
@@ -456,9 +472,26 @@ Prompt caching 补充：
 | `api_url` | `""` | rerank API 地址 |
 | `api_key` | `""` | API Key |
 | `model_name` | `""` | 模型名 |
+| `use_proxy` | `false` | 是否使用 `[proxy]` 中的代理地址 |
 | `queue_interval_seconds` | `0.0` | `0` 立即发车，`<0` 回退 `0.0` |
 | `query_instruction` | `""` | 查询前缀 |
 | `request_params` | `{}` | 额外请求体参数；保留字段如 `model`/`query`/`documents`/`top_n` 会忽略 |
+
+### 4.4.12 `[models.image_gen]` / `[models.image_edit]` 生图模型
+
+| 字段 | 默认值 | 说明 |
+|---|---:|---|
+| `api_url` | `""` | OpenAI-compatible 生图 API 地址 |
+| `api_key` | `""` | API Key |
+| `model_name` | `""` | 模型名 |
+| `use_proxy` | `false` | 是否让该模型请求使用 `[proxy]` 中的代理地址 |
+| `context_window_tokens` | `0` | 预留字段；`0` 表示不参与文本上下文预算 |
+| `request_params` | `{}` | 额外请求体参数 |
+
+说明：
+- `[models.image_gen].use_proxy` 控制 OpenAI-compatible 生图请求。
+- `[models.image_edit].use_proxy` 控制参考图生图请求。
+- `[image_gen].use_proxy` 控制非模型 provider（如星之阁）及图片下载链路，三者互不继承。
 
 `request_params` 说明：
 - 仅用于**请求体**字段，不包含 `api_key`、`base_url`、`timeout`、`extra_headers` 等 client 选项。
@@ -572,6 +605,7 @@ Prompt caching 补充：
 | 字段 | 默认值 | 说明 |
 |---|---:|---|
 | `remote_download_max_size_mb` | `25` | 远程附件自动下载并缓存的最大大小（MB）。超过上限时只登记 URL 引用；设为 `0` 可完全禁用远程附件下载 |
+| `use_proxy` | `false` | 远程附件下载是否使用 `[proxy]` 中的代理地址 |
 | `cache_max_total_size_mb` | `0` | 附件缓存文件总大小上限（MB）。`0` 表示不按总容量清理；达到上限时优先删除最旧本地缓存副本，有 URL 的记录会保留 UID 与 URL 以便后续回源 |
 | `cache_max_records` | `2000` | 附件登记记录最大数量。`0` 表示不限制数量 |
 | `cache_max_age_days` | `7` | 附件本地缓存最长保留天数。`0` 表示不按时间清理；有 URL 的记录只删除本地副本并保留 UID/URL，无 URL 的老记录会被删除 |
@@ -652,6 +686,7 @@ Prompt caching 补充：
 | `searxng_url` | `""` | SearXNG 地址；为空则禁用搜索包装器 |
 | `grok_search_enabled` | `false` | 是否在 `web_agent` 中暴露 `grok_search`；关闭时隐藏该工具 |
 | `firecrawl_search_enabled` | `false` | 是否在 `web_agent` 中暴露 `firecrawl_search`；关闭时隐藏该工具 |
+| `use_proxy` | `false` | 搜索相关 HTTP 请求是否使用 `[proxy]` 中的代理地址 |
 
 #### `search.firecrawl`
 
@@ -671,7 +706,6 @@ Prompt caching 补充：
 
 | 字段 | 默认值 | 说明 |
 |---|---:|---|
-| `use_proxy` | `true` | 是否允许相关工具使用代理 |
 | `http_proxy` | `""` | HTTP 代理地址 |
 | `https_proxy` | `""` | HTTPS 代理地址 |
 
@@ -679,8 +713,9 @@ Prompt caching 补充：
 - 若 TOML 未配置 `http_proxy` / `https_proxy`，会尝试 `HTTP_PROXY` / `HTTPS_PROXY`。
 
 说明：
-- 该配置会影响走统一 HTTP 请求封装的联网能力，例如 GitHub 仓库自动提取、arXiv 查询及部分第三方 API 请求。
-- 当 `use_proxy = false` 时，上述请求不会使用代理，也不会再读取代理环境变量。
+- `[proxy]` 只保存代理地址，不再包含全局启用开关。
+- 是否使用代理由各功能段或模型段的 `use_proxy` 独立控制，默认均为 `false`。
+- 本机 Runtime API、WebUI、Tauri 本机/内网桥接不走这里的公网代理配置。
 
 ---
 
@@ -698,6 +733,7 @@ Prompt caching 补充：
 | 字段 | 默认值 | 说明 | 约束/回退 |
 |---|---:|---|---|
 | `browser_max_concurrency` | `0` | 渲染浏览器最大同时开启数量 | `<=0` 时启用自动值：Linux=`1`，其它平台=`2` |
+| `use_proxy` | `false` | HTML/Markdown 渲染及网页抓取渲染链路是否使用 `[proxy]` 中的代理地址 | |
 
 说明：
 - 该配置只影响 `render.py` 的 HTML/Markdown 图片渲染链路，不影响 `crawl_webpage` 等独立浏览器实现。
@@ -731,6 +767,20 @@ Prompt caching 补充：
 | `xingzhige_base_url` | `https://api.xingzhige.com` | 星之阁基址 |
 
 说明：以上值会自动去除末尾 `/`。
+
+### 4.16.1 `[image_gen]` 生图工具
+
+| 字段 | 默认值 | 说明 |
+|---|---:|---|
+| `provider` | `"xingzhige"` | 生图 provider：`xingzhige` 或 `models` |
+| `use_proxy` | `false` | 非模型 provider 请求与生成图片下载是否使用 `[proxy]` 中的代理地址 |
+| `xingzhige_size` | `"1:1"` | 星之阁模式下的默认图片比例 |
+| `openai_size` | `""` | OpenAI-compatible 生图尺寸；空字符串表示不传 |
+| `openai_quality` | `""` | OpenAI-compatible 生图质量；空字符串表示不传 |
+| `openai_style` | `""` | OpenAI-compatible 生图风格；空字符串表示不传 |
+| `openai_timeout` | `120.0` | OpenAI-compatible 生图请求超时（秒） |
+
+说明：`provider="models"` 时，模型请求是否走代理由 `[models.image_gen].use_proxy` / `[models.image_edit].use_proxy` 控制；`[image_gen].use_proxy` 只控制工具自身的非模型 HTTP 请求。
 
 ---
 
@@ -774,6 +824,7 @@ Prompt caching 补充：
 
 | 字段 | 默认值 | 说明 | 约束/回退 |
 |---|---:|---|---|
+| `use_proxy` | `false` | URL 文件下载等消息工具联网请求是否使用 `[proxy]` 中的代理地址 | |
 | `send_text_file_max_size_kb` | `512` | 文本文件发送上限（KB） | `<=0` 回退 `512` |
 | `send_url_file_max_size_mb` | `100` | URL 文件发送上限（MB） | `<=0` 回退 `100` |
 
@@ -783,6 +834,7 @@ Prompt caching 补充：
 
 | 字段 | 默认值 | 说明 | 约束/回退 |
 |---|---:|---|---|
+| `use_proxy` | `false` | Bilibili API、短链解析、视频/弹幕请求是否使用 `[proxy]` 中的代理地址 | |
 | `auto_extract_enabled` | `false` | 是否自动提取 B 站链接/BV | |
 | `cookie` | `""` | 完整 Cookie 字符串 | 支持兼容旧字段 `sessdata`（不推荐） |
 | `prefer_quality` | `80` | 目标清晰度（80/64/32） | |
@@ -807,6 +859,7 @@ Prompt caching 补充：
 
 | 字段 | 默认值 | 说明 | 约束/回退 |
 |---|---:|---|---|
+| `use_proxy` | `false` | arXiv API 与 PDF 下载是否使用 `[proxy]` 中的代理地址 | |
 | `auto_extract_enabled` | `false` | 是否自动提取 arXiv 论文 | |
 | `max_file_size` | `100` | 最大 PDF 体积（MB），`0` 不限 | `<0` 回退 `100` |
 | `auto_extract_group_ids` | `[]` | 功能级群白名单 | 空时跟随全局 access |
@@ -827,6 +880,7 @@ Prompt caching 补充：
 
 | 字段 | 默认值 | 说明 | 约束/回退 |
 |---|---:|---|---|
+| `use_proxy` | `false` | GitHub API 请求和仓库卡片渲染资源加载是否使用 `[proxy]` 中的代理地址 | |
 | `auto_extract_enabled` | `false` | 是否自动提取 GitHub 仓库链接或 `owner/repo` 仓库 ID | |
 | `request_timeout_seconds` | `10.0` | GitHub API 请求超时（秒），作为显式超时传入，不被 `[network].request_timeout_seconds` 覆盖 | `<=0` 回退 `10`，`>60` 截断到 `60` |
 | `request_retries` | `2` | GitHub API 请求重试次数，仅重试网络/超时异常和 `429`/`5xx` 状态码 | `<0` 回退 `0`，`>5` 截断到 `5` |
@@ -838,7 +892,7 @@ Prompt caching 补充：
 - 命中 `https://github.com/owner/repo`、`github.com/owner/repo` 或 `git@github.com:owner/repo.git` 时触发。
 - 裸 `owner/repo` 会作为 GitHub 仓库 ID 尝试一次 public API 请求；失败时只记录日志，不向会话发送错误消息。
 - 仅支持 public 仓库。卡片渲染为图片，包含仓库 ID、作者头像、简介、stars、forks、issues、contributors、watchers、语言、许可证、默认分支和更新时间等信息。
-- GitHub API 请求默认复用全局 `[proxy]` 代理设置。
+- GitHub API 请求默认不使用代理；需要时设置 `[github].use_proxy = true`，代理地址来自 `[proxy]`。
 - 自动提取失败日志会记录异常类型、`repr(exc)` 和堆栈，便于定位代理连接失败等 `str(exc)` 为空的异常。
 
 自动提取调度说明：
@@ -899,6 +953,7 @@ Prompt caching 补充：
 | `port` | `8788` | Runtime API 端口（1..65535） |
 | `auth_key` | `changeme` | 请求头鉴权密钥（`X-Undefined-API-Key`） |
 | `openapi_enabled` | `true` | 是否暴露 `/openapi.json` |
+| `tool_invoke_callback_use_proxy` | `false` | Runtime tool invoke 回调外部 URL 时是否使用 `[proxy]` 中的代理地址 |
 
 关键行为：
 - Runtime API 仅在主进程 `Undefined` 中启动，WebUI 通过后端代理调用。
@@ -1036,6 +1091,7 @@ Prompt caching 补充：
 | `enabled` | `false` | 是否启用外部网关集成 | 需同时开启 `nagaagent_mode_enabled` |
 | `api_url` | `""` | Naga 服务器 API 地址 | 为空时无法向远端提交 bind request / revoke 同步 |
 | `api_key` | `""` | Undefined ↔ Naga 共享密钥 | 回调端点通过 `Authorization: Bearer` 校验 |
+| `use_proxy` | `false` | 向 Naga 服务器发起外部请求时是否使用 `[proxy]` 中的代理地址 | |
 | `moderation_enabled` | `true` | 是否启用 Naga 外发消息审核 | 关闭后 `messages/send` 直接跳过审核，返回 `moderation.status=skipped_disabled` |
 | `allowed_groups` | `[]` | Naga 服务群聊名单 | 绑定命令和回调群发仅限名单内的群 |
 
@@ -1078,7 +1134,7 @@ Prompt caching 补充：
 - `memes.db_path`
 - `memes.vector_store_path`
 - `memes.queue_path`
-- `naga.*`（`enabled/api_url/api_key/moderation_enabled/allowed_groups`）
+- `naga.*`（`enabled/api_url/api_key/use_proxy/moderation_enabled/allowed_groups`）
 
 ### 5.3 明确“会执行热应用”的字段
 - 模型发车间隔 / 模型名 / 模型池变更（队列间隔刷新）
@@ -1098,6 +1154,8 @@ Prompt caching 补充：
 - `skills.intro_autogen_*`（Agent intro 生成器配置刷新）
 - `search.searxng_url`（搜索客户端刷新）
 - `search.priority` / `search.grok_search_enabled` / `search.firecrawl_search_enabled` / `search.firecrawl.*` 会随运行时配置更新，用于后续 `web_agent` 工具暴露和提示词优先级；无需重启。
+- `api.tool_invoke_callback_use_proxy` 会随运行时配置更新，用于后续 Runtime tool invoke 回调。
+- 各功能段与模型段的 `use_proxy` 会随运行时配置更新；模型 requester 会清理 client cache，后续请求按新的开关与 `[proxy]` 地址选择连接方式。
 - `skills.hot_reload*`（技能热重载任务重启）
 - `skills.hot_reload_interval/debounce`（配置热更新监听器自身重启）
 
@@ -1113,6 +1171,7 @@ Prompt caching 补充：
 - `models.<x>.deepseek_new_cot_support`：旧 thinking 兼容开关。
 - `[core].keyword_reply_enabled`：旧位置，建议迁移到 `[easter_egg]`。
 - `[bilibili].sessdata`：旧字段，建议改为完整 `cookie`。
+- `[proxy].use_proxy` / `USE_PROXY`：已移除；请改用各功能段或模型段下的 `use_proxy`，默认均为 `false`。
 - `api_endpoints.jkyai_base_url`、`api_endpoints.seniverse_base_url`、`weather.api_key`：代码仍支持，模板中未显式列出。
 
 ---
@@ -1140,12 +1199,36 @@ Prompt caching 补充：
 | `access.blocked_private_ids` | `BLOCKED_PRIVATE_IDS` |
 | `access.mode` | `ACCESS_MODE` |
 
+#### `api`
+
+| TOML 路径 | 环境变量 |
+|-----------|----------|
+| `api.tool_invoke_callback_use_proxy` | `API_TOOL_INVOKE_CALLBACK_USE_PROXY` |
+
 #### `api_endpoints`
 
 | TOML 路径 | 环境变量 |
 |-----------|----------|
 | `api_endpoints.jkyai_base_url` | `JKYAI_BASE_URL` |
 | `api_endpoints.xxapi_base_url` | `XXAPI_BASE_URL` |
+
+#### `attachments`
+
+| TOML 路径 | 环境变量 |
+|-----------|----------|
+| `attachments.use_proxy` | `ATTACHMENTS_USE_PROXY` |
+
+#### `arxiv`
+
+| TOML 路径 | 环境变量 |
+|-----------|----------|
+| `arxiv.use_proxy` | `ARXIV_USE_PROXY` |
+
+#### `bilibili`
+
+| TOML 路径 | 环境变量 |
+|-----------|----------|
+| `bilibili.use_proxy` | `BILIBILI_USE_PROXY` |
 
 #### `core`
 
@@ -1162,6 +1245,12 @@ Prompt caching 补充：
 |-----------|----------|
 | `features.pool_enabled` | `MODEL_POOL_ENABLED` |
 
+#### `github`
+
+| TOML 路径 | 环境变量 |
+|-----------|----------|
+| `github.use_proxy` | `GITHUB_USE_PROXY` |
+
 #### `history`
 
 | TOML 路径 | 环境变量 |
@@ -1173,6 +1262,7 @@ Prompt caching 补充：
 | TOML 路径 | 环境变量 |
 |-----------|----------|
 | `image_gen.provider` | `IMAGE_GEN_PROVIDER` |
+| `image_gen.use_proxy` | `IMAGE_GEN_USE_PROXY` |
 
 #### `logging`
 
@@ -1200,6 +1290,7 @@ Prompt caching 补充：
 | `models.agent.api_url` | `AGENT_MODEL_API_URL` |
 | `models.agent.context_window_tokens` | `AGENT_MODEL_CONTEXT_WINDOW_TOKENS` |
 | `models.agent.model_name` | `AGENT_MODEL_NAME` |
+| `models.agent.use_proxy` | `AGENT_MODEL_USE_PROXY` |
 | `models.agent.reasoning_content_replay` | `AGENT_MODEL_REASONING_CONTENT_REPLAY` |
 | `models.agent.responses_force_stateless_replay` | `AGENT_MODEL_RESPONSES_FORCE_STATELESS_REPLAY` |
 | `models.agent.responses_tool_choice_compat` | `AGENT_MODEL_RESPONSES_TOOL_CHOICE_COMPAT` |
@@ -1215,6 +1306,7 @@ Prompt caching 补充：
 | `models.chat.context_window_tokens` | `CHAT_MODEL_CONTEXT_WINDOW_TOKENS` |
 | `models.chat.max_tokens` | `CHAT_MODEL_MAX_TOKENS` |
 | `models.chat.model_name` | `CHAT_MODEL_NAME` |
+| `models.chat.use_proxy` | `CHAT_MODEL_USE_PROXY` |
 | `models.chat.reasoning_content_replay` | `CHAT_MODEL_REASONING_CONTENT_REPLAY` |
 | `models.chat.responses_force_stateless_replay` | `CHAT_MODEL_RESPONSES_FORCE_STATELESS_REPLAY` |
 | `models.chat.responses_tool_choice_compat` | `CHAT_MODEL_RESPONSES_TOOL_CHOICE_COMPAT` |
@@ -1224,7 +1316,11 @@ Prompt caching 补充：
 
 | TOML 路径 | 环境变量 |
 |-----------|----------|
+| `models.embedding.api_key` | `EMBEDDING_MODEL_API_KEY` |
+| `models.embedding.api_url` | `EMBEDDING_MODEL_API_URL` |
 | `models.embedding.context_window_tokens` | `EMBEDDING_MODEL_CONTEXT_WINDOW_TOKENS` |
+| `models.embedding.model_name` | `EMBEDDING_MODEL_NAME` |
+| `models.embedding.use_proxy` | `EMBEDDING_MODEL_USE_PROXY` |
 
 #### `models.grok`
 
@@ -1235,6 +1331,25 @@ Prompt caching 补充：
 | `models.grok.context_window_tokens` | `GROK_MODEL_CONTEXT_WINDOW_TOKENS` |
 | `models.grok.max_tokens` | `GROK_MODEL_MAX_TOKENS` |
 | `models.grok.model_name` | `GROK_MODEL_NAME` |
+| `models.grok.use_proxy` | `GROK_MODEL_USE_PROXY` |
+
+#### `models.historian`
+
+| TOML 路径 | 环境变量 |
+|-----------|----------|
+| `models.historian.use_proxy` | `HISTORIAN_MODEL_USE_PROXY` |
+
+#### `models.image_edit`
+
+| TOML 路径 | 环境变量 |
+|-----------|----------|
+| `models.image_edit.use_proxy` | `IMAGE_EDIT_MODEL_USE_PROXY` |
+
+#### `models.image_gen`
+
+| TOML 路径 | 环境变量 |
+|-----------|----------|
+| `models.image_gen.use_proxy` | `IMAGE_GEN_MODEL_USE_PROXY` |
 
 #### `models.naga`
 
@@ -1245,6 +1360,7 @@ Prompt caching 补充：
 | `models.naga.api_url` | `NAGA_MODEL_API_URL` |
 | `models.naga.context_window_tokens` | `NAGA_MODEL_CONTEXT_WINDOW_TOKENS` |
 | `models.naga.model_name` | `NAGA_MODEL_NAME` |
+| `models.naga.use_proxy` | `NAGA_MODEL_USE_PROXY` |
 | `models.naga.reasoning_content_replay` | `NAGA_MODEL_REASONING_CONTENT_REPLAY` |
 | `models.naga.responses_force_stateless_replay` | `NAGA_MODEL_RESPONSES_FORCE_STATELESS_REPLAY` |
 | `models.naga.responses_tool_choice_compat` | `NAGA_MODEL_RESPONSES_TOOL_CHOICE_COMPAT` |
@@ -1258,6 +1374,7 @@ Prompt caching 补充：
 | `models.rerank.api_url` | `RERANK_MODEL_API_URL` |
 | `models.rerank.context_window_tokens` | `RERANK_MODEL_CONTEXT_WINDOW_TOKENS` |
 | `models.rerank.model_name` | `RERANK_MODEL_NAME` |
+| `models.rerank.use_proxy` | `RERANK_MODEL_USE_PROXY` |
 
 #### `models.security`
 
@@ -1268,6 +1385,7 @@ Prompt caching 补充：
 | `models.security.api_url` | `SECURITY_MODEL_API_URL` |
 | `models.security.context_window_tokens` | `SECURITY_MODEL_CONTEXT_WINDOW_TOKENS` |
 | `models.security.model_name` | `SECURITY_MODEL_NAME` |
+| `models.security.use_proxy` | `SECURITY_MODEL_USE_PROXY` |
 | `models.security.reasoning_content_replay` | `SECURITY_MODEL_REASONING_CONTENT_REPLAY` |
 | `models.security.responses_force_stateless_replay` | `SECURITY_MODEL_RESPONSES_FORCE_STATELESS_REPLAY` |
 | `models.security.responses_tool_choice_compat` | `SECURITY_MODEL_RESPONSES_TOOL_CHOICE_COMPAT` |
@@ -1282,10 +1400,29 @@ Prompt caching 补充：
 | `models.vision.api_url` | `VISION_MODEL_API_URL` |
 | `models.vision.context_window_tokens` | `VISION_MODEL_CONTEXT_WINDOW_TOKENS` |
 | `models.vision.model_name` | `VISION_MODEL_NAME` |
+| `models.vision.use_proxy` | `VISION_MODEL_USE_PROXY` |
 | `models.vision.reasoning_content_replay` | `VISION_MODEL_REASONING_CONTENT_REPLAY` |
 | `models.vision.responses_force_stateless_replay` | `VISION_MODEL_RESPONSES_FORCE_STATELESS_REPLAY` |
 | `models.vision.responses_tool_choice_compat` | `VISION_MODEL_RESPONSES_TOOL_CHOICE_COMPAT` |
 | `models.vision.system_prompt_as_user` | `VISION_MODEL_SYSTEM_PROMPT_AS_USER` |
+
+#### `models.summary`
+
+| TOML 路径 | 环境变量 |
+|-----------|----------|
+| `models.summary.use_proxy` | `SUMMARY_MODEL_USE_PROXY` |
+
+#### `messages`
+
+| TOML 路径 | 环境变量 |
+|-----------|----------|
+| `messages.use_proxy` | `MESSAGES_USE_PROXY` |
+
+#### `naga`
+
+| TOML 路径 | 环境变量 |
+|-----------|----------|
+| `naga.use_proxy` | `NAGA_USE_PROXY` |
 
 #### `onebot`
 
@@ -1294,16 +1431,17 @@ Prompt caching 补充：
 | `onebot.token` | `ONEBOT_TOKEN` |
 | `onebot.ws_url` | `ONEBOT_WS_URL` |
 
-#### `proxy`
+#### `render`
 
 | TOML 路径 | 环境变量 |
 |-----------|----------|
-| `proxy.use_proxy` | `USE_PROXY` |
+| `render.use_proxy` | `RENDER_USE_PROXY` |
 
 #### `search`
 
 | TOML 路径 | 环境变量 |
 |-----------|----------|
+| `search.use_proxy` | `SEARCH_USE_PROXY` |
 | `search.priority` | `SEARCH_PRIORITY` |
 | `search.searxng_url` | `SEARXNG_URL` |
 | `search.firecrawl_search_enabled` | `FIRECRAWL_SEARCH_ENABLED` |

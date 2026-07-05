@@ -17,7 +17,7 @@ from ..domain_parsers import (
     _parse_prompt_system_info_config,
     _parse_render_cache_config,
 )
-from ..model_parsers import (
+from ..parsers import (
     _parse_image_edit_model_config,
     _parse_image_gen_config,
     _parse_image_gen_model_config,

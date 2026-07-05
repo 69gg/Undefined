@@ -8,6 +8,7 @@ from aiohttp import ClientSession, ClientTimeout
 
 from Undefined.api.naga_store import NagaBinding, NagaStore, PendingBinding
 from Undefined.services.commands.context import CommandContext
+from Undefined.skills.http_config import get_configured_proxy
 
 from .policy import is_naga_command_visible
 
@@ -314,7 +315,16 @@ async def _submit_bind_request_to_naga(
     try:
         timeout = ClientTimeout(total=10)
         async with ClientSession(timeout=timeout) as session:
-            async with session.post(url, json=payload, headers=headers) as resp:
+            async with session.post(
+                url,
+                json=payload,
+                headers=headers,
+                proxy=get_configured_proxy(
+                    url,
+                    use_proxy=bool(getattr(context.config.naga, "use_proxy", False)),
+                    config=context.config,
+                ),
+            ) as resp:
                 if resp.status < 300:
                     logger.info(
                         "[NagaCmd] 绑定请求已提交: naga_id=%s bind_uuid=%s status=%d",
@@ -361,7 +371,16 @@ async def _notify_remote_revoke(context: CommandContext, binding: NagaBinding) -
     try:
         timeout = ClientTimeout(total=10)
         async with ClientSession(timeout=timeout) as session:
-            async with session.post(url, json=payload, headers=headers) as resp:
+            async with session.post(
+                url,
+                json=payload,
+                headers=headers,
+                proxy=get_configured_proxy(
+                    url,
+                    use_proxy=bool(getattr(context.config.naga, "use_proxy", False)),
+                    config=context.config,
+                ),
+            ) as resp:
                 if resp.status < 300:
                     logger.info(
                         "[NagaCmd] 远端吊销同步成功: naga_id=%s bind_uuid=%s status=%d",

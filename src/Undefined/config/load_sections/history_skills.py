@@ -118,6 +118,9 @@ def load_history_skills(
             500,
         ),
     )
+    attachment_use_proxy = _coerce_bool(
+        _get_value(data, ("attachments", "use_proxy"), "ATTACHMENTS_USE_PROXY"), False
+    )
     attachment_remote_download_max_size_mb = max(
         0,
         _coerce_int(
@@ -259,6 +262,7 @@ def load_history_skills(
         "history_summary_time_fetch_limit": history_summary_time_fetch_limit,
         "history_onebot_fetch_limit": history_onebot_fetch_limit,
         "history_group_analysis_limit": history_group_analysis_limit,
+        "attachment_use_proxy": attachment_use_proxy,
         "attachment_remote_download_max_size_mb": attachment_remote_download_max_size_mb,
         "attachment_cache_max_total_size_mb": attachment_cache_max_total_size_mb,
         "attachment_cache_max_records": attachment_cache_max_records,

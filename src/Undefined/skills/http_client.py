@@ -38,12 +38,18 @@ async def request_with_retry(
     follow_redirects: bool = False,
     context: dict[str, Any] | None = None,
     retries: int | None = None,
+    proxy_scope: str = "search",
 ) -> httpx.Response:
     request_timeout = (
         timeout if timeout is not None else get_request_timeout(default_timeout)
     )
     request_retries = retries if retries is not None else get_request_retries(0)
-    request_proxy = get_request_proxy(url)
+    proxy_config = context.get("runtime_config") if context is not None else None
+    request_proxy = get_request_proxy(
+        url,
+        proxy_scope=proxy_scope,
+        config=proxy_config,
+    )
     request_id = "-"
     if context is not None:
         request_id = str(context.get("request_id", "-"))
@@ -138,6 +144,7 @@ async def get_json_with_retry(
     follow_redirects: bool = False,
     context: dict[str, Any] | None = None,
     retries: int | None = None,
+    proxy_scope: str = "search",
 ) -> Any:
     request_id = "-"
     if context is not None:
@@ -152,6 +159,7 @@ async def get_json_with_retry(
         follow_redirects=follow_redirects,
         context=context,
         retries=retries,
+        proxy_scope=proxy_scope,
     )
     try:
         return response.json()
@@ -179,6 +187,7 @@ async def get_text_with_retry(
     follow_redirects: bool = False,
     context: dict[str, Any] | None = None,
     retries: int | None = None,
+    proxy_scope: str = "search",
 ) -> str:
     response = await request_with_retry(
         "GET",
@@ -189,6 +198,7 @@ async def get_text_with_retry(
         follow_redirects=follow_redirects,
         context=context,
         retries=retries,
+        proxy_scope=proxy_scope,
     )
     return response.text
 
@@ -202,6 +212,7 @@ async def get_bytes_with_retry(
     follow_redirects: bool = False,
     context: dict[str, Any] | None = None,
     retries: int | None = None,
+    proxy_scope: str = "search",
 ) -> bytes:
     response = await request_with_retry(
         "GET",
@@ -212,5 +223,6 @@ async def get_bytes_with_retry(
         follow_redirects=follow_redirects,
         context=context,
         retries=retries,
+        proxy_scope=proxy_scope,
     )
     return response.content

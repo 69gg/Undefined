@@ -114,6 +114,12 @@ def _parse_security_model_config(
         ),
         False,
     )
+    use_proxy = _coerce_bool(
+        _get_value(
+            data, ("models", "security", "use_proxy"), "SECURITY_MODEL_USE_PROXY"
+        ),
+        False,
+    )
 
     context_window_tokens = _resolve_context_window_tokens(
         data, "security", "SECURITY_MODEL_CONTEXT_WINDOW_TOKENS"
@@ -123,6 +129,7 @@ def _parse_security_model_config(
             api_url=api_url,
             api_key=api_key,
             model_name=model_name,
+            use_proxy=use_proxy,
             max_tokens=_coerce_int(
                 _get_value(
                     data,
@@ -175,6 +182,7 @@ def _parse_security_model_config(
         api_url=chat_model.api_url,
         api_key=chat_model.api_key,
         model_name=chat_model.model_name,
+        use_proxy=use_proxy,
         context_window_tokens=chat_model.context_window_tokens,
         max_tokens=chat_model.max_tokens,
         queue_interval_seconds=chat_model.queue_interval_seconds,

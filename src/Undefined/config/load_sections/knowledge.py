@@ -15,7 +15,7 @@ from ..coercers import (
     _coerce_str,
     _get_value,
 )
-from ..model_parsers import (
+from ..parsers import (
     _parse_embedding_model_config,
     _parse_rerank_model_config,
 )

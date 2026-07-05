@@ -6,6 +6,8 @@ import re
 from typing import Any, Dict
 
 from Undefined.attachments import scope_from_context
+from Undefined.config import get_config
+from Undefined.skills.http_config import get_configured_proxy
 
 logger = logging.getLogger(__name__)
 
@@ -211,18 +213,14 @@ async def _render_latex_to_bytes(
 
 async def _resolve_proxy(context: Dict[str, Any]) -> str | None:
     """从 context 的 runtime_config 中解析代理地址。"""
-    from Undefined.config import get_config
-
     runtime_config = context.get("runtime_config") or get_config(strict=False)
     if runtime_config is None:
         return None
-    use_proxy: bool = getattr(runtime_config, "use_proxy", False)
-    if not use_proxy:
-        return None
-    proxy: str = getattr(runtime_config, "http_proxy", "") or getattr(
-        runtime_config, "https_proxy", ""
+    return get_configured_proxy(
+        "https://cdn.jsdelivr.net",
+        use_proxy=bool(getattr(runtime_config, "render_use_proxy", False)),
+        config=runtime_config,
     )
-    return proxy or None
 
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:

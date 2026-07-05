@@ -119,6 +119,10 @@ def _parse_naga_model_config(
         ),
         getattr(security_model, "stream_enabled", False),
     )
+    use_proxy = _coerce_bool(
+        _get_value(data, ("models", "naga", "use_proxy"), "NAGA_MODEL_USE_PROXY"),
+        False,
+    )
 
     if api_url and api_key and model_name:
         context_window_tokens = _resolve_context_window_tokens(
@@ -131,6 +135,7 @@ def _parse_naga_model_config(
             api_url=api_url,
             api_key=api_key,
             model_name=model_name,
+            use_proxy=use_proxy,
             max_tokens=_coerce_int(
                 _get_value(
                     data,
@@ -185,6 +190,7 @@ def _parse_naga_model_config(
         api_url=security_model.api_url,
         api_key=security_model.api_key,
         model_name=security_model.model_name,
+        use_proxy=use_proxy,
         max_tokens=security_model.max_tokens,
         context_window_tokens=security_model.context_window_tokens,
         queue_interval_seconds=security_model.queue_interval_seconds,

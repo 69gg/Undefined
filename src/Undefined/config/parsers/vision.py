@@ -114,6 +114,12 @@ def _parse_vision_model_config(data: dict[str, Any]) -> VisionModelConfig:
             _get_value(data, ("models", "vision", "model_name"), "VISION_MODEL_NAME"),
             "",
         ),
+        use_proxy=_coerce_bool(
+            _get_value(
+                data, ("models", "vision", "use_proxy"), "VISION_MODEL_USE_PROXY"
+            ),
+            False,
+        ),
         max_tokens=_coerce_int(
             _get_value(
                 data,

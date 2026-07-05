@@ -7,6 +7,7 @@ import httpx
 
 from Undefined.bilibili.wbi import build_signed_params, parse_cookie_string
 from Undefined.config import get_config
+from Undefined.skills.http_config import build_httpx_client_kwargs
 
 logger = logging.getLogger(__name__)
 
@@ -384,12 +385,15 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
     timeout = timeout_raw if timeout_raw > 0 else 30.0
 
     try:
-        async with httpx.AsyncClient(
+        client_kwargs = build_httpx_client_kwargs(
+            _USER_INFO_WBI_ENDPOINT,
+            proxy_scope="bilibili",
             headers=_HEADERS,
             cookies=cookies,
             timeout=timeout,
             follow_redirects=True,
-        ) as client:
+        )
+        async with httpx.AsyncClient(**client_kwargs) as client:
             user_info_payload, source = await _request_user_info(client, mid=mid)
 
             if _to_int(user_info_payload.get("code"), default=-1) != 0:

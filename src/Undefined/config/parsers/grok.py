@@ -125,5 +125,9 @@ def _parse_grok_model_config(data: dict[str, Any]) -> GrokModelConfig:
             ),
             False,
         ),
+        use_proxy=_coerce_bool(
+            _get_value(data, ("models", "grok", "use_proxy"), "GROK_MODEL_USE_PROXY"),
+            False,
+        ),
         request_params=_get_model_request_params(data, "grok"),
     )

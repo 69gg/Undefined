@@ -419,6 +419,7 @@ async def _call_xingzhige(prompt: str, size: str, context: dict[str, Any]) -> st
         params=params,
         timeout=timeout,
         context=context,
+        proxy_scope="image_gen",
     )
 
     try:
@@ -487,6 +488,7 @@ async def _call_openai_models(
             headers=headers,
             timeout=timeout_val,
             context=context,
+            proxy_scope="model:image_gen",
         )
     except httpx.HTTPStatusError as exc:
         message = _format_upstream_error_message(exc.response)
@@ -617,6 +619,7 @@ async def _call_openai_models_edit(
             headers=headers or None,
             timeout=timeout_val,
             context=context,
+            proxy_scope="model:image_edit",
         )
     except httpx.HTTPStatusError as exc:
         message = _format_upstream_error_message(exc.response)
@@ -657,6 +660,7 @@ async def _download_and_send(
         str(image_url),
         timeout=max(timeout_val, 15.0),
         context=context,
+        proxy_scope="image_gen",
     )
     filepath = _write_image_cache_file(img_response.content)
     return await _send_cached_image(filepath, target_id, message_type, context)

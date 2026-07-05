@@ -14,6 +14,8 @@ from typing import Any
 
 import httpx
 
+from Undefined.skills.http_config import build_httpx_client_kwargs
+
 logger = logging.getLogger(__name__)
 
 # ---------- 正则 ----------
@@ -52,7 +54,13 @@ async def resolve_short_url(short_url: str) -> str | None:
     if not short_url.startswith("http"):
         short_url = f"https://{short_url}"
     try:
-        async with httpx.AsyncClient(follow_redirects=False, timeout=480) as client:
+        client_kwargs = build_httpx_client_kwargs(
+            short_url,
+            proxy_scope="bilibili",
+            follow_redirects=False,
+            timeout=480,
+        )
+        async with httpx.AsyncClient(**client_kwargs) as client:
             resp = await client.head(short_url)
             location: str | None = resp.headers.get("Location") or resp.headers.get(
                 "location"

@@ -90,7 +90,7 @@ from Undefined.api.app import RuntimeAPIServer
 
 - `Undefined.main`, `Undefined.webui`, `Undefined.handlers`, `Undefined.onebot`
 - `Undefined.services` 下的运行时编排模块；`AICoordinator` 的唯一内部导入路径是 `Undefined.services.coordinator`，旧路径 `Undefined.services.ai_coordinator` 已移除
-- `Undefined.config.coercers`, `Undefined.config.model_parsers`
+- `Undefined.config.coercers`, `Undefined.config.parsers`（`Undefined.config.model_parsers` 仅保留兼容 re-export）
 - `Undefined.utils.io`, `Undefined.utils.paths`
 
 ---

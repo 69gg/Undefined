@@ -30,6 +30,9 @@ _MAX_GITHUB_AUTO_EXTRACT_MAX_ITEMS: int = 10
 def load_integrations(
     data: dict[str, Any], *, config_path: Optional[Path] = None
 ) -> dict[str, Any]:
+    bilibili_use_proxy = _coerce_bool(
+        _get_value(data, ("bilibili", "use_proxy"), "BILIBILI_USE_PROXY"), False
+    )
     bilibili_auto_extract_enabled = _coerce_bool(
         _get_value(data, ("bilibili", "auto_extract_enabled"), None), False
     )
@@ -75,6 +78,9 @@ def load_integrations(
     )
 
     # arXiv 配置
+    arxiv_use_proxy = _coerce_bool(
+        _get_value(data, ("arxiv", "use_proxy"), "ARXIV_USE_PROXY"), False
+    )
     arxiv_auto_extract_enabled = _coerce_bool(
         _get_value(data, ("arxiv", "auto_extract_enabled"), None), False
     )
@@ -112,6 +118,9 @@ def load_integrations(
         arxiv_summary_preview_chars = 8000
 
     # GitHub 配置
+    github_use_proxy = _coerce_bool(
+        _get_value(data, ("github", "use_proxy"), "GITHUB_USE_PROXY"), False
+    )
     github_auto_extract_enabled = _coerce_bool(
         _get_value(data, ("github", "auto_extract_enabled"), None), False
     )
@@ -225,6 +234,9 @@ def load_integrations(
         code_delivery_command_blacklist = []
 
     # messages 工具集配置
+    messages_use_proxy = _coerce_bool(
+        _get_value(data, ("messages", "use_proxy"), "MESSAGES_USE_PROXY"), False
+    )
     messages_send_text_file_max_size_kb = _coerce_int(
         _get_value(
             data,
@@ -248,6 +260,7 @@ def load_integrations(
         messages_send_url_file_max_size_mb = 100
 
     return {
+        "bilibili_use_proxy": bilibili_use_proxy,
         "bilibili_auto_extract_enabled": bilibili_auto_extract_enabled,
         "bilibili_cookie": bilibili_cookie,
         "bilibili_prefer_quality": bilibili_prefer_quality,
@@ -259,6 +272,7 @@ def load_integrations(
         "bilibili_danmaku_max_count": bilibili_danmaku_max_count,
         "bilibili_auto_extract_group_ids": bilibili_auto_extract_group_ids,
         "bilibili_auto_extract_private_ids": bilibili_auto_extract_private_ids,
+        "arxiv_use_proxy": arxiv_use_proxy,
         "arxiv_auto_extract_enabled": arxiv_auto_extract_enabled,
         "arxiv_max_file_size": arxiv_max_file_size,
         "arxiv_auto_extract_group_ids": arxiv_auto_extract_group_ids,
@@ -266,6 +280,7 @@ def load_integrations(
         "arxiv_auto_extract_max_items": arxiv_auto_extract_max_items,
         "arxiv_author_preview_limit": arxiv_author_preview_limit,
         "arxiv_summary_preview_chars": arxiv_summary_preview_chars,
+        "github_use_proxy": github_use_proxy,
         "github_auto_extract_enabled": github_auto_extract_enabled,
         "github_request_timeout_seconds": github_request_timeout_seconds,
         "github_request_retries": github_request_retries,
@@ -288,6 +303,7 @@ def load_integrations(
         "code_delivery_container_memory_limit": code_delivery_container_memory_limit,
         "code_delivery_container_cpu_limit": code_delivery_container_cpu_limit,
         "code_delivery_command_blacklist": code_delivery_command_blacklist,
+        "messages_use_proxy": messages_use_proxy,
         "messages_send_text_file_max_size_kb": messages_send_text_file_max_size_kb,
         "messages_send_url_file_max_size_mb": messages_send_url_file_max_size_mb,
     }

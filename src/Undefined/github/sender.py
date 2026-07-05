@@ -287,7 +287,7 @@ async def _render_repo_card(info: GitHubRepoInfo, output_path: Path) -> None:
         str(output_path),
         viewport_width=768,
         screenshot_selector=".card",
-        proxy=get_request_proxy(info.html_url or "https://github.com"),
+        proxy=get_request_proxy(info.html_url or "https://github.com", "github"),
     )
 
 

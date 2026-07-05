@@ -38,7 +38,7 @@ def build_config(
     ctx.update(load_core(data))
     ctx.update(load_knowledge(data))
     ctx.update(load_models(data))
-    from .model_parsers import _merge_admins
+    from .parsers import _merge_admins
 
     # 合并 config.toml 与本地 admins.json，超管始终纳入 admin 列表
     superadmin_qq, admin_qqs = _merge_admins(

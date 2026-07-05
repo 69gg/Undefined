@@ -16,6 +16,7 @@ from Undefined.ai.transports.openai_transport import RESPONSES_OUTPUT_ITEMS_KEY
 from Undefined.ai.tooling import END_CO_CALL_REJECT_CONTENT
 from Undefined.context import RequestContext
 from Undefined.render import render_html_to_image, render_markdown_to_html
+from Undefined.skills.http_config import get_request_proxy
 from Undefined.services.message_summary_fetch import fetch_session_messages
 from Undefined.attachments import scope_from_context
 from Undefined.utils.io import write_bytes
@@ -216,7 +217,14 @@ class ClientAskLoopMixin(ClientQueueMixin):
         tool_context.setdefault("history_manager", history_manager)
         tool_context.setdefault("onebot_client", onebot_client)
         tool_context.setdefault("scheduler", scheduler)
-        tool_context.setdefault("render_html_to_image", render_html_to_image)
+
+        async def render_html_to_image_with_proxy(*args: Any, **kwargs: Any) -> Any:
+            kwargs.setdefault(
+                "proxy", get_request_proxy("https://example.com", "render")
+            )
+            return await render_html_to_image(*args, **kwargs)
+
+        tool_context.setdefault("render_html_to_image", render_html_to_image_with_proxy)
         tool_context.setdefault("render_markdown_to_html", render_markdown_to_html)
         tool_context.setdefault("send_image_callback", self._send_image_callback)
         tool_context.setdefault(

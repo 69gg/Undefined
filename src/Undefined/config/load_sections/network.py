@@ -73,8 +73,8 @@ def load_network(
         "https://api.firecrawl.dev",
     )
 
-    use_proxy = _coerce_bool(
-        _get_value(data, ("proxy", "use_proxy"), "USE_PROXY"), True
+    search_use_proxy = _coerce_bool(
+        _get_value(data, ("search", "use_proxy"), "SEARCH_USE_PROXY"), False
     )
     http_proxy = _coerce_str(
         _get_value(data, ("proxy", "http_proxy"), "http_proxy"), ""
@@ -126,6 +126,9 @@ def load_network(
             ),
             0,
         ),
+    )
+    render_use_proxy = _coerce_bool(
+        _get_value(data, ("render", "use_proxy"), "RENDER_USE_PROXY"), False
     )
 
     api_xxapi_base_url = _normalize_base_url(
@@ -185,12 +188,13 @@ def load_network(
         "firecrawl_search_enabled": firecrawl_search_enabled,
         "firecrawl_api_key": firecrawl_api_key,
         "firecrawl_base_url": firecrawl_base_url,
-        "use_proxy": use_proxy,
+        "search_use_proxy": search_use_proxy,
         "http_proxy": http_proxy,
         "https_proxy": https_proxy,
         "network_request_timeout": network_request_timeout,
         "network_request_retries": network_request_retries,
         "render_browser_max_concurrency": render_browser_max_concurrency,
+        "render_use_proxy": render_use_proxy,
         "api_xxapi_base_url": api_xxapi_base_url,
         "api_xingzhige_base_url": api_xingzhige_base_url,
         "api_jkyai_base_url": api_jkyai_base_url,

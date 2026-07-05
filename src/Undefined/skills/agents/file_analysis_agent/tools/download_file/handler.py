@@ -7,6 +7,8 @@ from typing import Any, Callable, Dict, Protocol, cast
 import aiofiles
 import httpx
 
+from Undefined.skills.http_config import build_httpx_client_kwargs
+
 logger = logging.getLogger(__name__)
 
 SIZE_LIMITS = {
@@ -190,7 +192,12 @@ async def _download_from_url(
     """从 Web URL 进行下载，包含大小预检"""
     max_size_bytes: int = int(max_size_mb * 1024 * 1024)
 
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    client_kwargs = build_httpx_client_kwargs(
+        url,
+        proxy_scope="messages",
+        timeout=60.0,
+    )
+    async with httpx.AsyncClient(**client_kwargs) as client:
         try:
             logger.info(f"正在获取文件大小: {url}")
             head_response = await client.head(url, timeout=30.0)
@@ -254,7 +261,13 @@ async def _download_from_file_id(
 
         if is_http_url:
             # 使用 httpx 下载远程文件
-            async with httpx.AsyncClient(timeout=120.0) as client:
+            client_kwargs = build_httpx_client_kwargs(
+                url,
+                proxy_scope="messages",
+                timeout=120.0,
+                config=context.get("runtime_config"),
+            )
+            async with httpx.AsyncClient(**client_kwargs) as client:
                 response = await client.get(url, timeout=120.0)
                 response.raise_for_status()
 

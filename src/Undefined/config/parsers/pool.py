@@ -57,6 +57,7 @@ def _parse_model_pool(
                 api_url=_coerce_str(item.get("api_url"), primary_config.api_url),
                 api_key=_coerce_str(item.get("api_key"), primary_config.api_key),
                 model_name=name,
+                use_proxy=_coerce_bool(item.get("use_proxy"), False),
                 context_window_tokens=_coerce_int(
                     item.get("context_window_tokens"),
                     primary_config.context_window_tokens,

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..model_parsers import _log_debug_info, _verify_required_fields
+from ..parsers import _log_debug_info, _verify_required_fields
 
 
 def load_finalize(ctx: dict[str, Any], *, strict: bool = True) -> None:

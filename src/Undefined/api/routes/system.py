@@ -295,6 +295,8 @@ async def external_probe_handler(
             base_url=cfg.naga_model.api_url,
             api_key=cfg.naga_model.api_key,
             model_name=cfg.naga_model.model_name,
+            use_proxy=bool(getattr(cfg.naga_model, "use_proxy", False)),
+            proxy_config=cfg,
         )
         if bool(cfg.api.enabled and cfg.nagaagent_mode_enabled and cfg.naga.enabled)
         else _skipped_probe(
@@ -309,18 +311,24 @@ async def external_probe_handler(
             base_url=cfg.chat_model.api_url,
             api_key=cfg.chat_model.api_key,
             model_name=cfg.chat_model.model_name,
+            use_proxy=bool(getattr(cfg.chat_model, "use_proxy", False)),
+            proxy_config=cfg,
         ),
         _probe_http_endpoint(
             name="vision_model",
             base_url=cfg.vision_model.api_url,
             api_key=cfg.vision_model.api_key,
             model_name=cfg.vision_model.model_name,
+            use_proxy=bool(getattr(cfg.vision_model, "use_proxy", False)),
+            proxy_config=cfg,
         ),
         _probe_http_endpoint(
             name="security_model",
             base_url=cfg.security_model.api_url,
             api_key=cfg.security_model.api_key,
             model_name=cfg.security_model.model_name,
+            use_proxy=bool(getattr(cfg.security_model, "use_proxy", False)),
+            proxy_config=cfg,
         ),
         naga_probe,
         _probe_http_endpoint(
@@ -328,6 +336,8 @@ async def external_probe_handler(
             base_url=cfg.agent_model.api_url,
             api_key=cfg.agent_model.api_key,
             model_name=cfg.agent_model.model_name,
+            use_proxy=bool(getattr(cfg.agent_model, "use_proxy", False)),
+            proxy_config=cfg,
         ),
     ]
     if summary_model is not None:
@@ -337,6 +347,8 @@ async def external_probe_handler(
                 base_url=summary_model.api_url,
                 api_key=summary_model.api_key,
                 model_name=summary_model.model_name,
+                use_proxy=bool(getattr(summary_model, "use_proxy", False)),
+                proxy_config=cfg,
             )
         )
     grok_model = getattr(cfg, "grok_model", None)
@@ -347,6 +359,8 @@ async def external_probe_handler(
                 base_url=getattr(grok_model, "api_url", ""),
                 api_key=getattr(grok_model, "api_key", ""),
                 model_name=getattr(grok_model, "model_name", ""),
+                use_proxy=bool(getattr(grok_model, "use_proxy", False)),
+                proxy_config=cfg,
             )
         )
     checks.extend(
@@ -356,12 +370,16 @@ async def external_probe_handler(
                 base_url=cfg.embedding_model.api_url,
                 api_key=cfg.embedding_model.api_key,
                 model_name=getattr(cfg.embedding_model, "model_name", ""),
+                use_proxy=bool(getattr(cfg.embedding_model, "use_proxy", False)),
+                proxy_config=cfg,
             ),
             _probe_http_endpoint(
                 name="rerank_model",
                 base_url=cfg.rerank_model.api_url,
                 api_key=cfg.rerank_model.api_key,
                 model_name=getattr(cfg.rerank_model, "model_name", ""),
+                use_proxy=bool(getattr(cfg.rerank_model, "use_proxy", False)),
+                proxy_config=cfg,
             ),
             _probe_ws_endpoint(cfg.onebot_ws_url),
         ]

@@ -55,6 +55,7 @@ async def download_paper_pdf(
             timeout_seconds=min(timeout_seconds, 60.0),
             follow_redirects=True,
             context=context,
+            proxy_scope="arxiv",
         )
         final_url = probe.final_url
         expected_size = probe.content_length
@@ -81,6 +82,8 @@ async def download_paper_pdf(
             timeout_seconds=timeout_seconds,
             expected_size=expected_size,
             follow_redirects=True,
+            proxy_scope="arxiv",
+            proxy_config=context.get("runtime_config") if context else None,
         )
         logger.info(
             "[arXiv] PDF 下载完成: paper=%s size=%sB path=%s",

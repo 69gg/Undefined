@@ -26,6 +26,7 @@ from Undefined.attachments.segments import (
     media_kind_from_value,
     scope_from_context,
 )
+from Undefined.skills.http_config import build_httpx_client_kwargs
 from Undefined.utils import io
 from Undefined.utils.paths import (
     ATTACHMENT_CACHE_DIR,
@@ -128,6 +129,7 @@ class AttachmentRegistry:
         url_reference_max_records: int = _ATTACHMENT_URL_REFERENCE_MAX_RECORDS,
         url_max_length: int = _ATTACHMENT_URL_MAX_LENGTH,
         remote_download_max_bytes: int = _DEFAULT_REMOTE_DOWNLOAD_MAX_BYTES,
+        proxy_config: Any | None = None,
     ) -> None:
         self._registry_path = registry_path
         self._cache_dir = cache_dir
@@ -138,6 +140,7 @@ class AttachmentRegistry:
         self._url_reference_max_records = max(0, int(url_reference_max_records))
         self._url_max_length = max(0, int(url_max_length))
         self._remote_download_max_bytes = max(0, int(remote_download_max_bytes))
+        self._proxy_config = proxy_config
         self._lock = asyncio.Lock()
         self._records: dict[str, AttachmentRecord] = {}
         self._loaded = False
@@ -162,6 +165,7 @@ class AttachmentRegistry:
         max_age_seconds: int | None = None,
         url_reference_max_records: int | None = None,
         url_max_length: int | None = None,
+        proxy_config: Any | None = None,
     ) -> None:
         """批量更新注册表容量与 TTL 限制。"""
         if remote_download_max_bytes is not None:
@@ -176,6 +180,8 @@ class AttachmentRegistry:
             self._url_reference_max_records = max(0, int(url_reference_max_records))
         if url_max_length is not None:
             self._url_max_length = max(0, int(url_max_length))
+        if proxy_config is not None:
+            self._proxy_config = proxy_config
 
     def set_global_image_resolver(
         self,
@@ -898,9 +904,14 @@ class AttachmentRegistry:
             if self._http_client is not None:
                 content, mime_type = await _stream(self._http_client)
             else:
-                async with httpx.AsyncClient(
-                    timeout=timeout, follow_redirects=True
-                ) as client:
+                client_kwargs = build_httpx_client_kwargs(
+                    url,
+                    proxy_scope="attachments",
+                    timeout=timeout,
+                    follow_redirects=True,
+                    config=self._proxy_config,
+                )
+                async with httpx.AsyncClient(**client_kwargs) as client:
                     content, mime_type = await _stream(client)
         except _RemoteAttachmentTooLarge as exc:
             return await self.register_remote_reference(

@@ -77,6 +77,9 @@ token = ""
 # zh: 对话模型配置（主模型，处理每一条消息）。
 # en: Chat model config (the main model, processing each message).
 [models.chat]
+# zh: 是否让该模型请求使用 [proxy] 代理地址。默认关闭；模型池条目需在 entry 内单独配置。
+# en: Whether this model uses proxy addresses from [proxy]. Disabled by default; pool entries configure this per entry.
+use_proxy = false
 # zh: OpenAI-compatible 基址 URL，例如 https://api.openai.com/v1（legacy "/chat/completions" 已弃用但仍兼容）。
 # en: OpenAI-compatible base URL, e.g. https://api.openai.com/v1. Note: legacy "/chat/completions" is deprecated but still supported.
 api_url = ""
@@ -152,13 +155,16 @@ enabled = false
 # zh: 分配策略：default（用户指定）/ round_robin（轮询）/ random（随机）。
 # en: Strategy: default (user-specified) / round_robin / random.
 strategy = "default"
-# zh: 模型池列表（每项需填 model_name、api_url、api_key，其余字段可选，缺省继承主模型）。
-# en: Model pool entries (model_name, api_url, api_key required; others optional, inherit from primary).
+# zh: 模型池列表（每项需填 model_name、api_url、api_key；可选 use_proxy，默认 false；其余字段可选，缺省继承主模型）。
+# en: Model pool entries (model_name, api_url, api_key required; optional use_proxy defaults to false; other fields inherit from primary).
 models = []
 
 # zh: 视觉模型配置（用于图片描述和 OCR）。
 # en: Vision model config (image description and OCR).
 [models.vision]
+# zh: 是否让该模型请求使用 [proxy] 代理地址。默认关闭。
+# en: Whether this model uses proxy addresses from [proxy]. Disabled by default.
+use_proxy = false
 # zh: OpenAI-compatible 基址 URL，例如 https://api.openai.com/v1（legacy "/chat/completions" 已弃用但仍兼容）。
 # en: OpenAI-compatible base URL, e.g. https://api.openai.com/v1. Note: legacy "/chat/completions" is deprecated but still supported.
 api_url = ""
@@ -231,6 +237,9 @@ stream_enabled = false
 # zh: 是否启用安全模型检测与注入响应（推荐开启）。
 # en: Enable security-model detection and injection response (recommended).
 enabled = true
+# zh: 是否让该模型请求使用 [proxy] 代理地址。默认关闭。
+# en: Whether this model uses proxy addresses from [proxy]. Disabled by default.
+use_proxy = false
 # zh: OpenAI-compatible 基址 URL，例如 https://api.openai.com/v1（legacy "/chat/completions" 已弃用但仍兼容）。
 # en: OpenAI-compatible base URL, e.g. https://api.openai.com/v1. Note: legacy "/chat/completions" is deprecated but still supported.
 api_url = ""
@@ -302,6 +311,9 @@ stream_enabled = false
 # en: Naga outbound moderation model config (used only before Naga sends messages through the Runtime API).
 # en: Optional; falls back to [models.security] when omitted.
 [models.naga]
+# zh: 是否让该模型请求使用 [proxy] 代理地址。默认关闭；即使回退 [models.security] endpoint，也使用本开关。
+# en: Whether this model uses proxy addresses from [proxy]. Disabled by default; this switch is used even when falling back to [models.security].
+use_proxy = false
 # zh: OpenAI-compatible 基址 URL，例如 https://api.openai.com/v1（legacy "/chat/completions" 已弃用但仍兼容）。
 # en: OpenAI-compatible base URL, e.g. https://api.openai.com/v1. Note: legacy "/chat/completions" is deprecated but still supported.
 api_url = ""
@@ -368,6 +380,9 @@ stream_enabled = false
 # zh: Agent 模型配置（用于执行 agents）。
 # en: Agent model config (used to run agents).
 [models.agent]
+# zh: 是否让该模型请求使用 [proxy] 代理地址。默认关闭；模型池条目需在 entry 内单独配置。
+# en: Whether this model uses proxy addresses from [proxy]. Disabled by default; pool entries configure this per entry.
+use_proxy = false
 # zh: OpenAI-compatible 基址 URL，例如 https://api.openai.com/v1（legacy "/chat/completions" 已弃用但仍兼容）。
 # en: OpenAI-compatible base URL, e.g. https://api.openai.com/v1. Note: legacy "/chat/completions" is deprecated but still supported.
 api_url = ""
@@ -443,13 +458,16 @@ enabled = false
 # zh: 分配策略：default（用户指定）/ round_robin（轮询）/ random（随机）。
 # en: Strategy: default (user-specified) / round_robin / random.
 strategy = "default"
-# zh: Agent 模型池列表（每项需填 model_name、api_url、api_key，其余字段可选，缺省继承主模型）。
-# en: Agent model pool entries (model_name, api_url, api_key required; others optional, inherit from primary).
+# zh: Agent 模型池列表（每项需填 model_name、api_url、api_key；可选 use_proxy，默认 false；其余字段可选，缺省继承主模型）。
+# en: Agent model pool entries (model_name, api_url, api_key required; optional use_proxy defaults to false; other fields inherit from primary).
 models = []
 
 # zh: 史官模型配置（认知记忆后台改写用，未配置时回退到 agent 模型）。
 # en: Historian model config (for cognitive memory rewriting, falls back to agent model if unset).
 [models.historian]
+# zh: 是否让该模型请求使用 [proxy] 代理地址。默认关闭；即使回退 [models.agent] endpoint，也使用本开关。
+# en: Whether this model uses proxy addresses from [proxy]. Disabled by default; this switch is used even when falling back to [models.agent].
+use_proxy = false
 # zh: OpenAI-compatible 基址 URL，例如 https://api.openai.com/v1（legacy "/chat/completions" 已弃用但仍兼容）。
 # en: OpenAI-compatible base URL, e.g. https://api.openai.com/v1. Note: legacy "/chat/completions" is deprecated but still supported.
 api_url = ""
@@ -519,6 +537,9 @@ stream_enabled = false
 # zh: 消息总结模型配置（/summary /sum 与 SummaryService 专用；未配置时回退到 agent 模型；主 AI 调用 summary_agent 不使用此段配置）。
 # en: Message-summary model config (used by /summary, /sum, and SummaryService; falls back to the agent model when unset; summary_agent invoked by the main AI does not use this section).
 [models.summary]
+# zh: 是否让该模型请求使用 [proxy] 代理地址。默认关闭；即使回退 [models.agent] endpoint，也使用本开关。
+# en: Whether this model uses proxy addresses from [proxy]. Disabled by default; this switch is used even when falling back to [models.agent].
+use_proxy = false
 # zh: OpenAI-compatible 基址 URL，例如 https://api.openai.com/v1（legacy "/chat/completions" 已弃用但仍兼容）。
 # en: OpenAI-compatible base URL, e.g. https://api.openai.com/v1. Note: legacy "/chat/completions" is deprecated but still supported.
 api_url = ""
@@ -588,6 +609,9 @@ stream_enabled = false
 # zh: Grok 搜索模型配置（仅供 web_agent 内的 grok_search 使用；固定走 chat.completions，不支持 tool call 兼容字段）。
 # en: Grok search model config (used only by grok_search inside web_agent; always uses chat completions and does not expose tool-call compatibility fields).
 [models.grok]
+# zh: 是否让该模型请求使用 [proxy] 代理地址。默认关闭。
+# en: Whether this model uses proxy addresses from [proxy]. Disabled by default.
+use_proxy = false
 # zh: OpenAI-compatible 基址 URL，例如 https://api.example.com/v1。
 # en: OpenAI-compatible base URL, e.g. https://api.example.com/v1.
 api_url = ""
@@ -639,6 +663,9 @@ stream_enabled = false
 # zh: 嵌入模型配置（知识库语义检索使用）。
 # en: Embedding model config (used by knowledge semantic retrieval).
 [models.embedding]
+# zh: 是否让该模型请求使用 [proxy] 代理地址。默认关闭。
+# en: Whether this model uses proxy addresses from [proxy]. Disabled by default.
+use_proxy = false
 # zh: OpenAI-compatible 基址 URL，例如 https://api.openai.com/v1。
 # en: OpenAI-compatible base URL, e.g. https://api.openai.com/v1.
 api_url = ""
@@ -672,6 +699,9 @@ document_instruction = ""
 # zh: 重排模型配置（知识库二阶段检索使用）。
 # en: Rerank model config (used in second-stage knowledge retrieval).
 [models.rerank]
+# zh: 是否让该模型请求使用 [proxy] 代理地址。默认关闭。
+# en: Whether this model uses proxy addresses from [proxy]. Disabled by default.
+use_proxy = false
 # zh: OpenAI-compatible 基址 URL，例如 https://api.openai.com/v1。
 # en: OpenAI-compatible base URL, e.g. https://api.openai.com/v1.
 api_url = ""
@@ -699,6 +729,9 @@ query_instruction = ""
 # zh: 生图模型配置（用于 image_gen.provider="models" 时调用 OpenAI 兼容的图片生成接口）。
 # en: Image generation model config (used when image_gen.provider="models" to call OpenAI-compatible image generation API).
 [models.image_gen]
+# zh: 是否让该图片生成模型请求使用 [proxy] 代理地址。默认关闭。
+# en: Whether this image-generation model uses proxy addresses from [proxy]. Disabled by default.
+use_proxy = false
 # zh: OpenAI-compatible 基址 URL，例如 https://api.openai.com/v1（最终请求路径为 /v1/images/generations）。
 # en: OpenAI-compatible base URL, e.g. https://api.openai.com/v1 (final request path is /v1/images/generations).
 api_url = ""
@@ -716,6 +749,9 @@ model_name = ""
 # zh: 参考图生图模型配置（用于 ai_draw_one 传入 reference_image_uids 时调用 OpenAI 兼容的图片编辑接口）。
 # en: Reference-image generation model config (used when ai_draw_one receives reference_image_uids and calls the OpenAI-compatible image editing API).
 [models.image_edit]
+# zh: 是否让该图片编辑模型请求使用 [proxy] 代理地址。默认关闭。
+# en: Whether this image-edit model uses proxy addresses from [proxy]. Disabled by default.
+use_proxy = false
 # zh: OpenAI-compatible 基址 URL，例如 https://api.openai.com/v1（最终请求路径为 /v1/images/edits）。
 # en: OpenAI-compatible base URL, e.g. https://api.openai.com/v1 (final request path is /v1/images/edits).
 api_url = ""
@@ -910,6 +946,9 @@ group_analysis_limit = 500
 # zh: 附件缓存配置。
 # en: Attachment cache settings.
 [attachments]
+# zh: 是否让远程附件下载/回源使用 [proxy] 代理地址。默认关闭。
+# en: Whether remote attachment downloads/backfills use proxy addresses from [proxy]. Disabled by default.
+use_proxy = false
 # zh: 远程附件自动下载并缓存的最大大小（MB）。超过上限或设为 0 时只保留 URL 引用，不下载文件内容。
 # en: Max remote attachment size (MB) to download into cache. Above the limit, or 0, keeps only a URL reference.
 remote_download_max_size_mb = 25
@@ -1002,6 +1041,9 @@ show_uptime = true
 # zh: 搜索服务配置。
 # en: Search service config.
 [search]
+# zh: 是否让联网搜索和通用信息类 HTTP 工具使用 [proxy] 代理地址。默认关闭。
+# en: Whether search and generic information HTTP tools use proxy addresses from [proxy]. Disabled by default.
+use_proxy = false
 # zh: web_agent 搜索工具优先级。关闭的工具会从可用工具中隐藏；开启后模型按该顺序优先考虑，但不会被代码硬性路由。
 # en: Search tool priority for web_agent. Disabled tools are hidden; enabled tools are preferred in this order by prompt guidance, not hard routing.
 priority = ["grok_search", "firecrawl_search", "web_search"]
@@ -1028,11 +1070,8 @@ base_url = "https://api.firecrawl.dev"
 # zh: 代理设置（可选）。
 # en: Proxy settings (optional).
 [proxy]
-# zh: 是否使用代理。
-# en: Whether to use proxy.
-# zh: 作用于 GitHub/arXiv 自动提取等走统一 HTTP 客户端的联网请求；关闭后也不会再读取代理环境变量。
-# en: Applies to GitHub/arXiv auto extraction and other shared HTTP-client requests; when disabled, proxy env vars are ignored.
-use_proxy = true
+# zh: 这里只配置代理地址；是否使用代理由各功能段的 use_proxy 单独控制，默认均关闭。
+# en: This section only defines proxy addresses; each feature's use_proxy controls usage independently, disabled by default.
 # zh: 例如 http://127.0.0.1:7890（也可使用环境变量 "HTTP_PROXY"）。
 # en: e.g. http://127.0.0.1:7890 (or use the "HTTP_PROXY" environment variable).
 http_proxy = ""
@@ -1053,6 +1092,9 @@ request_retries = 0
 # zh: HTML/Markdown 图片渲染配置。
 # en: HTML/Markdown image rendering settings.
 [render]
+# zh: 是否让 crawl4ai、HTML/Markdown/LaTeX 渲染中的远程资源使用 [proxy] 代理地址。默认关闭。
+# en: Whether crawl4ai and remote resources in HTML/Markdown/LaTeX rendering use proxy addresses from [proxy]. Disabled by default.
+use_proxy = false
 # zh: 渲染浏览器最大同时开启数量。0 表示自动：Linux 默认 1，其它平台默认 2。
 # en: Max concurrent render browser pages. 0 = auto: Linux defaults to 1, other platforms default to 2.
 browser_max_concurrency = 0
@@ -1086,6 +1128,9 @@ xingzhige_base_url = "https://api.xingzhige.com"
 # zh: 生图工具配置。
 # en: Image generation tool config.
 [image_gen]
+# zh: 是否让生图工具自身的第三方 HTTP 请求和图片下载使用 [proxy] 代理地址。默认关闭；模型接口另看 [models.image_gen]/[models.image_edit]。
+# en: Whether the image tool's third-party HTTP calls and image downloads use proxy addresses from [proxy]. Disabled by default; model APIs use [models.image_gen]/[models.image_edit].
+use_proxy = false
 # zh: 生图 provider："xingzhige"（免费星之阁 API）或 "models"（使用 [models.image_gen] 配置的 OpenAI 兼容接口）。
 # en: Image generation provider: "xingzhige" (free Xingzhige API) or "models" (OpenAI-compatible via [models.image_gen]).
 provider = "xingzhige"
@@ -1138,6 +1183,9 @@ config_path = "config/mcp.json"
 # zh: 消息工具配置。
 # en: Message tool settings.
 [messages]
+# zh: 是否让消息工具的 URL 文件下载使用 [proxy] 代理地址。默认关闭。
+# en: Whether message-tool URL file downloads use proxy addresses from [proxy]. Disabled by default.
+use_proxy = false
 # zh: messages.send_text_file 单文件文本发送大小上限（KB）。默认 512KB（0.5MB）。
 # en: Size limit for messages.send_text_file single-text-file uploads (KB). Default 512KB (0.5MB).
 send_text_file_max_size_kb = 512
@@ -1148,6 +1196,9 @@ send_url_file_max_size_mb = 100
 # zh: Bilibili 视频自动提取配置。
 # en: Bilibili video auto-extraction settings.
 [bilibili]
+# zh: 是否让 Bilibili API、短链解析、弹幕和视频流请求使用 [proxy] 代理地址。默认关闭。
+# en: Whether Bilibili API, short-link, danmaku, and video stream requests use proxy addresses from [proxy]. Disabled by default.
+use_proxy = false
 # zh: 是否启用自动提取（检测到B站视频链接/BV号时自动下载并发送）。
 # en: Enable auto-extraction (auto-download and send when Bilibili video links/BV IDs are detected).
 auto_extract_enabled = false
@@ -1185,6 +1236,9 @@ auto_extract_private_ids = []
 # zh: arXiv 论文自动提取配置。
 # en: arXiv paper auto-extraction settings.
 [arxiv]
+# zh: 是否让 arXiv API 和 PDF 下载使用 [proxy] 代理地址。默认关闭。
+# en: Whether arXiv API and PDF downloads use proxy addresses from [proxy]. Disabled by default.
+use_proxy = false
 # zh: 是否启用自动提取（检测到 arXiv 链接 / arXiv:ID / 带 arxiv 关键词的新式编号时自动发送论文信息并尽力附带 PDF）。
 # en: Enable auto-extraction (auto-send paper info and best-effort PDF when arXiv links / arXiv:ID / keyword-scoped new-style IDs are detected).
 auto_extract_enabled = false
@@ -1210,6 +1264,9 @@ summary_preview_chars = 1000
 # zh: GitHub 仓库自动提取配置（仅获取 public 仓库信息）。
 # en: GitHub repository auto-extraction settings (public repositories only).
 [github]
+# zh: 是否让 GitHub API 和仓库卡片渲染中的远程资源使用 [proxy] 代理地址。默认关闭。
+# en: Whether GitHub API and remote resources in repo-card rendering use proxy addresses from [proxy]. Disabled by default.
+use_proxy = false
 # zh: 是否启用自动提取（检测到 GitHub 仓库链接或 owner/repo 仓库 ID 时自动发送图片卡片）。
 # en: Enable auto-extraction (auto-send an image card when GitHub repository links or owner/repo IDs are detected).
 auto_extract_enabled = false
@@ -1333,6 +1390,9 @@ tool_invoke_timeout = 120
 # zh: 回调请求超时（秒）。
 # en: Callback request timeout in seconds.
 tool_invoke_callback_timeout = 10
+# zh: 是否让工具调用 API 的外部 callback URL 使用 [proxy] 代理地址。默认关闭；不影响 WebUI/Runtime 本机桥接。
+# en: Whether external callback URLs for the tool invoke API use proxy addresses from [proxy]. Disabled by default; does not affect WebUI/Runtime loopback calls.
+tool_invoke_callback_use_proxy = false
 
 # zh: 认知记忆系统配置。启用后需配置 [models.embedding]，其余参数均有合理默认值。
 # en: Cognitive memory system. Requires [models.embedding] when enabled. All other params have sensible defaults.
@@ -1512,6 +1572,9 @@ rerank_top_k = 20
 # en: To get NagaAgent answering without external callbacks, only enable nagaagent_mode_enabled.
 # en: ⚠️ Advanced feature for NagaAgent integration. Not recommended for regular users.
 [naga]
+# zh: 是否让 Naga 外部网关 HTTP 请求使用 [proxy] 代理地址。默认关闭。
+# en: Whether Naga external-gateway HTTP requests use proxy addresses from [proxy]. Disabled by default.
+use_proxy = false
 # zh: 是否启用外部网关集成（/naga bind/unbind、远端绑定回调、消息发送、解绑 API）。
 # zh: 需同时开启 [features].nagaagent_mode_enabled 才生效。
 # en: Enable external gateway integration (/naga bind/unbind, bind callback, message send, unbind API).

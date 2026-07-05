@@ -12,7 +12,7 @@ from ..coercers import (
     _coerce_bool,
     _get_value,
 )
-from ..model_parsers import (
+from ..parsers import (
     _parse_agent_model_config,
     _parse_chat_model_config,
     _parse_grok_model_config,

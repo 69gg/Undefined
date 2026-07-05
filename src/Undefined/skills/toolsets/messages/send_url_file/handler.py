@@ -349,6 +349,7 @@ async def _download_to_local_file(
     expected_size: int,
     max_file_size_bytes: int,
     timeout_seconds: float,
+    proxy_config: Any | None = None,
 ) -> tuple[str, int]:
     return await download_remote_file(
         url,
@@ -358,6 +359,8 @@ async def _download_to_local_file(
         expected_size=expected_size,
         follow_redirects=True,
         chunk_size=DOWNLOAD_CHUNK_SIZE,
+        proxy_scope="messages",
+        proxy_config=proxy_config,
     )
 
 
@@ -427,6 +430,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             timeout_seconds=head_timeout_seconds,
             follow_redirects=True,
             context=context,
+            proxy_scope="messages",
         )
     except Exception as exc:
         logger.warning(
@@ -483,6 +487,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             expected_size=content_length,
             max_file_size_bytes=max_file_size_bytes,
             timeout_seconds=timeout_seconds,
+            proxy_config=runtime_config,
         )
 
         await send_file_callable(target_id, abs_path, filename)

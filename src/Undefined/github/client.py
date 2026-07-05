@@ -95,6 +95,7 @@ async def _fetch_contributor_count(
         follow_redirects=True,
         context=context,
         retries=request_retries,
+        proxy_scope="github",
     )
     return _parse_contributor_count(response.headers.get("link", ""), response.json())
 
@@ -150,6 +151,7 @@ async def get_public_repo_info(
         follow_redirects=True,
         context=context,
         retries=request_retries,
+        proxy_scope="github",
     )
     payload = response.json()
     if not isinstance(payload, dict):

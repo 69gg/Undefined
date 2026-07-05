@@ -12,6 +12,7 @@ from .coercers import (
     _coerce_str,
     _coerce_int_list,
     _coerce_str_list,
+    _get_value,
 )
 from .models import (
     APIConfig,
@@ -313,6 +314,14 @@ def _parse_api_config(data: dict[str, Any]) -> APIConfig:
     )
     if tool_invoke_callback_timeout <= 0:
         tool_invoke_callback_timeout = 10
+    tool_invoke_callback_use_proxy = _coerce_bool(
+        _get_value(
+            data,
+            ("api", "tool_invoke_callback_use_proxy"),
+            "API_TOOL_INVOKE_CALLBACK_USE_PROXY",
+        ),
+        False,
+    )
 
     return APIConfig(
         enabled=enabled,
@@ -326,6 +335,7 @@ def _parse_api_config(data: dict[str, Any]) -> APIConfig:
         tool_invoke_denylist=tool_invoke_denylist,
         tool_invoke_timeout=tool_invoke_timeout,
         tool_invoke_callback_timeout=tool_invoke_callback_timeout,
+        tool_invoke_callback_use_proxy=tool_invoke_callback_use_proxy,
     )
 
 
@@ -336,6 +346,9 @@ def _parse_naga_config(data: dict[str, Any]) -> NagaConfig:
     enabled = _coerce_bool(section.get("enabled"), False)
     api_url = _coerce_str(section.get("api_url"), "")
     api_key = _coerce_str(section.get("api_key"), "")
+    use_proxy = _coerce_bool(
+        _get_value(data, ("naga", "use_proxy"), "NAGA_USE_PROXY"), False
+    )
     moderation_enabled = _coerce_bool(section.get("moderation_enabled"), True)
     allowed_groups = frozenset(_coerce_int_list(section.get("allowed_groups")))
 
@@ -343,6 +356,7 @@ def _parse_naga_config(data: dict[str, Any]) -> NagaConfig:
         enabled=enabled,
         api_url=api_url,
         api_key=api_key,
+        use_proxy=use_proxy,
         moderation_enabled=moderation_enabled,
         allowed_groups=allowed_groups,
     )

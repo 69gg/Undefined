@@ -33,6 +33,7 @@ class ModelPoolEntry:
     api_key: str
     model_name: str
     max_tokens: int
+    use_proxy: bool = False
     context_window_tokens: int = 8192
     queue_interval_seconds: float = 1.0
     api_mode: str = "chat_completions"
@@ -69,6 +70,7 @@ class ChatModelConfig:
     api_key: str
     model_name: str
     max_tokens: int
+    use_proxy: bool = False
     context_window_tokens: int = 8192
     queue_interval_seconds: float = 1.0
     api_mode: str = "chat_completions"  # 请求 API 模式
@@ -103,6 +105,7 @@ class VisionModelConfig:
     api_key: str
     model_name: str
     max_tokens: int = 8192  # 最大输出 tokens
+    use_proxy: bool = False
     context_window_tokens: int = 8192
     queue_interval_seconds: float = 1.0
     api_mode: str = "chat_completions"  # 请求 API 模式
@@ -134,6 +137,7 @@ class SecurityModelConfig:
     api_key: str
     model_name: str
     max_tokens: int
+    use_proxy: bool = False
     context_window_tokens: int = 8192
     queue_interval_seconds: float = 1.0
     api_mode: str = "chat_completions"  # 请求 API 模式
@@ -164,6 +168,7 @@ class EmbeddingModelConfig:
     api_url: str
     api_key: str
     model_name: str
+    use_proxy: bool = False
     context_window_tokens: int = 8192
     queue_interval_seconds: float = 0.0
     dimensions: int | None = None
@@ -179,6 +184,7 @@ class RerankModelConfig:
     api_url: str
     api_key: str
     model_name: str
+    use_proxy: bool = False
     context_window_tokens: int = 8192
     queue_interval_seconds: float = 0.0
     query_instruction: str = ""  # 查询端指令前缀（如部分 rerank 模型需要）
@@ -193,6 +199,7 @@ class AgentModelConfig:
     api_key: str
     model_name: str
     max_tokens: int = 4096
+    use_proxy: bool = False
     context_window_tokens: int = 8192
     queue_interval_seconds: float = 1.0
     api_mode: str = "chat_completions"  # 请求 API 模式
@@ -225,6 +232,7 @@ class GrokModelConfig:
     api_key: str
     model_name: str
     max_tokens: int = 8192
+    use_proxy: bool = False
     context_window_tokens: int = 8192
     queue_interval_seconds: float = 1.0
     thinking_enabled: bool = False  # 是否启用 thinking
@@ -248,6 +256,7 @@ class ImageGenModelConfig:
     api_url: str = ""
     api_key: str = ""
     model_name: str = ""
+    use_proxy: bool = False
     context_window_tokens: int = 0
     request_params: dict[str, Any] = field(default_factory=dict)
 
@@ -265,6 +274,7 @@ class ImageGenConfig:
 
     # 生图 provider: "xingzhige" | "models"
     provider: str = "xingzhige"
+    use_proxy: bool = False
     # xingzhige 模式下的默认图片比例
     xingzhige_size: str = "1:1"
     # models 模式下的 OpenAI 兼容参数（空字符串表示不传该字段）
@@ -292,6 +302,7 @@ class NagaConfig:
     enabled: bool = False
     api_url: str = ""
     api_key: str = ""
+    use_proxy: bool = False
     moderation_enabled: bool = True
     allowed_groups: frozenset[int] = field(default_factory=frozenset)
 
@@ -444,6 +455,7 @@ class APIConfig:
     tool_invoke_denylist: list[str] = field(default_factory=list)
     tool_invoke_timeout: int = 120
     tool_invoke_callback_timeout: int = 10
+    tool_invoke_callback_use_proxy: bool = False
 
     @property
     def loopback_url(self) -> str:

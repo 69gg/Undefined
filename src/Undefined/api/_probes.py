@@ -11,6 +11,8 @@ from urllib.parse import urlsplit
 
 from aiohttp import ClientSession, ClientTimeout
 
+from Undefined.skills.http_config import get_configured_proxy
+
 from ._helpers import _mask_url
 
 logger = logging.getLogger(__name__)
@@ -23,6 +25,8 @@ async def _probe_http_endpoint(
     api_key: str,
     model_name: str = "",
     timeout_seconds: float = 5.0,
+    use_proxy: bool = False,
+    proxy_config: Any | None = None,
 ) -> dict[str, Any]:
     normalized = str(base_url or "").strip().rstrip("/")
     if not normalized:
@@ -44,7 +48,15 @@ async def _probe_http_endpoint(
         try:
             timeout = ClientTimeout(total=timeout_seconds)
             async with ClientSession(timeout=timeout) as session:
-                async with session.get(url, headers=headers) as resp:
+                async with session.get(
+                    url,
+                    headers=headers,
+                    proxy=get_configured_proxy(
+                        url,
+                        use_proxy=use_proxy,
+                        config=proxy_config,
+                    ),
+                ) as resp:
                     elapsed_ms = round((time.perf_counter() - start) * 1000, 2)
                     return {
                         "name": name,

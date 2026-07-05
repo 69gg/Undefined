@@ -14,6 +14,7 @@ from Undefined.bilibili.api_client import DEFAULT_HEADERS
 from Undefined.bilibili.errors import ApiResponseError
 from Undefined.bilibili.models import DanmakuItem, VideoInfo
 from Undefined.bilibili.wbi import build_signed_params, parse_cookie_string
+from Undefined.skills.http_config import build_httpx_client_kwargs
 
 logger = logging.getLogger(__name__)
 
@@ -225,12 +226,15 @@ async def fetch_danmaku(
     cookies = parse_cookie_string(cookie)
     items: list[DanmakuItem] = []
 
-    async with httpx.AsyncClient(
+    client_kwargs = build_httpx_client_kwargs(
+        "https://api.bilibili.com",
+        proxy_scope="bilibili",
         headers=headers,
         cookies=cookies,
         timeout=timeout,
         follow_redirects=True,
-    ) as client:
+    )
+    async with httpx.AsyncClient(**client_kwargs) as client:
         for segment_index in range(1, _segment_count(info) + 1):
             params: dict[str, Any] = {
                 "type": 1,

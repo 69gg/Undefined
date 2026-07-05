@@ -138,6 +138,14 @@ def _parse_summary_model_config(
                 ),
                 fallback.stream_enabled,
             ),
+            use_proxy=_coerce_bool(
+                _get_value(
+                    {"models": {"summary": s}},
+                    ("models", "summary", "use_proxy"),
+                    "SUMMARY_MODEL_USE_PROXY",
+                ),
+                False,
+            ),
             request_params=merge_request_params(
                 fallback.request_params,
                 s.get("request_params"),

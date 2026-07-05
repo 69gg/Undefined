@@ -127,6 +127,7 @@ async def get_paper_info(
         default_timeout=30.0,
         follow_redirects=True,
         context=context,
+        proxy_scope="arxiv",
     )
     feed = _parse_feed(response.content)
     entries = list(_find_entries(feed))
@@ -168,6 +169,7 @@ async def search_papers(
         default_timeout=30.0,
         follow_redirects=True,
         context=context,
+        proxy_scope="arxiv",
     )
     feed = _parse_feed(response.content)
     items = tuple(_parse_entry(entry) for entry in _find_entries(feed))

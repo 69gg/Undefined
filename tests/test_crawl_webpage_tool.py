@@ -53,7 +53,7 @@ class _FakeCrawler:
 
 
 def _runtime_config() -> SimpleNamespace:
-    return SimpleNamespace(use_proxy=False, http_proxy=None, https_proxy=None)
+    return SimpleNamespace(render_use_proxy=False, http_proxy=None, https_proxy=None)
 
 
 def _successful_capabilities(

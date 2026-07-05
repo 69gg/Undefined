@@ -9,6 +9,7 @@ import httpx
 from Undefined.bilibili.errors import ApiResponseError
 from Undefined.bilibili.models import VideoInfo, VideoStats
 from Undefined.bilibili.wbi import build_signed_params_sync, parse_cookie_string
+from Undefined.skills.http_config import build_httpx_client_kwargs
 
 _BILIBILI_API_VIEW = "https://api.bilibili.com/x/web-interface/view"
 _BILIBILI_API_VIEW_WBI = "https://api.bilibili.com/x/web-interface/wbi/view"
@@ -45,12 +46,15 @@ class BilibiliApiClient:
     """
 
     def __init__(self, *, cookie: str = "", timeout: float = 30.0) -> None:
-        self._client = httpx.Client(
+        client_kwargs = build_httpx_client_kwargs(
+            "https://api.bilibili.com",
+            proxy_scope="bilibili",
             headers=DEFAULT_HEADERS,
             cookies=parse_cookie_string(cookie),
             timeout=timeout,
             follow_redirects=True,
         )
+        self._client = httpx.Client(**client_kwargs)
 
     @property
     def http_client(self) -> httpx.Client:

@@ -115,6 +115,10 @@ def _parse_agent_model_config(data: dict[str, Any]) -> AgentModelConfig:
             _get_value(data, ("models", "agent", "model_name"), "AGENT_MODEL_NAME"),
             "",
         ),
+        use_proxy=_coerce_bool(
+            _get_value(data, ("models", "agent", "use_proxy"), "AGENT_MODEL_USE_PROXY"),
+            False,
+        ),
         max_tokens=_coerce_int(
             _get_value(
                 data, ("models", "agent", "max_tokens"), "AGENT_MODEL_MAX_TOKENS"

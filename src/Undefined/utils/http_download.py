@@ -5,10 +5,12 @@ import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import aiofiles
 import httpx
 
+from Undefined.skills.http_config import build_httpx_client_kwargs
 from Undefined.skills.http_client import request_with_retry
 
 DEFAULT_DOWNLOAD_CHUNK_SIZE = 64 * 1024
@@ -39,6 +41,7 @@ async def probe_remote_file(
     timeout_seconds: float,
     follow_redirects: bool = True,
     context: dict[str, object] | None = None,
+    proxy_scope: str = "messages",
 ) -> RemoteFileProbe:
     response = await request_with_retry(
         "HEAD",
@@ -46,6 +49,7 @@ async def probe_remote_file(
         timeout=timeout_seconds,
         follow_redirects=follow_redirects,
         context=context,
+        proxy_scope=proxy_scope,
     )
     return RemoteFileProbe(
         final_url=str(response.url),
@@ -63,6 +67,8 @@ async def download_remote_file(
     expected_size: int | None = None,
     follow_redirects: bool = True,
     chunk_size: int = DEFAULT_DOWNLOAD_CHUNK_SIZE,
+    proxy_scope: str = "messages",
+    proxy_config: Any | None = None,
 ) -> tuple[str, int]:
     part_path = target_path.with_suffix(f"{target_path.suffix}.part")
 
@@ -70,10 +76,14 @@ async def download_remote_file(
         target_path.parent.mkdir(parents=True, exist_ok=True)
         downloaded_size = 0
 
-        async with httpx.AsyncClient(
+        client_kwargs = build_httpx_client_kwargs(
+            url,
+            proxy_scope=proxy_scope,
             timeout=httpx.Timeout(timeout_seconds),
             follow_redirects=follow_redirects,
-        ) as client:
+            config=proxy_config,
+        )
+        async with httpx.AsyncClient(**client_kwargs) as client:
             async with client.stream("GET", url) as response:
                 response.raise_for_status()
 

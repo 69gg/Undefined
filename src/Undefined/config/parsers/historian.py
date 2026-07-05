@@ -137,6 +137,14 @@ def _parse_historian_model_config(
             ),
             fallback.stream_enabled,
         ),
+        use_proxy=_coerce_bool(
+            _get_value(
+                {"models": {"historian": h}},
+                ("models", "historian", "use_proxy"),
+                "HISTORIAN_MODEL_USE_PROXY",
+            ),
+            False,
+        ),
         request_params=merge_request_params(
             fallback.request_params,
             h.get("request_params"),

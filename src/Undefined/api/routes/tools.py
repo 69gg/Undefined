@@ -20,6 +20,7 @@ from Undefined.api._helpers import (
     _validate_callback_url,
 )
 from Undefined.context import RequestContext
+from Undefined.skills.http_config import get_configured_proxy
 
 logger = logging.getLogger(__name__)
 
@@ -446,6 +447,17 @@ async def execute_and_callback(
                 callback_url,
                 json=payload,
                 headers=callback_headers or None,
+                proxy=get_configured_proxy(
+                    callback_url,
+                    use_proxy=bool(
+                        getattr(
+                            ctx.config_getter().api,
+                            "tool_invoke_callback_use_proxy",
+                            False,
+                        )
+                    ),
+                    config=ctx.config_getter(),
+                ),
             ) as resp:
                 logger.info(
                     "[ToolInvoke] 回调发送: request_id=%s url=%s status=%d",

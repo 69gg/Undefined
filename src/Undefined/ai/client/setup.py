@@ -180,16 +180,19 @@ class ClientSetupMixin:
         self._end_summary_storage = end_summary_storage or EndSummaryStorage()
         self._crawl4ai_capabilities = get_crawl4ai_capabilities()
 
-        self._http_client = httpx.AsyncClient(timeout=480.0)
+        self._http_client = httpx.AsyncClient(timeout=480.0, trust_env=False)
         self._token_usage_storage = TokenUsageStorage()
-        self._requester = ModelRequester(self._http_client, self._token_usage_storage)
+        self._requester = ModelRequester(
+            None,
+            self._token_usage_storage,
+            config_getter=self._get_runtime_config,
+        )
         self._token_counter = TokenCounter()
         self._knowledge_manager: Any = None
         self._cognitive_service: Any = cognitive_service
         self._meme_service: Any = None
         if self.runtime_config is not None:
             self.attachment_registry = AttachmentRegistry(
-                http_client=self._http_client,
                 remote_download_max_bytes=_attachment_remote_download_max_bytes(
                     self.runtime_config
                 ),
@@ -200,9 +203,10 @@ class ClientSetupMixin:
                     self.runtime_config.attachment_url_reference_max_records
                 ),
                 url_max_length=self.runtime_config.attachment_url_max_length,
+                proxy_config=self.runtime_config,
             )
         else:
-            self.attachment_registry = AttachmentRegistry(http_client=self._http_client)
+            self.attachment_registry = AttachmentRegistry()
 
         self._send_private_message_callback: Optional[SendPrivateMessageCallback] = None
         self._send_image_callback: Optional[
@@ -324,7 +328,11 @@ class ClientSetupMixin:
             anthropic_skill_registry=self.anthropic_skill_registry,
             cognitive_service=self._cognitive_service,
         )
-        self._multimodal = MultimodalAnalyzer(self._requester, self.vision_config)
+        self._multimodal = MultimodalAnalyzer(
+            self._requester,
+            self.vision_config,
+            config_getter=self._get_runtime_config,
+        )
         self._rebuild_summary_service()
 
         async def init_mcp_async() -> None:
@@ -398,9 +406,14 @@ class ClientSetupMixin:
             except Exception as exc:
                 logger.warning("[清理] 刷新附件注册表失败: %s", exc)
 
-        if hasattr(self, "_http_client"):
-            logger.info("[清理] 正在关闭 AIClient HTTP 客户端...")
-            await self._http_client.aclose()
+        requester = getattr(self, "_requester", None)
+        if requester is not None and hasattr(requester, "aclose"):
+            logger.info("[清理] 正在关闭 AIClient 模型 HTTP 客户端...")
+            await requester.aclose()
+
+        http_client = getattr(self, "_http_client", None)
+        if http_client is not None:
+            await http_client.aclose()
 
         logger.info("[清理] AIClient 已关闭")
 
@@ -574,7 +587,13 @@ class ClientSetupMixin:
         self.vision_config = vision_config
         self.agent_config = agent_config
         self.runtime_config = runtime_config
-        self._multimodal = MultimodalAnalyzer(self._requester, self.vision_config)
+        if hasattr(self._requester, "clear_client_cache"):
+            self._requester.clear_client_cache()
+        self._multimodal = MultimodalAnalyzer(
+            self._requester,
+            self.vision_config,
+            config_getter=self._get_runtime_config,
+        )
         self._rebuild_summary_service()
         self.apply_attachment_config(runtime_config)
         logger.info(
@@ -587,6 +606,8 @@ class ClientSetupMixin:
     def apply_runtime_config(self, runtime_config: Config) -> None:
         """应用不需要重建模型客户端的运行时配置。"""
         self.runtime_config = runtime_config
+        if hasattr(self._requester, "clear_client_cache"):
+            self._requester.clear_client_cache()
         self._rebuild_summary_service()
         logger.info("[配置] AI 运行时配置已热更新")
 
@@ -612,6 +633,7 @@ class ClientSetupMixin:
                 runtime_config.attachment_url_reference_max_records
             ),
             url_max_length=runtime_config.attachment_url_max_length,
+            proxy_config=runtime_config,
         )
 
     def count_tokens(self, text: str) -> int:

@@ -3,6 +3,7 @@ from typing import Any, Dict
 
 from Undefined.ai.crawl4ai_support import get_crawl4ai_capabilities
 from Undefined.config import get_config
+from Undefined.skills.http_config import get_configured_proxy
 
 logger = logging.getLogger(__name__)
 
@@ -52,8 +53,11 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
     try:
         runtime_config = _resolve_runtime_config(context)
-        use_proxy = runtime_config.use_proxy
-        proxy = runtime_config.http_proxy or runtime_config.https_proxy
+        proxy = get_configured_proxy(
+            url,
+            use_proxy=bool(getattr(runtime_config, "render_use_proxy", False)),
+            config=runtime_config,
+        )
 
         browser_config = BrowserConfig(
             headless=True,
@@ -70,14 +74,12 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             "delay_before_return_html": 2.0,
         }
 
-        if use_proxy and proxy:
+        if proxy:
             logger.info(f"使用代理: {proxy}")
             if capabilities.proxy_config_available and ProxyConfig is not None:
                 run_config_kwargs["proxy_config"] = ProxyConfig(server=proxy)
             else:
                 run_config_kwargs["proxy_config"] = proxy
-        elif use_proxy and not proxy:
-            logger.warning("已启用代理但未配置地址，将不使用代理")
 
         run_config = CrawlerRunConfig(**run_config_kwargs)
 
