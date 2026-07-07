@@ -871,7 +871,7 @@ Prompt caching 补充：
 自动提取行为：
 - 命中 `v.douyin.com/...`、`douyin.com/video/<id>` 或裸 aweme_id 后，自动提取会发送一次两节点合并转发：视频信息、视频文件或视频状态。
 - 下载链路走抖音 SSR share 页中的 `window._ROUTER_DATA`，从 `video.play_addr` 提取 token，再按 `prefer_ratios` 探测 `aweme/v1/play/`。
-- play 端点探测使用 2 字节 Range GET，并按 `content-length` 对重复文件去重；游客 share 页没有 `bit_rate` 时仍可选择实际可下载档位。
+- play 端点探测使用 2 字节 Range GET，并优先按 `Content-Range` 中的总长度对重复文件去重，缺失时回退 `Content-Length`；游客 share 页没有 `bit_rate` 时仍可选择实际可下载档位。
 - 若超过时长或体积限制，会跳过下载并只发送视频信息与状态节点。需要分析视频内容时，`file_analysis_agent` 可通过 `douyin_video(output_mode=uid)` 获取视频附件 UID 后再分析。
 
 ---

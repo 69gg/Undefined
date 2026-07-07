@@ -66,6 +66,17 @@ def test_parse_router_data_and_video_info() -> None:
     assert info.play_token == "token-123"
 
 
+def test_content_length_prefers_range_total_size() -> None:
+    headers = httpx.Headers(
+        {
+            "content-length": "2",
+            "content-range": "bytes 0-1/15084949",
+        }
+    )
+
+    assert downloader._content_length(headers) == 15084949
+
+
 @pytest.mark.asyncio
 async def test_probe_play_url_uses_ranged_get(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, Any] = {}

@@ -99,7 +99,30 @@ def _select_aweme_detail(router_data: Mapping[str, Any]) -> Mapping[str, Any]:
             play_addr = video.get("play_addr")
             if isinstance(play_addr, Mapping):
                 return candidate
+    reason = _format_filter_reason(router_data)
+    if reason:
+        raise DouyinParseError(f"share 页缺少 aweme_detail.video.play_addr: {reason}")
     raise DouyinParseError("share 页缺少 aweme_detail.video.play_addr")
+
+
+def _format_filter_reason(router_data: Mapping[str, Any]) -> str:
+    for item in _iter_dicts(router_data):
+        filter_list = item.get("filter_list")
+        if not isinstance(filter_list, list):
+            continue
+        messages: list[str] = []
+        for entry in filter_list:
+            if not isinstance(entry, Mapping):
+                continue
+            reason = _text(entry.get("filter_reason"))
+            detail = _text(entry.get("detail_msg")) or _text(entry.get("notice"))
+            aweme_id = _text(entry.get("aweme_id"))
+            parts = [part for part in (aweme_id, reason, detail) if part]
+            if parts:
+                messages.append(" / ".join(parts))
+        if messages:
+            return "; ".join(messages)
+    return ""
 
 
 def _first_string(value: Any) -> str:
@@ -295,15 +318,20 @@ async def get_video_info(
     fallback_aweme_id = (
         normalize_aweme_id(share_url) or normalize_aweme_id(identifier) or ""
     )
-    ttid = await get_anonymous_ttid(config=config)
+    ttid = ""
+    try:
+        ttid = await get_anonymous_ttid(config=config)
+    except Exception as exc:
+        logger.warning("[Douyin] 获取匿名 ttid 失败，将尝试直接请求 share 页: %s", exc)
     timeout_seconds = max(get_request_timeout(30.0), 5.0)
     host = urlsplit(share_url).netloc
     headers = {
         **_DEFAULT_HEADERS,
         "Referer": "https://www.douyin.com/",
-        "Cookie": f"ttwid={ttid}; ttid={ttid}",
         "Host": host,
     }
+    if ttid:
+        headers["Cookie"] = f"ttwid={ttid}; ttid={ttid}"
     client_kwargs = build_httpx_client_kwargs(
         share_url,
         proxy_scope="douyin",

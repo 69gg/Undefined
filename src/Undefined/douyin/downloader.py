@@ -36,17 +36,21 @@ def build_play_url(video_token: str, ratio: str) -> str:
     return f"{_PLAY_ENDPOINT}?{query}"
 
 
-def _content_length(headers: httpx.Headers) -> int | None:
-    value = headers.get("content-length")
-    if value is None:
-        content_range = headers.get("content-range")
-        if content_range and "/" in content_range:
-            value = content_range.rsplit("/", 1)[1]
+def _positive_int(value: str | None) -> int | None:
     try:
         parsed = int(str(value))
     except (TypeError, ValueError):
         return None
     return parsed if parsed > 0 else None
+
+
+def _content_length(headers: httpx.Headers) -> int | None:
+    content_range = headers.get("content-range")
+    if content_range and "/" in content_range:
+        total_size = _positive_int(content_range.rsplit("/", 1)[1].strip())
+        if total_size is not None:
+            return total_size
+    return _positive_int(headers.get("content-length"))
 
 
 async def probe_play_url(
