@@ -1,4 +1,4 @@
-"""B 站 / arXiv / GitHub 链接自动提取 mixin。
+"""B 站 / 抖音 / arXiv / GitHub 链接自动提取 mixin。
 
 从消息中解析外部资源 ID 并调用对应 sender 发送；由 ``MessageHandler`` 混入使用。
 """
@@ -37,6 +37,29 @@ class AutoExtractMixin:
         if not bvids:
             bvids = await extract_from_json_message(message_content)
         return list(bvids)
+
+    def _extract_douyin_ids(
+        self, text: str, message_content: list[dict[str, Any]]
+    ) -> list[str]:
+        """从文本和消息段中提取抖音视频标识。"""
+        from Undefined.douyin.parser import (
+            extract_douyin_ids,
+            extract_from_json_message,
+        )
+
+        items: list[str] = []
+        seen: set[str] = set()
+        for item in extract_douyin_ids(text):
+            if item in seen:
+                continue
+            seen.add(item)
+            items.append(item)
+        for item in extract_from_json_message(message_content):
+            if item in seen:
+                continue
+            seen.add(item)
+            items.append(item)
+        return items
 
     def _extract_arxiv_ids(
         self, text: str, message_content: list[dict[str, Any]]
@@ -127,6 +150,60 @@ class AutoExtractMixin:
                 )
                 try:
                     error_msg = f"视频提取失败: {exc}"
+                    if target_type == "group":
+                        await self.sender.send_group_message(target_id, error_msg)
+                    else:
+                        await self.sender.send_private_message(target_id, error_msg)
+                except Exception:
+                    pass
+
+    async def _handle_douyin_extract(
+        self,
+        target_id: int,
+        video_ids: list[str],
+        target_type: str,
+    ) -> None:
+        """处理 Douyin 视频自动提取和发送。"""
+        from Undefined.douyin.sender import send_douyin_video
+
+        max_items = max(
+            1, int(getattr(self.config, "douyin_auto_extract_max_items", 3))
+        )
+        prefer_ratios = tuple(getattr(self.config, "douyin_prefer_ratios", [])) or (
+            "1080p",
+            "720p",
+            "540p",
+            "360p",
+        )
+
+        for video_id in video_ids[:max_items]:
+            try:
+                result = await send_douyin_video(
+                    video_id=video_id,
+                    sender=self.sender,
+                    target_type=target_type,  # type: ignore[arg-type]
+                    target_id=target_id,
+                    max_duration=self.config.douyin_max_duration,
+                    max_file_size=self.config.douyin_max_file_size,
+                    prefer_ratios=prefer_ratios,
+                    config=self.config,
+                )
+                logger.info(
+                    "[Douyin] 自动提取完成 %s → %s:%s: %s",
+                    video_id,
+                    target_type,
+                    target_id,
+                    result,
+                )
+            except Exception as exc:
+                logger.exception(
+                    "[Douyin] 自动提取失败 %s → %s:%s",
+                    video_id,
+                    target_type,
+                    target_id,
+                )
+                try:
+                    error_msg = f"抖音视频提取失败: {exc}"
                     if target_type == "group":
                         await self.sender.send_group_message(target_id, error_msg)
                     else:

@@ -1,0 +1,31 @@
+{
+    "type": "function",
+    "function": {
+        "name": "douyin_video",
+        "description": "下载抖音视频。默认发送到群聊或私聊；也可设置 output_mode=uid 只注册为附件 UID 供文件分析使用。支持 v.douyin.com 短链、douyin.com/video 长链或 aweme_id。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "video_id": {
+                    "type": "string",
+                    "description": "抖音视频标识：v.douyin.com 短链、douyin.com/video 长链或裸 aweme_id"
+                },
+                "target_type": {
+                    "type": "string",
+                    "enum": ["group", "private"],
+                    "description": "可选。目标会话类型"
+                },
+                "target_id": {
+                    "type": "integer",
+                    "description": "可选。目标会话 ID"
+                },
+                "output_mode": {
+                    "type": "string",
+                    "enum": ["send", "uid"],
+                    "description": "输出模式：send（默认，发送视频合并转发）或 uid（仅下载并注册视频附件 UID，不发送消息）"
+                }
+            },
+            "required": ["video_id"]
+        }
+    }
+}

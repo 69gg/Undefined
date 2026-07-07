@@ -187,6 +187,15 @@ class Config:
     bilibili_danmaku_max_count: int
     bilibili_auto_extract_group_ids: list[int]
     bilibili_auto_extract_private_ids: list[int]
+    # Douyin 视频提取
+    douyin_use_proxy: bool
+    douyin_auto_extract_enabled: bool
+    douyin_max_duration: int
+    douyin_max_file_size: int
+    douyin_prefer_ratios: list[str]
+    douyin_auto_extract_group_ids: list[int]
+    douyin_auto_extract_private_ids: list[int]
+    douyin_auto_extract_max_items: int
     # arXiv 论文提取
     arxiv_use_proxy: bool
     arxiv_auto_extract_enabled: bool
@@ -250,6 +259,16 @@ class Config:
         init=False,
         repr=False,
     )
+    _douyin_group_ids_set: set[int] = dataclass_field(
+        default_factory=set,
+        init=False,
+        repr=False,
+    )
+    _douyin_private_ids_set: set[int] = dataclass_field(
+        default_factory=set,
+        init=False,
+        repr=False,
+    )
     _arxiv_group_ids_set: set[int] = dataclass_field(
         default_factory=set,
         init=False,
@@ -272,6 +291,9 @@ class Config:
     )
 
     def __post_init__(self) -> None:
+        self._refresh_runtime_sets()
+
+    def _refresh_runtime_sets(self) -> None:
         # 访问控制属于高频热路径，启动后缓存为 set 降低重复构建开销。
         normalized_mode = str(self.access_mode).strip().lower()
         if normalized_mode not in {"off", "blacklist", "allowlist", "legacy"}:
@@ -286,6 +308,12 @@ class Config:
         }
         self._bilibili_private_ids_set = {
             int(item) for item in self.bilibili_auto_extract_private_ids
+        }
+        self._douyin_group_ids_set = {
+            int(item) for item in self.douyin_auto_extract_group_ids
+        }
+        self._douyin_private_ids_set = {
+            int(item) for item in self.douyin_auto_extract_private_ids
         }
         self._arxiv_group_ids_set = {
             int(item) for item in self.arxiv_auto_extract_group_ids
@@ -457,6 +485,18 @@ class Config:
         # 功能白名单为空时跟随全局 access 控制
         return self.is_private_allowed(user_id)
 
+    def is_douyin_auto_extract_allowed_group(self, group_id: int) -> bool:
+        """群聊是否允许 Douyin 自动提取。"""
+        if self._douyin_group_ids_set:
+            return int(group_id) in self._douyin_group_ids_set
+        return self.is_group_allowed(group_id)
+
+    def is_douyin_auto_extract_allowed_private(self, user_id: int) -> bool:
+        """私聊是否允许 Douyin 自动提取。"""
+        if self._douyin_private_ids_set:
+            return int(user_id) in self._douyin_private_ids_set
+        return self.is_private_allowed(user_id)
+
     def is_arxiv_auto_extract_allowed_group(self, group_id: int) -> bool:
         """群聊是否允许 arXiv 自动提取。"""
         if self._arxiv_group_ids_set:
@@ -535,6 +575,8 @@ class Config:
             if old_value != new_value:
                 setattr(self, name, new_value)
                 changes[name] = (old_value, new_value)
+        if changes:
+            self._refresh_runtime_sets()
         return changes
 
     def reload(self, strict: bool = False) -> dict[str, tuple[Any, Any]]:

@@ -288,6 +288,7 @@ Undefined 搭载了基于 ChromaDB 向量数据库的后台认知系统，无需
 | `qq_like` | 给指定 QQ 号的资料卡点赞（默认 10 次） |
 | `python_interpreter` | 在隔离的 **Docker 容器**中执行 Python 代码，支持按需安装第三方库，可在执行后自动发送生成的文件（图片、CSV 等） |
 | `bilibili_video` | 下载并发送哔哩哔哩视频；也支持返回视频附件 UID 供文件分析（支持 BV 号、链接） |
+| `douyin_video` | 下载并发送抖音视频；也支持返回视频附件 UID 供文件分析（支持短链、长链、aweme_id） |
 | `arxiv_paper` | 下载并发送 arXiv 论文 PDF；也支持返回 PDF 附件 UID 供文件分析（支持 arXiv ID、链接） |
 | `fetch_image_uid` | 将指定 URL 的图片下载并转换为系统内部 uid |
 | `task_progress` | 向用户发送长任务的阶段性进度通知 |

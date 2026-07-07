@@ -1,0 +1,6 @@
+{
+    "name": "douyin",
+    "description": "检测并处理抖音视频链接、短链或 aweme_id 自动提取。",
+    "order": 11,
+    "enabled": true
+}

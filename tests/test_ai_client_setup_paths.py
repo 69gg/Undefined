@@ -112,4 +112,4 @@ def test_pipeline_registry_loads_expected_pipelines() -> None:
         return registry
 
     registry = asyncio.run(_load())
-    assert set(registry._items) == {"arxiv", "bilibili", "github"}
+    assert set(registry._items) == {"arxiv", "bilibili", "douyin", "github"}
