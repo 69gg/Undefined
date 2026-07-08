@@ -126,6 +126,54 @@ async def test_arxiv_paper_tool_uid_mode_registers_pdf(
 
 
 @pytest.mark.asyncio
+async def test_arxiv_paper_tool_info_mode_returns_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _fake_get_paper_info(
+        paper_id: str,
+        *,
+        context: dict[str, object] | None = None,
+    ) -> PaperInfo:
+        assert paper_id == "2501.01234"
+        assert context == {"request_id": "req-info"}
+        return PaperInfo(
+            paper_id="2501.01234",
+            title="Info Paper",
+            authors=("Alice", "Bob", "Carol"),
+            summary=" ".join(["summary"] * 20),
+            published="2025-01-02T00:00:00Z",
+            updated="",
+            primary_category="cs.AI",
+            abs_url="https://arxiv.org/abs/2501.01234",
+            pdf_url="https://arxiv.org/pdf/2501.01234.pdf",
+        )
+
+    send_mock = AsyncMock()
+    download_mock = AsyncMock()
+    monkeypatch.setattr(arxiv_paper, "get_paper_info", _fake_get_paper_info)
+    monkeypatch.setattr(arxiv_paper, "send_arxiv_paper", send_mock)
+    monkeypatch.setattr(arxiv_sender, "download_paper_pdf", download_mock)
+
+    result = await arxiv_paper.execute(
+        {"paper_id": "2501.01234", "output_mode": "info"},
+        {
+            "request_id": "req-info",
+            "runtime_config": SimpleNamespace(
+                arxiv_author_preview_limit=2,
+                arxiv_summary_preview_chars=30,
+            ),
+        },
+    )
+
+    assert "Info Paper" in result
+    assert "Alice、Bob 等3位作者" in result
+    assert "summary summary summary summar..." in result
+    assert "PDF: https://arxiv.org/pdf/2501.01234.pdf" in result
+    send_mock.assert_not_awaited()
+    download_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_arxiv_search_tool_formats_results(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -143,6 +143,35 @@ def _build_video_history_message(
     return "\n".join(lines)
 
 
+def format_bilibili_video_info(info: "VideoInfo") -> str:
+    """Format Bilibili metadata for tool results."""
+    stats = info.stats
+    lines = [
+        f"「{info.title}」",
+        f"BV: {info.bvid}",
+        f"AV: av{info.aid}",
+        f"UP主: {info.up_name or '未知'}",
+        f"时长: {_format_duration(info.duration)}",
+        (
+            "数据: "
+            f"播放 {_format_count(stats.view)} | "
+            f"点赞 {_format_count(stats.like)} | "
+            f"投币 {_format_count(stats.coin)} | "
+            f"收藏 {_format_count(stats.favorite)} | "
+            f"弹幕 {_format_count(stats.danmaku)} | "
+            f"评论 {_format_count(stats.reply)} | "
+            f"分享 {_format_count(stats.share)}"
+        ),
+    ]
+    desc = info.desc.strip()
+    if desc:
+        lines.extend(["---", desc])
+    if info.cover_url:
+        lines.append(f"封面: {info.cover_url}")
+    lines.append(info.url)
+    return "\n".join(lines)
+
+
 def _build_uid_message(
     info: "VideoInfo",
     *,

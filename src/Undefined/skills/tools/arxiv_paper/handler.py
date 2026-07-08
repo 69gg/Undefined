@@ -4,7 +4,12 @@ import logging
 from typing import Any, Literal
 
 from Undefined.attachments import scope_from_context
-from Undefined.arxiv.sender import fetch_arxiv_paper_attachment, send_arxiv_paper
+from Undefined.arxiv.client import get_paper_info
+from Undefined.arxiv.sender import (
+    fetch_arxiv_paper_attachment,
+    format_paper_info,
+    send_arxiv_paper,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -44,8 +49,8 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
         return "paper_id 不能为空"
 
     output_mode = str(args.get("output_mode", "send") or "send").strip().lower()
-    if output_mode not in {"send", "uid"}:
-        return "output_mode 只能是 send 或 uid"
+    if output_mode not in {"send", "uid", "info"}:
+        return "output_mode 只能是 send、uid 或 info"
 
     runtime_config = context.get("runtime_config")
     max_file_size = 100
@@ -59,6 +64,17 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
         )
 
     try:
+        if output_mode == "info":
+            info = await get_paper_info(
+                paper_id,
+                context={"request_id": context.get("request_id", "-")},
+            )
+            return format_paper_info(
+                info,
+                author_preview_limit=author_preview_limit,
+                summary_preview_chars=summary_preview_chars,
+            )
+
         if output_mode == "uid":
             attachment_registry = context.get("attachment_registry")
             scope_key = str(context.get("scope_key") or "").strip()

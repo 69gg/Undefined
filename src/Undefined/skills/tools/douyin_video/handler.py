@@ -4,8 +4,13 @@ import logging
 from typing import Any, Literal
 
 from Undefined.attachments import scope_from_context
+from Undefined.douyin.client import get_video_info
 from Undefined.douyin.downloader import DEFAULT_RATIOS
-from Undefined.douyin.sender import fetch_douyin_video_attachment, send_douyin_video
+from Undefined.douyin.sender import (
+    fetch_douyin_video_attachment,
+    format_douyin_video_info,
+    send_douyin_video,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -62,13 +67,17 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
         return "video_id 不能为空"
 
     output_mode = str(args.get("output_mode", "send") or "send").strip().lower()
-    if output_mode not in {"send", "uid"}:
-        return "output_mode 只能是 send 或 uid"
+    if output_mode not in {"send", "uid", "info"}:
+        return "output_mode 只能是 send、uid 或 info"
 
     runtime_config = context.get("runtime_config")
     max_duration, max_file_size, prefer_ratios = _runtime_douyin_options(runtime_config)
 
     try:
+        if output_mode == "info":
+            video_info = await get_video_info(video_id, config=runtime_config)
+            return format_douyin_video_info(video_info)
+
         if output_mode == "uid":
             attachment_registry = context.get("attachment_registry")
             scope_key = str(context.get("scope_key") or "").strip()

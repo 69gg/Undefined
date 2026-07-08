@@ -2,8 +2,11 @@ import logging
 from typing import Any, Dict, Literal
 
 from Undefined.attachments import scope_from_context
+from Undefined.bilibili.downloader import get_video_info
+from Undefined.bilibili.parser import normalize_to_bvid
 from Undefined.bilibili.sender import (
     fetch_bilibili_video_attachment,
+    format_bilibili_video_info,
     send_bilibili_video,
 )
 
@@ -54,8 +57,8 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         return "video_id 不能为空"
 
     output_mode = str(args.get("output_mode", "send") or "send").strip().lower()
-    if output_mode not in {"send", "uid"}:
-        return "output_mode 只能是 send 或 uid"
+    if output_mode not in {"send", "uid", "info"}:
+        return "output_mode 只能是 send、uid 或 info"
 
     runtime_config = context.get("runtime_config")
     sender = context.get("sender")
@@ -89,6 +92,13 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         danmaku_max_count = getattr(runtime_config, "bilibili_danmaku_max_count", 0)
 
     try:
+        if output_mode == "info":
+            bvid = await normalize_to_bvid(str(video_id))
+            if not bvid:
+                return f"无法解析视频标识: {video_id}"
+            video_info = await get_video_info(bvid, cookie=cookie)
+            return format_bilibili_video_info(video_info)
+
         if output_mode == "uid":
             attachment_registry = context.get("attachment_registry")
             scope_key = str(context.get("scope_key") or "").strip()

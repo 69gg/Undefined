@@ -104,6 +104,22 @@ def _build_history_message(
     return "\n".join(lines)
 
 
+def format_douyin_video_info(info: DouyinVideoInfo) -> str:
+    """Format Douyin metadata for tool results."""
+    lines = [
+        f"「{info.title}」",
+        f"ID: {info.aweme_id}",
+        f"作者: {info.author_name or '未知'}",
+        f"时长: {_format_duration(info.duration)}",
+    ]
+    if info.desc and info.desc != info.title:
+        lines.extend(["---", info.desc])
+    if info.cover_url:
+        lines.append(f"封面: {info.cover_url}")
+    lines.append(info.share_url)
+    return "\n".join(lines)
+
+
 def _build_uid_message(
     info: DouyinVideoInfo,
     *,
