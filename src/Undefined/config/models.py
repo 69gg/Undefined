@@ -292,10 +292,11 @@ class NagaConfig:
     面向与 NagaAgent 对接的高级场景，普通用户不建议开启。
 
     开关分层：
-    - ``features.nagaagent_mode_enabled`` — 控制 AI 侧行为（提示词切换、工具暴露）
-    - ``naga.enabled`` — 控制外部网关集成（/naga、绑定回调、消息发送、解绑）
+    - ``features.nagaagent_mode_enabled`` — 进程总闸：是否具备 NagaAgent AI 能力
+    - ``naga.enabled`` — 进程总闸：是否启用外部网关集成
+    - ``naga.mode`` + 群/私聊名单 — 会话级策略（对齐 ``[access]``）
 
-    两者均默认 False。可单独开启 ``nagaagent_mode_enabled`` 获得 NagaAgent 解答能力，
+    可单独开启 ``nagaagent_mode_enabled`` 获得 NagaAgent 解答能力，
     无需启用外部回调联动。
     """
 
@@ -304,7 +305,101 @@ class NagaConfig:
     api_key: str = ""
     use_proxy: bool = False
     moderation_enabled: bool = True
-    allowed_groups: frozenset[int] = field(default_factory=frozenset)
+    # 会话级访问控制：off / blacklist / allowlist（语义对齐 [access]）
+    mode: str = "off"
+    allowed_group_ids: frozenset[int] = field(default_factory=frozenset)
+    blocked_group_ids: frozenset[int] = field(default_factory=frozenset)
+    allowed_private_ids: frozenset[int] = field(default_factory=frozenset)
+    blocked_private_ids: frozenset[int] = field(default_factory=frozenset)
+
+    def __post_init__(self) -> None:
+        normalized = str(self.mode or "off").strip().lower()
+        if normalized not in {"off", "blacklist", "allowlist"}:
+            normalized = "off"
+        object.__setattr__(self, "mode", normalized)
+        object.__setattr__(
+            self, "allowed_group_ids", frozenset(int(x) for x in self.allowed_group_ids)
+        )
+        object.__setattr__(
+            self, "blocked_group_ids", frozenset(int(x) for x in self.blocked_group_ids)
+        )
+        object.__setattr__(
+            self,
+            "allowed_private_ids",
+            frozenset(int(x) for x in self.allowed_private_ids),
+        )
+        object.__setattr__(
+            self,
+            "blocked_private_ids",
+            frozenset(int(x) for x in self.blocked_private_ids),
+        )
+
+    def group_denied_reason(self, group_id: int) -> str | None:
+        """群聊 Naga 会话策略拒绝原因。
+
+        返回:
+            - ``"blacklist"``: 命中 blocked_group_ids
+            - ``"allowlist"``: allowlist 模式下名单为空，或不在 allowed_group_ids
+            - ``None``: 允许
+
+        allowlist 说明（较 ``[access]`` 更严格）:
+            - ``allowed_group_ids`` 为空表示拒绝全部群（fail closed）
+            - 名单非空时，仅名单内的群允许
+        """
+        gid = int(group_id)
+        if self.mode == "off":
+            return None
+        if self.mode == "blacklist":
+            if gid in self.blocked_group_ids:
+                return "blacklist"
+            return None
+        # allowlist：空名单 = 拒绝全部
+        if not self.allowed_group_ids:
+            return "allowlist"
+        if gid not in self.allowed_group_ids:
+            return "allowlist"
+        return None
+
+    def private_denied_reason(
+        self, user_id: int, *, is_superadmin: bool = False
+    ) -> str | None:
+        """私聊 Naga 会话策略拒绝原因。
+
+        当 ``is_superadmin=True`` 时绕过私聊名单（调用方传入；当前网关/AI
+        策略路径对超管固定传 True，无独立 naga 配置开关）。
+
+        返回:
+            - ``"blacklist"``: 命中 blocked_private_ids
+            - ``"allowlist"``: allowlist 模式下名单为空，或不在 allowed_private_ids
+            - ``None``: 允许
+
+        allowlist 说明（较 ``[access]`` 更严格）:
+            - ``allowed_private_ids`` 为空表示拒绝全部私聊（fail closed）
+            - 名单非空时，仅名单内的用户允许
+        """
+        if is_superadmin:
+            return None
+        uid = int(user_id)
+        if self.mode == "off":
+            return None
+        if self.mode == "blacklist":
+            if uid in self.blocked_private_ids:
+                return "blacklist"
+            return None
+        # allowlist：空名单 = 拒绝全部
+        if not self.allowed_private_ids:
+            return "allowlist"
+        if uid not in self.allowed_private_ids:
+            return "allowlist"
+        return None
+
+    def is_group_allowed(self, group_id: int) -> bool:
+        """群聊是否通过 Naga 会话名单策略。"""
+        return self.group_denied_reason(group_id) is None
+
+    def is_private_allowed(self, user_id: int, *, is_superadmin: bool = False) -> bool:
+        """私聊是否通过 Naga 会话名单策略。"""
+        return self.private_denied_reason(user_id, is_superadmin=is_superadmin) is None
 
 
 @dataclass

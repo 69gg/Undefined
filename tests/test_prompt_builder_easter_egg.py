@@ -72,7 +72,7 @@ async def _build_messages(
     *,
     group_id: int | None = None,
 ) -> list[dict[str, Any]]:
-    async def _fake_load_system_prompt() -> str:
+    async def _fake_load_system_prompt(*, nagaagent_active: bool | None = None) -> str:
         return "系统提示词"
 
     async def _fake_load_each_rules() -> str:

@@ -93,7 +93,13 @@ def _make_server(
             enabled=True,
             api_key="shared-key",
             moderation_enabled=True,
-            allowed_groups={456},
+            mode="allowlist",
+            allowed_group_ids=frozenset({456}),
+            blocked_group_ids=frozenset(),
+            allowed_private_ids=frozenset(),
+            blocked_private_ids=frozenset(),
+            is_group_allowed=lambda gid: int(gid) in {456},
+            is_private_allowed=lambda uid, is_superadmin=False: True,
         ),
         naga_model=SimpleNamespace(
             model_name="naga-moderation",
@@ -418,7 +424,9 @@ async def test_naga_messages_send_releases_delivery_when_group_not_allowed(
             model_name="naga-moderation",
         ),
     )
-    server._ctx.config_getter().naga.allowed_groups = set()
+    naga = server._ctx.config_getter().naga
+    naga.allowed_group_ids = frozenset()
+    naga.is_group_allowed = lambda gid: False
 
     response = await server._naga_messages_send_handler(
         _make_request(
@@ -438,7 +446,7 @@ async def test_naga_messages_send_releases_delivery_when_group_not_allowed(
 
 
 @pytest.mark.asyncio
-async def test_naga_messages_send_both_mode_allows_private_when_group_not_allowed(
+async def test_naga_messages_send_both_mode_rejects_when_either_channel_denied(
     tmp_path: Path,
 ) -> None:
     store = NagaStore(tmp_path / "naga_bindings.json")
@@ -460,7 +468,9 @@ async def test_naga_messages_send_both_mode_allows_private_when_group_not_allowe
             model_name="naga-moderation",
         ),
     )
-    server._ctx.config_getter().naga.allowed_groups = set()
+    naga = server._ctx.config_getter().naga
+    naga.allowed_group_ids = frozenset()
+    naga.is_group_allowed = lambda gid: False
 
     response = await server._naga_messages_send_handler(
         _make_request(
@@ -476,13 +486,9 @@ async def test_naga_messages_send_both_mode_allows_private_when_group_not_allowe
     )
 
     payload = _json(response)
-    assert response.status == 200
-    assert payload["ok"] is True
-    assert payload["sent_private"] is True
-    assert payload["sent_group"] is False
-    assert payload["partial_success"] is True
-    assert payload["delivery_status"] == "partial_success"
-    assert sender.private_messages == [(123, "hello")]
+    assert response.status == 403
+    assert payload["error"] == "naga policy denied"
+    assert sender.private_messages == []
     assert sender.group_messages == []
     assert store._active_deliveries == {}
 
@@ -960,7 +966,9 @@ async def test_naga_messages_send_both_mode_returns_403_if_group_blocked_and_pri
             model_name="naga-moderation",
         ),
     )
-    server._ctx.config_getter().naga.allowed_groups = set()
+    naga = server._ctx.config_getter().naga
+    naga.allowed_group_ids = frozenset()
+    naga.is_group_allowed = lambda gid: False
 
     response = await server._naga_messages_send_handler(
         _make_request(
@@ -977,9 +985,7 @@ async def test_naga_messages_send_both_mode_returns_403_if_group_blocked_and_pri
 
     payload = _json(response)
     assert response.status == 403
-    assert payload["error"] == "bound group is not in naga.allowed_groups"
-    assert payload["sent_private"] is False
-    assert payload["sent_group"] is False
+    assert payload["error"] == "naga policy denied"
 
 
 @pytest.mark.asyncio

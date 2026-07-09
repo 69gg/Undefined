@@ -1587,16 +1587,18 @@ rerank_top_k = 20
 
 # zh: Naga 外部网关集成配置。
 # zh: 开关分层：
-# zh:   - [features].nagaagent_mode_enabled — 总开关，控制 AI 侧行为（提示词切换、工具暴露）
-# zh:   - [naga].enabled — 子开关，控制外部网关集成（回调 API、/naga 命令、绑定管理）
-# zh: 仅当两者均为 true 时，外部网关集成才生效。
+# zh:   - [features].nagaagent_mode_enabled — 进程总闸：是否具备 NagaAgent AI 能力（提示词/工具）
+# zh:   - [naga].enabled — 进程总闸：外部网关集成（回调 API、/naga 命令、绑定管理）
+# zh:   - [naga].mode + 群/私聊名单 — 会话级策略（对齐 [access]）
+# zh: 仅当 AI/网关总闸打开后，才按 mode 名单决定具体群/私聊是否启用。
 # zh: 若只需 NagaAgent 解答能力而不需要外部回调联动，可只开启 nagaagent_mode_enabled。
 # zh: ⚠️ 此功能面向与 NagaAgent 对接的高级场景，普通用户不建议开启。
 # en: Naga external gateway integration settings.
 # en: Switch hierarchy:
-# en:   - [features].nagaagent_mode_enabled — master switch for AI behavior (prompt, tool exposure)
-# en:   - [naga].enabled — sub-switch for external gateway (callback API, /naga command, bindings)
-# en: Both must be true for external gateway integration to work.
+# en:   - [features].nagaagent_mode_enabled — process master: NagaAgent AI capability (prompt/tools)
+# en:   - [naga].enabled — process master: external gateway (callback API, /naga, bindings)
+# en:   - [naga].mode + group/private lists — per-session policy (aligned with [access])
+# en: After masters are on, mode lists decide which group/private sessions are active.
 # en: To get NagaAgent answering without external callbacks, only enable nagaagent_mode_enabled.
 # en: ⚠️ Advanced feature for NagaAgent integration. Not recommended for regular users.
 [naga]
@@ -1619,6 +1621,24 @@ api_key = ""
 # en: Whether to enable Naga outbound message moderation.
 # en: When disabled, /api/v1/naga/messages/send skips local moderation and returns moderation.status=skipped_disabled.
 moderation_enabled = true
-# zh: Naga 白名单群：/naga 在这些群中才可见；绑定和群聊投递也仅限这些群。
-# en: Naga allowlisted groups: /naga is only visible here, and binding/group delivery are restricted to these groups.
-allowed_groups = []
+# zh: Naga 会话级访问控制模式：off / blacklist / allowlist（语义对齐 [access]）。
+# zh: - off: 不按名单过滤；总闸打开后所有群/私聊会话可用
+# zh: - blacklist: 仅拦截 blocked_* 名单
+# zh: - allowlist: 仅放行 allowed_*；某维度列表为空表示该维度全部拒绝（fail closed）
+# en: Naga per-session access mode: off / blacklist / allowlist.
+# en: - off: no list filtering; all sessions allowed when masters are on
+# en: - blacklist: block blocked_* only
+# en: - allowlist: allow allowed_* only; empty list for a dimension denies all (fail closed)
+mode = "off"
+# zh: 群号白名单（allowlist 模式生效；留空 = 拒绝全部群）。
+# en: Allowed group IDs (allowlist mode; empty = deny all groups).
+allowed_group_ids = []
+# zh: 群号黑名单（blacklist 模式生效）。
+# en: Blocked group IDs (blacklist mode).
+blocked_group_ids = []
+# zh: 私聊 QQ 白名单（allowlist 模式生效；留空 = 拒绝全部私聊）。
+# en: Allowed private-chat user IDs (allowlist mode; empty = deny all private chats).
+allowed_private_ids = []
+# zh: 私聊 QQ 黑名单（blacklist 模式生效）。
+# en: Blocked private-chat user IDs (blacklist mode).
+blocked_private_ids = []

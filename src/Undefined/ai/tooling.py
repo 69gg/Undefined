@@ -187,30 +187,51 @@ class ToolManager:
         """
         start_time = time.perf_counter()
 
-        runtime_config = context.get("runtime_config")
-        if runtime_config is not None:
-            nagaagent_mode_enabled = bool(
-                getattr(runtime_config, "nagaagent_mode_enabled", False)
-            )
-            if (
-                not nagaagent_mode_enabled
-                and function_name == "naga_code_analysis_agent"
-            ):
-                return "该功能未启用"
-
-        # 自动注入 RequestContext 资源
+        # 先注入 RequestContext，再做会话级策略判定（避免缺 group_id/user_id）
+        # 身份字段以活跃 RequestContext 为准（覆盖 context 中可能被污染的值）
         ctx = RequestContext.current()
         if ctx:
             for key, value in ctx.get_resources().items():
                 context.setdefault(key, value)
             if ctx.group_id is not None:
-                context.setdefault("group_id", ctx.group_id)
+                context["group_id"] = ctx.group_id
             if ctx.user_id is not None:
-                context.setdefault("user_id", ctx.user_id)
+                context["user_id"] = ctx.user_id
             if ctx.sender_id is not None:
-                context.setdefault("sender_id", ctx.sender_id)
-            context.setdefault("request_type", ctx.request_type)
-            context.setdefault("request_id", ctx.request_id)
+                context["sender_id"] = ctx.sender_id
+            context["request_type"] = ctx.request_type
+            context["request_id"] = ctx.request_id
+
+        runtime_config = context.get("runtime_config")
+        if runtime_config is not None and function_name == "naga_code_analysis_agent":
+            from Undefined.config.naga_policy import resolve_naga_session_allowed
+
+            group_id_raw = context.get("group_id")
+            user_id_raw = context.get("user_id")
+            if user_id_raw is None:
+                user_id_raw = context.get("sender_id")
+            request_type_raw = context.get("request_type")
+            group_id: int | None = None
+            user_id: int | None = None
+            if group_id_raw is not None:
+                try:
+                    group_id = int(group_id_raw)
+                except (TypeError, ValueError):
+                    group_id = None
+            if user_id_raw is not None:
+                try:
+                    user_id = int(user_id_raw)
+                except (TypeError, ValueError):
+                    user_id = None
+            if not resolve_naga_session_allowed(
+                runtime_config,
+                request_type=str(request_type_raw)
+                if request_type_raw is not None
+                else None,
+                group_id=group_id,
+                user_id=user_id,
+            ):
+                return "该功能未启用"
 
         context.setdefault("get_scope_from_context", scope_from_context)
         context.setdefault("download_cache_dir", DOWNLOAD_CACHE_DIR)

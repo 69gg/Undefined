@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import fields
 from typing import Any
 
@@ -27,6 +28,8 @@ from .models import (
 DEFAULT_API_HOST = "127.0.0.1"
 DEFAULT_API_PORT = 8788
 DEFAULT_API_AUTH_KEY = "changeme"
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_cognitive_config(data: dict[str, Any]) -> CognitiveConfig:
@@ -350,7 +353,38 @@ def _parse_naga_config(data: dict[str, Any]) -> NagaConfig:
         _get_value(data, ("naga", "use_proxy"), "NAGA_USE_PROXY"), False
     )
     moderation_enabled = _coerce_bool(section.get("moderation_enabled"), True)
-    allowed_groups = frozenset(_coerce_int_list(section.get("allowed_groups")))
+
+    # 会话级名单：新字段 + 旧 allowed_groups 兼容
+    allowed_group_ids = set(_coerce_int_list(section.get("allowed_group_ids")))
+    blocked_group_ids = set(_coerce_int_list(section.get("blocked_group_ids")))
+    allowed_private_ids = set(_coerce_int_list(section.get("allowed_private_ids")))
+    blocked_private_ids = set(_coerce_int_list(section.get("blocked_private_ids")))
+
+    has_legacy_allowed_groups = "allowed_groups" in section
+    if has_legacy_allowed_groups:
+        legacy_groups = set(_coerce_int_list(section.get("allowed_groups")))
+        allowed_group_ids |= legacy_groups
+        logger.warning(
+            "配置项 naga.allowed_groups 已弃用，请改用 naga.mode + "
+            "naga.allowed_group_ids / blocked_group_ids / "
+            "allowed_private_ids / blocked_private_ids"
+        )
+
+    mode_raw = section.get("mode")
+    mode_explicit = mode_raw is not None
+    if mode_explicit:
+        mode = _coerce_str(mode_raw, "off").strip().lower()
+        if mode not in {"off", "blacklist", "allowlist"}:
+            logger.warning(
+                "无效的 naga.mode=%r，已回退为 off（允许值: off/blacklist/allowlist）",
+                mode_raw,
+            )
+            mode = "off"
+    elif has_legacy_allowed_groups:
+        # 旧配置只有 allowed_groups：保持「仅名单内群」语义
+        mode = "allowlist"
+    else:
+        mode = "off"
 
     return NagaConfig(
         enabled=enabled,
@@ -358,7 +392,11 @@ def _parse_naga_config(data: dict[str, Any]) -> NagaConfig:
         api_key=api_key,
         use_proxy=use_proxy,
         moderation_enabled=moderation_enabled,
-        allowed_groups=allowed_groups,
+        mode=mode,
+        allowed_group_ids=frozenset(allowed_group_ids),
+        blocked_group_ids=frozenset(blocked_group_ids),
+        allowed_private_ids=frozenset(allowed_private_ids),
+        blocked_private_ids=frozenset(blocked_private_ids),
     )
 
 

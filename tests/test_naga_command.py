@@ -7,6 +7,7 @@ from typing import Any, cast
 import pytest
 
 from Undefined.api.naga_store import NagaStore
+from Undefined.config.models import NagaConfig
 from Undefined.services.commands.context import CommandContext
 from Undefined.services.commands.registry import CommandRegistry
 from Undefined.skills.commands.help.handler import execute as help_execute
@@ -38,20 +39,35 @@ class _DummyOneBot:
 
 def _config(
     *,
-    allowed_groups: set[int],
+    allowed_groups: set[int] | None = None,
+    mode: str | None = None,
+    allowed_private_ids: set[int] | None = None,
+    blocked_group_ids: set[int] | None = None,
+    blocked_private_ids: set[int] | None = None,
     superadmin: bool = False,
     api_enabled: bool = True,
 ) -> Any:
+    allowed_groups = allowed_groups or set()
+    # 默认模拟旧 allowlist 行为：有 allowed_groups 时仅名单内群可见
+    resolved_mode = mode
+    if resolved_mode is None:
+        resolved_mode = "allowlist" if allowed_groups else "off"
+    naga = NagaConfig(
+        enabled=True,
+        api_url="https://naga.example.com",
+        api_key="shared-key",
+        mode=resolved_mode,
+        allowed_group_ids=frozenset(allowed_groups),
+        blocked_group_ids=frozenset(blocked_group_ids or set()),
+        allowed_private_ids=frozenset(allowed_private_ids or set()),
+        blocked_private_ids=frozenset(blocked_private_ids or set()),
+    )
     return SimpleNamespace(
         api=SimpleNamespace(enabled=api_enabled),
         nagaagent_mode_enabled=True,
-        naga=SimpleNamespace(
-            enabled=True,
-            allowed_groups=allowed_groups,
-            api_url="https://naga.example.com",
-            api_key="shared-key",
-        ),
+        naga=naga,
         bot_qq=42,
+        superadmin_qq=1 if superadmin else 0,
         is_superadmin=lambda sender_id: superadmin and sender_id == 1,
         is_admin=lambda sender_id: superadmin and sender_id == 1,
     )
@@ -67,6 +83,8 @@ def _context(
     user_id: int | None = None,
     superadmin: bool = False,
     allowed_groups: set[int] | None = None,
+    mode: str | None = None,
+    allowed_private_ids: set[int] | None = None,
     store: NagaStore | None = None,
 ) -> CommandContext:
     allowed_groups = allowed_groups or set()
@@ -74,7 +92,15 @@ def _context(
     return CommandContext(
         group_id=group_id,
         sender_id=sender_id,
-        config=cast(Any, _config(allowed_groups=allowed_groups, superadmin=superadmin)),
+        config=cast(
+            Any,
+            _config(
+                allowed_groups=allowed_groups,
+                mode=mode,
+                allowed_private_ids=allowed_private_ids,
+                superadmin=superadmin,
+            ),
+        ),
         sender=cast(Any, sender),
         ai=cast(Any, SimpleNamespace()),
         faq_storage=cast(Any, SimpleNamespace()),

@@ -129,16 +129,58 @@ class ClientAskLoopMixin(ClientQueueMixin):
             )
 
         # ===== 阶段二：构建 LLM messages 与 OpenAI tools schema =====
+        # 提示词与工具过滤共用 pre_context（RequestContext + extra_context 合并结果）
         await emit_webchat_stage("building_context")
         messages = await self._prompt_builder.build_messages(
             question,
             get_recent_messages_callback=get_recent_messages_callback,
-            extra_context=extra_context,
+            extra_context=pre_context if pre_context else extra_context,
         )
         await emit_webchat_stage("context_ready")
 
         tools = self.tool_manager.get_openai_tools()
-        tools = self._filter_tools_for_runtime_config(tools)
+        # 有活跃 RequestContext 时以其身份为准，避免 extra_context 覆盖策略会话
+        _session_group_id: int | None = None
+        _session_user_id: int | None = None
+        _session_request_type: str | None = None
+        if ctx is not None:
+            if ctx.group_id is not None:
+                try:
+                    _session_group_id = int(ctx.group_id)
+                except (TypeError, ValueError):
+                    _session_group_id = None
+            raw_uid = ctx.user_id if ctx.user_id is not None else ctx.sender_id
+            if raw_uid is not None:
+                try:
+                    _session_user_id = int(raw_uid)
+                except (TypeError, ValueError):
+                    _session_user_id = None
+            if ctx.request_type is not None:
+                _session_request_type = str(ctx.request_type) or None
+        else:
+            raw_gid = pre_context.get("group_id")
+            raw_uid = pre_context.get("user_id")
+            if raw_uid is None:
+                raw_uid = pre_context.get("sender_id")
+            raw_rtype = pre_context.get("request_type")
+            if raw_gid is not None:
+                try:
+                    _session_group_id = int(raw_gid)
+                except (TypeError, ValueError):
+                    _session_group_id = None
+            if raw_uid is not None:
+                try:
+                    _session_user_id = int(raw_uid)
+                except (TypeError, ValueError):
+                    _session_user_id = None
+            if raw_rtype is not None:
+                _session_request_type = str(raw_rtype) or None
+        tools = self._filter_tools_for_runtime_config(
+            tools,
+            group_id=_session_group_id,
+            user_id=_session_user_id,
+            request_type=_session_request_type,
+        )
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(
                 "[AI消息] 构建完成: messages=%s tools=%s question_len=%s",
