@@ -21,7 +21,6 @@ from typing import Any
 import httpx
 
 from Undefined.attachments import scope_from_context
-from Undefined.attachments.segments import is_data_url, is_http_url
 from Undefined.ai.parsing import extract_choices_content
 from Undefined.skills.http_client import request_with_retry
 from Undefined.skills.http_config import get_request_timeout, get_xingzhige_url
@@ -40,6 +39,16 @@ _ALLOWED_MODELS_IMAGE_SIZES = (
 _ALLOWED_IMAGE_RESPONSE_FORMATS = ("url", "b64_json", "base64")
 _MAX_REFERENCE_IMAGE_UIDS = 16
 _IMAGE_GEN_MODERATION_PROMPT: str | None = None
+
+
+def _is_http_url(value: str) -> bool:
+    """判断字符串是否为 HTTP(S) URL（技能内本地实现，避免跨包耦合）。"""
+    return value.startswith("http://") or value.startswith("https://")
+
+
+def _is_data_url(value: str) -> bool:
+    """判断字符串是否为 ``data:`` URL（技能内本地实现，避免跨包耦合）。"""
+    return value.startswith("data:")
 
 
 @dataclass
@@ -123,7 +132,7 @@ def _decode_image_base64(text: str) -> bytes | None:
     if not payload:
         return None
 
-    if is_data_url(payload):
+    if _is_data_url(payload):
         header, _, encoded = payload.partition(",")
         if not encoded or ";base64" not in header.lower():
             return None
@@ -156,7 +165,7 @@ def _parse_image_url(data: dict[str, Any]) -> str | None:
     if raw_url is None:
         return None
     text = str(raw_url).strip()
-    if not text or not is_http_url(text):
+    if not text or not _is_http_url(text):
         return None
     return text
 
@@ -178,12 +187,12 @@ def _parse_generated_image(data: dict[str, Any]) -> _GeneratedImagePayload | Non
     if raw_url is not None:
         url_text = str(raw_url).strip()
         if url_text:
-            if is_http_url(url_text):
+            if _is_http_url(url_text):
                 return _GeneratedImagePayload(
                     image_url=url_text,
                     detected_format="url",
                 )
-            if is_data_url(url_text):
+            if _is_data_url(url_text):
                 image_bytes = _decode_image_base64(url_text)
                 if image_bytes is not None:
                     return _GeneratedImagePayload(

@@ -24,6 +24,10 @@ _PNG_BYTES = (
     b"\x0b\xe7\x02\x9d"
     b"\x00\x00\x00\x00IEND\xaeB`\x82"
 )
+# 最小魔数夹具，仅用于校验 _decode_image_base64 / _is_likely_image_bytes
+_JPEG_BYTES = b"\xff\xd8\xff\xd9"
+_GIF_BYTES = b"GIF89a" + b"\x00" * 4
+_WEBP_BYTES = b"RIFF" + b"\x00\x00\x00\x00" + b"WEBP"
 
 
 def _make_runtime_config(*, request_params: dict[str, Any] | None = None) -> Any:
@@ -310,6 +314,13 @@ def test_decode_image_base64_rejects_non_image_payload() -> None:
 def test_decode_image_base64_accepts_valid_png() -> None:
     payload_base64 = base64.b64encode(_PNG_BYTES).decode("ascii")
     assert ai_draw_handler._decode_image_base64(payload_base64) == _PNG_BYTES
+
+
+def test_decode_image_base64_accepts_jpeg_gif_webp() -> None:
+    """非 PNG 常见格式也应通过魔数校验。"""
+    for image_bytes in (_JPEG_BYTES, _GIF_BYTES, _WEBP_BYTES):
+        payload_base64 = base64.b64encode(image_bytes).decode("ascii")
+        assert ai_draw_handler._decode_image_base64(payload_base64) == image_bytes
 
 
 def test_decode_image_base64_strips_whitespace_in_payload() -> None:

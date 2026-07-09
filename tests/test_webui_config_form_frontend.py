@@ -25,9 +25,8 @@ def _read_source(path: Path) -> str:
 
 def _has_bare_form_group_query(source: str) -> bool:
     """True if source still queries all .form-group nodes (not only [data-path])."""
-    return 'querySelectorAll(".form-group")' in source or (
-        'querySelector(\n                ".form-group:not(.is-hidden)",\n            )'
-        in source
+    return (
+        'querySelectorAll(".form-group")' in source
         or '".form-group:not(.is-hidden)"' in source
     )
 
