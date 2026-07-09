@@ -129,11 +129,12 @@ class ClientAskLoopMixin(ClientQueueMixin):
             )
 
         # ===== 阶段二：构建 LLM messages 与 OpenAI tools schema =====
+        # 提示词与工具过滤共用 pre_context（RequestContext + extra_context 合并结果）
         await emit_webchat_stage("building_context")
         messages = await self._prompt_builder.build_messages(
             question,
             get_recent_messages_callback=get_recent_messages_callback,
-            extra_context=extra_context,
+            extra_context=pre_context if pre_context else extra_context,
         )
         await emit_webchat_stage("context_ready")
 

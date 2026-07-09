@@ -187,6 +187,20 @@ class ToolManager:
         """
         start_time = time.perf_counter()
 
+        # 先注入 RequestContext，再做会话级策略判定（避免缺 group_id/user_id）
+        ctx = RequestContext.current()
+        if ctx:
+            for key, value in ctx.get_resources().items():
+                context.setdefault(key, value)
+            if ctx.group_id is not None:
+                context.setdefault("group_id", ctx.group_id)
+            if ctx.user_id is not None:
+                context.setdefault("user_id", ctx.user_id)
+            if ctx.sender_id is not None:
+                context.setdefault("sender_id", ctx.sender_id)
+            context.setdefault("request_type", ctx.request_type)
+            context.setdefault("request_id", ctx.request_id)
+
         runtime_config = context.get("runtime_config")
         if runtime_config is not None and function_name == "naga_code_analysis_agent":
             from Undefined.config.naga_policy import resolve_naga_session_allowed
@@ -217,20 +231,6 @@ class ToolManager:
                 user_id=user_id,
             ):
                 return "该功能未启用"
-
-        # 自动注入 RequestContext 资源
-        ctx = RequestContext.current()
-        if ctx:
-            for key, value in ctx.get_resources().items():
-                context.setdefault(key, value)
-            if ctx.group_id is not None:
-                context.setdefault("group_id", ctx.group_id)
-            if ctx.user_id is not None:
-                context.setdefault("user_id", ctx.user_id)
-            if ctx.sender_id is not None:
-                context.setdefault("sender_id", ctx.sender_id)
-            context.setdefault("request_type", ctx.request_type)
-            context.setdefault("request_id", ctx.request_id)
 
         context.setdefault("get_scope_from_context", scope_from_context)
         context.setdefault("download_cache_dir", DOWNLOAD_CACHE_DIR)
