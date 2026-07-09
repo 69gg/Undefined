@@ -1,10 +1,12 @@
-## Unreleased
+## v3.6.7 Naga 会话级黑白名单
 
-### Naga 会话级黑白名单
+本版本将 Naga 启用粒度从进程全局细化到群聊/私聊会话：在总闸打开后，可按 `mode` 名单控制具体群与私聊是否启用 NagaAgent 提示词、相关 Agent 与外部网关能力，并保证提示词与工具暴露/执行结论一致。
 
-- 将 Naga 启用粒度从进程全局细化到群聊/私聊会话。`[features].nagaagent_mode_enabled` 与 `[naga].enabled` 仍为进程总闸；新增 `[naga].mode`（`off` / `blacklist` / `allowlist`）及 `allowed_group_ids` / `blocked_group_ids` / `allowed_private_ids` / `blocked_private_ids`，语义对齐 `[access]`。
-- AI 侧（NagaAgent 提示词与 `naga_code_analysis_agent`）与外部网关（`/naga`、绑定、回调投递）共用同一套会话策略；私聊 superadmin 默认绕过私聊名单。
+- 新增 `[naga].mode`（`off` / `blacklist` / `allowlist`）及 `allowed_group_ids` / `blocked_group_ids` / `allowed_private_ids` / `blocked_private_ids`，语义对齐 `[access]`。`[features].nagaagent_mode_enabled` 与 `[naga].enabled` 仍为进程总闸。
+- AI 侧（NagaAgent 提示词与 `naga_code_analysis_agent` 工具 schema/执行）与外部网关（`/naga`、绑定、回调投递）共用同一套会话策略；私聊 superadmin 默认绕过私聊名单；群聊无 superadmin 绕过。
+- 每轮请求按会话同步切换：放行时使用 `undefined_nagaagent.xml` 并暴露 Naga Agent，拒绝时回退默认提示词并隐藏/拦截该 Agent。
 - 兼容旧字段 `allowed_groups`（合并至 `allowed_group_ids`；未写 `mode` 时自动 `allowlist`）。策略拒绝时投递返回 `naga policy denied`。
+- 同步配置模板、文档（configuration / slash-commands / naga 契约 / access-control）与策略、命令、Runtime API、提示词/工具回归测试。
 
 ---
 
