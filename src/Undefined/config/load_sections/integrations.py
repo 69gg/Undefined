@@ -14,6 +14,7 @@ from ..coercers import (
     _coerce_int,
     _coerce_int_list,
     _coerce_str,
+    _coerce_str_list,
     _get_value,
 )
 
@@ -76,6 +77,44 @@ def load_integrations(
     bilibili_auto_extract_private_ids = _coerce_int_list(
         _get_value(data, ("bilibili", "auto_extract_private_ids"), None)
     )
+
+    # Douyin 配置
+    douyin_use_proxy = _coerce_bool(
+        _get_value(data, ("douyin", "use_proxy"), "DOUYIN_USE_PROXY"), False
+    )
+    douyin_auto_extract_enabled = _coerce_bool(
+        _get_value(data, ("douyin", "auto_extract_enabled"), None), False
+    )
+    douyin_max_duration = _coerce_int(
+        _get_value(data, ("douyin", "max_duration"), None), 600
+    )
+    if douyin_max_duration < 0:
+        douyin_max_duration = 600
+    douyin_max_file_size = _coerce_int(
+        _get_value(data, ("douyin", "max_file_size"), None), 100
+    )
+    if douyin_max_file_size < 0:
+        douyin_max_file_size = 100
+    douyin_prefer_ratios = _coerce_str_list(
+        _get_value(data, ("douyin", "prefer_ratios"), None)
+    )
+    allowed_ratios = ("1080p", "720p", "540p", "360p")
+    douyin_prefer_ratios = [
+        ratio for ratio in douyin_prefer_ratios if ratio in allowed_ratios
+    ] or list(allowed_ratios)
+    douyin_auto_extract_group_ids = _coerce_int_list(
+        _get_value(data, ("douyin", "auto_extract_group_ids"), None)
+    )
+    douyin_auto_extract_private_ids = _coerce_int_list(
+        _get_value(data, ("douyin", "auto_extract_private_ids"), None)
+    )
+    douyin_auto_extract_max_items = _coerce_int(
+        _get_value(data, ("douyin", "auto_extract_max_items"), None), 3
+    )
+    if douyin_auto_extract_max_items <= 0:
+        douyin_auto_extract_max_items = 3
+    if douyin_auto_extract_max_items > 10:
+        douyin_auto_extract_max_items = 10
 
     # arXiv 配置
     arxiv_use_proxy = _coerce_bool(
@@ -272,6 +311,14 @@ def load_integrations(
         "bilibili_danmaku_max_count": bilibili_danmaku_max_count,
         "bilibili_auto_extract_group_ids": bilibili_auto_extract_group_ids,
         "bilibili_auto_extract_private_ids": bilibili_auto_extract_private_ids,
+        "douyin_use_proxy": douyin_use_proxy,
+        "douyin_auto_extract_enabled": douyin_auto_extract_enabled,
+        "douyin_max_duration": douyin_max_duration,
+        "douyin_max_file_size": douyin_max_file_size,
+        "douyin_prefer_ratios": douyin_prefer_ratios,
+        "douyin_auto_extract_group_ids": douyin_auto_extract_group_ids,
+        "douyin_auto_extract_private_ids": douyin_auto_extract_private_ids,
+        "douyin_auto_extract_max_items": douyin_auto_extract_max_items,
         "arxiv_use_proxy": arxiv_use_proxy,
         "arxiv_auto_extract_enabled": arxiv_auto_extract_enabled,
         "arxiv_max_file_size": arxiv_max_file_size,

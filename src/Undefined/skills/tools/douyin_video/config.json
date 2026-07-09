@@ -1,14 +1,14 @@
 {
     "type": "function",
     "function": {
-        "name": "arxiv_paper",
-        "description": "处理 arXiv 论文。默认发送到群聊或私聊；可设置 output_mode=uid 只注册 PDF 附件 UID，或 output_mode=info 只获取论文信息。支持 arXiv ID、arXiv: 前缀或 arXiv 链接。",
+        "name": "douyin_video",
+        "description": "处理抖音视频。默认发送到群聊或私聊；可设置 output_mode=uid 只注册视频附件 UID，或 output_mode=info 只获取视频信息。支持 v.douyin.com 短链、douyin.com/video 长链或 aweme_id。",
         "parameters": {
             "type": "object",
             "properties": {
-                "paper_id": {
+                "video_id": {
                     "type": "string",
-                    "description": "arXiv 论文标识：如 2501.01234、arXiv:2501.01234v2 或 https://arxiv.org/abs/2501.01234"
+                    "description": "抖音视频标识：v.douyin.com 短链、douyin.com/video 长链或裸 aweme_id"
                 },
                 "target_type": {
                     "type": "string",
@@ -22,10 +22,10 @@
                 "output_mode": {
                     "type": "string",
                     "enum": ["send", "uid", "info"],
-                    "description": "输出模式：send（默认，发送论文信息和 PDF）、uid（仅下载并注册 PDF 附件 UID，不发送消息）或 info（仅返回论文信息，不下载不发送）"
+                    "description": "输出模式：send（默认，发送视频合并转发）、uid（仅下载并注册视频附件 UID，不发送消息）或 info（仅返回视频信息，不下载不发送）"
                 }
             },
-            "required": ["paper_id"]
+            "required": ["video_id"]
         }
     }
 }

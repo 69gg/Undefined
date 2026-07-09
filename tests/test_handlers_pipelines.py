@@ -68,9 +68,11 @@ async def test_pipelines_initializes_when_flag_missing() -> None:
     handler.onebot = SimpleNamespace()
     handler.pipeline_registry = registry
     handler._extract_bilibili_ids = AsyncMock(return_value=[])
+    handler._extract_douyin_ids = MagicMock(return_value=[])
     handler._extract_arxiv_ids = MagicMock(return_value=[])
     handler._extract_github_repo_ids = MagicMock(return_value=[])
     handler._handle_bilibili_extract = AsyncMock()
+    handler._handle_douyin_extract = AsyncMock()
     handler._handle_arxiv_extract = AsyncMock()
     handler._handle_github_extract = AsyncMock()
 
@@ -95,15 +97,19 @@ async def test_pipelines_processes_all_matches() -> None:
     handler.config = SimpleNamespace(
         bilibili_auto_extract_enabled=True,
         is_bilibili_auto_extract_allowed_private=lambda _uid: True,
+        douyin_auto_extract_enabled=True,
+        is_douyin_auto_extract_allowed_private=lambda _uid: True,
         arxiv_auto_extract_enabled=True,
         is_arxiv_auto_extract_allowed_private=lambda _uid: True,
         github_auto_extract_enabled=True,
         is_github_auto_extract_allowed_private=lambda _uid: True,
     )
     handler._extract_bilibili_ids = AsyncMock(return_value=["BV1xx411c7mD"])
+    handler._extract_douyin_ids = MagicMock(return_value=["https://v.douyin.com/abc/"])
     handler._extract_arxiv_ids = MagicMock(return_value=["2501.01234"])
     handler._extract_github_repo_ids = MagicMock(return_value=["69gg/Undefined"])
     handler._handle_bilibili_extract = AsyncMock()
+    handler._handle_douyin_extract = AsyncMock()
     handler._handle_arxiv_extract = AsyncMock()
     handler._handle_github_extract = AsyncMock()
     handler.pipeline_registry = PipelineRegistry()
@@ -120,6 +126,11 @@ async def test_pipelines_processes_all_matches() -> None:
     handler._handle_bilibili_extract.assert_awaited_once_with(
         20001,
         ["BV1xx411c7mD"],
+        "private",
+    )
+    handler._handle_douyin_extract.assert_awaited_once_with(
+        20001,
+        ["https://v.douyin.com/abc/"],
         "private",
     )
     handler._handle_arxiv_extract.assert_awaited_once_with(
@@ -238,9 +249,11 @@ async def test_private_model_pool_command_runs_before_command_dispatch(
     handler._profile_name_refresh_cache = {}
     handler._collect_message_attachments = AsyncMock(return_value=[])
     handler._extract_bilibili_ids = AsyncMock(return_value=[])
+    handler._extract_douyin_ids = MagicMock(return_value=[])
     handler._extract_arxiv_ids = MagicMock(return_value=[])
     handler._extract_github_repo_ids = MagicMock(return_value=[])
     handler._handle_bilibili_extract = AsyncMock()
+    handler._handle_douyin_extract = AsyncMock()
     handler._handle_arxiv_extract = AsyncMock()
     handler._handle_github_extract = AsyncMock()
     handler._schedule_profile_display_name_refresh = MagicMock()
@@ -306,9 +319,11 @@ async def test_private_message_starting_with_select_does_not_touch_model_pool(
     handler._profile_name_refresh_cache = {}
     handler._collect_message_attachments = AsyncMock(return_value=[])
     handler._extract_bilibili_ids = AsyncMock(return_value=[])
+    handler._extract_douyin_ids = MagicMock(return_value=[])
     handler._extract_arxiv_ids = MagicMock(return_value=[])
     handler._extract_github_repo_ids = MagicMock(return_value=[])
     handler._handle_bilibili_extract = AsyncMock()
+    handler._handle_douyin_extract = AsyncMock()
     handler._handle_arxiv_extract = AsyncMock()
     handler._handle_github_extract = AsyncMock()
     handler._schedule_profile_display_name_refresh = MagicMock()
@@ -370,9 +385,11 @@ async def test_private_model_pool_command_ignored_when_pool_disabled(
     handler._profile_name_refresh_cache = {}
     handler._collect_message_attachments = AsyncMock(return_value=[])
     handler._extract_bilibili_ids = AsyncMock(return_value=[])
+    handler._extract_douyin_ids = MagicMock(return_value=[])
     handler._extract_arxiv_ids = MagicMock(return_value=[])
     handler._extract_github_repo_ids = MagicMock(return_value=[])
     handler._handle_bilibili_extract = AsyncMock()
+    handler._handle_douyin_extract = AsyncMock()
     handler._handle_arxiv_extract = AsyncMock()
     handler._handle_github_extract = AsyncMock()
     handler._schedule_profile_display_name_refresh = MagicMock()

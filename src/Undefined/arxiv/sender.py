@@ -120,6 +120,25 @@ def _build_info_message(
     return "\n".join(lines)
 
 
+def format_paper_info(
+    info: PaperInfo,
+    *,
+    author_preview_limit: int,
+    summary_preview_chars: int,
+) -> str:
+    """Format arXiv metadata for tool results."""
+    lines = [
+        _build_info_message(
+            info,
+            author_preview_limit=author_preview_limit,
+            summary_preview_chars=summary_preview_chars,
+        )
+    ]
+    if info.pdf_url:
+        lines.append(f"PDF: {info.pdf_url}")
+    return "\n".join(lines)
+
+
 async def _send_text_message(
     sender: "MessageSender",
     target_type: Literal["group", "private"],

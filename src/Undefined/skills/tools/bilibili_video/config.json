@@ -2,7 +2,7 @@
     "type": "function",
     "function": {
         "name": "bilibili_video",
-        "description": "下载 Bilibili 视频。默认发送到群聊或私聊；也可设置 output_mode=uid 只注册为附件 UID 供文件分析使用。支持 BV号、AV号或B站视频链接。",
+        "description": "处理 Bilibili 视频。默认发送到群聊或私聊；可设置 output_mode=uid 只注册视频附件 UID，或 output_mode=info 只获取视频信息。支持 BV号、AV号或B站视频链接。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -21,8 +21,8 @@
                 },
                 "output_mode": {
                     "type": "string",
-                    "enum": ["send", "uid"],
-                    "description": "输出模式：send（默认，发送视频合并转发）或 uid（仅下载并注册视频附件 UID，不发送消息）"
+                    "enum": ["send", "uid", "info"],
+                    "description": "输出模式：send（默认，发送视频合并转发）、uid（仅下载并注册视频附件 UID，不发送消息）或 info（仅返回视频信息，不下载不发送）"
                 }
             },
             "required": ["video_id"]

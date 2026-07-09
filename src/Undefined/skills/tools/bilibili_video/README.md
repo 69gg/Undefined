@@ -1,6 +1,6 @@
 # bilibili_video 工具
 
-下载 Bilibili 视频。默认发送到群聊或私聊；也支持只注册为附件 UID 供文件分析使用。支持 BV 号、AV 号或 B 站视频链接。
+处理 Bilibili 视频。默认发送到群聊或私聊；也支持只注册为附件 UID 供文件分析使用，或只获取视频信息。支持 BV 号、AV 号或 B 站视频链接。
 
 依赖：
 - 系统需安装 `ffmpeg`（用于合并 DASH 音视频流）
@@ -10,7 +10,7 @@
 - `video_id`：视频标识（BV 号、AV 号或完整 URL）
 - `target_type`：可选，目标会话类型（`group`/`private`）
 - `target_id`：可选，目标会话 ID
-- `output_mode`：可选，`send`（默认，发送合并转发）或 `uid`（只返回 `<attachment uid="file_xxx"/>`，不发送消息）
+- `output_mode`：可选，`send`（默认，发送合并转发）、`uid`（只返回 `<attachment uid="file_xxx"/>`，不发送消息）或 `info`（只返回视频信息，不下载不发送）
 
 `send` 模式流程：
 1. 解析 `video_id` 为 BV 号
@@ -23,6 +23,12 @@
 1. 下载并按大小限制处理视频
 2. 注册为当前会话附件 UID
 3. 返回视频概要和 `<attachment uid="file_xxx"/>`，供 `file_analysis_agent` 继续分析
+
+`info` 模式流程：
+1. 解析 `video_id` 为 BV 号
+2. 调用项目内 `Undefined.bilibili` 模块获取视频信息
+3. 返回标题、UP 主、时长、互动统计、简介、封面 URL 和视频链接
+4. 不下载视频、不发送消息、不注册附件
 
 配置依赖：
 - `config.toml` 中的 `[bilibili]` 段控制清晰度、时长限制、文件大小限制等

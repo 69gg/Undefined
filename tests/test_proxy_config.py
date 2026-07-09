@@ -15,6 +15,7 @@ _PROXY_ENV_KEYS = (
     "IMAGE_GEN_USE_PROXY",
     "MESSAGES_USE_PROXY",
     "BILIBILI_USE_PROXY",
+    "DOUYIN_USE_PROXY",
     "ARXIV_USE_PROXY",
     "GITHUB_USE_PROXY",
     "API_TOOL_INVOKE_CALLBACK_USE_PROXY",
@@ -85,6 +86,7 @@ def test_proxy_switches_default_false_and_legacy_global_ignored(
     assert cfg.image_gen.use_proxy is False
     assert cfg.messages_use_proxy is False
     assert cfg.bilibili_use_proxy is False
+    assert cfg.douyin_use_proxy is False
     assert cfg.arxiv_use_proxy is False
     assert cfg.github_use_proxy is False
     assert cfg.api.tool_invoke_callback_use_proxy is False
@@ -116,6 +118,7 @@ def test_proxy_switches_parse_per_feature_and_per_model(
             "image_gen": {"use_proxy": True},
             "messages": {"use_proxy": True},
             "bilibili": {"use_proxy": True},
+            "douyin": {"use_proxy": True},
             "arxiv": {"use_proxy": True},
             "github": {"use_proxy": True},
             "api": {"tool_invoke_callback_use_proxy": True},
@@ -218,6 +221,7 @@ def test_proxy_switches_parse_per_feature_and_per_model(
     assert cfg.image_gen.use_proxy is True
     assert cfg.messages_use_proxy is True
     assert cfg.bilibili_use_proxy is True
+    assert cfg.douyin_use_proxy is True
     assert cfg.arxiv_use_proxy is True
     assert cfg.github_use_proxy is True
     assert cfg.api.tool_invoke_callback_use_proxy is True

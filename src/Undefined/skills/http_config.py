@@ -71,6 +71,7 @@ def _scope_use_proxy(config: Any, proxy_scope: str) -> bool:
         "image_gen": "image_gen.use_proxy",
         "messages": "messages_use_proxy",
         "bilibili": "bilibili_use_proxy",
+        "douyin": "douyin_use_proxy",
         "arxiv": "arxiv_use_proxy",
         "github": "github_use_proxy",
         "naga": "naga.use_proxy",

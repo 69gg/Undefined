@@ -13,7 +13,8 @@
 工具使用原则：
 - 如果文件源是 arXiv ID、`arXiv:...`、`arxiv.org/abs/...` 或 `arxiv.org/pdf/...`，先调用共享工具 `arxiv_paper`，设置 `output_mode="uid"`，拿到 `<attachment uid="file_xxx"/>` 后再按普通文件 UID 下载和分析。
 - 如果文件源是 Bilibili BV 号、AV 号、B 站视频链接或 b23.tv 短链，先调用共享工具 `bilibili_video`，设置 `output_mode="uid"`，拿到 `<attachment uid="file_xxx"/>` 后再按普通视频 UID 下载和分析。
-- 已经给出内部附件 UID 时，不要再调用 arXiv/Bilibili 获取工具。
+- 如果文件源是抖音 `v.douyin.com` 短链、`douyin.com/video/<id>` 长链或裸 aweme_id，先调用共享工具 `douyin_video`，设置 `output_mode="uid"`，拿到 `<attachment uid="file_xxx"/>` 后再按普通视频 UID 下载和分析。
+- 已经给出内部附件 UID 时，不要再调用 arXiv/Bilibili/抖音获取工具。
 - 根据用户目标选择合适工具：文本读取、文件类型检测、PDF/Office/表格/代码/压缩包/多模态分析都按内容类型处理。
 - `analyze_multimodal` 支持直接传入内部附件 UID；其他需要本地路径的工具应先调用 `download_file` 将 UID 转成本地临时文件路径。
 - PDF 文本和元数据优先用 `extract_pdf`；扫描版、图表、版式、公式图、截图式页面或用户指定页码时，用 `describe_pdf_page` 做逐页视觉分析。

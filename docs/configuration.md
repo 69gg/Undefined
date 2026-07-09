@@ -855,6 +855,27 @@ Prompt caching 补充：
 
 ---
 
+### 4.21.1 `[douyin]` 自动提取
+
+| 字段 | 默认值 | 说明 | 约束/回退 |
+|---|---:|---|---|
+| `use_proxy` | `false` | 抖音短链解析、share 页、ttid 注册和视频流请求是否使用 `[proxy]` 中的代理地址 | |
+| `auto_extract_enabled` | `false` | 是否自动提取抖音短链、长链或 aweme_id | |
+| `max_duration` | `600` | 最大时长（秒），`0` 不限 | `<0` 回退 `600` |
+| `max_file_size` | `100` | 最大体积（MB），`0` 不限 | `<0` 回退 `100` |
+| `prefer_ratios` | `["1080p","720p","540p","360p"]` | 清晰度探测顺序 | 非法或空列表回退默认顺序 |
+| `auto_extract_group_ids` | `[]` | 功能级群白名单 | 空时跟随全局 access |
+| `auto_extract_private_ids` | `[]` | 功能级私聊白名单 | 空时跟随全局 access |
+| `auto_extract_max_items` | `3` | 单条消息最多自动处理几个视频 | `<=0` 回退 `3`，`>10` 截断到 `10` |
+
+自动提取行为：
+- 命中 `v.douyin.com/...`、`douyin.com/video/<id>` 或裸 aweme_id 后，自动提取会发送一次两节点合并转发：视频信息、视频文件或视频状态。
+- 下载链路走抖音 SSR share 页中的 `window._ROUTER_DATA`，从 `video.play_addr` 提取 token，再按 `prefer_ratios` 探测 `aweme/v1/play/`。
+- play 端点探测使用 2 字节 Range GET，并优先按 `Content-Range` 中的总长度对重复文件去重，缺失时回退 `Content-Length`；游客 share 页没有 `bit_rate` 时仍可选择实际可下载档位。
+- 若超过时长或体积限制，会跳过下载并只发送视频信息与状态节点。需要分析视频内容时，`file_analysis_agent` 可通过 `douyin_video(output_mode=uid)` 获取视频附件 UID 后再分析；只需标题、作者、时长和简介等元信息时可使用 `douyin_video(output_mode=info)`。
+
+---
+
 ### 4.20.1 `[arxiv]` 自动提取
 
 | 字段 | 默认值 | 说明 | 约束/回退 |
@@ -872,7 +893,7 @@ Prompt caching 补充：
 - 命中 `arxiv.org/abs/...`、`arxiv.org/pdf/...` 或 `arXiv:<id>` 时直接触发。
 - 裸新式编号仅在消息中同时出现 `arxiv` 关键词时触发，避免误判普通数字串。
 - PDF 下载或上传失败时不会额外发送失败提示，只保留论文信息消息。
-- 自动提取仍默认发送论文信息与 PDF；若用户要求分析 arXiv 论文内容，`file_analysis_agent` 会通过 `arxiv_paper(output_mode=uid)` 获取 PDF 附件 UID 后再分析。
+- 自动提取仍默认发送论文信息与 PDF；若用户要求分析 arXiv 论文内容，`file_analysis_agent` 会通过 `arxiv_paper(output_mode=uid)` 获取 PDF 附件 UID 后再分析；只需标题、作者、摘要和链接等元信息时可使用 `arxiv_paper(output_mode=info)`。
 
 ---
 
@@ -897,7 +918,7 @@ Prompt caching 补充：
 
 自动提取调度说明：
 - 斜杠命令优先级高于自动处理管线；命中命令后直接分发并结束本轮后续处理，不会触发自动提取或 AI 自动回复。命令输入和命令输出会写入历史，供后续 AI 轮次读取。
-- 同一条消息内，自动处理管线会并行检测 Bilibili、arXiv、GitHub 等已注册管线。
+- 同一条消息内，自动处理管线会并行检测 Bilibili、Douyin、arXiv、GitHub 等已注册管线。
 - 检测到多个管线时会并行处理全部命中结果；通常单条消息只会命中一个管线，因此不手动维护优先级。
 - 自动提取发送出的信息消息、图片卡片、文件或视频摘要会通过统一发送层写入消息历史，本地媒体和文件会自动登记为会话附件 UID，随后才进入 AI 自动回复，因此 AI 可以读取刚刚的自动提取结果。
 - 管线实现位于 `src/Undefined/skills/pipelines/`，跟随 `[skills]` 热重载配置自动重新加载。开发新管线请参考 [自动处理管线开发指南](pipelines.md)。

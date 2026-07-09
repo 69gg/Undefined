@@ -1233,6 +1233,34 @@ auto_extract_group_ids = []
 # en: Private chat allowlist for auto-extraction (empty = follow global access.allowed_private_ids).
 auto_extract_private_ids = []
 
+# zh: 抖音视频自动提取配置。
+# en: Douyin video auto-extraction settings.
+[douyin]
+# zh: 是否让抖音短链解析、share 页、ttid 注册和视频流请求使用 [proxy] 代理地址。默认关闭。
+# en: Whether Douyin short-link, share page, ttid registration, and video stream requests use proxy addresses from [proxy]. Disabled by default.
+use_proxy = false
+# zh: 是否启用自动提取（检测到抖音短链、长链或 aweme_id 时自动下载并发送）。
+# en: Enable auto-extraction (auto-download and send when Douyin short links, long links, or aweme IDs are detected).
+auto_extract_enabled = false
+# zh: 最大视频时长（秒），超过则不下载，仅发送信息卡片。0=不限。
+# en: Max video duration (seconds); exceeding this sends info card only. 0=unlimited.
+max_duration = 600
+# zh: 最大文件大小（MB），超过则仅发送信息卡片。0=不限。
+# en: Max file size (MB); exceeding this sends info card only. 0=unlimited.
+max_file_size = 100
+# zh: 清晰度探测顺序。游客 share 页无 bit_rate 时会按该列表探测 play 端点，并按文件大小去重。
+# en: Quality probing order. Visitor share pages lack bit_rate, so play endpoints are probed in this order and deduplicated by file size.
+prefer_ratios = ["1080p", "720p", "540p", "360p"]
+# zh: 自动提取功能的群聊白名单（空=跟随全局 access.allowed_group_ids）。
+# en: Group allowlist for auto-extraction (empty = follow global access.allowed_group_ids).
+auto_extract_group_ids = []
+# zh: 自动提取功能的私聊白名单（空=跟随全局 access.allowed_private_ids）。
+# en: Private chat allowlist for auto-extraction (empty = follow global access.allowed_private_ids).
+auto_extract_private_ids = []
+# zh: 单条消息最多自动处理几个抖音视频。<=0 回退 3，>10 截断到 10。
+# en: Max number of Douyin videos to auto-process from one message. <=0 falls back to 3, >10 is capped to 10.
+auto_extract_max_items = 3
+
 # zh: arXiv 论文自动提取配置。
 # en: arXiv paper auto-extraction settings.
 [arxiv]

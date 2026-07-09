@@ -4,11 +4,12 @@ import logging
 from typing import Any, Literal
 
 from Undefined.attachments import scope_from_context
-from Undefined.arxiv.client import get_paper_info
-from Undefined.arxiv.sender import (
-    fetch_arxiv_paper_attachment,
-    format_paper_info,
-    send_arxiv_paper,
+from Undefined.douyin.client import get_video_info
+from Undefined.douyin.downloader import DEFAULT_RATIOS
+from Undefined.douyin.sender import (
+    fetch_douyin_video_attachment,
+    format_douyin_video_info,
+    send_douyin_video,
 )
 
 logger = logging.getLogger(__name__)
@@ -43,51 +44,53 @@ def _resolve_target(
     return None, "无法确定目标会话，请提供 target_type 与 target_id"
 
 
+def _runtime_douyin_options(
+    runtime_config: Any | None,
+) -> tuple[int, int, tuple[str, ...]]:
+    max_duration = 600
+    max_file_size = 100
+    prefer_ratios: tuple[str, ...] = DEFAULT_RATIOS
+    if runtime_config is not None:
+        max_duration = int(getattr(runtime_config, "douyin_max_duration", 600))
+        max_file_size = int(getattr(runtime_config, "douyin_max_file_size", 100))
+        raw_ratios = getattr(runtime_config, "douyin_prefer_ratios", None)
+        if raw_ratios:
+            prefer_ratios = tuple(str(item) for item in raw_ratios if str(item).strip())
+    return max_duration, max_file_size, prefer_ratios or DEFAULT_RATIOS
+
+
 async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
-    paper_id = str(args.get("paper_id", "")).strip()
-    if not paper_id:
-        return "paper_id 不能为空"
+    """下载并发送抖音视频。"""
+
+    video_id = str(args.get("video_id", "")).strip()
+    if not video_id:
+        return "video_id 不能为空"
 
     output_mode = str(args.get("output_mode", "send") or "send").strip().lower()
     if output_mode not in {"send", "uid", "info"}:
         return "output_mode 只能是 send、uid 或 info"
 
     runtime_config = context.get("runtime_config")
-    max_file_size = 100
-    author_preview_limit = 20
-    summary_preview_chars = 1000
-    if runtime_config is not None:
-        max_file_size = getattr(runtime_config, "arxiv_max_file_size", 100)
-        author_preview_limit = getattr(runtime_config, "arxiv_author_preview_limit", 20)
-        summary_preview_chars = getattr(
-            runtime_config, "arxiv_summary_preview_chars", 1000
-        )
+    max_duration, max_file_size, prefer_ratios = _runtime_douyin_options(runtime_config)
 
     try:
         if output_mode == "info":
-            info = await get_paper_info(
-                paper_id,
-                context={"request_id": context.get("request_id", "-")},
-            )
-            return format_paper_info(
-                info,
-                author_preview_limit=author_preview_limit,
-                summary_preview_chars=summary_preview_chars,
-            )
+            video_info = await get_video_info(video_id, config=runtime_config)
+            return format_douyin_video_info(video_info)
 
         if output_mode == "uid":
             attachment_registry = context.get("attachment_registry")
             scope_key = str(context.get("scope_key") or "").strip()
             if not scope_key:
                 scope_key = scope_from_context(context) or ""
-            return await fetch_arxiv_paper_attachment(
-                paper_id=paper_id,
+            return await fetch_douyin_video_attachment(
+                video_id=video_id,
                 attachment_registry=attachment_registry,
                 scope_key=scope_key,
+                max_duration=max_duration,
                 max_file_size=max_file_size,
-                author_preview_limit=author_preview_limit,
-                summary_preview_chars=summary_preview_chars,
-                context={"request_id": context.get("request_id", "-")},
+                prefer_ratios=prefer_ratios,
+                config=runtime_config,
             )
 
         target, error = _resolve_target(args, context)
@@ -99,16 +102,16 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
         if sender is None:
             return "缺少必要的运行时组件（sender）"
 
-        return await send_arxiv_paper(
-            paper_id=paper_id,
+        return await send_douyin_video(
+            video_id=video_id,
             sender=sender,
             target_type=target_type,
             target_id=target_id,
+            max_duration=max_duration,
             max_file_size=max_file_size,
-            author_preview_limit=author_preview_limit,
-            summary_preview_chars=summary_preview_chars,
-            context={"request_id": context.get("request_id", "-")},
+            prefer_ratios=prefer_ratios,
+            config=runtime_config,
         )
     except Exception as exc:
-        logger.exception("[arxiv_paper] 执行失败: %s", exc)
-        return f"论文处理失败: {exc}"
+        logger.exception("[douyin_video] 执行失败: %s", exc)
+        return f"抖音视频处理失败: {exc}"

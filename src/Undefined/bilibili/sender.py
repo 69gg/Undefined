@@ -14,7 +14,7 @@ from Undefined.bilibili.downloader import (
     download_video,
     get_video_info,
 )
-from Undefined.bilibili.models import DanmakuItem
+from Undefined.bilibili.models import DanmakuItem, VideoStats
 from Undefined.bilibili.parser import normalize_to_bvid
 from Undefined.utils.io import get_file_size
 
@@ -53,6 +53,19 @@ def _format_progress(progress_ms: int) -> str:
     return _format_duration(seconds)
 
 
+def _format_stats_line(stats: VideoStats) -> str:
+    return (
+        "数据: "
+        f"播放 {_format_count(stats.view)} | "
+        f"点赞 {_format_count(stats.like)} | "
+        f"投币 {_format_count(stats.coin)} | "
+        f"收藏 {_format_count(stats.favorite)} | "
+        f"弹幕 {_format_count(stats.danmaku)} | "
+        f"评论 {_format_count(stats.reply)} | "
+        f"分享 {_format_count(stats.share)}"
+    )
+
+
 def _chunked(items: list[DanmakuItem], size: int) -> Iterable[list[DanmakuItem]]:
     size = max(1, size)
     for index in range(0, len(items), size):
@@ -84,16 +97,7 @@ def _build_info_segments(
             f"「{info.title}」",
             f"UP主: {info.up_name or '未知'}",
             f"时长: {_format_duration(info.duration)}",
-            (
-                "数据: "
-                f"播放 {_format_count(stats.view)} | "
-                f"点赞 {_format_count(stats.like)} | "
-                f"投币 {_format_count(stats.coin)} | "
-                f"收藏 {_format_count(stats.favorite)} | "
-                f"弹幕 {_format_count(stats.danmaku)} | "
-                f"评论 {_format_count(stats.reply)} | "
-                f"分享 {_format_count(stats.share)}"
-            ),
+            _format_stats_line(stats),
         ]
     )
     desc = info.desc.strip()
@@ -121,16 +125,7 @@ def _build_video_history_message(
         f"[Bilibili] 「{info.title}」",
         f"UP主: {info.up_name}",
         f"时长: {_format_duration(info.duration)}",
-        (
-            "数据: "
-            f"播放 {_format_count(stats.view)} | "
-            f"点赞 {_format_count(stats.like)} | "
-            f"投币 {_format_count(stats.coin)} | "
-            f"收藏 {_format_count(stats.favorite)} | "
-            f"弹幕 {_format_count(stats.danmaku)} | "
-            f"评论 {_format_count(stats.reply)} | "
-            f"分享 {_format_count(stats.share)}"
-        ),
+        _format_stats_line(stats),
     ]
     if quality_name and file_size_mb is not None:
         lines.append(f"清晰度: {quality_name} | 大小: {file_size_mb:.1f}MB")
@@ -139,6 +134,26 @@ def _build_video_history_message(
     desc = info.desc.strip()
     if desc:
         lines.append(f"简介: {desc}")
+    lines.append(info.url)
+    return "\n".join(lines)
+
+
+def format_bilibili_video_info(info: "VideoInfo") -> str:
+    """Format Bilibili metadata for tool results."""
+    stats = info.stats
+    lines = [
+        f"「{info.title}」",
+        f"BV: {info.bvid}",
+        f"AV: av{info.aid}",
+        f"UP主: {info.up_name or '未知'}",
+        f"时长: {_format_duration(info.duration)}",
+        _format_stats_line(stats),
+    ]
+    desc = info.desc.strip()
+    if desc:
+        lines.extend(["---", desc])
+    if info.cover_url:
+        lines.append(f"封面: {info.cover_url}")
     lines.append(info.url)
     return "\n".join(lines)
 
