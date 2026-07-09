@@ -53,3 +53,13 @@ def test_canonical_share_url_for_aweme_and_long_link() -> None:
     assert normalize_aweme_id("https://www.douyin.com/video/7312345678901234567") == (
         "7312345678901234567"
     )
+
+
+def test_canonical_share_url_handles_uppercase_http_scheme() -> None:
+    assert (
+        canonical_share_url("HTTP://www.douyin.com/video/7312345678901234567")
+        == "https://www.iesdouyin.com/share/video/7312345678901234567/"
+    )
+    assert extract_douyin_ids("HTTPS://v.douyin.com/ABC123/") == [
+        "HTTPS://v.douyin.com/ABC123/"
+    ]

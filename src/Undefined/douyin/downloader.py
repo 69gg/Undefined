@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
-import shutil
 from typing import Any
 from urllib.parse import urlencode
 import uuid
@@ -20,6 +19,7 @@ from Undefined.douyin.models import (
     DouyinVideoInfo,
 )
 from Undefined.skills.http_config import build_httpx_client_kwargs, get_request_timeout
+from Undefined.utils.io import delete_file, delete_tree, exists, is_file
 from Undefined.utils.paths import DOWNLOAD_CACHE_DIR, ensure_dir
 
 logger = logging.getLogger(__name__)
@@ -114,13 +114,18 @@ async def probe_qualities(
 
     probes: list[DouyinQualityProbe] = []
     seen: set[tuple[int | None, str]] = set()
-    for ratio in ratios:
-        probe = await probe_play_url(
-            info.play_token,
-            ratio,
-            referer=info.share_url,
-            config=config,
+    probed = await asyncio.gather(
+        *(
+            probe_play_url(
+                info.play_token,
+                ratio,
+                referer=info.share_url,
+                config=config,
+            )
+            for ratio in ratios
         )
+    )
+    for probe in probed:
         if probe is None:
             continue
         key = (probe.size_bytes, probe.play_url if probe.size_bytes is None else "")
@@ -165,7 +170,7 @@ async def _download_probe(
     )
     downloaded = 0
     try:
-        target_path.parent.mkdir(parents=True, exist_ok=True)
+        await asyncio.to_thread(target_path.parent.mkdir, parents=True, exist_ok=True)
         async with httpx.AsyncClient(**client_kwargs) as client:
             async with client.stream("GET", probe.play_url) as response:
                 response.raise_for_status()
@@ -188,11 +193,10 @@ async def _download_probe(
         await asyncio.to_thread(part_path.replace, target_path)
         return downloaded
     finally:
-        if part_path.exists():
-            try:
-                part_path.unlink()
-            except OSError:
-                pass
+        try:
+            await delete_file(part_path)
+        except OSError:
+            pass
 
 
 async def download_video(
@@ -235,12 +239,12 @@ async def download_video(
             selected = probe
             break
     if selected is None:
-        largest = probes[0]
+        largest = max(probes, key=lambda probe: probe.size_bytes or 0)
         return None, info, largest.ratio, largest.size_bytes
 
     if output_dir is None:
         output_dir = _DOUYIN_DOWNLOAD_DIR
-    task_dir = ensure_dir(output_dir / uuid.uuid4().hex)
+    task_dir = await asyncio.to_thread(ensure_dir, output_dir / uuid.uuid4().hex)
     file_path = task_dir / build_download_filename(info.aweme_id, selected.ratio)
     try:
         size_bytes = await _download_probe(
@@ -258,22 +262,29 @@ async def download_video(
         )
         return file_path, info, selected.ratio, size_bytes
     except Exception:
-        cleanup_path(task_dir)
+        await cleanup_path(task_dir)
         raise
 
 
-def cleanup_path(path: Path) -> None:
+async def _remove_parent_if_empty(parent: Path) -> None:
+    def remove_if_empty() -> None:
+        if parent.exists() and parent.is_dir() and not any(parent.iterdir()):
+            parent.rmdir()
+
+    await asyncio.to_thread(remove_if_empty)
+
+
+async def cleanup_path(path: Path) -> None:
     """Remove a file or task directory created by the downloader."""
 
     try:
-        if path.is_file():
+        if await is_file(path):
             parent = path.parent
-            path.unlink()
-            if parent.exists() and not any(parent.iterdir()):
-                parent.rmdir()
+            await delete_file(path)
+            await _remove_parent_if_empty(parent)
             return
-        if path.exists():
-            shutil.rmtree(path, ignore_errors=True)
+        if await exists(path):
+            await delete_tree(path)
     except Exception as exc:
         logger.warning("[Douyin] 清理下载路径失败 %s: %s", path, exc)
 

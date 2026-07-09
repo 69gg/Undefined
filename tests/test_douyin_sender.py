@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -42,7 +42,7 @@ async def test_send_douyin_video_records_two_node_forward(
         "download_video",
         AsyncMock(return_value=(video_path, _video_info(), "1080p", 5)),
     )
-    cleanup_mock = MagicMock()
+    cleanup_mock = AsyncMock()
     monkeypatch.setattr(douyin_sender, "cleanup_path", cleanup_mock)
 
     result = await douyin_sender.send_douyin_video(
@@ -65,7 +65,7 @@ async def test_send_douyin_video_records_two_node_forward(
     history_message = call.kwargs["history_message"]
     assert history_message.startswith("[Douyin] 「测试抖音」")
     assert "清晰度: 1080p" in history_message
-    cleanup_mock.assert_called_once_with(video_path)
+    cleanup_mock.assert_awaited_once_with(video_path)
 
 
 @pytest.mark.asyncio
@@ -85,7 +85,7 @@ async def test_fetch_douyin_video_attachment_registers_uid(
         "download_video",
         AsyncMock(return_value=(video_path, _video_info(), "720p", 11)),
     )
-    cleanup_mock = MagicMock()
+    cleanup_mock = AsyncMock()
     monkeypatch.setattr(douyin_sender, "cleanup_path", cleanup_mock)
 
     result = await douyin_sender.fetch_douyin_video_attachment(
@@ -102,4 +102,4 @@ async def test_fetch_douyin_video_attachment_registers_uid(
     assert record is not None
     assert record.display_name == "douyin.mp4"
     assert Path(record.local_path or "").read_bytes() == b"video bytes"
-    cleanup_mock.assert_called_once_with(video_path)
+    cleanup_mock.assert_awaited_once_with(video_path)

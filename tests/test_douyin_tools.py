@@ -44,6 +44,51 @@ async def test_douyin_video_tool_uses_runtime_config(
 
 
 @pytest.mark.asyncio
+async def test_douyin_video_tool_uid_mode_registers_attachment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    async def _fake_fetch_douyin_video_attachment(
+        *args: object, **kwargs: object
+    ) -> str:
+        captured["args"] = args
+        captured.update(kwargs)
+        return '已获取抖音视频：标题\n视频: <attachment uid="file_douyin"/>'
+
+    monkeypatch.setattr(
+        douyin_video,
+        "fetch_douyin_video_attachment",
+        _fake_fetch_douyin_video_attachment,
+    )
+
+    attachment_registry = object()
+    runtime_config = SimpleNamespace(
+        douyin_max_duration=42,
+        douyin_max_file_size=99,
+        douyin_prefer_ratios=["720p", "360p"],
+    )
+    result = await douyin_video.execute(
+        {"video_id": "7312345678901234567", "output_mode": "uid"},
+        {
+            "request_type": "group",
+            "group_id": 123456,
+            "attachment_registry": attachment_registry,
+            "runtime_config": runtime_config,
+        },
+    )
+
+    assert '<attachment uid="file_douyin"/>' in result
+    assert captured["video_id"] == "7312345678901234567"
+    assert captured["attachment_registry"] is attachment_registry
+    assert captured["scope_key"] == "group:123456"
+    assert captured["max_duration"] == 42
+    assert captured["max_file_size"] == 99
+    assert captured["prefer_ratios"] == ("720p", "360p")
+    assert captured["config"] is runtime_config
+
+
+@pytest.mark.asyncio
 async def test_douyin_video_tool_info_mode_returns_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

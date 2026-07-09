@@ -279,6 +279,13 @@ async def get_anonymous_ttid(*, config: Any | None = None) -> str:
         return ttid
 
 
+def invalidate_anonymous_ttid() -> None:
+    """Clear cached anonymous ttid so the next request registers a fresh value."""
+
+    global _TTID_CACHE
+    _TTID_CACHE = None
+
+
 async def resolve_share_url(identifier: str, *, config: Any | None = None) -> str:
     """Resolve any Douyin identifier to the SSR share-page URL."""
 
@@ -309,20 +316,19 @@ async def resolve_share_url(identifier: str, *, config: Any | None = None) -> st
     return final_url
 
 
-async def get_video_info(
-    identifier: str, *, config: Any | None = None
-) -> DouyinVideoInfo:
-    """Fetch and parse Douyin video metadata from the SSR share page."""
+def _is_ttid_auth_error(exc: Exception) -> bool:
+    return isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in {
+        401,
+        403,
+    }
 
-    share_url = await resolve_share_url(identifier, config=config)
-    fallback_aweme_id = (
-        normalize_aweme_id(share_url) or normalize_aweme_id(identifier) or ""
-    )
-    ttid = ""
-    try:
-        ttid = await get_anonymous_ttid(config=config)
-    except Exception as exc:
-        logger.warning("[Douyin] 获取匿名 ttid 失败，将尝试直接请求 share 页: %s", exc)
+
+async def _fetch_share_page(
+    share_url: str,
+    *,
+    ttid: str,
+    config: Any | None,
+) -> str:
     timeout_seconds = max(get_request_timeout(30.0), 5.0)
     host = urlsplit(share_url).netloc
     headers = {
@@ -343,8 +349,42 @@ async def get_video_info(
     async with httpx.AsyncClient(**client_kwargs) as client:
         response = await client.get(share_url)
         response.raise_for_status()
+        return response.text
 
-    router_data = parse_router_data(response.text)
+
+async def get_video_info(
+    identifier: str, *, config: Any | None = None
+) -> DouyinVideoInfo:
+    """Fetch and parse Douyin video metadata from the SSR share page."""
+
+    share_url = await resolve_share_url(identifier, config=config)
+    fallback_aweme_id = (
+        normalize_aweme_id(share_url) or normalize_aweme_id(identifier) or ""
+    )
+    ttid = ""
+    try:
+        ttid = await get_anonymous_ttid(config=config)
+    except Exception as exc:
+        logger.warning("[Douyin] 获取匿名 ttid 失败，将尝试直接请求 share 页: %s", exc)
+
+    try:
+        html_text = await _fetch_share_page(share_url, ttid=ttid, config=config)
+    except Exception as exc:
+        if not ttid or not _is_ttid_auth_error(exc):
+            raise
+        logger.warning("[Douyin] 匿名 ttid 可能已失效，刷新后重试: %s", exc)
+        invalidate_anonymous_ttid()
+        try:
+            ttid = await get_anonymous_ttid(config=config)
+        except Exception as refresh_exc:
+            logger.warning(
+                "[Douyin] 刷新匿名 ttid 失败，将尝试直接请求 share 页: %s",
+                refresh_exc,
+            )
+            ttid = ""
+        html_text = await _fetch_share_page(share_url, ttid=ttid, config=config)
+
+    router_data = parse_router_data(html_text)
     info = parse_video_info(
         router_data,
         fallback_aweme_id=fallback_aweme_id,

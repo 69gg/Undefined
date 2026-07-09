@@ -159,6 +159,21 @@ async def _send_forward(
         )
 
 
+async def _recover_video_info_after_failure(
+    video_id: str,
+    video_info: DouyinVideoInfo | None,
+    *,
+    config: Any | None,
+    original_error: Exception,
+) -> tuple[DouyinVideoInfo | None, str | None]:
+    if video_info is not None:
+        return video_info, None
+    try:
+        return await get_video_info(video_id, config=config), None
+    except Exception:
+        return None, f"抖音视频处理失败：无法获取视频信息: {original_error}"
+
+
 async def send_douyin_video(
     video_id: str,
     sender: "MessageSender",
@@ -222,11 +237,14 @@ async def send_douyin_video(
         return f"已发送抖音合并转发「{video_info.title}」"
     except Exception as exc:
         logger.exception("[Douyin] 处理视频失败: %s", video_id)
-        if video_info is None:
-            try:
-                video_info = await get_video_info(video_id, config=config)
-            except Exception:
-                return f"抖音视频处理失败：无法获取视频信息: {exc}"
+        video_info, error = await _recover_video_info_after_failure(
+            video_id,
+            video_info,
+            config=config,
+            original_error=exc,
+        )
+        if error or video_info is None:
+            return error or f"抖音视频处理失败：无法获取视频信息: {exc}"
         failure_status = f"视频处理失败: {exc}"
         nodes = _build_forward_nodes(
             video_info,
@@ -249,7 +267,7 @@ async def send_douyin_video(
         return f"处理失败，已发送抖音信息合并转发: {exc}"
     finally:
         if video_path is not None:
-            cleanup_path(video_path)
+            await cleanup_path(video_path)
 
 
 async def fetch_douyin_video_attachment(
@@ -310,12 +328,15 @@ async def fetch_douyin_video_attachment(
         )
     except Exception as exc:
         logger.exception("[Douyin] UID 模式处理视频失败: %s", video_id)
-        if video_info is None:
-            try:
-                video_info = await get_video_info(video_id, config=config)
-            except Exception:
-                return f"抖音视频处理失败：无法获取视频信息: {exc}"
+        video_info, error = await _recover_video_info_after_failure(
+            video_id,
+            video_info,
+            config=config,
+            original_error=exc,
+        )
+        if error or video_info is None:
+            return error or f"抖音视频处理失败：无法获取视频信息: {exc}"
         return f"抖音视频处理失败：{exc}"
     finally:
         if video_path is not None:
-            cleanup_path(video_path)
+            await cleanup_path(video_path)

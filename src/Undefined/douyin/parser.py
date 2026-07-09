@@ -27,7 +27,10 @@ def _normalize_url(url: str) -> str:
     text = _strip_trailing_punctuation(str(url or "").strip())
     if not text:
         return ""
-    if not text.startswith(("http://", "https://")):
+    lowered = text.lower()
+    if lowered.startswith("http://"):
+        text = f"https://{text[7:]}"
+    elif not lowered.startswith("https://"):
         text = f"https://{text}"
     return text
 
