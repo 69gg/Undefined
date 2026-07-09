@@ -41,6 +41,51 @@ def is_naga_gateway_master_enabled(config: Any) -> bool:
     return bool(getattr(api_cfg, "enabled", False))
 
 
+def _coerce_id_set(raw: Any) -> set[int]:
+    if raw is None:
+        return set()
+    try:
+        return {int(item) for item in raw}
+    except (TypeError, ValueError):
+        return set()
+
+
+def _group_allowed_from_fields(naga: Any, group_id: int) -> bool:
+    """当缺少 is_group_allowed 方法时，按 mode + 名单字段判定（不 fail-open）。"""
+    mode = str(getattr(naga, "mode", "off") or "off").strip().lower()
+    gid = int(group_id)
+    if mode == "off":
+        return True
+    if mode == "blacklist":
+        return gid not in _coerce_id_set(getattr(naga, "blocked_group_ids", None))
+    if mode == "allowlist":
+        allowed = _coerce_id_set(getattr(naga, "allowed_group_ids", None))
+        if not allowed:
+            return True
+        return gid in allowed
+    return True
+
+
+def _private_allowed_from_fields(
+    naga: Any, user_id: int, *, is_superadmin: bool
+) -> bool:
+    """当缺少 is_private_allowed 方法时，按 mode + 名单字段判定（不 fail-open）。"""
+    if is_superadmin:
+        return True
+    mode = str(getattr(naga, "mode", "off") or "off").strip().lower()
+    uid = int(user_id)
+    if mode == "off":
+        return True
+    if mode == "blacklist":
+        return uid not in _coerce_id_set(getattr(naga, "blocked_private_ids", None))
+    if mode == "allowlist":
+        allowed = _coerce_id_set(getattr(naga, "allowed_private_ids", None))
+        if not allowed:
+            return True
+        return uid in allowed
+    return True
+
+
 def is_nagaagent_active_for_group(config: Any, group_id: int) -> bool:
     """群聊会话是否启用 NagaAgent AI 能力。"""
     if not is_nagaagent_master_enabled(config):
@@ -51,7 +96,7 @@ def is_nagaagent_active_for_group(config: Any, group_id: int) -> bool:
     is_allowed = getattr(naga, "is_group_allowed", None)
     if callable(is_allowed):
         return bool(is_allowed(int(group_id)))
-    return True
+    return _group_allowed_from_fields(naga, int(group_id))
 
 
 def is_nagaagent_active_for_private(config: Any, user_id: int) -> bool:
@@ -61,12 +106,11 @@ def is_nagaagent_active_for_private(config: Any, user_id: int) -> bool:
     naga = _naga_cfg(config)
     if naga is None:
         return False
+    is_superadmin = _is_superadmin(config, user_id)
     is_allowed = getattr(naga, "is_private_allowed", None)
     if callable(is_allowed):
-        return bool(
-            is_allowed(int(user_id), is_superadmin=_is_superadmin(config, user_id))
-        )
-    return True
+        return bool(is_allowed(int(user_id), is_superadmin=is_superadmin))
+    return _private_allowed_from_fields(naga, int(user_id), is_superadmin=is_superadmin)
 
 
 def is_naga_gateway_active_for_group(config: Any, group_id: int) -> bool:

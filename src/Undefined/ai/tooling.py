@@ -188,18 +188,19 @@ class ToolManager:
         start_time = time.perf_counter()
 
         # 先注入 RequestContext，再做会话级策略判定（避免缺 group_id/user_id）
+        # 身份字段以活跃 RequestContext 为准（覆盖 context 中可能被污染的值）
         ctx = RequestContext.current()
         if ctx:
             for key, value in ctx.get_resources().items():
                 context.setdefault(key, value)
             if ctx.group_id is not None:
-                context.setdefault("group_id", ctx.group_id)
+                context["group_id"] = ctx.group_id
             if ctx.user_id is not None:
-                context.setdefault("user_id", ctx.user_id)
+                context["user_id"] = ctx.user_id
             if ctx.sender_id is not None:
-                context.setdefault("sender_id", ctx.sender_id)
-            context.setdefault("request_type", ctx.request_type)
-            context.setdefault("request_id", ctx.request_id)
+                context["sender_id"] = ctx.sender_id
+            context["request_type"] = ctx.request_type
+            context["request_id"] = ctx.request_id
 
         runtime_config = context.get("runtime_config")
         if runtime_config is not None and function_name == "naga_code_analysis_agent":

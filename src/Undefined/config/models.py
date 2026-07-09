@@ -339,8 +339,12 @@ class NagaConfig:
 
         返回:
             - ``"blacklist"``: 命中 blocked_group_ids
-            - ``"allowlist"``: allowlist 模式下不在 allowed_group_ids
+            - ``"allowlist"``: allowlist 模式下名单非空且 group 不在 allowed_group_ids
             - ``None``: 允许
+
+        allowlist 说明:
+            - ``allowed_group_ids`` 为空表示群维度不限制（全部允许）
+            - 仅当名单非空时，不在名单内的群返回 ``"allowlist"``
         """
         gid = int(group_id)
         if self.mode == "off":
@@ -349,7 +353,7 @@ class NagaConfig:
             if gid in self.blocked_group_ids:
                 return "blacklist"
             return None
-        # allowlist
+        # allowlist：空名单 = 该维度不限制
         if not self.allowed_group_ids:
             return None
         if gid not in self.allowed_group_ids:
@@ -361,7 +365,17 @@ class NagaConfig:
     ) -> str | None:
         """私聊 Naga 会话策略拒绝原因。
 
-        superadmin 默认绕过私聊名单（运维便利）。
+        当 ``is_superadmin=True`` 时绕过私聊名单（调用方传入；当前网关/AI
+        策略路径对超管固定传 True，无独立 naga 配置开关）。
+
+        返回:
+            - ``"blacklist"``: 命中 blocked_private_ids
+            - ``"allowlist"``: allowlist 模式下名单非空且 user 不在 allowed_private_ids
+            - ``None``: 允许
+
+        allowlist 说明:
+            - ``allowed_private_ids`` 为空表示私聊维度不限制（全部允许）
+            - 仅当名单非空时，不在名单内的用户返回 ``"allowlist"``
         """
         if is_superadmin:
             return None
@@ -372,7 +386,7 @@ class NagaConfig:
             if uid in self.blocked_private_ids:
                 return "blacklist"
             return None
-        # allowlist
+        # allowlist：空名单 = 该维度不限制
         if not self.allowed_private_ids:
             return None
         if uid not in self.allowed_private_ids:

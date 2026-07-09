@@ -143,20 +143,25 @@ class PromptBuilder:
             elif ctx.sender_id is not None and group_id is None:
                 user_id = int(ctx.sender_id)
 
+        # RequestContext 已给出的字段不可被 extra_context 覆盖；仅补齐缺失项
         if isinstance(extra_context, dict):
-            if extra_context.get("request_type") is not None:
+            if request_type is None and extra_context.get("request_type") is not None:
                 request_type = str(extra_context.get("request_type") or "") or None
-            if extra_context.get("group_id") is not None:
+            if group_id is None and extra_context.get("group_id") is not None:
                 try:
                     group_id = int(extra_context["group_id"])
                 except (TypeError, ValueError):
                     pass
-            if extra_context.get("user_id") is not None:
+            if user_id is None and extra_context.get("user_id") is not None:
                 try:
                     user_id = int(extra_context["user_id"])
                 except (TypeError, ValueError):
                     pass
-            elif extra_context.get("sender_id") is not None and group_id is None:
+            elif (
+                user_id is None
+                and extra_context.get("sender_id") is not None
+                and group_id is None
+            ):
                 try:
                     user_id = int(extra_context["sender_id"])
                 except (TypeError, ValueError):

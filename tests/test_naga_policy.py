@@ -99,6 +99,26 @@ def test_nagaagent_session_allowlist() -> None:
     assert is_nagaagent_active_for_private(cfg, 1)  # superadmin
 
 
+def test_field_based_fallback_when_helpers_missing() -> None:
+    """duck-typed naga 无 is_*_allowed 时不得 fail-open。"""
+    cfg = SimpleNamespace(
+        nagaagent_mode_enabled=True,
+        superadmin_qq=0,
+        is_superadmin=lambda _uid: False,
+        naga=SimpleNamespace(
+            mode="allowlist",
+            allowed_group_ids=frozenset({10}),
+            blocked_group_ids=frozenset(),
+            allowed_private_ids=frozenset({20}),
+            blocked_private_ids=frozenset(),
+        ),
+    )
+    assert is_nagaagent_active_for_group(cfg, 10)
+    assert not is_nagaagent_active_for_group(cfg, 11)
+    assert is_nagaagent_active_for_private(cfg, 20)
+    assert not is_nagaagent_active_for_private(cfg, 21)
+
+
 def test_naga_gateway_requires_all_masters() -> None:
     cfg = _cfg(nagaagent=True, naga_enabled=True, api_enabled=False)
     assert not is_naga_gateway_active_for_group(cfg, 1)

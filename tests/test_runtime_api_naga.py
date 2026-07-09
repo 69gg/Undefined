@@ -446,7 +446,7 @@ async def test_naga_messages_send_releases_delivery_when_group_not_allowed(
 
 
 @pytest.mark.asyncio
-async def test_naga_messages_send_both_mode_allows_private_when_group_not_allowed(
+async def test_naga_messages_send_both_mode_rejects_when_either_channel_denied(
     tmp_path: Path,
 ) -> None:
     store = NagaStore(tmp_path / "naga_bindings.json")
@@ -486,13 +486,9 @@ async def test_naga_messages_send_both_mode_allows_private_when_group_not_allowe
     )
 
     payload = _json(response)
-    assert response.status == 200
-    assert payload["ok"] is True
-    assert payload["sent_private"] is True
-    assert payload["sent_group"] is False
-    assert payload["partial_success"] is True
-    assert payload["delivery_status"] == "partial_success"
-    assert sender.private_messages == [(123, "hello")]
+    assert response.status == 403
+    assert payload["error"] == "naga policy denied"
+    assert sender.private_messages == []
     assert sender.group_messages == []
     assert store._active_deliveries == {}
 
@@ -990,8 +986,6 @@ async def test_naga_messages_send_both_mode_returns_403_if_group_blocked_and_pri
     payload = _json(response)
     assert response.status == 403
     assert payload["error"] == "naga policy denied"
-    assert payload["sent_private"] is False
-    assert payload["sent_group"] is False
 
 
 @pytest.mark.asyncio

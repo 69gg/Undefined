@@ -1127,8 +1127,10 @@ Prompt caching 补充：
 - `mode=off`：不按名单过滤；总闸打开后所有群/私聊会话可用对应能力
 - `mode=blacklist`：仅拦截 `blocked_group_ids` / `blocked_private_ids`
 - `mode=allowlist`：仅放行 `allowed_*`；某维度列表为空表示该维度不限制
-- 私聊 superadmin 默认绕过私聊名单（运维便利）；群聊无 superadmin 绕过
-- `/naga` 命令与回调投递均受会话策略约束；策略拒绝时返回 `naga policy denied`（HTTP 403）
+- 私聊名单判定：调用方若将当前用户识别为 superadmin，则绕过私聊名单（当前实现固定如此，**不是** `[access].superadmin_bypass_*` 开关）；群聊无 superadmin 绕过
+- 策略拒绝时的表现因入口而异：
+  - 斜杠命令 `/naga`：命令不可见且静默忽略（`/help` 也不展示），**不**返回 HTTP 错误
+  - Runtime API `/api/v1/naga/*`（如 `messages/send`）：HTTP 403，错误信息 `naga policy denied`
 - `/api/v1/naga/*` 端点仅在 `api.enabled`、`nagaagent_mode_enabled`、`naga.enabled` 三者均开启时注册（进程级）
 - Runtime API 关闭时，`/naga` 命令也不会在 `/help` 中显示
 

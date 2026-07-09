@@ -102,7 +102,7 @@ Authorization: Bearer <config.[naga].api_key>
 - 会话策略拒绝时返回 HTTP 403，错误信息为 `naga policy denied`
 - `markdown/html` 会按当前 Runtime API 的渲染逻辑先尝试转图片
 - 若渲染失败，会回退为文本发送，并在响应中标记 `render_fallback=true`
-- 当 `mode=both` 时，只要私聊或群聊至少有一个发送成功，接口仍返回 `200`；由 `sent_private` / `sent_group` 表示实际投递结果
+- 当 `mode=both` 时：两条通道都必须先通过会话策略，否则整单 HTTP 403（`naga policy denied`），不会部分投递；策略通过后若发送链路部分失败，只要至少一条通道发送成功仍可返回 `200`，由 `sent_private` / `sent_group` 表示实际投递结果
 - 成功响应会额外带 `partial_success` 与 `delivery_status`，用于显式区分“完全成功”和“部分成功”
 - 对同一个 `uuid` 的重复调用：
   - 若 payload 完全一致，则直接复用首个结果
@@ -241,7 +241,7 @@ Undefined 在本地 `/naga unbind` 成功后，会 best-effort 调用：
   - `404`: `pending` 不存在
   - `409`: 状态冲突，例如重复激活不同签名、请求已被其他结果终结
 - `POST /api/v1/naga/messages/send`
-  - `403`: 绑定不存在或已吊销、签名不匹配、目标不匹配、群不在白名单、审核拦截
+  - `403`: 绑定不存在或已吊销、签名不匹配、目标不匹配、会话策略拒绝（`naga policy denied`，含 `config.[naga].mode` 名单）、审核拦截
   - `502`: 所有目标投递失败
 - `POST /api/v1/naga/unbind`
   - `403`: `delivery_signature` 不匹配
@@ -251,7 +251,7 @@ Undefined 在本地 `/naga unbind` 成功后，会 best-effort 调用：
 
 ## Lifecycle Summary
 
-1. 用户在白名单群执行 `/naga bind <naga_id>`
+1. 用户在 Naga 会话策略允许的群执行 `/naga bind <naga_id>`
 2. Undefined 生成 `bind_uuid` 并调用 Naga `bind/request`
 3. Naga 完成验证后回调 Undefined `bind/callback`
 4. 绑定生效后，Naga 可调用 `messages/send`

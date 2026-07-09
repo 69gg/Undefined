@@ -326,14 +326,17 @@ async def naga_messages_send_impl(
         if mode == "both":
             group_ok = is_nagaagent_active_for_group(cfg, binding.group_id)
             private_ok = is_nagaagent_active_for_private(cfg, binding.qq_id)
-            if not group_ok and not private_ok:
+            # both 要求两条通道均通过策略；任一拒绝则整单 403，禁止部分投递
+            if not group_ok or not private_ok:
                 logger.warning(
-                    "[NagaSend] 双通道投递均被策略拒绝: trace=%s naga_id=%s bind_uuid=%s group=%s qq=%s",
+                    "[NagaSend] 双通道投递被策略拒绝: trace=%s naga_id=%s bind_uuid=%s group=%s qq=%s group_ok=%s private_ok=%s",
                     trace_id,
                     naga_id,
                     bind_uuid,
                     binding.group_id,
                     binding.qq_id,
+                    group_ok,
+                    private_ok,
                 )
                 return _json_error(_NAGA_POLICY_DENIED, status=403)
 
