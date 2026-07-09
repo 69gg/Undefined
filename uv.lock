@@ -4626,7 +4626,7 @@ wheels = [
 
 [[package]]
 name = "undefined-bot"
-version = "3.6.6"
+version = "3.6.7"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },

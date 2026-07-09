@@ -1,7 +1,7 @@
 {
 	"name": "undefined-console",
 	"private": true,
-	"version": "3.6.6",
+	"version": "3.6.7",
 	"type": "module",
 	"scripts": {
 		"tauri": "tauri",
