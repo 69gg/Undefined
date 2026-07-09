@@ -153,10 +153,11 @@ async def test_execute_models_rejects_invalid_size(
 
 
 @pytest.mark.asyncio
-async def test_execute_models_defaults_response_format_to_base64(
+async def test_execute_models_omits_response_format_when_unset(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    """未配置 tool 参数 / request_params 时，请求体不默认带 response_format。"""
     monkeypatch.setattr(
         "Undefined.config.get_config",
         lambda strict=False: _make_runtime_config(request_params={}),
@@ -203,7 +204,245 @@ async def test_execute_models_defaults_response_format_to_base64(
     )
 
     assert result == "AI 绘图已发送给 group 10001"
-    assert seen_request["json_data"]["response_format"] == "base64"
+    assert "response_format" not in seen_request["json_data"]
+    assert seen_request["json_data"]["n"] == 1
+    assert seen_request["json_data"]["prompt"] == "violet flowers"
+    assert seen_request["json_data"]["model"] == "grok-imagine-1.0"
+    assert seen_request["json_data"]["size"] == "1024x1024"
+
+
+def test_parse_generated_image_detects_http_url() -> None:
+    payload = ai_draw_handler._parse_generated_image(
+        {"data": [{"url": "https://cdn.example.com/a.png"}]}
+    )
+    assert payload is not None
+    assert payload.image_url == "https://cdn.example.com/a.png"
+    assert payload.image_bytes is None
+    assert payload.detected_format == "url"
+
+
+def test_parse_generated_image_detects_data_url_in_url_field() -> None:
+    data_url = "data:image/png;base64," + base64.b64encode(_PNG_BYTES).decode("ascii")
+    payload = ai_draw_handler._parse_generated_image({"data": [{"url": data_url}]})
+    assert payload is not None
+    assert payload.image_url is None
+    assert payload.image_bytes == _PNG_BYTES
+    assert payload.detected_format == "data_url"
+
+
+def test_parse_generated_image_decodes_b64_with_data_url_prefix() -> None:
+    data_url = "data:image/png;base64," + base64.b64encode(_PNG_BYTES).decode("ascii")
+    payload = ai_draw_handler._parse_generated_image({"data": [{"b64_json": data_url}]})
+    assert payload is not None
+    assert payload.image_bytes == _PNG_BYTES
+    assert payload.detected_format == "b64_json"
+
+
+def test_parse_generated_image_skips_empty_url_and_uses_b64() -> None:
+    payload_base64 = base64.b64encode(_PNG_BYTES).decode("ascii")
+    payload = ai_draw_handler._parse_generated_image(
+        {"data": [{"url": "  ", "base64": payload_base64}]}
+    )
+    assert payload is not None
+    assert payload.image_url is None
+    assert payload.image_bytes == _PNG_BYTES
+    assert payload.detected_format == "base64"
+
+
+def test_parse_generated_image_ignores_request_settings_shape() -> None:
+    """解析只看 payload，不假设 response_format 设置。"""
+    payload_base64 = base64.b64encode(_PNG_BYTES).decode("ascii")
+    as_b64 = ai_draw_handler._parse_generated_image(
+        {"data": [{"b64_json": payload_base64}]}
+    )
+    as_url = ai_draw_handler._parse_generated_image(
+        {"data": [{"url": "https://cdn.example.com/b.png"}]}
+    )
+    assert as_b64 is not None and as_b64.detected_format == "b64_json"
+    assert as_url is not None and as_url.detected_format == "url"
+
+
+@pytest.mark.asyncio
+async def test_execute_models_accepts_b64_when_request_prefers_url(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """请求 response_format=url，上游却返回 b64_json 时仍应成功。"""
+    runtime_config = _make_runtime_config(
+        request_params={"response_format": "url"},
+    )
+    monkeypatch.setattr(
+        "Undefined.config.get_config",
+        lambda strict=False: runtime_config,
+    )
+    monkeypatch.setattr("Undefined.utils.paths.IMAGE_CACHE_DIR", tmp_path)
+
+    payload_base64 = base64.b64encode(_PNG_BYTES).decode("ascii")
+    seen_request: dict[str, Any] = {}
+
+    class _FakeResponse:
+        text = ""
+
+        def json(self) -> dict[str, Any]:
+            return {"data": [{"b64_json": payload_base64}]}
+
+    async def _fake_request_with_retry(
+        method: str,
+        url: str,
+        **kwargs: Any,
+    ) -> _FakeResponse:
+        seen_request["json_data"] = kwargs.get("json_data")
+        return _FakeResponse()
+
+    sent: dict[str, Any] = {}
+
+    async def _send_image(
+        target_id: int | str,
+        message_type: str,
+        file_path: str,
+    ) -> None:
+        sent["file_path"] = file_path
+
+    monkeypatch.setattr(ai_draw_handler, "request_with_retry", _fake_request_with_retry)
+
+    result = await ai_draw_handler.execute(
+        {
+            "prompt": "violet flowers",
+            "size": "1024x1024",
+            "delivery": "send",
+            "target_id": 10001,
+            "message_type": "group",
+        },
+        {"send_image_callback": _send_image},
+    )
+
+    assert result == "AI 绘图已发送给 group 10001"
+    assert seen_request["json_data"]["response_format"] == "url"
+    assert Path(sent["file_path"]).read_bytes() == _PNG_BYTES
+
+
+@pytest.mark.asyncio
+async def test_execute_models_accepts_url_when_request_prefers_b64(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """请求 response_format=b64_json，上游却返回 url 时仍应成功。"""
+    monkeypatch.setattr(
+        "Undefined.config.get_config",
+        lambda strict=False: _make_runtime_config(),
+    )
+    monkeypatch.setattr("Undefined.utils.paths.IMAGE_CACHE_DIR", tmp_path)
+
+    image_url = "https://cdn.example.com/generated.png"
+    seen_request: dict[str, Any] = {}
+    download_urls: list[str] = []
+
+    class _FakeGenResponse:
+        text = ""
+
+        def json(self) -> dict[str, Any]:
+            return {"data": [{"url": image_url}]}
+
+    class _FakeDownloadResponse:
+        content = _PNG_BYTES
+        text = ""
+
+    async def _fake_request_with_retry(
+        method: str,
+        url: str,
+        **kwargs: Any,
+    ) -> Any:
+        if method == "POST":
+            seen_request["json_data"] = kwargs.get("json_data")
+            return _FakeGenResponse()
+        download_urls.append(url)
+        return _FakeDownloadResponse()
+
+    sent: dict[str, Any] = {}
+
+    async def _send_image(
+        target_id: int | str,
+        message_type: str,
+        file_path: str,
+    ) -> None:
+        sent["file_path"] = file_path
+
+    monkeypatch.setattr(ai_draw_handler, "request_with_retry", _fake_request_with_retry)
+
+    result = await ai_draw_handler.execute(
+        {
+            "prompt": "violet flowers",
+            "size": "1024x1024",
+            "response_format": "b64_json",
+            "delivery": "send",
+            "target_id": 10001,
+            "message_type": "group",
+        },
+        {"send_image_callback": _send_image},
+    )
+
+    assert result == "AI 绘图已发送给 group 10001"
+    assert seen_request["json_data"]["response_format"] == "b64_json"
+    assert download_urls == [image_url]
+    assert Path(sent["file_path"]).read_bytes() == _PNG_BYTES
+
+
+@pytest.mark.asyncio
+async def test_execute_models_data_url_response_registers_bytes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """url 字段为 data URL 时应按字节处理，不走远程下载。"""
+    monkeypatch.setattr(
+        "Undefined.config.get_config",
+        lambda strict=False: _make_runtime_config(),
+    )
+    monkeypatch.setattr("Undefined.utils.paths.IMAGE_CACHE_DIR", tmp_path)
+
+    data_url = "data:image/png;base64," + base64.b64encode(_PNG_BYTES).decode("ascii")
+    download_called = False
+
+    class _FakeResponse:
+        text = ""
+
+        def json(self) -> dict[str, Any]:
+            return {"data": [{"url": data_url}]}
+
+    async def _fake_request_with_retry(
+        method: str,
+        url: str,
+        **kwargs: Any,
+    ) -> _FakeResponse:
+        nonlocal download_called
+        if method == "GET":
+            download_called = True
+        return _FakeResponse()
+
+    sent: dict[str, Any] = {}
+
+    async def _send_image(
+        target_id: int | str,
+        message_type: str,
+        file_path: str,
+    ) -> None:
+        sent["file_path"] = file_path
+
+    monkeypatch.setattr(ai_draw_handler, "request_with_retry", _fake_request_with_retry)
+
+    result = await ai_draw_handler.execute(
+        {
+            "prompt": "violet flowers",
+            "size": "1024x1024",
+            "delivery": "send",
+            "target_id": 10001,
+            "message_type": "group",
+        },
+        {"send_image_callback": _send_image},
+    )
+
+    assert result == "AI 绘图已发送给 group 10001"
+    assert download_called is False
+    assert Path(sent["file_path"]).read_bytes() == _PNG_BYTES
 
 
 @pytest.mark.asyncio

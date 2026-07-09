@@ -21,6 +21,7 @@ from typing import Any
 import httpx
 
 from Undefined.attachments import scope_from_context
+from Undefined.attachments.segments import is_data_url, is_http_url
 from Undefined.ai.parsing import extract_choices_content
 from Undefined.skills.http_client import request_with_retry
 from Undefined.skills.http_config import get_request_timeout, get_xingzhige_url
@@ -45,6 +46,7 @@ _IMAGE_GEN_MODERATION_PROMPT: str | None = None
 class _GeneratedImagePayload:
     image_url: str | None = None
     image_bytes: bytes | None = None
+    detected_format: str | None = None
 
 
 def _record_image_gen_usage(
@@ -79,23 +81,78 @@ def _iso_now() -> str:
     return datetime.now().isoformat()
 
 
-def _parse_image_url(data: dict[str, Any]) -> str | None:
-    """从 API 响应中提取图片 URL"""
-    try:
-        return str(data["data"][0]["url"])
-    except (KeyError, IndexError, TypeError):
-        return None
-
-
-def _parse_image_bytes(data: dict[str, Any]) -> bytes | None:
-    """从 API 响应中提取 Base64 图片内容。"""
+def _extract_first_image_item(data: dict[str, Any]) -> dict[str, Any] | None:
+    """从 OpenAI 形 ``{"data":[{...}]}`` 取出首个图片 item。"""
     try:
         image_item = data["data"][0]
     except (KeyError, IndexError, TypeError):
         return None
-
     if not isinstance(image_item, dict):
         return None
+    return image_item
+
+
+def _decode_image_base64(text: str) -> bytes | None:
+    """解码纯 base64 或 ``data:image/...;base64,...`` 图片内容。"""
+    payload = text.strip()
+    if not payload:
+        return None
+
+    if is_data_url(payload):
+        header, _, encoded = payload.partition(",")
+        if not encoded or ";base64" not in header.lower():
+            return None
+        payload = encoded.strip()
+
+    try:
+        return base64.b64decode(payload, validate=False)
+    except (binascii.Error, ValueError):
+        return None
+
+
+def _parse_image_url(data: dict[str, Any]) -> str | None:
+    """从 API 响应中提取可下载的 http(s) 图片 URL（星之阁等路径复用）。"""
+    image_item = _extract_first_image_item(data)
+    if image_item is None:
+        return None
+    raw_url = image_item.get("url")
+    if raw_url is None:
+        return None
+    text = str(raw_url).strip()
+    if not text or not is_http_url(text):
+        return None
+    return text
+
+
+def _parse_generated_image(data: dict[str, Any]) -> _GeneratedImagePayload | None:
+    """按响应 payload 自动检测图片格式，不依赖请求/配置中的 response_format。
+
+    优先级：
+    1. ``url`` 为 http(s) → 远程 URL
+    2. ``url`` 为 data URL → 解码为字节
+    3. ``b64_json`` / ``base64``（可含 data URL 前缀）→ 解码为字节
+    """
+    image_item = _extract_first_image_item(data)
+    if image_item is None:
+        return None
+
+    raw_url = image_item.get("url")
+    if raw_url is not None:
+        url_text = str(raw_url).strip()
+        if url_text:
+            if is_http_url(url_text):
+                return _GeneratedImagePayload(
+                    image_url=url_text,
+                    detected_format="url",
+                )
+            if is_data_url(url_text):
+                image_bytes = _decode_image_base64(url_text)
+                if image_bytes is not None:
+                    return _GeneratedImagePayload(
+                        image_bytes=image_bytes,
+                        detected_format="data_url",
+                    )
+                logger.warning("图片 data URL 解码失败，继续尝试其它字段")
 
     for key in ("b64_json", "base64"):
         raw_value = image_item.get(key)
@@ -104,22 +161,13 @@ def _parse_image_bytes(data: dict[str, Any]) -> bytes | None:
         text = str(raw_value).strip()
         if not text:
             continue
-        try:
-            return base64.b64decode(text)
-        except (binascii.Error, ValueError):
-            logger.error("图片 Base64 解码失败: key=%s", key)
-            return None
-    return None
-
-
-def _parse_generated_image(data: dict[str, Any]) -> _GeneratedImagePayload | None:
-    image_url = _parse_image_url(data)
-    if image_url:
-        return _GeneratedImagePayload(image_url=image_url)
-
-    image_bytes = _parse_image_bytes(data)
-    if image_bytes is not None:
-        return _GeneratedImagePayload(image_bytes=image_bytes)
+        image_bytes = _decode_image_base64(text)
+        if image_bytes is not None:
+            return _GeneratedImagePayload(
+                image_bytes=image_bytes,
+                detected_format=key,
+            )
+        logger.warning("图片 Base64 解码失败: key=%s", key)
 
     return None
 
@@ -271,10 +319,9 @@ def _build_openai_models_request_body(
         body["quality"] = quality
     if style:
         body["style"] = style
+    # 仅在工具参数显式传入时覆盖；否则保留 request_params 中的值（若有），不默认塞 response_format
     if response_format:
         body["response_format"] = response_format
-    else:
-        body.setdefault("response_format", "base64")
     return body
 
 
@@ -334,10 +381,9 @@ def _build_openai_models_edit_form(
         body["quality"] = quality
     if style:
         body["style"] = style
+    # 仅在工具参数显式传入时覆盖；否则保留 request_params 中的值（若有），不默认塞 response_format
     if response_format:
         body["response_format"] = response_format
-    else:
-        body.setdefault("response_format", "base64")
     return {key: _stringify_multipart_value(value) for key, value in body.items()}
 
 
@@ -508,7 +554,10 @@ async def _call_openai_models(
         logger.error(f"图片生成 API 返回 (未找到图片链接): {data}")
         return f"API 返回原文 (错误：未找到图片内容): {data}"
 
-    logger.info(f"图片生成 API 返回: {data}")
+    logger.info(
+        "图片生成 API 解析成功: detected_format=%s",
+        generated_image.detected_format or "unknown",
+    )
     if generated_image.image_url:
         logger.info(f"提取图片链接: {generated_image.image_url}")
     elif generated_image.image_bytes is not None:
@@ -639,7 +688,10 @@ async def _call_openai_models_edit(
         logger.error(f"参考图生图 API 返回 (未找到图片内容): {data}")
         return f"API 返回原文 (错误：未找到图片内容): {data}"
 
-    logger.info(f"参考图生图 API 返回: {data}")
+    logger.info(
+        "参考图生图 API 解析成功: detected_format=%s",
+        generated_image.detected_format or "unknown",
+    )
     if generated_image.image_url:
         logger.info(f"提取图片链接: {generated_image.image_url}")
     elif generated_image.image_bytes is not None:
