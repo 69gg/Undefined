@@ -65,10 +65,14 @@ def test_naga_config_blacklist() -> None:
     assert naga.is_private_allowed(20, is_superadmin=True)
 
 
-def test_naga_config_allowlist_empty_means_unrestricted_dimension() -> None:
+def test_naga_config_allowlist_empty_denies_all() -> None:
     naga = NagaConfig(mode="allowlist")
-    assert naga.is_group_allowed(123)
-    assert naga.is_private_allowed(456)
+    assert not naga.is_group_allowed(123)
+    assert naga.group_denied_reason(123) == "allowlist"
+    assert not naga.is_private_allowed(456)
+    assert naga.private_denied_reason(456) == "allowlist"
+    # superadmin 仍可绕过私聊空名单
+    assert naga.is_private_allowed(456, is_superadmin=True)
 
 
 def test_naga_config_allowlist_restricts_when_nonempty() -> None:
@@ -100,7 +104,7 @@ def test_nagaagent_session_allowlist() -> None:
 
 
 def test_field_based_fallback_when_helpers_missing() -> None:
-    """duck-typed naga 无 is_*_allowed 时不得 fail-open。"""
+    """duck-typed naga 无 is_*_allowed 时按字段判定，且 allowlist 空名单 fail closed。"""
     cfg = SimpleNamespace(
         nagaagent_mode_enabled=True,
         superadmin_qq=0,
@@ -117,6 +121,36 @@ def test_field_based_fallback_when_helpers_missing() -> None:
     assert not is_nagaagent_active_for_group(cfg, 11)
     assert is_nagaagent_active_for_private(cfg, 20)
     assert not is_nagaagent_active_for_private(cfg, 21)
+
+    empty = SimpleNamespace(
+        nagaagent_mode_enabled=True,
+        superadmin_qq=0,
+        is_superadmin=lambda _uid: False,
+        naga=SimpleNamespace(
+            mode="allowlist",
+            allowed_group_ids=frozenset(),
+            blocked_group_ids=frozenset(),
+            allowed_private_ids=frozenset(),
+            blocked_private_ids=frozenset(),
+        ),
+    )
+    assert not is_nagaagent_active_for_group(empty, 1)
+    assert not is_nagaagent_active_for_private(empty, 1)
+
+    unknown = SimpleNamespace(
+        nagaagent_mode_enabled=True,
+        superadmin_qq=0,
+        is_superadmin=lambda _uid: False,
+        naga=SimpleNamespace(
+            mode="weird",
+            allowed_group_ids=frozenset({1}),
+            blocked_group_ids=frozenset(),
+            allowed_private_ids=frozenset({1}),
+            blocked_private_ids=frozenset(),
+        ),
+    )
+    assert not is_nagaagent_active_for_group(unknown, 1)
+    assert not is_nagaagent_active_for_private(unknown, 1)
 
 
 def test_naga_gateway_requires_all_masters() -> None:

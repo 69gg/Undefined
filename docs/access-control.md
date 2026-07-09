@@ -83,4 +83,4 @@ superadmin_bypass_allowlist = true
 
 ## 与 Naga 会话策略的关系
 
-全局 `[access]` 控制机器人整体能否收发消息。Naga 另有独立的会话策略（`[naga].mode` + 群/私聊名单），用于在 Naga 总闸打开后，按群/私聊决定是否启用 NagaAgent 提示词/工具与外部网关（`/naga`、绑定、回调投递）。语义对齐本节的 `off` / `blacklist` / `allowlist` 模型，详见 [configuration.md §4.27](configuration.md)。
+全局 `[access]` 控制机器人整体能否收发消息。Naga 另有独立的会话策略（`[naga].mode` + 群/私聊名单），用于在 Naga 总闸打开后，按群/私聊决定是否启用 NagaAgent 提示词/工具与外部网关（`/naga`、绑定、回调投递）。模式名与本节相同（`off` / `blacklist` / `allowlist`），但 **Naga 的 allowlist 空名单为 fail closed（拒绝全部）**，与本节「空名单不限制」不同；详见 [configuration.md §4.27](configuration.md)。

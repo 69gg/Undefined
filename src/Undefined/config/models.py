@@ -339,12 +339,12 @@ class NagaConfig:
 
         返回:
             - ``"blacklist"``: 命中 blocked_group_ids
-            - ``"allowlist"``: allowlist 模式下名单非空且 group 不在 allowed_group_ids
+            - ``"allowlist"``: allowlist 模式下名单为空，或不在 allowed_group_ids
             - ``None``: 允许
 
-        allowlist 说明:
-            - ``allowed_group_ids`` 为空表示群维度不限制（全部允许）
-            - 仅当名单非空时，不在名单内的群返回 ``"allowlist"``
+        allowlist 说明（较 ``[access]`` 更严格）:
+            - ``allowed_group_ids`` 为空表示拒绝全部群（fail closed）
+            - 名单非空时，仅名单内的群允许
         """
         gid = int(group_id)
         if self.mode == "off":
@@ -353,9 +353,9 @@ class NagaConfig:
             if gid in self.blocked_group_ids:
                 return "blacklist"
             return None
-        # allowlist：空名单 = 该维度不限制
+        # allowlist：空名单 = 拒绝全部
         if not self.allowed_group_ids:
-            return None
+            return "allowlist"
         if gid not in self.allowed_group_ids:
             return "allowlist"
         return None
@@ -370,12 +370,12 @@ class NagaConfig:
 
         返回:
             - ``"blacklist"``: 命中 blocked_private_ids
-            - ``"allowlist"``: allowlist 模式下名单非空且 user 不在 allowed_private_ids
+            - ``"allowlist"``: allowlist 模式下名单为空，或不在 allowed_private_ids
             - ``None``: 允许
 
-        allowlist 说明:
-            - ``allowed_private_ids`` 为空表示私聊维度不限制（全部允许）
-            - 仅当名单非空时，不在名单内的用户返回 ``"allowlist"``
+        allowlist 说明（较 ``[access]`` 更严格）:
+            - ``allowed_private_ids`` 为空表示拒绝全部私聊（fail closed）
+            - 名单非空时，仅名单内的用户允许
         """
         if is_superadmin:
             return None
@@ -386,9 +386,9 @@ class NagaConfig:
             if uid in self.blocked_private_ids:
                 return "blacklist"
             return None
-        # allowlist：空名单 = 该维度不限制
+        # allowlist：空名单 = 拒绝全部
         if not self.allowed_private_ids:
-            return None
+            return "allowlist"
         if uid not in self.allowed_private_ids:
             return "allowlist"
         return None

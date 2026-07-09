@@ -1624,20 +1624,20 @@ moderation_enabled = true
 # zh: Naga 会话级访问控制模式：off / blacklist / allowlist（语义对齐 [access]）。
 # zh: - off: 不按名单过滤；总闸打开后所有群/私聊会话可用
 # zh: - blacklist: 仅拦截 blocked_* 名单
-# zh: - allowlist: 仅放行 allowed_*；某维度列表为空表示该维度不限制
-# en: Naga per-session access mode: off / blacklist / allowlist (aligned with [access]).
+# zh: - allowlist: 仅放行 allowed_*；某维度列表为空表示该维度全部拒绝（fail closed）
+# en: Naga per-session access mode: off / blacklist / allowlist.
 # en: - off: no list filtering; all sessions allowed when masters are on
 # en: - blacklist: block blocked_* only
-# en: - allowlist: allow allowed_* only; empty list for a dimension means unrestricted
+# en: - allowlist: allow allowed_* only; empty list for a dimension denies all (fail closed)
 mode = "off"
-# zh: 群号白名单（allowlist 模式生效；留空 = 群维度不限制）。
-# en: Allowed group IDs (allowlist mode; empty = no group restriction).
+# zh: 群号白名单（allowlist 模式生效；留空 = 拒绝全部群）。
+# en: Allowed group IDs (allowlist mode; empty = deny all groups).
 allowed_group_ids = []
 # zh: 群号黑名单（blacklist 模式生效）。
 # en: Blocked group IDs (blacklist mode).
 blocked_group_ids = []
-# zh: 私聊 QQ 白名单（allowlist 模式生效；留空 = 私聊维度不限制）。
-# en: Allowed private-chat user IDs (allowlist mode; empty = no private restriction).
+# zh: 私聊 QQ 白名单（allowlist 模式生效；留空 = 拒绝全部私聊）。
+# en: Allowed private-chat user IDs (allowlist mode; empty = deny all private chats).
 allowed_private_ids = []
 # zh: 私聊 QQ 黑名单（blacklist 模式生效）。
 # en: Blocked private-chat user IDs (blacklist mode).

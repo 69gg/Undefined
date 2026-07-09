@@ -1118,15 +1118,15 @@ Prompt caching 补充：
 | `use_proxy` | `false` | 向 Naga 服务器发起外部请求时是否使用 `[proxy]` 中的代理地址 | |
 | `moderation_enabled` | `true` | 是否启用 Naga 外发消息审核 | 关闭后 `messages/send` 直接跳过审核，返回 `moderation.status=skipped_disabled` |
 | `mode` | `"off"` | 会话级策略：`off` / `blacklist` / `allowlist` | 非法值回退 `off` |
-| `allowed_group_ids` | `[]` | 群白名单 | 仅 `allowlist` 生效；空 = 群维度不限制 |
+| `allowed_group_ids` | `[]` | 群白名单 | 仅 `allowlist` 生效；**空 = 拒绝全部群**（fail closed，比 `[access]` 更严） |
 | `blocked_group_ids` | `[]` | 群黑名单 | 仅 `blacklist` 生效 |
-| `allowed_private_ids` | `[]` | 私聊白名单 | 仅 `allowlist` 生效；空 = 私聊维度不限制 |
+| `allowed_private_ids` | `[]` | 私聊白名单 | 仅 `allowlist` 生效；**空 = 拒绝全部私聊**（fail closed） |
 | `blocked_private_ids` | `[]` | 私聊黑名单 | 仅 `blacklist` 生效 |
 
 **会话策略规则**：
 - `mode=off`：不按名单过滤；总闸打开后所有群/私聊会话可用对应能力
 - `mode=blacklist`：仅拦截 `blocked_group_ids` / `blocked_private_ids`
-- `mode=allowlist`：仅放行 `allowed_*`；某维度列表为空表示该维度不限制
+- `mode=allowlist`：仅放行 `allowed_*`；某维度列表为空表示该维度**全部拒绝**（fail closed）
 - 私聊名单判定：调用方若将当前用户识别为 superadmin，则绕过私聊名单（当前实现固定如此，**不是** `[access].superadmin_bypass_*` 开关）；群聊无 superadmin 绕过
 - 策略拒绝时的表现因入口而异：
   - 斜杠命令 `/naga`：命令不可见且静默忽略（`/help` 也不展示），**不**返回 HTTP 错误
@@ -1137,7 +1137,7 @@ Prompt caching 补充：
 **兼容迁移**：
 - 旧字段 `allowed_groups` 仍可读取，会合并进 `allowed_group_ids` 并打印弃用警告
 - 若未显式配置 `mode` 但存在 `allowed_groups`，自动设为 `mode=allowlist`
-- 注意：旧版空 `allowed_groups` 等价于群全部拒绝；新语义下 `allowlist` + 空群名单 = 群维度不限制。升级后请检查配置
+- 注意：旧版空 `allowed_groups` 与当前 `allowlist` + 空 `allowed_group_ids` 均拒绝全部群；若需全部放行请使用 `mode=off`
 
 **数据存储**：绑定数据持久化在 `data/naga_bindings.json`，Unix 下自动 `chmod 600`。
 

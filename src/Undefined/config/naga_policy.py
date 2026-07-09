@@ -51,7 +51,12 @@ def _coerce_id_set(raw: Any) -> set[int]:
 
 
 def _group_allowed_from_fields(naga: Any, group_id: int) -> bool:
-    """当缺少 is_group_allowed 方法时，按 mode + 名单字段判定（不 fail-open）。"""
+    """当缺少 is_group_allowed 方法时，按 mode + 名单字段判定。
+
+    - ``mode=off``：不限制
+    - ``allowlist``：空名单拒绝全部；仅名单内放行
+    - 未知 mode：拒绝（fail closed）
+    """
     mode = str(getattr(naga, "mode", "off") or "off").strip().lower()
     gid = int(group_id)
     if mode == "off":
@@ -61,15 +66,20 @@ def _group_allowed_from_fields(naga: Any, group_id: int) -> bool:
     if mode == "allowlist":
         allowed = _coerce_id_set(getattr(naga, "allowed_group_ids", None))
         if not allowed:
-            return True
+            return False
         return gid in allowed
-    return True
+    return False
 
 
 def _private_allowed_from_fields(
     naga: Any, user_id: int, *, is_superadmin: bool
 ) -> bool:
-    """当缺少 is_private_allowed 方法时，按 mode + 名单字段判定（不 fail-open）。"""
+    """当缺少 is_private_allowed 方法时，按 mode + 名单字段判定。
+
+    - ``mode=off``：不限制
+    - ``allowlist``：空名单拒绝全部；仅名单内放行
+    - 未知 mode：拒绝（fail closed）
+    """
     if is_superadmin:
         return True
     mode = str(getattr(naga, "mode", "off") or "off").strip().lower()
@@ -81,9 +91,9 @@ def _private_allowed_from_fields(
     if mode == "allowlist":
         allowed = _coerce_id_set(getattr(naga, "allowed_private_ids", None))
         if not allowed:
-            return True
+            return False
         return uid in allowed
-    return True
+    return False
 
 
 def is_nagaagent_active_for_group(config: Any, group_id: int) -> bool:
