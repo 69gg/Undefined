@@ -249,6 +249,127 @@ def test_parse_generated_image_skips_empty_url_and_uses_b64() -> None:
     assert payload.detected_format == "base64"
 
 
+def test_parse_generated_image_broken_data_url_falls_through_to_b64() -> None:
+    """url 中 data URL 解码失败时应继续尝试 b64_json。"""
+    payload_base64 = base64.b64encode(_PNG_BYTES).decode("ascii")
+    payload = ai_draw_handler._parse_generated_image(
+        {
+            "data": [
+                {
+                    "url": "data:image/png;base64,????",
+                    "b64_json": payload_base64,
+                }
+            ]
+        }
+    )
+    assert payload is not None
+    assert payload.image_bytes == _PNG_BYTES
+    assert payload.detected_format == "b64_json"
+
+
+def test_parse_generated_image_non_url_falls_through_to_sibling_b64() -> None:
+    """非 http(s)/data 的 url 解码失败时，应继续使用同级 b64 字段。"""
+    payload_base64 = base64.b64encode(_PNG_BYTES).decode("ascii")
+    payload = ai_draw_handler._parse_generated_image(
+        {
+            "data": [
+                {
+                    "url": "not-a-url",
+                    "b64_json": payload_base64,
+                }
+            ]
+        }
+    )
+    assert payload is not None
+    assert payload.image_bytes == _PNG_BYTES
+    assert payload.detected_format == "b64_json"
+
+
+def test_parse_generated_image_raw_base64_in_url_field() -> None:
+    """部分网关把原始 base64 放在 url 字段，应直接解码。"""
+    payload_base64 = base64.b64encode(_PNG_BYTES).decode("ascii")
+    payload = ai_draw_handler._parse_generated_image(
+        {"data": [{"url": payload_base64}]}
+    )
+    assert payload is not None
+    assert payload.image_url is None
+    assert payload.image_bytes == _PNG_BYTES
+    assert payload.detected_format == "url_base64"
+
+
+def test_decode_image_base64_rejects_invalid_alphabet() -> None:
+    assert ai_draw_handler._decode_image_base64("not!!!valid@@@base64") is None
+
+
+def test_decode_image_base64_rejects_non_image_payload() -> None:
+    """合法 base64 但内容不是图片魔数时返回 None。"""
+    text_payload = base64.b64encode(b"hello world not an image").decode("ascii")
+    assert ai_draw_handler._decode_image_base64(text_payload) is None
+
+
+def test_decode_image_base64_accepts_valid_png() -> None:
+    payload_base64 = base64.b64encode(_PNG_BYTES).decode("ascii")
+    assert ai_draw_handler._decode_image_base64(payload_base64) == _PNG_BYTES
+
+
+def test_decode_image_base64_strips_whitespace_in_payload() -> None:
+    payload_base64 = base64.b64encode(_PNG_BYTES).decode("ascii")
+    spaced = "\n".join(
+        payload_base64[i : i + 16] for i in range(0, len(payload_base64), 16)
+    )
+    assert ai_draw_handler._decode_image_base64(spaced) == _PNG_BYTES
+
+
+def test_build_openai_models_edit_form_omits_response_format_when_unset() -> None:
+    form = ai_draw_handler._build_openai_models_edit_form(
+        prompt="edit me",
+        model_name="grok-edit-1.0",
+        size="1024x1024",
+        quality="",
+        style="",
+        response_format="",
+        n=None,
+        extra_params={},
+    )
+    assert "response_format" not in form
+    assert form["prompt"] == "edit me"
+    assert form["model"] == "grok-edit-1.0"
+    assert form["size"] == "1024x1024"
+    assert form["n"] == "1"
+
+
+def test_build_openai_models_edit_form_preserves_request_params_response_format() -> (
+    None
+):
+    form = ai_draw_handler._build_openai_models_edit_form(
+        prompt="edit me",
+        model_name="grok-edit-1.0",
+        size="1024x1024",
+        quality="",
+        style="",
+        response_format="",
+        n=None,
+        extra_params={"response_format": "url", "background": "transparent"},
+    )
+    assert form["response_format"] == "url"
+    assert form["background"] == "transparent"
+
+
+def test_build_openai_models_edit_form_tool_arg_overrides_request_params() -> None:
+    form = ai_draw_handler._build_openai_models_edit_form(
+        prompt="edit me",
+        model_name="grok-edit-1.0",
+        size="1024x1024",
+        quality="",
+        style="",
+        response_format="b64_json",
+        n=2,
+        extra_params={"response_format": "url"},
+    )
+    assert form["response_format"] == "b64_json"
+    assert form["n"] == "2"
+
+
 def test_parse_generated_image_ignores_request_settings_shape() -> None:
     """解析只看 payload，不假设 response_format 设置。"""
     payload_base64 = base64.b64encode(_PNG_BYTES).decode("ascii")
@@ -756,6 +877,59 @@ async def test_execute_models_reference_images_uses_edit_endpoint_and_config(
     assert seen_request["files"][0][0] == "image"
     assert isinstance(seen_request["files"][0][1][1], bytes)
     assert seen_request["files"][0][1][1] == _PNG_BYTES
+
+
+@pytest.mark.asyncio
+async def test_call_openai_models_edit_omits_response_format_and_auto_parses_b64(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """edit 路径：未设 response_format 时不默认塞入；响应按 payload 自动识别。"""
+    payload_base64 = base64.b64encode(_PNG_BYTES).decode("ascii")
+    reference_path = tmp_path / "reference.png"
+    reference_path.write_bytes(_PNG_BYTES)
+    seen_request: dict[str, Any] = {}
+
+    class _FakeResponse:
+        text = ""
+
+        def json(self) -> dict[str, Any]:
+            # 请求未声明 format，上游仍返回 b64
+            return {"data": [{"b64_json": payload_base64}]}
+
+    async def _fake_request_with_retry(
+        method: str,
+        url: str,
+        **kwargs: Any,
+    ) -> _FakeResponse:
+        seen_request["method"] = method
+        seen_request["url"] = url
+        seen_request["data"] = kwargs.get("data")
+        return _FakeResponse()
+
+    monkeypatch.setattr(ai_draw_handler, "request_with_retry", _fake_request_with_retry)
+
+    result = await ai_draw_handler._call_openai_models_edit(
+        prompt="use this as reference",
+        api_url="https://edit.example.com",
+        api_key="sk-edit",
+        model_name="grok-edit-1.0",
+        size="1024x1024",
+        quality="",
+        style="",
+        response_format="",
+        n=None,
+        timeout_val=30.0,
+        reference_image_paths=[reference_path],
+        extra_params={},
+        context={},
+    )
+
+    assert isinstance(result, ai_draw_handler._GeneratedImagePayload)
+    assert result.image_bytes == _PNG_BYTES
+    assert result.detected_format == "b64_json"
+    assert seen_request["method"] == "POST"
+    assert "response_format" not in (seen_request["data"] or {})
 
 
 @pytest.mark.asyncio

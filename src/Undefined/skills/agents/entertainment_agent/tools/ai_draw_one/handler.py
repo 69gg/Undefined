@@ -92,8 +92,33 @@ def _extract_first_image_item(data: dict[str, Any]) -> dict[str, Any] | None:
     return image_item
 
 
+def _is_likely_image_bytes(image_bytes: bytes) -> bool:
+    """用魔数判断解码结果是否像常见图片，避免把任意 base64 垃圾当图。"""
+    if not image_bytes:
+        return False
+    if image_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+        return True
+    if image_bytes.startswith(b"\xff\xd8\xff"):
+        return True
+    if image_bytes.startswith((b"GIF87a", b"GIF89a")):
+        return True
+    if image_bytes.startswith(b"BM"):
+        return True
+    if (
+        len(image_bytes) >= 12
+        and image_bytes.startswith(b"RIFF")
+        and image_bytes[8:12] == b"WEBP"
+    ):
+        return True
+    return False
+
+
 def _decode_image_base64(text: str) -> bytes | None:
-    """解码纯 base64 或 ``data:image/...;base64,...`` 图片内容。"""
+    """解码纯 base64 或 ``data:image/...;base64,...`` 图片内容。
+
+    使用 ``validate=True`` 拒绝非字母表字符，并用魔数确认结果是图片，
+    避免错误/文本 payload 被当作成功生图。
+    """
     payload = text.strip()
     if not payload:
         return None
@@ -104,10 +129,22 @@ def _decode_image_base64(text: str) -> bytes | None:
             return None
         payload = encoded.strip()
 
+    # 部分网关会在长 base64 中插入空白；去掉后再严格解码
+    compact = "".join(payload.split())
+    if not compact:
+        return None
+    padding = (-len(compact)) % 4
+    if padding:
+        compact = f"{compact}{'=' * padding}"
+
     try:
-        return base64.b64decode(payload, validate=False)
+        decoded = base64.b64decode(compact, validate=True)
     except (binascii.Error, ValueError):
         return None
+
+    if not _is_likely_image_bytes(decoded):
+        return None
+    return decoded
 
 
 def _parse_image_url(data: dict[str, Any]) -> str | None:
@@ -130,7 +167,8 @@ def _parse_generated_image(data: dict[str, Any]) -> _GeneratedImagePayload | Non
     优先级：
     1. ``url`` 为 http(s) → 远程 URL
     2. ``url`` 为 data URL → 解码为字节
-    3. ``b64_json`` / ``base64``（可含 data URL 前缀）→ 解码为字节
+    3. ``url`` 为原始 base64（部分网关）→ 解码为字节
+    4. ``b64_json`` / ``base64``（可含 data URL 前缀）→ 解码为字节
     """
     image_item = _extract_first_image_item(data)
     if image_item is None:
@@ -153,6 +191,17 @@ def _parse_generated_image(data: dict[str, Any]) -> _GeneratedImagePayload | Non
                         detected_format="data_url",
                     )
                 logger.warning("图片 data URL 解码失败，继续尝试其它字段")
+            else:
+                # 非 http(s)/data URL：部分网关把原始 base64 塞进 url
+                image_bytes = _decode_image_base64(url_text)
+                if image_bytes is not None:
+                    return _GeneratedImagePayload(
+                        image_bytes=image_bytes,
+                        detected_format="url_base64",
+                    )
+                logger.warning(
+                    "url 字段既非可下载链接也非有效图片 base64，继续尝试其它字段"
+                )
 
     for key in ("b64_json", "base64"):
         raw_value = image_item.get(key)

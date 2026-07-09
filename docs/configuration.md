@@ -492,7 +492,7 @@ Prompt caching 补充：
 - `[models.image_gen].use_proxy` 控制 OpenAI-compatible 生图请求。
 - `[models.image_edit].use_proxy` 控制参考图生图请求。
 - `[image_gen].use_proxy` 控制非模型 provider（如星之阁）及图片下载链路，三者互不继承。
-- 生图响应按 payload **自动识别** `url` / `b64_json` / `base64` / data URL，不依赖 `request_params.response_format` 或工具参数；后者只影响**请求**偏好。
+- 生图响应按 payload **自动识别** `http(s) url` / data URL / `url` 内原始 base64 / `b64_json` / `base64`，不依赖 `request_params.response_format` 或工具参数；后者只影响**请求**偏好。解码 base64 时会校验字母表与常见图片魔数，避免把错误文本当图片。
 
 `request_params` 说明：
 - 仅用于**请求体**字段，不包含 `api_key`、`base_url`、`timeout`、`extra_headers` 等 client 选项。
