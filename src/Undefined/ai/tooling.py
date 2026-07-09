@@ -188,13 +188,33 @@ class ToolManager:
         start_time = time.perf_counter()
 
         runtime_config = context.get("runtime_config")
-        if runtime_config is not None:
-            nagaagent_mode_enabled = bool(
-                getattr(runtime_config, "nagaagent_mode_enabled", False)
-            )
-            if (
-                not nagaagent_mode_enabled
-                and function_name == "naga_code_analysis_agent"
+        if runtime_config is not None and function_name == "naga_code_analysis_agent":
+            from Undefined.config.naga_policy import resolve_naga_session_allowed
+
+            group_id_raw = context.get("group_id")
+            user_id_raw = context.get("user_id")
+            if user_id_raw is None:
+                user_id_raw = context.get("sender_id")
+            request_type_raw = context.get("request_type")
+            group_id: int | None = None
+            user_id: int | None = None
+            if group_id_raw is not None:
+                try:
+                    group_id = int(group_id_raw)
+                except (TypeError, ValueError):
+                    group_id = None
+            if user_id_raw is not None:
+                try:
+                    user_id = int(user_id_raw)
+                except (TypeError, ValueError):
+                    user_id = None
+            if not resolve_naga_session_allowed(
+                runtime_config,
+                request_type=str(request_type_raw)
+                if request_type_raw is not None
+                else None,
+                group_id=group_id,
+                user_id=user_id,
             ):
                 return "该功能未启用"
 

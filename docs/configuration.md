@@ -568,7 +568,7 @@ Prompt caching 补充：
 
 | 字段 | 默认值 | 说明 |
 |---|---:|---|
-| `nagaagent_mode_enabled` | `false` | 切换 NagaAgent 提示词和相关 Agent 暴露 |
+| `nagaagent_mode_enabled` | `false` | NagaAgent 能力进程总闸；实际是否启用还受 `[naga].mode` 会话策略约束 |
 | `pool_enabled` | `false` | 多模型池全局总开关 |
 
 ---
@@ -1100,12 +1100,15 @@ Prompt caching 补充：
 
 | 开关 | 控制范围 | 默认值 |
 |------|---------|--------|
-| `[features].nagaagent_mode_enabled` | 总开关：AI 侧行为（提示词切换、工具暴露） | `false` |
-| `[naga].enabled` | 子开关：外部网关集成（回调 API、`/naga` 命令、绑定管理） | `false` |
+| `[features].nagaagent_mode_enabled` | 进程总闸：是否具备 NagaAgent AI 能力（提示词/工具） | `false` |
+| `[naga].enabled` | 进程总闸：外部网关集成（回调 API、`/naga` 命令、绑定管理） | `false` |
+| `[naga].mode` + 群/私聊名单 | 会话级策略：在总闸打开后决定具体群/私聊是否启用 | `off` |
 
-- 仅当 `[api].enabled = true`、`[features].nagaagent_mode_enabled = true`、`[naga].enabled = true` 三者同时成立时，外部网关集成才会生效（API 端点注册、`/naga` 命令可用）
+- 仅当 `[api].enabled = true`、`[features].nagaagent_mode_enabled = true`、`[naga].enabled = true` 三者同时成立时，外部网关**端点注册**才会生效
 - 若只需 NagaAgent 解答能力而不需要外部回调联动，可只开启 `nagaagent_mode_enabled`
-- `nagaagent_mode_enabled = false` 时强制关闭所有 Naga 功能，无论 `naga.enabled` 值
+- `nagaagent_mode_enabled = false` 时强制关闭所有 Naga 功能，无论 `naga.enabled` 与名单配置
+- AI 侧（提示词 / `naga_code_analysis_agent`）与外部网关（`/naga`、绑定、投递）共用同一套 `mode` 名单
+- 会话策略语义对齐 `[access]`，详见 [access-control.md](access-control.md)
 
 | 字段 | 默认值 | 说明 | 约束/回退 |
 |---|---:|---|---|
@@ -1114,15 +1117,25 @@ Prompt caching 补充：
 | `api_key` | `""` | Undefined ↔ Naga 共享密钥 | 回调端点通过 `Authorization: Bearer` 校验 |
 | `use_proxy` | `false` | 向 Naga 服务器发起外部请求时是否使用 `[proxy]` 中的代理地址 | |
 | `moderation_enabled` | `true` | 是否启用 Naga 外发消息审核 | 关闭后 `messages/send` 直接跳过审核，返回 `moderation.status=skipped_disabled` |
-| `allowed_groups` | `[]` | Naga 服务群聊名单 | 绑定命令和回调群发仅限名单内的群 |
+| `mode` | `"off"` | 会话级策略：`off` / `blacklist` / `allowlist` | 非法值回退 `off` |
+| `allowed_group_ids` | `[]` | 群白名单 | 仅 `allowlist` 生效；空 = 群维度不限制 |
+| `blocked_group_ids` | `[]` | 群黑名单 | 仅 `blacklist` 生效 |
+| `allowed_private_ids` | `[]` | 私聊白名单 | 仅 `allowlist` 生效；空 = 私聊维度不限制 |
+| `blocked_private_ids` | `[]` | 私聊黑名单 | 仅 `blacklist` 生效 |
 
-**作用域规则**：
-- 群聊场景下，所有 `/naga` 子命令仅在 `allowed_groups` 内的群可用
-- 私聊场景不受 `allowed_groups` 限制
-- 回调群发仅发到绑定时的群（该群须仍在 `allowed_groups` 内）
-- 回调私聊只需开关开启，不受 `allowed_groups` 限制
-- `/api/v1/naga/*` 端点仅在 `api.enabled`、`nagaagent_mode_enabled`、`naga.enabled` 三者均开启时注册
+**会话策略规则**：
+- `mode=off`：不按名单过滤；总闸打开后所有群/私聊会话可用对应能力
+- `mode=blacklist`：仅拦截 `blocked_group_ids` / `blocked_private_ids`
+- `mode=allowlist`：仅放行 `allowed_*`；某维度列表为空表示该维度不限制
+- 私聊 superadmin 默认绕过私聊名单（运维便利）；群聊无 superadmin 绕过
+- `/naga` 命令与回调投递均受会话策略约束；策略拒绝时返回 `naga policy denied`（HTTP 403）
+- `/api/v1/naga/*` 端点仅在 `api.enabled`、`nagaagent_mode_enabled`、`naga.enabled` 三者均开启时注册（进程级）
 - Runtime API 关闭时，`/naga` 命令也不会在 `/help` 中显示
+
+**兼容迁移**：
+- 旧字段 `allowed_groups` 仍可读取，会合并进 `allowed_group_ids` 并打印弃用警告
+- 若未显式配置 `mode` 但存在 `allowed_groups`，自动设为 `mode=allowlist`
+- 注意：旧版空 `allowed_groups` 等价于群全部拒绝；新语义下 `allowlist` + 空群名单 = 群维度不限制。升级后请检查配置
 
 **数据存储**：绑定数据持久化在 `data/naga_bindings.json`，Unix 下自动 `chmod 600`。
 
@@ -1155,7 +1168,7 @@ Prompt caching 补充：
 - `memes.db_path`
 - `memes.vector_store_path`
 - `memes.queue_path`
-- `naga.*`（`enabled/api_url/api_key/use_proxy/moderation_enabled/allowed_groups`）
+- `naga.*`（`enabled/api_url/api_key/use_proxy/moderation_enabled/mode/allowed_group_ids/blocked_group_ids/allowed_private_ids/blocked_private_ids`）
 
 ### 5.3 明确“会执行热应用”的字段
 - 模型发车间隔 / 模型名 / 模型池变更（队列间隔刷新）

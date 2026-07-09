@@ -97,7 +97,9 @@ Authorization: Bearer <config.[naga].api_key>
 发送规则：
 
 - Undefined 只允许投递到“绑定 QQ + 绑定群”
-- 若 `mode` 包含 `group`，绑定群必须仍在 `config.[naga].allowed_groups`
+- 若 `mode` 包含 `group`，绑定群必须通过 `config.[naga].mode` 会话策略（群维度名单）
+- 若 `mode` 包含 `private`，绑定 QQ 必须通过 `config.[naga].mode` 会话策略（私聊维度名单）
+- 会话策略拒绝时返回 HTTP 403，错误信息为 `naga policy denied`
 - `markdown/html` 会按当前 Runtime API 的渲染逻辑先尝试转图片
 - 若渲染失败，会回退为文本发送，并在响应中标记 `render_fallback=true`
 - 当 `mode=both` 时，只要私聊或群聊至少有一个发送成功，接口仍返回 `200`；由 `sent_private` / `sent_group` 表示实际投递结果

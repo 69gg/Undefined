@@ -22,8 +22,14 @@ from Undefined.api._helpers import (
 from Undefined.api._naga_state import NagaState
 
 from Undefined.api.routes.naga.auth import verify_naga_api_key
+from Undefined.config.naga_policy import (
+    is_nagaagent_active_for_group,
+    is_nagaagent_active_for_private,
+)
 
 logger = logging.getLogger(__name__)
+
+_NAGA_POLICY_DENIED = "naga policy denied"
 
 # ------------------------------------------------------------------
 # POST /api/v1/naga/messages/send
@@ -297,7 +303,7 @@ async def naga_messages_send_impl(
             return _json_error("target does not match bound qq/group", status=403)
 
         cfg = ctx.config_getter()
-        if mode == "group" and binding.group_id not in cfg.naga.allowed_groups:
+        if mode == "group" and not is_nagaagent_active_for_group(cfg, binding.group_id):
             logger.warning(
                 "[NagaSend] 群投递被策略拒绝: trace=%s naga_id=%s bind_uuid=%s group=%s",
                 trace_id,
@@ -305,7 +311,31 @@ async def naga_messages_send_impl(
                 bind_uuid,
                 binding.group_id,
             )
-            return _json_error("bound group is not in naga.allowed_groups", status=403)
+            return _json_error(_NAGA_POLICY_DENIED, status=403)
+        if mode == "private" and not is_nagaagent_active_for_private(
+            cfg, binding.qq_id
+        ):
+            logger.warning(
+                "[NagaSend] 私聊投递被策略拒绝: trace=%s naga_id=%s bind_uuid=%s qq=%s",
+                trace_id,
+                naga_id,
+                bind_uuid,
+                binding.qq_id,
+            )
+            return _json_error(_NAGA_POLICY_DENIED, status=403)
+        if mode == "both":
+            group_ok = is_nagaagent_active_for_group(cfg, binding.group_id)
+            private_ok = is_nagaagent_active_for_private(cfg, binding.qq_id)
+            if not group_ok and not private_ok:
+                logger.warning(
+                    "[NagaSend] 双通道投递均被策略拒绝: trace=%s naga_id=%s bind_uuid=%s group=%s qq=%s",
+                    trace_id,
+                    naga_id,
+                    bind_uuid,
+                    binding.group_id,
+                    binding.qq_id,
+                )
+                return _json_error(_NAGA_POLICY_DENIED, status=403)
 
         sender = ctx.sender
         if sender is None:
@@ -443,6 +473,7 @@ async def naga_messages_send_impl(
         sent_private = False
         sent_group = False
         group_policy_blocked = False
+        private_policy_blocked = False
 
         async def _ensure_delivery_active() -> tuple[Any, Response | None]:
             current_binding, live_err = await naga_store.ensure_delivery_active(
@@ -486,48 +517,64 @@ async def naga_messages_send_impl(
                 current_binding, abort_response = await _ensure_delivery_active()
                 if abort_response is not None:
                     return abort_response
-                logger.info(
-                    "[NagaSend] 私聊投递开始: trace=%s naga_id=%s bind_uuid=%s key=%s qq=%s",
-                    trace_id,
-                    naga_id,
-                    bind_uuid,
-                    message_key,
-                    current_binding.qq_id,
-                )
-                try:
-                    if send_content is not None:
-                        await sender.send_private_message(
-                            current_binding.qq_id, send_content
-                        )
-                    elif cq_image is not None:
-                        await sender.send_private_message(
-                            current_binding.qq_id, cq_image
-                        )
-                    sent_private = True
-                    logger.info(
-                        "[NagaSend] 私聊投递成功: trace=%s naga_id=%s bind_uuid=%s key=%s qq=%s",
+                current_cfg = ctx.config_getter()
+                if not is_nagaagent_active_for_private(
+                    current_cfg, current_binding.qq_id
+                ):
+                    private_policy_blocked = True
+                    logger.warning(
+                        "[NagaSend] 私聊投递被策略阻止: trace=%s naga_id=%s bind_uuid=%s key=%s qq=%s",
                         trace_id,
                         naga_id,
                         bind_uuid,
                         message_key,
                         current_binding.qq_id,
                     )
-                except Exception as exc:
-                    logger.warning(
-                        "[NagaSend] 私聊发送失败: trace=%s naga_id=%s qq=%d key=%s err=%s",
+                else:
+                    logger.info(
+                        "[NagaSend] 私聊投递开始: trace=%s naga_id=%s bind_uuid=%s key=%s qq=%s",
                         trace_id,
                         naga_id,
-                        current_binding.qq_id,
+                        bind_uuid,
                         message_key,
-                        exc,
+                        current_binding.qq_id,
                     )
+                    try:
+                        if send_content is not None:
+                            await sender.send_private_message(
+                                current_binding.qq_id, send_content
+                            )
+                        elif cq_image is not None:
+                            await sender.send_private_message(
+                                current_binding.qq_id, cq_image
+                            )
+                        sent_private = True
+                        logger.info(
+                            "[NagaSend] 私聊投递成功: trace=%s naga_id=%s bind_uuid=%s key=%s qq=%s",
+                            trace_id,
+                            naga_id,
+                            bind_uuid,
+                            message_key,
+                            current_binding.qq_id,
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "[NagaSend] 私聊发送失败: trace=%s naga_id=%s qq=%d key=%s err=%s",
+                            trace_id,
+                            naga_id,
+                            current_binding.qq_id,
+                            message_key,
+                            exc,
+                        )
 
             if mode in {"group", "both"}:
                 current_binding, abort_response = await _ensure_delivery_active()
                 if abort_response is not None:
                     return abort_response
                 current_cfg = ctx.config_getter()
-                if current_binding.group_id not in current_cfg.naga.allowed_groups:
+                if not is_nagaagent_active_for_group(
+                    current_cfg, current_binding.group_id
+                ):
                     group_policy_blocked = True
                     logger.warning(
                         "[NagaSend] 群投递被策略阻止: trace=%s naga_id=%s bind_uuid=%s key=%s group=%s",
@@ -581,6 +628,17 @@ async def naga_messages_send_impl(
                     pass
 
         if mode == "private" and not sent_private:
+            if private_policy_blocked:
+                return web.json_response(
+                    {
+                        "ok": False,
+                        "error": _NAGA_POLICY_DENIED,
+                        "sent_private": sent_private,
+                        "sent_group": sent_group,
+                        "moderation": moderation,
+                    },
+                    status=403,
+                )
             return web.json_response(
                 {
                     "ok": False,
@@ -592,6 +650,17 @@ async def naga_messages_send_impl(
                 status=502,
             )
         if mode == "group" and not sent_group:
+            if group_policy_blocked:
+                return web.json_response(
+                    {
+                        "ok": False,
+                        "error": _NAGA_POLICY_DENIED,
+                        "sent_private": sent_private,
+                        "sent_group": sent_group,
+                        "moderation": moderation,
+                    },
+                    status=403,
+                )
             return web.json_response(
                 {
                     "ok": False,
@@ -603,11 +672,11 @@ async def naga_messages_send_impl(
                 status=502,
             )
         if mode == "both" and not (sent_private or sent_group):
-            if group_policy_blocked:
+            if group_policy_blocked or private_policy_blocked:
                 return web.json_response(
                     {
                         "ok": False,
-                        "error": "bound group is not in naga.allowed_groups",
+                        "error": _NAGA_POLICY_DENIED,
                         "sent_private": sent_private,
                         "sent_group": sent_group,
                         "moderation": moderation,

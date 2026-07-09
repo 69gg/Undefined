@@ -115,7 +115,7 @@ async def execute(args: list[str], context: CommandContext) -> None:
             context,
             "用法: /naga <bind|unbind> [参数]\n"
             "子命令:\n"
-            "  bind <naga_id> — 在白名单群聊中发起绑定\n"
+            "  bind <naga_id> — 在 Naga 会话策略允许的群聊中发起绑定\n"
             "  unbind <naga_id> — 超管解绑并吊销签名",
         )
         return

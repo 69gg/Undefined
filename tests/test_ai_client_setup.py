@@ -24,6 +24,8 @@ from Undefined.ai.client.setup import (
 
 def _make_runtime_config(**kwargs: Any) -> Any:
     """Build a minimal SimpleNamespace that satisfies the runtime_config interface."""
+    from Undefined.config.models import NagaConfig
+
     defaults: dict[str, Any] = {
         "attachment_remote_download_max_size_mb": 50,
         "attachment_cache_max_total_size_mb": 200,
@@ -34,6 +36,7 @@ def _make_runtime_config(**kwargs: Any) -> Any:
         "summary_model_configured": False,
         "summary_model": None,
         "nagaagent_mode_enabled": False,
+        "naga": NagaConfig(mode="off"),
         "prefetch_tools": [],
         "prefetch_tools_hide": False,
         "tools_dot_delimiter": "-_-",
@@ -316,6 +319,32 @@ class TestFilterToolsForRuntimeConfig:
         ]
         result = self.client._filter_tools_for_runtime_config(tools)
         assert len(result) == 2
+
+    def test_naga_agent_filtered_when_session_denied(self) -> None:
+        from Undefined.config.models import NagaConfig
+
+        self.client.runtime_config = _make_runtime_config(
+            nagaagent_mode_enabled=True,
+            naga=NagaConfig(
+                mode="allowlist",
+                allowed_group_ids=frozenset({100}),
+            ),
+        )
+        tools = [
+            self._make_tool("send_message"),
+            self._make_tool("naga_code_analysis_agent"),
+        ]
+        result = self.client._filter_tools_for_runtime_config(
+            tools, group_id=999, request_type="group"
+        )
+        names = [t["function"]["name"] for t in result]
+        assert "naga_code_analysis_agent" not in names
+        assert "send_message" in names
+
+        allowed = self.client._filter_tools_for_runtime_config(
+            tools, group_id=100, request_type="group"
+        )
+        assert len(allowed) == 2
 
     def test_empty_tools_list(self) -> None:
         result = self.client._filter_tools_for_runtime_config([])

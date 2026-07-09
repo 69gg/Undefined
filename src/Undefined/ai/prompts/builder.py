@@ -125,10 +125,69 @@ class PromptBuilder:
         except Exception:
             return ""
 
-    async def _load_system_prompt(self) -> str:
+    def _resolve_session_scope(
+        self, extra_context: dict[str, Any] | None
+    ) -> tuple[str | None, int | None, int | None]:
+        """从 RequestContext / extra_context 解析 request_type, group_id, user_id。"""
+        request_type: str | None = None
+        group_id: int | None = None
+        user_id: int | None = None
+
+        ctx = RequestContext.current()
+        if ctx is not None:
+            request_type = str(ctx.request_type or "") or None
+            if ctx.group_id is not None:
+                group_id = int(ctx.group_id)
+            if ctx.user_id is not None:
+                user_id = int(ctx.user_id)
+            elif ctx.sender_id is not None and group_id is None:
+                user_id = int(ctx.sender_id)
+
+        if isinstance(extra_context, dict):
+            if extra_context.get("request_type") is not None:
+                request_type = str(extra_context.get("request_type") or "") or None
+            if extra_context.get("group_id") is not None:
+                try:
+                    group_id = int(extra_context["group_id"])
+                except (TypeError, ValueError):
+                    pass
+            if extra_context.get("user_id") is not None:
+                try:
+                    user_id = int(extra_context["user_id"])
+                except (TypeError, ValueError):
+                    pass
+            elif extra_context.get("sender_id") is not None and group_id is None:
+                try:
+                    user_id = int(extra_context["sender_id"])
+                except (TypeError, ValueError):
+                    pass
+
+        return request_type, group_id, user_id
+
+    def _resolve_nagaagent_active(self, extra_context: dict[str, Any] | None) -> bool:
+        if self._runtime_config_getter is None:
+            return False
+        try:
+            runtime_config = self._runtime_config_getter()
+        except Exception:
+            return False
+        if runtime_config is None:
+            return False
+        from Undefined.config.naga_policy import resolve_naga_session_allowed
+
+        request_type, group_id, user_id = self._resolve_session_scope(extra_context)
+        return resolve_naga_session_allowed(
+            runtime_config,
+            request_type=request_type,
+            group_id=group_id,
+            user_id=user_id,
+        )
+
+    async def _load_system_prompt(self, *, nagaagent_active: bool | None = None) -> str:
         system_prompt_path = select_system_prompt_path(
             default_path=self._system_prompt_path,
             runtime_config_getter=self._runtime_config_getter,
+            nagaagent_active=nagaagent_active,
         )
         try:
             return read_text_resource(system_prompt_path)
@@ -185,14 +244,19 @@ class PromptBuilder:
                 payload["detail"] = detail
             await webchat_event_callback("stage", payload)
 
-        system_prompt = await self._load_system_prompt()
+        nagaagent_active = self._resolve_nagaagent_active(extra_context)
+        system_prompt = await self._load_system_prompt(
+            nagaagent_active=nagaagent_active
+        )
         logger.debug(
-            "[Prompt] system_prompt_len=%s path=%s",
+            "[Prompt] system_prompt_len=%s path=%s nagaagent_active=%s",
             len(system_prompt),
             select_system_prompt_path(
                 default_path=self._system_prompt_path,
                 runtime_config_getter=self._runtime_config_getter,
+                nagaagent_active=nagaagent_active,
             ),
+            nagaagent_active,
         )
 
         if self._bot_qq != 0:

@@ -1,3 +1,13 @@
+## Unreleased
+
+### Naga 会话级黑白名单
+
+- 将 Naga 启用粒度从进程全局细化到群聊/私聊会话。`[features].nagaagent_mode_enabled` 与 `[naga].enabled` 仍为进程总闸；新增 `[naga].mode`（`off` / `blacklist` / `allowlist`）及 `allowed_group_ids` / `blocked_group_ids` / `allowed_private_ids` / `blocked_private_ids`，语义对齐 `[access]`。
+- AI 侧（NagaAgent 提示词与 `naga_code_analysis_agent`）与外部网关（`/naga`、绑定、回调投递）共用同一套会话策略；私聊 superadmin 默认绕过私聊名单。
+- 兼容旧字段 `allowed_groups`（合并至 `allowed_group_ids`；未写 `mode` 时自动 `allowlist`）。策略拒绝时投递返回 `naga policy denied`。
+
+---
+
 ## v3.6.6 抖音视频提取与媒体信息模式
 
 本版本把抖音视频纳入自动提取、工具调用和文件分析链路：可识别短链、长链与 aweme_id，下载并发送视频合并转发，也可只返回附件 UID 或元信息。同时补齐 B 站与 arXiv 工具的信息模式，并加固抖音真实视频地址探测。

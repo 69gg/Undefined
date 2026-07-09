@@ -93,7 +93,13 @@ def _make_server(
             enabled=True,
             api_key="shared-key",
             moderation_enabled=True,
-            allowed_groups={456},
+            mode="allowlist",
+            allowed_group_ids=frozenset({456}),
+            blocked_group_ids=frozenset(),
+            allowed_private_ids=frozenset(),
+            blocked_private_ids=frozenset(),
+            is_group_allowed=lambda gid: int(gid) in {456},
+            is_private_allowed=lambda uid, is_superadmin=False: True,
         ),
         naga_model=SimpleNamespace(
             model_name="naga-moderation",
@@ -418,7 +424,9 @@ async def test_naga_messages_send_releases_delivery_when_group_not_allowed(
             model_name="naga-moderation",
         ),
     )
-    server._ctx.config_getter().naga.allowed_groups = set()
+    naga = server._ctx.config_getter().naga
+    naga.allowed_group_ids = frozenset()
+    naga.is_group_allowed = lambda gid: False
 
     response = await server._naga_messages_send_handler(
         _make_request(
@@ -460,7 +468,9 @@ async def test_naga_messages_send_both_mode_allows_private_when_group_not_allowe
             model_name="naga-moderation",
         ),
     )
-    server._ctx.config_getter().naga.allowed_groups = set()
+    naga = server._ctx.config_getter().naga
+    naga.allowed_group_ids = frozenset()
+    naga.is_group_allowed = lambda gid: False
 
     response = await server._naga_messages_send_handler(
         _make_request(
@@ -960,7 +970,9 @@ async def test_naga_messages_send_both_mode_returns_403_if_group_blocked_and_pri
             model_name="naga-moderation",
         ),
     )
-    server._ctx.config_getter().naga.allowed_groups = set()
+    naga = server._ctx.config_getter().naga
+    naga.allowed_group_ids = frozenset()
+    naga.is_group_allowed = lambda gid: False
 
     response = await server._naga_messages_send_handler(
         _make_request(
@@ -977,7 +989,7 @@ async def test_naga_messages_send_both_mode_returns_403_if_group_blocked_and_pri
 
     payload = _json(response)
     assert response.status == 403
-    assert payload["error"] == "bound group is not in naga.allowed_groups"
+    assert payload["error"] == "naga policy denied"
     assert payload["sent_private"] is False
     assert payload["sent_group"] is False
 

@@ -665,10 +665,40 @@ class ClientSetupMixin:
         return list(runtime_config.prefetch_tools)
 
     def _filter_tools_for_runtime_config(
-        self, tools: list[dict[str, Any]]
+        self,
+        tools: list[dict[str, Any]],
+        *,
+        group_id: int | None = None,
+        user_id: int | None = None,
+        request_type: str | None = None,
     ) -> list[dict[str, Any]]:
         runtime_config = self._get_runtime_config()
-        enabled = bool(getattr(runtime_config, "nagaagent_mode_enabled", False))
+        from Undefined.config.naga_policy import resolve_naga_session_allowed
+        from Undefined.context import RequestContext
+
+        # 未显式传入会话信息时，回退到 RequestContext（覆盖 request_model 等路径）
+        if group_id is None and user_id is None and request_type is None:
+            ctx = RequestContext.current()
+            if ctx is not None:
+                request_type = str(ctx.request_type or "") or None
+                if ctx.group_id is not None:
+                    try:
+                        group_id = int(ctx.group_id)
+                    except (TypeError, ValueError):
+                        group_id = None
+                uid = ctx.user_id if ctx.user_id is not None else ctx.sender_id
+                if uid is not None:
+                    try:
+                        user_id = int(uid)
+                    except (TypeError, ValueError):
+                        user_id = None
+
+        enabled = resolve_naga_session_allowed(
+            runtime_config,
+            request_type=request_type,
+            group_id=group_id,
+            user_id=user_id,
+        )
         if enabled:
             return tools
 

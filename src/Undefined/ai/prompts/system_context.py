@@ -17,18 +17,33 @@ def select_system_prompt_path(
     *,
     default_path: str,
     runtime_config_getter: Any | None,
+    nagaagent_active: bool | None = None,
+    group_id: int | None = None,
+    user_id: int | None = None,
+    request_type: str | None = None,
 ) -> str:
-    """根据运行时配置选择系统提示词路径。"""
-    if runtime_config_getter is None:
-        return default_path
-
-    runtime_config = None
-    try:
-        runtime_config = runtime_config_getter()
-    except Exception:
+    """根据运行时配置与会话策略选择系统提示词路径。"""
+    if nagaagent_active is not None:
+        enabled = bool(nagaagent_active)
+    elif runtime_config_getter is None:
+        enabled = False
+    else:
         runtime_config = None
+        try:
+            runtime_config = runtime_config_getter()
+        except Exception:
+            runtime_config = None
+        if runtime_config is None:
+            enabled = False
+        else:
+            from Undefined.config.naga_policy import resolve_naga_session_allowed
 
-    enabled = bool(getattr(runtime_config, "nagaagent_mode_enabled", False))
+            enabled = resolve_naga_session_allowed(
+                runtime_config,
+                request_type=request_type,
+                group_id=group_id,
+                user_id=user_id,
+            )
     # NagaAgent 模式切换专用系统提示词模板
     if enabled:
         return "res/prompts/undefined_nagaagent.xml"

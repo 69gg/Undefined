@@ -138,7 +138,32 @@ class ClientAskLoopMixin(ClientQueueMixin):
         await emit_webchat_stage("context_ready")
 
         tools = self.tool_manager.get_openai_tools()
-        tools = self._filter_tools_for_runtime_config(tools)
+        _session_group_id: int | None = None
+        _session_user_id: int | None = None
+        _session_request_type: str | None = None
+        raw_gid = pre_context.get("group_id")
+        raw_uid = pre_context.get("user_id")
+        if raw_uid is None:
+            raw_uid = pre_context.get("sender_id")
+        raw_rtype = pre_context.get("request_type")
+        if raw_gid is not None:
+            try:
+                _session_group_id = int(raw_gid)
+            except (TypeError, ValueError):
+                _session_group_id = None
+        if raw_uid is not None:
+            try:
+                _session_user_id = int(raw_uid)
+            except (TypeError, ValueError):
+                _session_user_id = None
+        if raw_rtype is not None:
+            _session_request_type = str(raw_rtype) or None
+        tools = self._filter_tools_for_runtime_config(
+            tools,
+            group_id=_session_group_id,
+            user_id=_session_user_id,
+            request_type=_session_request_type,
+        )
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(
                 "[AI消息] 构建完成: messages=%s tools=%s question_len=%s",
