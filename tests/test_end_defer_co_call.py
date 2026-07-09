@@ -41,7 +41,7 @@ def _build_minimal_ai_client(
             execute_tool=execute_tool,
         ),
     )
-    client._filter_tools_for_runtime_config = lambda tools: tools
+    client._filter_tools_for_runtime_config = lambda tools, **_kwargs: tools
     client._get_runtime_config = cast(Any, lambda: client.runtime_config)
     client.model_selector = cast(Any, SimpleNamespace(wait_ready=AsyncMock()))
     client.chat_config = ChatModelConfig(

@@ -36,7 +36,7 @@ async def test_ai_ask_suppresses_queued_llm_error_when_retries_exhausted() -> No
         ),
     )
     client.tool_manager = cast(Any, SimpleNamespace(get_openai_tools=lambda: []))
-    client._filter_tools_for_runtime_config = lambda tools: tools
+    client._filter_tools_for_runtime_config = lambda tools, **_kwargs: tools
     client._get_runtime_config = cast(Any, lambda: client.runtime_config)
     client.model_selector = cast(Any, SimpleNamespace(wait_ready=AsyncMock()))
     client.chat_config = ChatModelConfig(
@@ -97,7 +97,7 @@ async def test_ai_ask_retries_pre_tool_local_failure() -> None:
             execute_tool=_execute_tool,
         ),
     )
-    client._filter_tools_for_runtime_config = lambda tools: tools
+    client._filter_tools_for_runtime_config = lambda tools, **_kwargs: tools
     client._get_runtime_config = cast(Any, lambda: client.runtime_config)
     client.model_selector = cast(Any, SimpleNamespace(wait_ready=AsyncMock()))
     client.chat_config = ChatModelConfig(
@@ -190,7 +190,7 @@ async def test_ai_ask_webchat_events_include_stage_and_tool_lifecycle() -> None:
             execute_tool=_execute_tool,
         ),
     )
-    client._filter_tools_for_runtime_config = lambda tools: tools
+    client._filter_tools_for_runtime_config = lambda tools, **_kwargs: tools
     client._get_runtime_config = cast(Any, lambda: client.runtime_config)
     client.model_selector = cast(Any, SimpleNamespace(wait_ready=AsyncMock()))
     client.chat_config = ChatModelConfig(
@@ -321,7 +321,7 @@ async def test_ai_ask_limits_missing_tool_call_retries() -> None:
             execute_tool=AsyncMock(),
         ),
     )
-    client._filter_tools_for_runtime_config = lambda tools: tools
+    client._filter_tools_for_runtime_config = lambda tools, **_kwargs: tools
     client._get_runtime_config = cast(Any, lambda: client.runtime_config)
     client.model_selector = cast(Any, SimpleNamespace(wait_ready=AsyncMock()))
     client.chat_config = ChatModelConfig(

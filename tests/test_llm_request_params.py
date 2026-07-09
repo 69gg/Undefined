@@ -1132,7 +1132,7 @@ async def test_ai_client_request_model_prefetch_keeps_transport_count_from_calle
         "tool_manager",
         SimpleNamespace(maybe_merge_agent_tools=lambda _call_type, tools: tools),
     )
-    setattr(client, "_filter_tools_for_runtime_config", lambda tools: tools)
+    setattr(client, "_filter_tools_for_runtime_config", lambda tools, **_kwargs: tools)
     monkeypatch.setattr(client, "_maybe_prefetch_tools", prefetch_mock)
 
     cfg = ChatModelConfig(

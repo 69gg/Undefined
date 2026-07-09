@@ -65,7 +65,7 @@ async def test_group_message_with_level_includes_level_attribute(
     """测试群消息有 level 时 XML 包含 level 属性"""
     builder = _make_builder()
 
-    async def _fake_load_system_prompt() -> str:
+    async def _fake_load_system_prompt(*, nagaagent_active: bool | None = None) -> str:
         return "系统提示词"
 
     async def _fake_load_each_rules() -> str:
@@ -123,7 +123,7 @@ async def test_group_message_with_empty_level_excludes_level_attribute(
     """测试群消息 level 为空字符串时 XML 不包含 level 属性"""
     builder = _make_builder()
 
-    async def _fake_load_system_prompt() -> str:
+    async def _fake_load_system_prompt(*, nagaagent_active: bool | None = None) -> str:
         return "系统提示词"
 
     async def _fake_load_each_rules() -> str:
@@ -181,7 +181,7 @@ async def test_group_message_without_level_key_excludes_level_attribute(
     """测试群消息没有 level 键时 XML 不包含 level 属性"""
     builder = _make_builder()
 
-    async def _fake_load_system_prompt() -> str:
+    async def _fake_load_system_prompt(*, nagaagent_active: bool | None = None) -> str:
         return "系统提示词"
 
     async def _fake_load_each_rules() -> str:
@@ -238,7 +238,7 @@ async def test_private_message_never_has_level_attribute(
     """测试私聊消息无论是否有 level 都不会出现 level 属性"""
     builder = _make_builder()
 
-    async def _fake_load_system_prompt() -> str:
+    async def _fake_load_system_prompt(*, nagaagent_active: bool | None = None) -> str:
         return "系统提示词"
 
     async def _fake_load_each_rules() -> str:

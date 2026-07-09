@@ -172,7 +172,7 @@ async def test_build_messages_places_each_rules_before_dynamic_context(
 ) -> None:
     builder = _make_builder()
 
-    async def _fake_load_system_prompt() -> str:
+    async def _fake_load_system_prompt(*, nagaagent_active: bool | None = None) -> str:
         return "系统提示词"
 
     async def _fake_load_each_rules() -> str:
@@ -260,7 +260,7 @@ async def test_build_messages_passes_per_message_recall_queries(
     cognitive_service = _RecordingCognitiveService()
     builder = _make_builder_with_cognitive_service(cognitive_service)
 
-    async def _fake_load_system_prompt() -> str:
+    async def _fake_load_system_prompt(*, nagaagent_active: bool | None = None) -> str:
         return "系统提示词"
 
     async def _fake_load_each_rules() -> str:
@@ -301,7 +301,7 @@ async def test_build_messages_keeps_cache_friendly_static_before_dynamic_context
 ) -> None:
     builder = _make_builder()
 
-    async def _fake_load_system_prompt() -> str:
+    async def _fake_load_system_prompt(*, nagaagent_active: bool | None = None) -> str:
         return "系统提示词"
 
     async def _fake_load_each_rules() -> str:
@@ -375,7 +375,7 @@ async def test_build_messages_places_system_info_before_current_time(
 ) -> None:
     builder = _make_builder_with_system_info()
 
-    async def _fake_load_system_prompt() -> str:
+    async def _fake_load_system_prompt(*, nagaagent_active: bool | None = None) -> str:
         return "系统提示词"
 
     async def _fake_load_each_rules() -> str:
@@ -444,7 +444,7 @@ async def test_build_messages_collects_system_info_off_event_loop_thread(
     event_loop_thread_id = threading.get_ident()
     observed_thread_ids: list[int] = []
 
-    async def _fake_load_system_prompt() -> str:
+    async def _fake_load_system_prompt(*, nagaagent_active: bool | None = None) -> str:
         return "系统提示词"
 
     async def _fake_load_each_rules() -> str:
@@ -478,7 +478,7 @@ async def test_build_messages_keeps_current_input_batch_as_last_item(
         end_summary_storage=cast(Any, _FakeEndSummaryStorage()),
     )
 
-    async def _fake_load_system_prompt() -> str:
+    async def _fake_load_system_prompt(*, nagaagent_active: bool | None = None) -> str:
         return "系统提示词"
 
     async def _fake_load_each_rules() -> str:
@@ -508,7 +508,7 @@ async def test_system_prompt_as_user_keeps_current_batch_and_readonly_history_ma
         end_summary_storage=cast(Any, _FakeEndSummaryStorage()),
     )
 
-    async def _fake_load_system_prompt() -> str:
+    async def _fake_load_system_prompt(*, nagaagent_active: bool | None = None) -> str:
         return "系统提示词"
 
     async def _fake_load_each_rules() -> str:
