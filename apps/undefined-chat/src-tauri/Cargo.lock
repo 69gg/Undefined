@@ -5431,7 +5431,7 @@ dependencies = [
 
 [[package]]
 name = "undefined_chat"
-version = "3.6.7"
+version = "3.6.8"
 dependencies = [
  "futures-util",
  "keyring",
