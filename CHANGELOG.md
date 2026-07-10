@@ -7,6 +7,7 @@
 - 加固逐轮 schema 扩展与执行边界。搜索命中的工具从下一模型轮开始可调用；同轮猜测未加载工具会被执行层拒绝，`end` 与其他调用同轮出现时仍按既有规则拒绝结束，所有 tool result 按原始 tool call 顺序回填，兼容 Responses 的严格调用链校验。
 - 新增 `[skills]` 配置与热更新。`tool_search_enabled` 默认关闭，`tool_search_always_loaded` 默认 `["send_message", "end"]`，`tool_search_max_results` 默认 `5`；配置变更从下一次 `ask()` 生效。预取工具隐藏、保留名冲突、无延迟工具和功能关闭场景均保留安全回退，不会覆盖真实工具或重复执行预取。
 - 同步 Prompt、配置模板、根 README、架构、使用说明、Skills 文档与独立 Tool Search 专题文档；新增搜索内核、主循环、预取、配置、Prompt、Chat Completions、Responses 状态续轮及 stateless fallback 回归测试。
+- 修复 Console 前端依赖审计告警。将 Vite 的最低版本提升到 `6.4.3`，并刷新 `picomatch`、`postcss` 与 `nanoid` 锁定版本，消除开发服务器路径读取、glob ReDoS 和 CSS stringify XSS 等已知漏洞；`npm audit` 结果归零。
 
 ---
 
