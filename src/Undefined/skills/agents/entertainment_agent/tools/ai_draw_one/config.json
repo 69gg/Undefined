@@ -24,7 +24,7 @@
                 },
                 "response_format": {
                     "type": "string",
-                    "description": "图片响应格式（仅 models 模式生效）",
+                    "description": "请求偏好的图片响应格式（仅 models 模式生效，影响上游请求体；返回解析始终按 payload 自动识别 url / b64_json / data URL，不依赖此字段）",
                     "enum": ["url", "b64_json", "base64"]
                 },
                 "delivery": {

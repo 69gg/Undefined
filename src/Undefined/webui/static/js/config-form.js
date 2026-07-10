@@ -34,9 +34,12 @@ function updateCommentTexts() {
 }
 
 function updateConfigSearchIndex() {
-    document.querySelectorAll(".form-group").forEach((group) => {
-        const label = group.querySelector(".form-label");
-        const hint = group.querySelector(".form-hint");
+    // Only index real config fields (data-path). Nested structural
+    // form-groups inside request_params editors (key/type) must not
+    // participate, or search will hide them independently of the parent.
+    document.querySelectorAll(".form-group[data-path]").forEach((group) => {
+        const label = group.querySelector(":scope > .form-label");
+        const hint = group.querySelector(":scope > .form-hint");
         const path = group.dataset.path || "";
         group.dataset.searchText =
             `${path} ${label ? label.innerText : ""} ${hint ? hint.innerText : ""}`.toLowerCase();
@@ -184,7 +187,10 @@ function applyConfigFilter() {
     let matchCount = 0;
     document.querySelectorAll(".config-card").forEach((card) => {
         let cardMatches = 0;
-        card.querySelectorAll(".form-group").forEach((group) => {
+        // Only filter top-level config fields. Nested form-groups inside
+        // structured editors (request_params key/type) have no data-path
+        // and must stay visible whenever their parent field is shown.
+        card.querySelectorAll(".form-group[data-path]").forEach((group) => {
             const isMatch =
                 !query || (group.dataset.searchText || "").includes(query);
             group.classList.toggle("is-hidden", !isMatch);
@@ -193,7 +199,7 @@ function applyConfigFilter() {
         });
         card.querySelectorAll(".form-subsection").forEach((section) => {
             section.style.display = section.querySelector(
-                ".form-group:not(.is-hidden)",
+                ".form-group[data-path]:not(.is-hidden)",
             )
                 ? ""
                 : "none";
@@ -516,7 +522,7 @@ function inferScalarType(value) {
 
 function createRequestParamsWidget(path, value) {
     const group = document.createElement("div");
-    group.className = "form-group";
+    group.className = "form-group config-request-params";
     group.dataset.path = path;
 
     const label = document.createElement("label");

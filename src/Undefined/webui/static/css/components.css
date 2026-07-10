@@ -35,6 +35,8 @@
 .form-group { margin-bottom: 18px; }
 .form-group.is-hidden { display: none; }
 .form-group.is-match { border: 1px solid rgba(217, 119, 87, 0.4); border-radius: var(--radius-sm); padding: 10px; background: rgba(217, 119, 87, 0.05); }
+/* request_params structured editor needs full row width in form-fields grid */
+.form-group.config-request-params { grid-column: 1 / -1; }
 .form-label { display: block; font-size: 12px; font-weight: 500; color: var(--text-secondary); margin-bottom: 8px; text-transform: capitalize; }
 .form-hint { font-size: 12px; color: var(--text-tertiary); margin-bottom: 8px; }
 .form-control { width: 100%; padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border-color); background: var(--bg-input); color: var(--text-primary); font-size: 14px; outline: none; }

@@ -1,3 +1,15 @@
+## v3.6.8 生图响应自动识别与 WebUI request_params 搜索修复
+
+本版本修复 OpenAI 兼容生图链路对 `response_format` 的错误默认与解析依赖，并加固 base64 解码；同时修正 WebUI 配置搜索会把 `request_params` 结构化编辑器里的 key/type 控件单独隐藏的问题。
+
+- 生图响应按 payload **自动识别**格式：`http(s) url` / data URL / `url` 内原始 base64 / `b64_json` / `base64`，不再依赖请求或配置中的 `response_format` 做解析分支。
+- 停止默认写入 `response_format=base64`：仅当工具参数显式传入时覆盖；否则保留 `request_params` 中的值（若有），避免上游网关因默认格式不兼容而失败。
+- 加固 base64 解码：`validate=True` 校验字母表，并用 PNG/JPEG/GIF/BMP/WEBP 魔数确认结果为图片，拒绝把错误文本当成功生图。
+- 修复 WebUI 配置搜索：索引与过滤仅针对带 `data-path` 的表单项，嵌套 key/type 表单组不再被单独隐藏；`request_params` 编辑器占满网格宽度，搜索匹配时 key/type 仍可见。
+- 同步配置文档与回归测试：覆盖 payload 解析回落、edit-form 默认值、base64 校验，以及 config search 对 request_params 嵌套控件的可见性。
+
+---
+
 ## v3.6.7 Naga 会话级黑白名单
 
 本版本将 Naga 启用粒度从进程全局细化到群聊/私聊会话：在总闸打开后，可按 `mode` 名单控制具体群与私聊是否启用 NagaAgent 提示词、相关 Agent 与外部网关能力，并保证提示词与工具暴露/执行结论一致。
