@@ -189,6 +189,7 @@ class ClientAskLoopMixin(ClientQueueMixin):
         runtime_config = self._get_runtime_config()
         tool_search_session: ToolSearchSession | None = None
         hidden_prefetch_tools: list[dict[str, Any]] = []
+        visible_prefetch_tools: list[dict[str, Any]] = []
         if bool(getattr(runtime_config, "tool_search_enabled", False)):
             prefetch_names = {
                 str(name).strip()
@@ -256,6 +257,13 @@ class ClientAskLoopMixin(ClientQueueMixin):
         )
         if prefetched_tools is not None:
             tools = prefetched_tools
+        if tool_search_session is not None and hidden_prefetch_tools:
+            visible_names = {_schema_name(schema) for schema in tools}
+            visible_prefetch_tools = [
+                schema
+                for schema in hidden_prefetch_tools
+                if _schema_name(schema) in visible_names
+            ]
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(
                 "[AI消息] 构建完成: messages=%s tools=%s deferred_tools=%s question_len=%s",
@@ -418,8 +426,13 @@ class ClientAskLoopMixin(ClientQueueMixin):
             logger.info(f"[AI决策] 开始第 {iteration} 轮迭代...")
             iteration_exposed_tool_names: frozenset[str] | None = None
             if tool_search_session is not None:
-                tools = tool_search_session.request_tools()
-                iteration_exposed_tool_names = tool_search_session.exposed_tool_names()
+                tools = tool_search_session.request_tools() + visible_prefetch_tools
+                iteration_exposed_tool_names = frozenset(
+                    (
+                        *tool_search_session.exposed_tool_names(),
+                        *(_schema_name(schema) for schema in visible_prefetch_tools),
+                    )
+                )
             message_checkpoint_len = len(messages)
             transport_state_checkpoint = transport_state
 
@@ -438,6 +451,7 @@ class ClientAskLoopMixin(ClientQueueMixin):
                     tool_choice="auto",
                     transport_state=transport_state,
                     queue_lane=queue_lane,
+                    skip_prefetch_tools=True,
                 )
 
                 tool_name_map = (

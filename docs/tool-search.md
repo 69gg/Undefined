@@ -28,7 +28,7 @@ tool_search_max_results = 5
 每次主 AI `ask()` 会创建独立的 `ToolSearchSession`：
 
 1. 先应用当前会话的权限与功能过滤，再从过滤结果建立工具快照；未授权工具不会进入名称目录或搜索索引。
-2. 首轮只发送 `tool_search`、`tool_search_always_loaded` 中存在的工具，以及未隐藏的预取工具 schema。
+2. 首轮只发送 `tool_search`、`tool_search_always_loaded` 中存在的工具，以及未配置隐藏或预取失败的工具 schema。
 3. 其余规范工具名按稳定顺序写入 `<available_deferred_tools>`；目录不含描述、参数或 schema。
 4. 模型调用 `tool_search` 后，命中的 schema 加入本次请求的已加载集合。
 5. 新加载工具从下一轮模型请求开始可调用。搜索和目标工具不能在同一轮调用。
@@ -47,7 +47,7 @@ tool_search(query: string, max_results?: integer)
 
 | 查询 | 行为 |
 |---|---|
-| `select:web_agent,info_agent` | 按规范名称精确加载多个工具；大小写不敏感并去重 |
+| `select:web_agent,info_agent` | 按规范名称精确加载多个工具；优先匹配目录中的精确拼写，再按大小写不敏感方式解析并去重 |
 | `group.get_member_info` | 完整名称精确匹配，优先于关键词搜索 |
 | `member avatar` | 按空格分词，在工具名、参数名、工具描述和参数描述中搜索 |
 | `member +user` | `+user` 为必需词；名称、参数名或描述均不包含该词的候选会先被排除 |
@@ -70,8 +70,8 @@ tool_search(query: string, max_results?: integer)
 
 - Tool Search 只作用于主 AI；子 Agent 仍使用各自完整且经过白名单过滤的私有工具集。
 - 它不改变工具注册、执行、别名、MCP 连接或 Runtime Tool Invoke API，只改变发给模型的 schema 投影。
-- `prefetch_tools_hide = true` 的工具仍会预取，但不会进入目录、搜索索引或后续模型 schema；为 `false` 时会随首轮工具一起暴露。
-- 如果完整注册表已经存在名为 `tool_search` 的真实工具，该请求记录错误并回退全量工具，避免虚拟工具覆盖真实实现。
+- `prefetch_tools_hide = true` 的工具仅在预取成功后隐藏；抛出异常或返回“未找到”时，本次 `ask()` 不会自动重试预取，并会持续向模型暴露其 schema，允许模型按需调用。为 `false` 时无论预取结果如何都会随首轮工具一起暴露。
+- 如果完整注册表已经存在名为 `tool_search` 的真实工具，该请求记录错误并回退全量工具，且因不生成 `<available_deferred_tools>` 目录而禁用 Tool Search Prompt 规则，避免模型把真实工具误当作虚拟加载器。
 - 当权限过滤后没有延迟工具时，请求直接使用全量可用工具，不额外保留无意义的搜索会话。
 - Chat Completions 与 Responses 使用同一套普通 function tool 逐轮扩展逻辑，不依赖服务商专属 Tool Search 协议。
 

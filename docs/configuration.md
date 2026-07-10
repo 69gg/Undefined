@@ -648,7 +648,7 @@ Prompt caching 补充：
 | `intro_autogen_max_tokens` | `8192` | intro 生成上限 |
 | `intro_hash_path` | `.cache/agent_intro_hashes.json` | intro hash 缓存 |
 | `prefetch_tools` | `["get_current_time"]` | 预先执行并注入 system 的工具列表 |
-| `prefetch_tools_hide` | `true` | 预取后是否从 tool list 隐藏该工具 |
+| `prefetch_tools_hide` | `true` | 预取成功后是否从 tool list 隐藏该工具；失败时仍保留 schema |
 | `tool_search_enabled` | `false` | 是否为主 AI 启用按需工具搜索；关闭时保持全量工具声明行为 |
 | `tool_search_always_loaded` | `["send_message", "end"]` | Tool Search 启用后始终向主 AI 暴露的工具名列表 |
 | `tool_search_max_results` | `5` | 单次工具搜索最多加载的匹配数量；小于 `1` 时按 `1` 处理 |

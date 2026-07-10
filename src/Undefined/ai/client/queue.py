@@ -83,6 +83,7 @@ class ClientQueueMixin(ClientSetupMixin):
         max_tokens: int | None = None,
         transport_state: dict[str, Any] | None = None,
         queue_lane: str | None = None,
+        skip_prefetch_tools: bool = False,
     ) -> dict[str, Any]:
         """将 LLM 调用投递到统一队列，走统一发车间隔和重试逻辑。
         无 queue_manager 时降级为直接调用。"""
@@ -102,6 +103,7 @@ class ClientQueueMixin(ClientSetupMixin):
                 call_type=call_type,
                 max_tokens=effective_max_tokens,
                 transport_state=transport_state,
+                skip_prefetch_tools=skip_prefetch_tools,
             )
         request_id = uuid4().hex
         event: asyncio.Event = asyncio.Event()
@@ -118,6 +120,7 @@ class ClientQueueMixin(ClientSetupMixin):
             "call_type": call_type,
             "max_tokens": effective_max_tokens,
             "transport_state": transport_state,
+            "skip_prefetch_tools": skip_prefetch_tools,
         }
         ctx = RequestContext.current()
         if ctx is not None:

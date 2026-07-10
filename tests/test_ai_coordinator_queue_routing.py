@@ -347,10 +347,12 @@ async def test_execute_queued_llm_call_coerces_max_tokens_to_int() -> None:
             "messages": [{"role": "user", "content": "hello"}],
             "max_tokens": "123",
             "call_type": "test_call",
+            "skip_prefetch_tools": True,
         },
     )
 
     request_model.assert_awaited_once()
     assert request_model.await_args is not None
     assert request_model.await_args.kwargs["max_tokens"] == 123
+    assert request_model.await_args.kwargs["skip_prefetch_tools"] is True
     set_llm_call_result.assert_called_once_with("req-1", result)

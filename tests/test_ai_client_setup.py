@@ -17,6 +17,7 @@ from Undefined.ai.client.setup import (
     _build_invalid_tool_call_response,
     _INVALID_TOOL_CALL_CONTENT,
 )
+from Undefined.context import RequestContext
 
 
 # ---------------------------------------------------------------------------
@@ -213,14 +214,25 @@ class TestHidePrefetchToolSchemas:
     def _tool(name: str) -> dict[str, Any]:
         return {"type": "function", "function": {"name": name}}
 
-    def test_hides_configured_prefetch_tools(self) -> None:
+    def test_hides_successfully_prefetched_tools(self) -> None:
         self.client.runtime_config = _make_runtime_config(
             prefetch_tools=["get_current_time"],
             prefetch_tools_hide=True,
         )
         tools = [self._tool("get_current_time"), self._tool("end")]
 
-        assert self.client._hide_prefetch_tool_schemas(tools) == [self._tool("end")]
+        assert self.client._hide_prefetch_tool_schemas(tools, {"get_current_time"}) == [
+            self._tool("end")
+        ]
+
+    def test_keeps_prefetch_tools_without_a_successful_result(self) -> None:
+        self.client.runtime_config = _make_runtime_config(
+            prefetch_tools=["get_current_time"],
+            prefetch_tools_hide=True,
+        )
+        tools = [self._tool("get_current_time"), self._tool("end")]
+
+        assert self.client._hide_prefetch_tool_schemas(tools, set()) == tools
 
     def test_keeps_tools_when_prefetch_hiding_is_disabled(self) -> None:
         self.client.runtime_config = _make_runtime_config(
@@ -229,7 +241,10 @@ class TestHidePrefetchToolSchemas:
         )
         tools = [self._tool("get_current_time"), self._tool("end")]
 
-        assert self.client._hide_prefetch_tool_schemas(tools) == tools
+        assert (
+            self.client._hide_prefetch_tool_schemas(tools, {"get_current_time"})
+            == tools
+        )
 
     def test_virtual_tool_search_cannot_be_hidden_by_prefetch_config(self) -> None:
         self.client.runtime_config = _make_runtime_config(
@@ -238,7 +253,7 @@ class TestHidePrefetchToolSchemas:
         )
         tools = [self._tool("tool_search"), self._tool("end")]
 
-        assert self.client._hide_prefetch_tool_schemas(tools) == tools
+        assert self.client._hide_prefetch_tool_schemas(tools, {"tool_search"}) == tools
 
     @pytest.mark.asyncio
     async def test_prefetch_result_stays_in_messages_and_is_not_executed_twice(
@@ -263,6 +278,96 @@ class TestHidePrefetchToolSchemas:
         assert first_tools == second_tools == [self._tool("end")]
         assert "【预先工具结果】" in str(first_messages[-1]["content"])
         execute_tool.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_partial_prefetch_failure_only_hides_successful_tools(
+        self,
+    ) -> None:
+        self.client.runtime_config = _make_runtime_config(
+            prefetch_tools=["get_current_time", "weather_lookup"],
+            prefetch_tools_hide=True,
+        )
+        execute_tool = AsyncMock(
+            side_effect=["2026-07-10 12:00:00", "未找到项目 weather_lookup"]
+        )
+        self.client.tool_manager = SimpleNamespace(execute_tool=execute_tool)
+        tools = [
+            self._tool("get_current_time"),
+            self._tool("weather_lookup"),
+            self._tool("end"),
+        ]
+
+        first_messages, first_tools = await self.client._maybe_prefetch_tools(
+            [{"role": "system", "content": "system"}], tools, "chat"
+        )
+        second_messages, second_tools = await self.client._maybe_prefetch_tools(
+            first_messages, tools, "chat"
+        )
+
+        expected_tools = [self._tool("weather_lookup"), self._tool("end")]
+        assert first_tools == second_tools == expected_tools
+        assert second_messages == first_messages
+        assert "get_current_time" in str(first_messages[-1]["content"])
+        assert "weather_lookup" not in str(first_messages[-1]["content"])
+        assert execute_tool.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_failed_prefetch_is_attempted_once_per_request_context(
+        self,
+    ) -> None:
+        self.client.runtime_config = _make_runtime_config(
+            prefetch_tools=["weather_lookup"],
+            prefetch_tools_hide=True,
+        )
+        execute_tool = AsyncMock(side_effect=RuntimeError("temporary failure"))
+        self.client.tool_manager = SimpleNamespace(execute_tool=execute_tool)
+        messages = [{"role": "system", "content": "system"}]
+        tools = [self._tool("weather_lookup"), self._tool("end")]
+
+        async with RequestContext(request_type="private"):
+            first_messages, first_tools = await self.client._maybe_prefetch_tools(
+                messages, tools, "chat"
+            )
+            second_messages, second_tools = await self.client._maybe_prefetch_tools(
+                first_messages, tools, "chat"
+            )
+
+        assert first_messages == second_messages == messages
+        assert first_tools == second_tools == tools
+        execute_tool.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_request_model_can_skip_prefetch_already_attempted_by_ask(
+        self,
+    ) -> None:
+        self.client.runtime_config = _make_runtime_config(
+            prefetch_tools=["weather_lookup"],
+            prefetch_tools_hide=True,
+        )
+        execute_tool = AsyncMock(side_effect=RuntimeError("must not execute"))
+        self.client.tool_manager = SimpleNamespace(
+            execute_tool=execute_tool,
+            maybe_merge_agent_tools=lambda _call_type, tools: tools,
+        )
+        self.client._filter_tools_for_runtime_config = lambda tools: tools
+        requester = AsyncMock(return_value={"choices": []})
+        self.client._requester = SimpleNamespace(request=requester)
+        messages = [{"role": "system", "content": "system"}]
+        tools = [self._tool("weather_lookup"), self._tool("end")]
+
+        await self.client.request_model(
+            model_config=cast(Any, SimpleNamespace()),
+            messages=messages,
+            tools=tools,
+            call_type="chat",
+            skip_prefetch_tools=True,
+        )
+
+        execute_tool.assert_not_awaited()
+        requester.assert_awaited_once()
+        assert requester.await_args is not None
+        assert requester.await_args.kwargs["messages"] == messages
+        assert requester.await_args.kwargs["tools"] == tools
 
 
 # ---------------------------------------------------------------------------

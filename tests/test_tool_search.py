@@ -134,6 +134,18 @@ def test_bare_full_name_reports_already_loaded() -> None:
     assert result.already_loaded == ("send_message",)
 
 
+def test_exact_catalog_case_variant_takes_priority_over_virtual_name() -> None:
+    session = ToolSearchSession([_tool("Tool_Search")], [], max_results=5)
+
+    real_result = session.search_and_load("select:Tool_Search")
+    virtual_result = session.search_and_load("select:tool_search")
+
+    assert real_result.loaded == ("Tool_Search",)
+    assert real_result.already_loaded == ()
+    assert virtual_result.loaded == ()
+    assert virtual_result.already_loaded == (TOOL_SEARCH_NAME,)
+
+
 def test_keyword_scoring_uses_name_parameter_and_descriptions() -> None:
     session = ToolSearchSession(
         [

@@ -375,6 +375,43 @@ async def test_prefetch_result_persists_when_tool_search_is_disabled() -> None:
         ]
         assert len(prefetch_messages) == 1
         assert "result:web_agent" in str(prefetch_messages[0]["content"])
+        assert submit_call["skip_prefetch_tools"] is True
+
+
+@pytest.mark.asyncio
+async def test_failed_hidden_prefetch_tool_remains_callable_without_retry() -> None:
+    executed: list[str] = []
+
+    async def _execute_tool(
+        name: str, args: dict[str, Any], context: dict[str, Any]
+    ) -> str:
+        _ = args
+        executed.append(name)
+        if name == "web_agent" and executed.count(name) == 1:
+            raise RuntimeError("temporary prefetch failure")
+        if name == "end":
+            context["conversation_ended"] = True
+        return f"result:{name}"
+
+    client = _build_client(
+        execute_tool=_execute_tool,
+        prefetch_tools=["web_agent"],
+        llm_responses=[
+            _llm_tool_calls(_tool_call("call_web", "web_agent")),
+            _llm_tool_calls(_tool_call("call_end", "end")),
+        ],
+    )
+
+    assert await AIClient.ask(client, "hello") == ""
+
+    assert executed == ["web_agent", "web_agent", "end"]
+    for submit_call in client._submit_calls:
+        assert "web_agent" in _schema_names(submit_call["tools"])
+        assert submit_call["skip_prefetch_tools"] is True
+        assert not any(
+            str(message.get("content") or "").startswith("【预先工具结果】")
+            for message in submit_call["messages"]
+        )
 
 
 @pytest.mark.asyncio

@@ -381,6 +381,8 @@ class ToolSearchSession:
         return self._catalog_casefold.get(stripped_name.casefold())
 
     def _resolve_exact_name(self, requested_name: str) -> str | None:
+        if requested_name in self._catalog:
+            return requested_name
         if requested_name.casefold() == TOOL_SEARCH_NAME.casefold():
             return TOOL_SEARCH_NAME
         return self._resolve_catalog_name(requested_name)
