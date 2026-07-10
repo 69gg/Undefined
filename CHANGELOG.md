@@ -1,3 +1,15 @@
+## v3.7.0 主 AI Tool Search 按需工具加载
+
+本版本为主 AI 新增请求级 Tool Search：工具较多时不再必须把全部 function schema 一次性发送给模型，而是先提供基础工具、虚拟搜索工具和经过权限过滤的名称目录，再按模型实际需要从下一轮开始补充完整 schema。该能力使用普通 function tool 实现，可同时适配 Chat Completions 与 Responses，并保持子 Agent 现有私有工具集不变。
+
+- 新增请求级 `ToolSearchSession`。启用后，主 AI 首轮只加载 `send_message`、`end` 等配置项指定的常驻工具与虚拟 `tool_search`；其余工具以稳定排序的 `<available_deferred_tools>` 名称目录注入。目录在会话权限与运行时功能过滤后生成，已加载集合在当前 `ask()` 内只增不减，新用户请求会重新建立最小快照。
+- 支持精确选择与关键词检索。`tool_search` 接受 `select:tool_a,tool_b`、完整工具名、普通关键词和 `+必需词` 查询，可按工具名、参数名、工具描述与参数描述稳定评分；`max_results` 只能缩小配置上限，返回结果会区分新加载、已加载、未找到及是否截断。
+- 加固逐轮 schema 扩展与执行边界。搜索命中的工具从下一模型轮开始可调用；同轮猜测未加载工具会被执行层拒绝，`end` 与其他调用同轮出现时仍按既有规则拒绝结束，所有 tool result 按原始 tool call 顺序回填，兼容 Responses 的严格调用链校验。
+- 新增 `[skills]` 配置与热更新。`tool_search_enabled` 默认关闭，`tool_search_always_loaded` 默认 `["send_message", "end"]`，`tool_search_max_results` 默认 `5`；配置变更从下一次 `ask()` 生效。预取工具隐藏、保留名冲突、无延迟工具和功能关闭场景均保留安全回退，不会覆盖真实工具或重复执行预取。
+- 同步 Prompt、配置模板、根 README、架构、使用说明、Skills 文档与独立 Tool Search 专题文档；新增搜索内核、主循环、预取、配置、Prompt、Chat Completions、Responses 状态续轮及 stateless fallback 回归测试。
+
+---
+
 ## v3.6.8 生图响应自动识别与 WebUI request_params 搜索修复
 
 本版本修复 OpenAI 兼容生图链路对 `response_format` 的错误默认与解析依赖，并加固 base64 解码；同时修正 WebUI 配置搜索会把 `request_params` 结构化编辑器里的 key/type 控件单独隐藏的问题。
