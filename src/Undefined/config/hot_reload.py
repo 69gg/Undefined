@@ -75,6 +75,9 @@ _RUNTIME_AI_MODEL_CONFIG_PREFIXES: tuple[str, ...] = (
     "historian_model",
     "grok_model",
     "missing_tool_call_retries",
+    "tool_search_enabled",
+    "tool_search_always_loaded",
+    "tool_search_max_results",
 )
 
 _AGENT_INTRO_KEYS: set[str] = {

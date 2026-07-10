@@ -6,6 +6,7 @@ import asyncio
 import html
 import logging
 import re
+from collections.abc import Collection
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional, Protocol, TYPE_CHECKING
 
@@ -19,6 +20,7 @@ from Undefined.ai.prompts import PromptBuilder
 from Undefined.ai.crawl4ai_support import get_crawl4ai_capabilities
 from Undefined.ai.summaries import SummaryService
 from Undefined.ai.tokens import TokenCounter
+from Undefined.ai.tool_search import TOOL_SEARCH_NAME
 from Undefined.ai.tooling import ToolManager
 from Undefined.config import (
     ChatModelConfig,
@@ -43,6 +45,8 @@ from Undefined.token_usage_storage import TokenUsageStorage
 from Undefined.utils.logging import redact_string
 
 logger = logging.getLogger(__name__)
+
+_PREFETCH_RESULT_MARKER = "【预先工具结果】"
 
 
 # 模型返回纯文本但未调用 tool 时，追加到 messages 的纠正提示（不写死具体 tool）
@@ -716,6 +720,56 @@ class ClientSetupMixin:
         runtime_config = self._get_runtime_config()
         return runtime_config.prefetch_tools_hide
 
+    def _hide_prefetch_tool_schemas(
+        self,
+        tools: list[dict[str, Any]] | None,
+        completed_names: Collection[str],
+    ) -> list[dict[str, Any]] | None:
+        """隐藏已成功预取且不再需要模型调用的工具 schema。"""
+        if not tools or not self._prefetch_hide_tools():
+            return tools
+
+        configured_names = {
+            name for name in self._get_prefetch_tool_names() if name != TOOL_SEARCH_NAME
+        }
+        hidden_names = configured_names.intersection(completed_names)
+        if not hidden_names:
+            return tools
+        return [
+            tool
+            for tool in tools
+            if tool.get("function", {}).get("name") not in hidden_names
+        ]
+
+    def _completed_prefetch_tool_names(
+        self,
+        messages: list[dict[str, Any]],
+        call_type: str,
+    ) -> set[str]:
+        """从请求缓存和已注入结果中恢复成功预取的工具名。"""
+        completed: set[str] = set()
+        ctx = RequestContext.current()
+        if ctx:
+            cache: dict[str, list[str]] = ctx.get_resource("prefetch_tools", {}) or {}
+            completed.update(cache.get(call_type, []))
+
+        configured_names = {
+            name for name in self._get_prefetch_tool_names() if name != TOOL_SEARCH_NAME
+        }
+        for message in messages:
+            if not isinstance(message, dict) or message.get("role") != "system":
+                continue
+            content = str(message.get("content") or "")
+            if not content.startswith(_PREFETCH_RESULT_MARKER):
+                continue
+            result_lines = content.splitlines()[1:]
+            completed.update(
+                name
+                for name in configured_names
+                if any(line.startswith(f"- {name}:") for line in result_lines)
+            )
+        return completed
+
     def _is_missing_tool_result(self, result: Any) -> bool:
         if not isinstance(result, str):
             return False
@@ -730,8 +784,21 @@ class ClientSetupMixin:
         if not tools:
             return messages, tools
 
+        completed = self._completed_prefetch_tool_names(messages, call_type)
+        visible_tools = self._hide_prefetch_tool_schemas(tools, completed)
+
+        if any(
+            message.get("role") == "system"
+            and str(message.get("content") or "").startswith(_PREFETCH_RESULT_MARKER)
+            for message in messages
+            if isinstance(message, dict)
+        ):
+            return messages, visible_tools
+
         # 预先调用部分工具，为模型补充稳定上下文（同一 call_type 仅执行一次）
-        prefetch_names = self._get_prefetch_tool_names()
+        prefetch_names = [
+            name for name in self._get_prefetch_tool_names() if name != TOOL_SEARCH_NAME
+        ]
         if not prefetch_names:
             return messages, tools
 
@@ -744,17 +811,24 @@ class ClientSetupMixin:
         if not prefetch_targets:
             return messages, tools
 
-        # 使用 RequestContext 缓存已执行的预先调用，避免重复触发
+        # 分别缓存尝试和成功状态：失败项本轮不重试，但 schema 仍对模型可见。
         ctx = RequestContext.current()
-        cache: dict[str, list[str]] = {}
-        done: set[str] = set()
+        completed_cache: dict[str, list[str]] = {}
+        attempted_cache: dict[str, list[str]] = {}
+        attempted: set[str] = set()
         if ctx:
-            cache = ctx.get_resource("prefetch_tools", {}) or {}
-            done = set(cache.get(call_type, []))
+            completed_cache = ctx.get_resource("prefetch_tools", {}) or {}
+            attempted_cache = ctx.get_resource("prefetch_tools_attempted", {}) or {}
+            attempted = set(attempted_cache.get(call_type, []))
 
-        to_run = [name for name in prefetch_targets if name not in done]
+        to_run = [name for name in prefetch_targets if name not in attempted]
         if not to_run:
-            return messages, tools
+            return messages, visible_tools
+
+        attempted.update(to_run)
+        if ctx:
+            attempted_cache[call_type] = sorted(attempted)
+            ctx.set_resource("prefetch_tools_attempted", attempted_cache)
 
         results: list[tuple[str, Any]] = []
         for name in to_run:
@@ -780,17 +854,20 @@ class ClientSetupMixin:
                 continue
 
             results.append((name, result))
-            done.add(name)
-
-        if not results:
-            return messages, tools
+            completed.add(name)
 
         if ctx:
-            cache[call_type] = sorted(done)
-            ctx.set_resource("prefetch_tools", cache)
+            completed_cache[call_type] = sorted(completed)
+            ctx.set_resource("prefetch_tools", completed_cache)
 
-        content_lines = ["【预先工具结果】"]
-        content_lines.extend([f"- {name}: {result}" for name, result in results])
+        visible_tools = self._hide_prefetch_tool_schemas(tools, completed)
+        if not results:
+            return messages, visible_tools
+
+        content_lines = [_PREFETCH_RESULT_MARKER]
+        for name, result in results:
+            result_text = str(result).replace("\n", "\n  ")
+            content_lines.append(f"- {name}: {result_text}")
         prefetch_message = {"role": "system", "content": "\n".join(content_lines)}
 
         insert_idx = 0
@@ -803,14 +880,7 @@ class ClientSetupMixin:
         new_messages = list(messages)
         new_messages.insert(insert_idx, prefetch_message)
 
-        if self._prefetch_hide_tools():
-            hidden = set(name for name in done)
-            tools = [
-                tool
-                for tool in tools
-                if tool.get("function", {}).get("name") not in hidden
-            ]
-        return new_messages, tools
+        return new_messages, visible_tools
 
     async def request_model(
         self,
@@ -823,23 +893,27 @@ class ClientSetupMixin:
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str = "auto",
         transport_state: dict[str, Any] | None = None,
+        skip_prefetch_tools: bool = False,
         **kwargs: Any,
     ) -> dict[str, Any]:
         tools = self.tool_manager.maybe_merge_agent_tools(call_type, tools)
         if tools is not None:
             tools = self._filter_tools_for_runtime_config(tools)
         message_count_for_transport = len(messages)
-        # Responses 续轮（previous_response_id）时跳过 prefetch，避免重复注入系统消息
-        if not (
-            isinstance(transport_state, dict)
-            and transport_state.get("previous_response_id")
-        ):
-            messages, tools = await self._maybe_prefetch_tools(
-                # messages, tools, call_type
-                messages,
-                tools,
-                call_type,
-            )
+        # ask() 已在消息链上完成预取时，内层和后续模型轮次都不得再次执行。
+        if not skip_prefetch_tools:
+            # Responses 续轮时跳过 prefetch，避免重复注入系统消息。
+            if isinstance(transport_state, dict) and transport_state.get(
+                "previous_response_id"
+            ):
+                completed = self._completed_prefetch_tool_names(messages, call_type)
+                tools = self._hide_prefetch_tool_schemas(tools, completed)
+            else:
+                messages, tools = await self._maybe_prefetch_tools(
+                    messages,
+                    tools,
+                    call_type,
+                )
         return await self._requester.request(
             model_config=model_config,
             messages=messages,

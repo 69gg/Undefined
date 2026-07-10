@@ -6,7 +6,7 @@ import logging
 import asyncio
 from collections import deque
 from datetime import datetime
-from typing import Any, Awaitable, Callable, Literal
+from typing import Any, Awaitable, Callable, Literal, Sequence
 
 import aiofiles
 
@@ -21,7 +21,7 @@ from Undefined.skills.anthropic_skills import AnthropicSkillRegistry
 from Undefined.utils.coerce import safe_int
 from Undefined.utils.logging import log_debug_json
 from Undefined.utils.resources import read_text_resource
-from Undefined.utils.xml import format_message_xml
+from Undefined.utils.xml import escape_xml_text, format_message_xml
 from Undefined.ai.prompts.cognitive import (
     build_cognitive_per_message_queries,
     build_cognitive_query,
@@ -214,6 +214,23 @@ class PromptBuilder:
             "只能用于消歧、防重复和理解上下文，不能作为 end.observations 的新事实来源。"
         )
 
+    @staticmethod
+    def _format_deferred_tool_names(
+        deferred_tool_names: Sequence[str] | None,
+    ) -> str:
+        """Build the compact, stable deferred-tool directory for the model."""
+        if not deferred_tool_names or isinstance(deferred_tool_names, str):
+            return ""
+        names = sorted(
+            {str(name).strip() for name in deferred_tool_names if str(name).strip()}
+        )
+        if not names:
+            return ""
+        escaped_names = "\n".join(escape_xml_text(name) for name in names)
+        return (
+            f"<available_deferred_tools>\n{escaped_names}\n</available_deferred_tools>"
+        )
+
     async def build_messages(
         self,
         question: str,
@@ -222,6 +239,7 @@ class PromptBuilder:
         ]
         | None = None,
         extra_context: dict[str, Any] | None = None,
+        deferred_tool_names: Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
         """构建发送给 AI 的消息列表
 
@@ -229,6 +247,7 @@ class PromptBuilder:
             question: 当前用户消息
             get_recent_messages_callback: 获取历史消息的回调函数
             extra_context: 额外的上下文信息 (如 group_id, user_id)
+            deferred_tool_names: 可通过 tool_search 按需加载的工具名称
 
         返回:
             构建好的消息列表 (role/content 结构)
@@ -379,6 +398,14 @@ class PromptBuilder:
                     "[Prompt] 已注入 %d 个 Anthropic Skills 元数据",
                     len(self._anthropic_skill_registry.get_all_skills()),
                 )
+
+        deferred_tools_xml = self._format_deferred_tool_names(deferred_tool_names)
+        if deferred_tools_xml:
+            messages.append({"role": "system", "content": deferred_tools_xml})
+            logger.debug(
+                "[Prompt] 已注入 %d 个延迟工具名称",
+                len(deferred_tools_xml.splitlines()) - 2,
+            )
 
         each_rules = await self._load_each_rules()
         if each_rules:

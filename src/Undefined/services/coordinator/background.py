@@ -161,6 +161,7 @@ class BackgroundMixin:
                 call_type=call_type,
                 max_tokens=max_tokens,
                 transport_state=request.get("transport_state"),
+                skip_prefetch_tools=bool(request.get("skip_prefetch_tools", False)),
             )
             self.ai.set_llm_call_result(request_id, result)
             if retry_count > 0:

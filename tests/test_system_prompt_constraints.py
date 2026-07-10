@@ -29,6 +29,27 @@ def test_system_prompts_include_info_gate_and_style_constraints(path: Path) -> N
         assert snippet in text
 
 
+@pytest.mark.parametrize("path", PROMPT_PATHS)
+def test_system_prompts_define_conditional_tool_search_sequence(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+
+    required_snippets = [
+        "仅当当前 tools 列表中实际包含虚拟 `tool_search`",
+        "当前消息中存在 `<available_deferred_tools>` 目录时",
+        "缺一不可",
+        "<available_deferred_tools>",
+        "尚未加载 schema 的工具名称目录",
+        "必须先调用 `tool_search`",
+        '优先使用 `query="select:工具名"` 精确加载',
+        "等待系统在下一轮暴露目标 schema 后",
+        "禁止与搜索同轮调用目标工具",
+        "如果当前 tools 列表没有虚拟 `tool_search`",
+        "或当前消息没有 `<available_deferred_tools>` 目录",
+    ]
+    for snippet in required_snippets:
+        assert snippet in text
+
+
 def test_naga_prompt_requires_scope_before_naga_analysis() -> None:
     text = Path("res/prompts/undefined_nagaagent.xml").read_text(encoding="utf-8")
 

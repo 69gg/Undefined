@@ -143,6 +143,12 @@ Undefined 搭载了基于 ChromaDB 向量数据库的后台认知系统，无需
 
 除了通过 Agent 按需调用外，以下工具在对话中均可以通过自然语言直接触发。
 
+### 按需工具目录（Tool Search）
+
+工具数量较多时，可通过 `skills.tool_search_enabled = true`（即 `[skills]` 下的 `tool_search_enabled`）为主 AI 启用按需工具加载。启用后，模型首轮只收到 `send_message`、`end` 等基础工具以及 `tool_search` 的完整 schema，其余能力只显示为名称目录。模型会在需要时先检索并加载目标工具，下一轮再调用；用户仍然只需用自然语言提出需求，不需要手动编写搜索语句。
+
+该机制只减少发送给主模型的 schema，不会卸载本地工具、绕过会话权限或改变子 Agent 的工具集。详细配置、查询规则与兼容边界见 [Tool Search 按需工具加载](tool-search.md)。
+
 ### 渲染 (`render.*`)
 
 | 工具 | 说明 |

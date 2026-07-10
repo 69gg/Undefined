@@ -998,6 +998,15 @@ prefetch_tools = ["get_current_time"]
 # zh: 隐藏已预取的工具声明。
 # en: Hide prefetched tools from the model's tool list.
 prefetch_tools_hide = true
+# zh: 是否为主 AI 启用按需工具搜索。关闭时仍向模型暴露完整工具列表。
+# en: Enable on-demand tool search for the main AI. When disabled, the full tool list remains exposed.
+tool_search_enabled = false
+# zh: Tool Search 启用后始终向主 AI 暴露的工具名称。
+# en: Tool names always exposed to the main AI when Tool Search is enabled.
+tool_search_always_loaded = ["send_message", "end"]
+# zh: 单次工具搜索最多加载的匹配数量（最小为 1）。
+# en: Maximum matches loaded by one tool search (minimum 1).
+tool_search_max_results = 5
 
 # zh: Prompt 系统信息注入。总开关默认关闭；开启后各子项默认展示，可逐项关闭。
 # en: Prompt system information injection. The master switch is disabled by default; enabled sub-items are shown by default and can be disabled individually.

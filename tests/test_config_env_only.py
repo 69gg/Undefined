@@ -59,3 +59,19 @@ def test_http_proxy_env_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
         strict=False,
     )
     assert cfg.http_proxy == "http://127.0.0.1:7890"
+
+
+def test_tool_search_env_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TOOL_SEARCH_ENABLED", "true")
+    monkeypatch.setenv("TOOL_SEARCH_ALWAYS_LOADED", "send_message,end,get_current_time")
+    monkeypatch.setenv("TOOL_SEARCH_MAX_RESULTS", "8")
+
+    cfg = Config.from_mapping({}, strict=False)
+
+    assert cfg.tool_search_enabled is True
+    assert cfg.tool_search_always_loaded == [
+        "send_message",
+        "end",
+        "get_current_time",
+    ]
+    assert cfg.tool_search_max_results == 8

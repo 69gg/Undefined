@@ -503,6 +503,7 @@ async def test_submit_queued_llm_call_enqueues_requested_lane() -> None:
         assert request["type"] == "queued_llm_call"
         assert request["group_id"] == 123
         assert request["user_id"] == 456
+        assert request["skip_prefetch_tools"] is True
         client.set_llm_call_result(str(request["request_id"]), {"choices": []})
 
     client._queue_manager.add_queued_llm_request = cast(Any, _enqueue)
@@ -520,9 +521,36 @@ async def test_submit_queued_llm_call_enqueues_requested_lane() -> None:
             client,
             model_config=model_config,
             messages=[{"role": "user", "content": "hello"}],
+            skip_prefetch_tools=True,
         )
 
     assert result == {"choices": []}
+
+
+@pytest.mark.asyncio
+async def test_submit_direct_llm_call_forwards_prefetch_skip() -> None:
+    client: Any = object.__new__(AIClient)
+    client._queue_manager = None
+    client.request_model = cast(Any, AsyncMock(return_value={"choices": []}))
+    client._resolve_queue_lane = cast(Any, lambda _lane: "background")
+    model_config = ChatModelConfig(
+        api_url="https://api.openai.com/v1",
+        api_key="sk-test",
+        model_name="chat-model",
+        max_tokens=1024,
+    )
+
+    result = await AIClient.submit_queued_llm_call(
+        client,
+        model_config=model_config,
+        messages=[{"role": "user", "content": "hello"}],
+        skip_prefetch_tools=True,
+    )
+
+    assert result == {"choices": []}
+    client.request_model.assert_awaited_once()
+    assert client.request_model.await_args is not None
+    assert client.request_model.await_args.kwargs["skip_prefetch_tools"] is True
 
 
 @pytest.mark.asyncio

@@ -35,6 +35,31 @@ def test_from_mapping_builds_without_toml() -> None:
     assert cfg.chat_model.model_name == "gpt-test"
 
 
+def test_tool_search_defaults() -> None:
+    cfg = Config.from_mapping(_MINIMAL_MAPPING, strict=False)
+
+    assert cfg.tool_search_enabled is False
+    assert cfg.tool_search_always_loaded == ["send_message", "end"]
+    assert cfg.tool_search_max_results == 5
+
+
+def test_tool_search_config_parsing_and_normalization() -> None:
+    mapping = {
+        **_MINIMAL_MAPPING,
+        "skills": {
+            "tool_search_enabled": True,
+            "tool_search_always_loaded": [],
+            "tool_search_max_results": 0,
+        },
+    }
+
+    cfg = Config.from_mapping(mapping, strict=False)
+
+    assert cfg.tool_search_enabled is True
+    assert cfg.tool_search_always_loaded == []
+    assert cfg.tool_search_max_results == 1
+
+
 def test_builder_with_mapping() -> None:
     cfg = Config.builder().with_mapping(_MINIMAL_MAPPING).build(strict=False)
     assert cfg.agent_model.model_name == "agent-test"
