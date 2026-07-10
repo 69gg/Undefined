@@ -210,10 +210,17 @@ async def test_build_messages_places_each_rules_before_dynamic_context(
             "group_name": "研发群",
             "request_type": "group",
         },
+        deferred_tool_names=(
+            "web_agent",
+            "group.get_member_info",
+            "web_agent",
+            "",
+        ),
     )
 
     labels = {
         "skills": "【可用的 Anthropic Skills】",
+        "deferred_tools": "<available_deferred_tools>",
         "rules": "【强制规则 - 必须在进行任何操作前仔细阅读并严格遵守】",
         "memory": "【memory.* 手动长期记忆（可编辑）】",
         "cognitive": "【认知记忆上下文】",
@@ -231,7 +238,12 @@ async def test_build_messages_places_each_rules_before_dynamic_context(
         for name, marker in labels.items()
     }
 
-    assert positions["skills"] < positions["rules"] < positions["memory"]
+    assert (
+        positions["skills"]
+        < positions["deferred_tools"]
+        < positions["rules"]
+        < positions["memory"]
+    )
     assert positions["memory"] < positions["cognitive"] < positions["summary"]
     assert positions["summary"] < positions["history"] < positions["time"]
     assert positions["time"] < positions["current"]
@@ -251,6 +263,19 @@ async def test_build_messages_places_each_rules_before_dynamic_context(
         "- 表情包库: 已启用（默认检索=hybrid，GIF=允许，入库上限=500KB）"
         in runtime_config_message
     )
+
+    deferred_tools_message = next(
+        str(message.get("content", ""))
+        for message in messages
+        if "<available_deferred_tools>" in str(message.get("content", ""))
+    )
+    assert deferred_tools_message == (
+        "<available_deferred_tools>\n"
+        "group.get_member_info\n"
+        "web_agent\n"
+        "</available_deferred_tools>"
+    )
+    assert "<tool>" not in deferred_tools_message
 
 
 @pytest.mark.asyncio
@@ -496,6 +521,10 @@ async def test_build_messages_keeps_current_input_batch_as_last_item(
     assert "</current_input_batch>" in current_content
     assert "允许你回应和写入 end.observations 的当前输入" in current_content
     assert "不能作为 end.observations 的新事实来源" in current_content
+    assert all(
+        "<available_deferred_tools>" not in str(message.get("content", ""))
+        for message in messages
+    )
 
 
 @pytest.mark.asyncio

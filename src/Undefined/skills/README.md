@@ -83,7 +83,7 @@ skills/
 ### 基础工具
 
 - **定位**: 单一功能的原子操作
-- **调用方式**: 直接暴露给主 AI
+- **调用方式**: 注册到主 AI 完整工具池；启用 Tool Search 时，除始终加载项外由主 AI 按需检索 schema
 - **Agent 可见性**: 默认仅主 AI 可见；可通过 `skills/tools/{tool_name}/callable.json` 按白名单暴露给 Agent
 - **命名规则**: 简单名称（如 `send_message`, `save_memory`）
 - **适用场景**: 通用、高频使用的简单操作
@@ -92,7 +92,7 @@ skills/
 ### 工具集
 
 - **定位**: 按功能分类的相关工具组
-- **调用方式**: 直接暴露给主 AI
+- **调用方式**: 注册到主 AI 完整工具池；启用 Tool Search 时按需检索 schema
 - **Agent 可见性**: 默认仅主 AI 可见；可通过 `skills/toolsets/{category}/{tool_name}/callable.json` 按白名单暴露给 Agent
 - **命名规则**: `{category}.{tool_name}`（如 `render.render_html`, `scheduler.create_schedule_task`）
 - **目录结构**: `toolsets/{category}/{tool_name}/`
@@ -102,7 +102,7 @@ skills/
 ### 智能体
 
 - **定位**: 封装复杂任务的 AI Agent
-- **调用方式**: 暴露给主 AI，内部可调用多个子工具
+- **调用方式**: 注册到主 AI 完整工具池，内部可调用多个子工具；主 AI 启用 Tool Search 时其 schema 同样按需加载
 - **命名规则**: Agent 名称（如 `web_agent`, `file_analysis_agent`）
 - **参数**: 统一使用 `prompt` 参数，由 Agent 内部解析
 - **适用场景**: 复杂场景、领域特定任务、需要多步推理
@@ -116,15 +116,18 @@ skills/
 - **命名规则**: 内部 `skills.<name>`，注册为 `skills-_-<name>`（使用 `config.tools_dot_delimiter`）
 - **目录结构**: `anthropic_skills/<skill-name>/SKILL.md` 或 `agents/<agent>/anthropic_skills/<skill-name>/`
 - **适用场景**: 提供领域专业知识、工作流程指导、最佳实践
-- **特性**: 渐进式披露（元数据始终注入，完整内容按需获取）、热重载
+- **特性**: 渐进式披露（元数据始终注入，完整内容按需获取）、热重载；启用 Tool Search 时，对应 function schema 也可能需要先检索
 - **示例**: `pdf-processing`, `code-review`, `data-analysis`
 
 ## 运行机制（重要）
 
-- **延迟加载**: 仅在首次执行时才导入 `handler.py`，加快启动速度。
+- **注册表 handler 延迟导入**: 启动时读取 `config.json` 建立完整本地 schema，仅在首次执行时才导入 `handler.py`，用于降低启动成本。
+- **模型 schema 按需投影**: 可通过 `skills.tool_search_enabled`（即 `[skills]` 下的 `tool_search_enabled`）让主 AI 首轮只看到配置为始终加载的工具和 `tool_search` schema，其余工具以名称目录提示，检索后从下一模型轮开始可调用。它只降低模型上下文占用，不会卸载注册表或提前导入 handler；子 Agent 不使用该投影。
 - **结构化日志 + 统计**: 统一输出 `event=execute`、`status=success/timeout/error` 等结构化字段，并记录执行耗时与成功/失败计数。
 - **超时与取消**: 所有技能执行默认 120 秒超时，超时会返回提示并记录统计。
 - **热重载**: 自动扫描 `skills/` 目录，检测到 `config.json` 或 `handler.py` 变更后自动重载。
+
+Tool Search 的配置、查询语法、请求级生命周期和权限边界详见 [Tool Search 按需工具加载](../../../docs/tool-search.md)。
 
 ## 选择指南
 

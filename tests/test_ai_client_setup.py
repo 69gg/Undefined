@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from typing import Any, cast
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from Undefined.ai.client.setup import (
     MISSING_TOOL_CALL_RETRY_HINT,
@@ -201,6 +203,66 @@ class TestIsMissingToolResult:
 
     def test_empty_string_false(self) -> None:
         assert not self.client._is_missing_tool_result("")
+
+
+class TestHidePrefetchToolSchemas:
+    def setup_method(self) -> None:
+        self.client = _make_client_setup_mixin()
+
+    @staticmethod
+    def _tool(name: str) -> dict[str, Any]:
+        return {"type": "function", "function": {"name": name}}
+
+    def test_hides_configured_prefetch_tools(self) -> None:
+        self.client.runtime_config = _make_runtime_config(
+            prefetch_tools=["get_current_time"],
+            prefetch_tools_hide=True,
+        )
+        tools = [self._tool("get_current_time"), self._tool("end")]
+
+        assert self.client._hide_prefetch_tool_schemas(tools) == [self._tool("end")]
+
+    def test_keeps_tools_when_prefetch_hiding_is_disabled(self) -> None:
+        self.client.runtime_config = _make_runtime_config(
+            prefetch_tools=["get_current_time"],
+            prefetch_tools_hide=False,
+        )
+        tools = [self._tool("get_current_time"), self._tool("end")]
+
+        assert self.client._hide_prefetch_tool_schemas(tools) == tools
+
+    def test_virtual_tool_search_cannot_be_hidden_by_prefetch_config(self) -> None:
+        self.client.runtime_config = _make_runtime_config(
+            prefetch_tools=["tool_search"],
+            prefetch_tools_hide=True,
+        )
+        tools = [self._tool("tool_search"), self._tool("end")]
+
+        assert self.client._hide_prefetch_tool_schemas(tools) == tools
+
+    @pytest.mark.asyncio
+    async def test_prefetch_result_stays_in_messages_and_is_not_executed_twice(
+        self,
+    ) -> None:
+        self.client.runtime_config = _make_runtime_config(
+            prefetch_tools=["get_current_time"],
+            prefetch_tools_hide=True,
+        )
+        execute_tool = AsyncMock(return_value="2026-07-10 12:00:00")
+        self.client.tool_manager = SimpleNamespace(execute_tool=execute_tool)
+        tools = [self._tool("get_current_time"), self._tool("end")]
+
+        first_messages, first_tools = await self.client._maybe_prefetch_tools(
+            [{"role": "system", "content": "system"}], tools, "chat"
+        )
+        second_messages, second_tools = await self.client._maybe_prefetch_tools(
+            first_messages, tools, "chat"
+        )
+
+        assert second_messages == first_messages
+        assert first_tools == second_tools == [self._tool("end")]
+        assert "【预先工具结果】" in str(first_messages[-1]["content"])
+        execute_tool.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------

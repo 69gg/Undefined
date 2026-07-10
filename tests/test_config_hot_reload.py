@@ -382,6 +382,39 @@ def test_apply_config_updates_hot_reloads_missing_tool_call_retries() -> None:
     assert ai_client.runtime_updates == [updated]
 
 
+def test_apply_config_updates_hot_reloads_tool_search_config() -> None:
+    updated = cast(
+        Any,
+        SimpleNamespace(
+            tool_search_enabled=True,
+            tool_search_always_loaded=["send_message", "end"],
+            tool_search_max_results=8,
+        ),
+    )
+    ai_client = _FakeAIClient()
+    context = HotReloadContext(
+        ai_client=cast(Any, ai_client),
+        queue_manager=cast(Any, _FakeQueueManager()),
+        config_manager=cast(Any, SimpleNamespace()),
+        security_service=cast(Any, _FakeSecurityService()),
+    )
+
+    apply_config_updates(
+        updated,
+        {
+            "tool_search_enabled": (False, True),
+            "tool_search_always_loaded": (
+                ["send_message", "end"],
+                ["send_message", "end", "get_current_time"],
+            ),
+            "tool_search_max_results": (5, 8),
+        },
+        context,
+    )
+
+    assert ai_client.runtime_updates == [updated]
+
+
 def test_apply_config_updates_hot_reloads_attachment_config() -> None:
     updated = cast(
         Any,

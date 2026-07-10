@@ -44,6 +44,17 @@ def test_registry_has_search_firecrawl_entries() -> None:
     assert ENV_REGISTRY[("search", "firecrawl", "base_url")] == "FIRECRAWL_BASE_URL"
 
 
+def test_registry_has_tool_search_entries() -> None:
+    assert ENV_REGISTRY[("skills", "tool_search_enabled")] == "TOOL_SEARCH_ENABLED"
+    assert (
+        ENV_REGISTRY[("skills", "tool_search_always_loaded")]
+        == "TOOL_SEARCH_ALWAYS_LOADED"
+    )
+    assert (
+        ENV_REGISTRY[("skills", "tool_search_max_results")] == "TOOL_SEARCH_MAX_RESULTS"
+    )
+
+
 def test_registry_uses_scoped_proxy_env_keys() -> None:
     assert "USE_PROXY" not in ENV_REGISTRY.values()
     assert ENV_REGISTRY[("search", "use_proxy")] == "SEARCH_USE_PROXY"

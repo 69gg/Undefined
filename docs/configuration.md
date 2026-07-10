@@ -649,10 +649,15 @@ Prompt caching 补充：
 | `intro_hash_path` | `.cache/agent_intro_hashes.json` | intro hash 缓存 |
 | `prefetch_tools` | `["get_current_time"]` | 预先执行并注入 system 的工具列表 |
 | `prefetch_tools_hide` | `true` | 预取后是否从 tool list 隐藏该工具 |
+| `tool_search_enabled` | `false` | 是否为主 AI 启用按需工具搜索；关闭时保持全量工具声明行为 |
+| `tool_search_always_loaded` | `["send_message", "end"]` | Tool Search 启用后始终向主 AI 暴露的工具名列表 |
+| `tool_search_max_results` | `5` | 单次工具搜索最多加载的匹配数量；小于 `1` 时按 `1` 处理 |
 
 补充：
 - `prefetch_tools` 未配置时默认会注入 `get_current_time`。
 - `hot_reload_interval/debounce` 还会用于配置热更新监听器本身。
+- `tool_search_*` 支持热更新，只影响热更新后的新 `ask()`；正在运行的请求继续使用创建时的工具快照。
+- Tool Search 的查询语法、逐轮加载流程和兼容边界见 [Tool Search 按需工具加载](tool-search.md)。
 
 ---
 
@@ -1189,6 +1194,7 @@ Prompt caching 补充：
 因此：**单独配置 `[models.summary]` 只影响斜杠命令与 SummaryService，不会改变主 AI 对话里 `summary_agent` 的行为。** 若希望对话内总结也使用专用模型，需调整 `[models.agent]` 或模型池，而不是只改 `[models.summary]`。
 - `render.browser_max_concurrency` 会在当前渲染任务空闲后重建渲染并发信号量。
 - `skills.intro_autogen_*`（Agent intro 生成器配置刷新）
+- `skills.tool_search_*`（主 AI 后续新 `ask()` 的按需工具加载配置刷新）
 - `search.searxng_url`（搜索客户端刷新）
 - `search.priority` / `search.grok_search_enabled` / `search.firecrawl_search_enabled` / `search.firecrawl.*` 会随运行时配置更新，用于后续 `web_agent` 工具暴露和提示词优先级；无需重启。
 - `api.tool_invoke_callback_use_proxy` 会随运行时配置更新，用于后续 Runtime tool invoke 回调。
@@ -1492,6 +1498,9 @@ Prompt caching 补充：
 | `skills.hot_reload` | `SKILLS_HOT_RELOAD` |
 | `skills.intro_hash_path` | `AGENT_INTRO_HASH_PATH` |
 | `skills.prefetch_tools_hide` | `PREFETCH_TOOLS_HIDE` |
+| `skills.tool_search_always_loaded` | `TOOL_SEARCH_ALWAYS_LOADED` |
+| `skills.tool_search_enabled` | `TOOL_SEARCH_ENABLED` |
+| `skills.tool_search_max_results` | `TOOL_SEARCH_MAX_RESULTS` |
 
 #### `token_usage`
 

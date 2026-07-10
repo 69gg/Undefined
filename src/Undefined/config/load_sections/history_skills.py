@@ -249,6 +249,29 @@ def load_history_skills(
         _get_value(data, ("skills", "prefetch_tools_hide"), "PREFETCH_TOOLS_HIDE"),
         True,
     )
+    tool_search_enabled = _coerce_bool(
+        _get_value(data, ("skills", "tool_search_enabled"), "TOOL_SEARCH_ENABLED"),
+        False,
+    )
+    tool_search_always_loaded_raw = _get_value(
+        data,
+        ("skills", "tool_search_always_loaded"),
+        "TOOL_SEARCH_ALWAYS_LOADED",
+    )
+    tool_search_always_loaded = _coerce_str_list(tool_search_always_loaded_raw)
+    if tool_search_always_loaded_raw is None:
+        tool_search_always_loaded = ["send_message", "end"]
+    tool_search_max_results = max(
+        1,
+        _coerce_int(
+            _get_value(
+                data,
+                ("skills", "tool_search_max_results"),
+                "TOOL_SEARCH_MAX_RESULTS",
+            ),
+            5,
+        ),
+    )
 
     return {
         "token_usage_max_size_mb": token_usage_max_size_mb,
@@ -278,4 +301,7 @@ def load_history_skills(
         "agent_intro_hash_path": agent_intro_hash_path,
         "prefetch_tools": prefetch_tools,
         "prefetch_tools_hide": prefetch_tools_hide,
+        "tool_search_enabled": tool_search_enabled,
+        "tool_search_always_loaded": tool_search_always_loaded,
+        "tool_search_max_results": tool_search_max_results,
     }

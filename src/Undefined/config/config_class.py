@@ -133,6 +133,9 @@ class Config:
     mcp_config_path: str
     prefetch_tools: list[str]
     prefetch_tools_hide: bool
+    tool_search_enabled: bool
+    tool_search_always_loaded: list[str]
+    tool_search_max_results: int
     webui_url: str
     webui_port: int
     webui_password: str

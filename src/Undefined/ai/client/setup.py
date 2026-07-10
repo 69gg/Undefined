@@ -19,6 +19,7 @@ from Undefined.ai.prompts import PromptBuilder
 from Undefined.ai.crawl4ai_support import get_crawl4ai_capabilities
 from Undefined.ai.summaries import SummaryService
 from Undefined.ai.tokens import TokenCounter
+from Undefined.ai.tool_search import TOOL_SEARCH_NAME
 from Undefined.ai.tooling import ToolManager
 from Undefined.config import (
     ChatModelConfig,
@@ -716,6 +717,25 @@ class ClientSetupMixin:
         runtime_config = self._get_runtime_config()
         return runtime_config.prefetch_tools_hide
 
+    def _hide_prefetch_tool_schemas(
+        self,
+        tools: list[dict[str, Any]] | None,
+    ) -> list[dict[str, Any]] | None:
+        """持续隐藏配置为预取且不再需要模型调用的工具 schema。"""
+        if not tools or not self._prefetch_hide_tools():
+            return tools
+
+        hidden_names = {
+            name for name in self._get_prefetch_tool_names() if name != TOOL_SEARCH_NAME
+        }
+        if not hidden_names:
+            return tools
+        return [
+            tool
+            for tool in tools
+            if tool.get("function", {}).get("name") not in hidden_names
+        ]
+
     def _is_missing_tool_result(self, result: Any) -> bool:
         if not isinstance(result, str):
             return False
@@ -730,8 +750,20 @@ class ClientSetupMixin:
         if not tools:
             return messages, tools
 
+        visible_tools = self._hide_prefetch_tool_schemas(tools)
+
+        if any(
+            message.get("role") == "system"
+            and str(message.get("content") or "").startswith("【预先工具结果】")
+            for message in messages
+            if isinstance(message, dict)
+        ):
+            return messages, visible_tools
+
         # 预先调用部分工具，为模型补充稳定上下文（同一 call_type 仅执行一次）
-        prefetch_names = self._get_prefetch_tool_names()
+        prefetch_names = [
+            name for name in self._get_prefetch_tool_names() if name != TOOL_SEARCH_NAME
+        ]
         if not prefetch_names:
             return messages, tools
 
@@ -754,7 +786,7 @@ class ClientSetupMixin:
 
         to_run = [name for name in prefetch_targets if name not in done]
         if not to_run:
-            return messages, tools
+            return messages, visible_tools
 
         results: list[tuple[str, Any]] = []
         for name in to_run:
@@ -783,7 +815,7 @@ class ClientSetupMixin:
             done.add(name)
 
         if not results:
-            return messages, tools
+            return messages, visible_tools
 
         if ctx:
             cache[call_type] = sorted(done)
@@ -803,14 +835,7 @@ class ClientSetupMixin:
         new_messages = list(messages)
         new_messages.insert(insert_idx, prefetch_message)
 
-        if self._prefetch_hide_tools():
-            hidden = set(name for name in done)
-            tools = [
-                tool
-                for tool in tools
-                if tool.get("function", {}).get("name") not in hidden
-            ]
-        return new_messages, tools
+        return new_messages, visible_tools
 
     async def request_model(
         self,
@@ -840,6 +865,8 @@ class ClientSetupMixin:
                 tools,
                 call_type,
             )
+        else:
+            tools = self._hide_prefetch_tool_schemas(tools)
         return await self._requester.request(
             model_config=model_config,
             messages=messages,
