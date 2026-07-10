@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 _RELEASE_CACHE_TTL_SECONDS = 15 * 60.0
 _release_cache: GitHubReleaseInfo | None = None
 _release_cache_expires_at = 0.0
-_release_cache_lock: asyncio.Lock | None = None
+_release_fetch_task: asyncio.Task[GitHubReleaseInfo] | None = None
 
 
 def _truncate(text: str, *, max_chars: int = 12000) -> str:
@@ -37,48 +37,68 @@ def _truncate(text: str, *, max_chars: int = 12000) -> str:
     return text[:max_chars] + "\n... (truncated)"
 
 
-def _get_release_cache_lock() -> asyncio.Lock:
-    global _release_cache_lock
-    if _release_cache_lock is None:
-        _release_cache_lock = asyncio.Lock()
-    return _release_cache_lock
+def _release_fetch_done(task: asyncio.Task[GitHubReleaseInfo]) -> None:
+    global _release_fetch_task
+    if _release_fetch_task is task:
+        _release_fetch_task = None
+    if task.cancelled():
+        return
+    # Retrieve failures even if every shielded request was cancelled.
+    task.exception()
 
 
 def _reset_release_cache() -> None:
     """Reset process-local state for isolated app instances and tests."""
-    global _release_cache, _release_cache_expires_at, _release_cache_lock
+    global _release_cache, _release_cache_expires_at, _release_fetch_task
+    fetch_task = _release_fetch_task
     _release_cache = None
     _release_cache_expires_at = 0.0
-    _release_cache_lock = None
+    _release_fetch_task = None
+    if fetch_task is not None and not fetch_task.done():
+        fetch_task.cancel()
+
+
+async def _fetch_latest_release(
+    policy: GitUpdatePolicy,
+) -> GitHubReleaseInfo:
+    global _release_cache, _release_cache_expires_at
+
+    config = get_config(strict=False)
+    release = await get_latest_public_release(
+        policy.release_repo_id,
+        request_timeout=config.github_request_timeout_seconds,
+        request_retries=config.github_request_retries,
+        context={
+            "runtime_config": config,
+            "request_id": "webui-update-check",
+        },
+    )
+    _release_cache = release
+    _release_cache_expires_at = time.monotonic() + _RELEASE_CACHE_TTL_SECONDS
+    return release
 
 
 async def _get_latest_release_cached(
     policy: GitUpdatePolicy,
 ) -> tuple[GitHubReleaseInfo, bool]:
-    global _release_cache, _release_cache_expires_at
+    global _release_fetch_task
 
     now = time.monotonic()
     if _release_cache is not None and now < _release_cache_expires_at:
         return _release_cache, True
 
-    async with _get_release_cache_lock():
-        now = time.monotonic()
-        if _release_cache is not None and now < _release_cache_expires_at:
-            return _release_cache, True
-
-        config = get_config(strict=False)
-        release = await get_latest_public_release(
-            policy.release_repo_id,
-            request_timeout=config.github_request_timeout_seconds,
-            request_retries=config.github_request_retries,
-            context={
-                "runtime_config": config,
-                "request_id": "webui-update-check",
-            },
+    fetch_task = _release_fetch_task
+    shared = fetch_task is not None
+    if fetch_task is None:
+        fetch_task = asyncio.create_task(
+            _fetch_latest_release(policy),
+            name="webui-release-check",
         )
-        _release_cache = release
-        _release_cache_expires_at = now + _RELEASE_CACHE_TTL_SECONDS
-        return release, False
+        fetch_task.add_done_callback(_release_fetch_done)
+        _release_fetch_task = fetch_task
+
+    release = await asyncio.shield(fetch_task)
+    return release, shared
 
 
 def _release_response_payload(

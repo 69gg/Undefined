@@ -1,9 +1,60 @@
 from __future__ import annotations
 
 import asyncio
+from html.parser import HTMLParser
 from pathlib import Path
 
 from Undefined.utils import io as async_io
+
+
+_VOID_ELEMENTS = {
+    "area",
+    "base",
+    "br",
+    "col",
+    "embed",
+    "hr",
+    "img",
+    "input",
+    "link",
+    "meta",
+    "param",
+    "source",
+    "track",
+    "wbr",
+}
+
+
+class _ElementParentParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._stack: list[tuple[str, str | None]] = []
+        self.parent_tags_by_id: dict[str, tuple[str, ...]] = {}
+        self.parent_ids_by_id: dict[str, tuple[str, ...]] = {}
+
+    def handle_starttag(
+        self,
+        tag: str,
+        attrs: list[tuple[str, str | None]],
+    ) -> None:
+        element_id = dict(attrs).get("id")
+        if element_id is not None:
+            self.parent_tags_by_id[element_id] = tuple(
+                parent_tag for parent_tag, _parent_id in self._stack
+            )
+            self.parent_ids_by_id[element_id] = tuple(
+                parent_id
+                for _parent_tag, parent_id in self._stack
+                if parent_id is not None
+            )
+        if tag not in _VOID_ELEMENTS:
+            self._stack.append((tag, element_id))
+
+    def handle_endtag(self, tag: str) -> None:
+        for index in range(len(self._stack) - 1, -1, -1):
+            if self._stack[index][0] == tag:
+                del self._stack[index:]
+                return
 
 
 def _read(path: str) -> str:
@@ -23,6 +74,15 @@ def test_update_dialog_has_accessible_structure_and_actions() -> None:
     assert 'id="updateDialogCancel"' in html
     assert 'id="updateDialogConfirm"' in html
     assert 'data-i18n="update.check"' in html
+
+
+def test_update_dialog_is_outside_hidden_app_view() -> None:
+    html = _read("src/Undefined/webui/templates/index.html")
+    parser = _ElementParentParser()
+    parser.feed(html)
+
+    assert parser.parent_tags_by_id["updateDialogBackdrop"] == ("html", "body")
+    assert "view-app" not in parser.parent_ids_by_id["updateDialogBackdrop"]
 
 
 def test_update_frontend_checks_once_automatically_and_allows_manual_check() -> None:

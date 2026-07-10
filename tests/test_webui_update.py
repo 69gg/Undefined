@@ -195,6 +195,58 @@ async def test_release_cache_collapses_concurrent_requests(
 
 
 @pytest.mark.asyncio
+async def test_release_cache_collapses_concurrent_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+    request_started = asyncio.Event()
+    finish_request = asyncio.Event()
+
+    async def fake_get_latest_release(
+        _repo_id: str,
+        **_kwargs: Any,
+    ) -> GitHubReleaseInfo:
+        nonlocal calls
+        calls += 1
+        request_started.set()
+        await finish_request.wait()
+        raise RuntimeError("GitHub unavailable")
+
+    monkeypatch.setattr(
+        _bot,
+        "get_config",
+        lambda strict=False: SimpleNamespace(
+            github_request_timeout_seconds=10.0,
+            github_request_retries=2,
+        ),
+    )
+    monkeypatch.setattr(
+        _bot,
+        "get_latest_public_release",
+        fake_get_latest_release,
+    )
+    policy = GitUpdatePolicy()
+    requests = [
+        asyncio.create_task(_bot._get_latest_release_cached(policy))
+        for _index in range(3)
+    ]
+
+    await request_started.wait()
+    finish_request.set()
+    results = await asyncio.gather(*requests, return_exceptions=True)
+
+    assert calls == 1
+    assert all(
+        isinstance(result, RuntimeError) and str(result) == "GitHub unavailable"
+        for result in results
+    )
+
+    with pytest.raises(RuntimeError, match="GitHub unavailable"):
+        await _bot._get_latest_release_cached(policy)
+    assert calls == 2
+
+
+@pytest.mark.asyncio
 async def test_update_restart_applies_confirmed_release_tag(
     monkeypatch: pytest.MonkeyPatch,
     _authenticated: None,
