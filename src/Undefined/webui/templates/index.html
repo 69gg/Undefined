@@ -260,7 +260,7 @@
                         </div>
                          <div class="toolbar">
                              <button id="btnRefreshOverview" class="btn" data-i18n="overview.refresh">刷新</button>
-                             <button id="btnUpdateRestart" class="btn danger" data-i18n="update.restart">更新并重启</button>
+                             <button id="btnUpdateRestart" class="btn" data-i18n="update.check">检查更新</button>
                          </div>
                      </div>
                     <div class="overview-grid">
@@ -1033,6 +1033,46 @@
                     <input id="cmdPaletteInput" class="cmd-palette-input" type="text" placeholder="Type a command..." autocomplete="off" />
                     <div id="cmdPaletteList" class="cmd-palette-list"></div>
                 </div>
+            </div>
+            <div id="updateDialogBackdrop" class="update-dialog-backdrop" role="presentation" aria-hidden="true" hidden>
+                <section
+                    id="updateDialog"
+                    class="update-dialog"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="updateDialogTitle"
+                    aria-describedby="updateReleaseMeta"
+                >
+                    <div class="update-dialog-heading">
+                        <span class="update-dialog-kicker" data-i18n="update.available">发现新版本</span>
+                        <h2 id="updateDialogTitle" data-i18n="update.dialog_title">Undefined 可以更新</h2>
+                        <p id="updateReleaseMeta" class="update-dialog-meta"></p>
+                    </div>
+                    <div class="update-version-flow" data-i18n-aria-label="update.version_change" aria-label="版本变化">
+                        <div class="update-version-item">
+                            <span data-i18n="update.current_version">当前版本</span>
+                            <strong id="updateCurrentVersion">--</strong>
+                        </div>
+                        <span class="update-version-arrow" aria-hidden="true">→</span>
+                        <div class="update-version-item is-latest">
+                            <span data-i18n="update.latest_version">最新版本</span>
+                            <strong id="updateLatestVersion">--</strong>
+                        </div>
+                    </div>
+                    <p id="updateEligibilityMessage" class="update-eligibility-message" role="status" hidden></p>
+                    <a
+                        id="updateReleaseLink"
+                        class="update-release-link"
+                        href="#"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        data-i18n="update.view_release"
+                    >查看 GitHub Release</a>
+                    <div class="update-dialog-actions">
+                        <button id="updateDialogCancel" class="btn ghost" type="button" data-i18n="update.later">稍后</button>
+                        <button id="updateDialogConfirm" class="btn danger" type="button" data-i18n="update.pull_restart">拉取并重启</button>
+                    </div>
+                </section>
             </div>
             <div id="runtimeChatImageViewer" class="runtime-chat-image-viewer" role="dialog" aria-modal="true" aria-hidden="true" data-i18n-aria-label="runtime.image_preview" aria-label="图片预览" hidden>
                 <button id="btnRuntimeChatImageViewerClose" class="runtime-chat-image-viewer-close" type="button" data-chat-image-viewer-close data-i18n-aria-label="runtime.close" aria-label="关闭">×</button>

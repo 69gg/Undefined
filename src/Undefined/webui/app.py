@@ -20,12 +20,6 @@ from .routes._shared import (
     SETTINGS_APP_KEY,
 )
 from .utils import ensure_config_toml
-from Undefined.utils.self_update import (
-    GitUpdatePolicy,
-    apply_git_update,
-    format_update_result,
-    restart_process,
-)
 
 # 初始化 WebUI 自身日志
 logging.basicConfig(
@@ -298,7 +292,13 @@ def create_app(*, redirect_to_config_once: bool = False) -> web.Application:
     app[REDIRECT_TO_CONFIG_ONCE_APP_KEY] = redirect_to_config_once
 
     def _on_config_change(config: Any, changes: dict[str, Any]) -> None:
-        webui_keys = {"webui_url", "webui_port", "webui_password"}
+        webui_keys = {
+            "webui_url",
+            "webui_port",
+            "webui_password",
+            "webui_autostart_bot",
+            "webui_check_updates",
+        }
         if any(key.startswith("webui.") for key in changes) or webui_keys.intersection(
             changes
         ):
@@ -324,21 +324,6 @@ def create_app(*, redirect_to_config_once: bool = False) -> web.Application:
 
 def run() -> None:
     _init_webui_file_handler()
-
-    # Git-based auto update (only for official origin/main).
-    try:
-        update_result = apply_git_update(GitUpdatePolicy())
-        logger.info("[WebUI][自更新] %s", format_update_result(update_result))
-        if update_result.updated and update_result.repo_root is not None:
-            if update_result.uv_sync_attempted and not update_result.uv_synced:
-                logger.warning(
-                    "[WebUI][自更新] 代码已更新但 uv sync 失败，跳过自动重启（避免启动失败）"
-                )
-            else:
-                logger.warning("[WebUI][自更新] 检测到更新，正在重启 WebUI...")
-                restart_process(module="Undefined.webui", chdir=update_result.repo_root)
-    except Exception as exc:
-        logger.warning("[WebUI][自更新] 检查更新失败，将继续启动: %s", exc)
 
     created = ensure_config_toml()
     settings = load_webui_settings()

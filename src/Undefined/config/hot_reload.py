@@ -31,6 +31,7 @@ _RESTART_REQUIRED_KEYS: set[str] = {
     "webui_url",
     "webui_port",
     "webui_password",
+    "webui_autostart_bot",
     "api",
     "api.enabled",
     "api.host",

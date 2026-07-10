@@ -41,6 +41,7 @@ def _make_settings(*, autostart_bot: bool) -> WebUISettings:
         port=8787,
         password="test",
         autostart_bot=autostart_bot,
+        check_updates=True,
         using_default_password=False,
         config_exists=True,
     )

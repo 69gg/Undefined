@@ -9,11 +9,11 @@ This module is intentionally conservative:
 from __future__ import annotations
 
 import os
-import shlex
+import re
 import subprocess
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Mapping
 
@@ -23,6 +23,7 @@ from Undefined.utils.file_lock import FileLock
 @dataclass(frozen=True)
 class GitUpdatePolicy:
     allowed_origin_base: str = "https://github.com/69gg/Undefined"
+    release_repo_id: str = "69gg/Undefined"
     allowed_branch: str = "main"
     remote_name: str = "origin"
     remote_branch: str = "main"
@@ -49,6 +50,28 @@ class GitUpdateResult:
     output: str = ""
     uv_synced: bool = False
     uv_sync_attempted: bool = False
+    target_tag: str | None = None
+
+
+_RELEASE_VERSION_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
+
+
+def release_version_tuple(value: str) -> tuple[int, int, int]:
+    """Parse the repository's canonical release version format."""
+    match = _RELEASE_VERSION_RE.fullmatch(str(value or "").strip())
+    if match is None:
+        raise ValueError(f"非法 Release 版本号: {value}")
+    major, minor, patch = match.groups()
+    return int(major), int(minor), int(patch)
+
+
+def normalize_release_tag(value: str) -> str:
+    major, minor, patch = release_version_tuple(value)
+    return f"v{major}.{minor}.{patch}"
+
+
+def is_release_newer(*, current_version: str, release_tag: str) -> bool:
+    return release_version_tuple(release_tag) > release_version_tuple(current_version)
 
 
 def _normalize_origin_url(url: str) -> str:
@@ -170,10 +193,93 @@ def _diff_names(repo_root: Path, old_rev: str, new_rev: str) -> set[str]:
     return {line.strip() for line in proc.stdout.splitlines() if line.strip()}
 
 
-def apply_git_update(
-    policy: GitUpdatePolicy, *, start_dir: Path | None = None
+def _append_process_output(
+    output_lines: list[str], process: subprocess.CompletedProcess[str]
+) -> None:
+    if process.stdout.strip():
+        output_lines.append(process.stdout.strip())
+    if process.stderr.strip():
+        output_lines.append(process.stderr.strip())
+
+
+def _is_ancestor(repo_root: Path, ancestor: str, descendant: str) -> bool:
+    process = _git(
+        ["merge-base", "--is-ancestor", ancestor, descendant],
+        cwd=repo_root,
+        timeout_seconds=10.0,
+    )
+    return process.returncode == 0
+
+
+def _sync_updated_checkout(
+    *,
+    repo_root: Path,
+    policy: GitUpdatePolicy,
+    old_rev: str,
+    new_rev: str,
+    output_lines: list[str],
+) -> tuple[bool, bool]:
+    changed = _diff_names(repo_root, old_rev, new_rev)
+
+    if policy.update_submodules:
+        output_lines.append("[self-update] git submodule update --init --recursive")
+        try:
+            sync_process = _git(
+                ["submodule", "sync", "--recursive"],
+                cwd=repo_root,
+                timeout_seconds=policy.submodule_timeout_seconds,
+            )
+            _append_process_output(output_lines, sync_process)
+            update_process = _git(
+                ["submodule", "update", "--init", "--recursive"],
+                cwd=repo_root,
+                timeout_seconds=policy.submodule_timeout_seconds,
+            )
+            _append_process_output(output_lines, update_process)
+        except subprocess.TimeoutExpired:
+            output_lines.append("[self-update] submodule update timed out")
+
+    uv_sync_attempted = policy.uv_sync_on_lock_change and bool(
+        {"uv.lock", "pyproject.toml"}.intersection(changed)
+    )
+    if not uv_sync_attempted:
+        return False, False
+
+    output_lines.append("[self-update] uv sync")
+    try:
+        uv_process = _run(
+            ["uv", "sync"],
+            cwd=repo_root,
+            timeout_seconds=policy.uv_sync_timeout_seconds,
+        )
+        _append_process_output(output_lines, uv_process)
+        return uv_process.returncode == 0, True
+    except FileNotFoundError:
+        output_lines.append("[self-update] uv not found")
+    except subprocess.TimeoutExpired:
+        output_lines.append("[self-update] uv sync timed out")
+    return False, True
+
+
+def apply_git_release_update(
+    policy: GitUpdatePolicy,
+    *,
+    release_tag: str,
+    start_dir: Path | None = None,
 ) -> GitUpdateResult:
+    """Fast-forward the official main branch to an exact published tag."""
     start = time.perf_counter()
+    try:
+        target_tag = normalize_release_tag(release_tag)
+    except ValueError:
+        return GitUpdateResult(
+            eligible=False,
+            updated=False,
+            repo_root=None,
+            reason="invalid_release_tag",
+            target_tag=str(release_tag or "") or None,
+        )
+
     cwd = start_dir or Path.cwd()
     repo_root = resolve_repo_root(cwd)
     if repo_root is None:
@@ -182,6 +288,7 @@ def apply_git_update(
             updated=False,
             repo_root=None,
             reason="not_a_git_repo",
+            target_tag=target_tag,
         )
 
     # Use a lock under data/cache (gitignored) to avoid concurrent updates.
@@ -189,54 +296,12 @@ def apply_git_update(
 
     output_lines: list[str] = []
     with FileLock(lock_path, shared=False):
-        origin_url = _read_origin_url(repo_root, policy.remote_name)
-        branch = _read_branch(repo_root)
+        eligibility = check_git_update_eligibility(policy, start_dir=repo_root)
+        if not eligibility.eligible:
+            return replace(eligibility, target_tag=target_tag)
 
-        if origin_url is None:
-            return GitUpdateResult(
-                eligible=False,
-                updated=False,
-                repo_root=repo_root,
-                reason="missing_origin",
-            )
-        if branch is None:
-            return GitUpdateResult(
-                eligible=False,
-                updated=False,
-                repo_root=repo_root,
-                origin_url=origin_url,
-                reason="detached_head",
-            )
-
-        normalized_origin = _normalize_origin_url(origin_url)
-        if normalized_origin != policy.allowed_origin_base:
-            return GitUpdateResult(
-                eligible=False,
-                updated=False,
-                repo_root=repo_root,
-                origin_url=origin_url,
-                branch=branch,
-                reason="origin_mismatch",
-            )
-        if branch != policy.allowed_branch:
-            return GitUpdateResult(
-                eligible=False,
-                updated=False,
-                repo_root=repo_root,
-                origin_url=origin_url,
-                branch=branch,
-                reason="branch_mismatch",
-            )
-
-        if policy.require_clean_worktree and not _is_worktree_clean(repo_root):
-            return GitUpdateResult(
-                eligible=False,
-                updated=False,
-                repo_root=repo_root,
-                origin_url=origin_url,
-                branch=branch,
-                reason="dirty_worktree",
-            )
+        origin_url = eligibility.origin_url
+        branch = eligibility.branch
 
         old_rev = _rev_parse(repo_root, "HEAD")
         if not old_rev:
@@ -247,16 +312,15 @@ def apply_git_update(
                 origin_url=origin_url,
                 branch=branch,
                 reason="cannot_read_head",
+                target_tag=target_tag,
             )
 
-        # Fetch and compare.
-        fetch_ref = f"{policy.remote_name}/{policy.remote_branch}"
-        output_lines.append(
-            f"[self-update] git fetch {policy.remote_name} {policy.remote_branch}"
-        )
+        remote_main_ref = f"{policy.remote_name}/{policy.remote_branch}"
+        tag_ref = f"refs/tags/{target_tag}"
+        output_lines.append(f"[self-update] git fetch {policy.remote_name}")
         try:
-            fetch_proc = _git(
-                ["fetch", "--prune", policy.remote_name, policy.remote_branch],
+            fetch_main_process = _git(
+                ["fetch", "--prune", policy.remote_name],
                 cwd=repo_root,
                 timeout_seconds=policy.fetch_timeout_seconds,
             )
@@ -268,12 +332,9 @@ def apply_git_update(
                 origin_url=origin_url,
                 branch=branch,
                 reason="git_not_found",
+                target_tag=target_tag,
             )
-        if fetch_proc.stdout.strip():
-            output_lines.append(fetch_proc.stdout.strip())
-        if fetch_proc.stderr.strip():
-            output_lines.append(fetch_proc.stderr.strip())
-        if fetch_proc.returncode != 0:
+        except subprocess.TimeoutExpired:
             return GitUpdateResult(
                 eligible=True,
                 updated=False,
@@ -281,12 +342,62 @@ def apply_git_update(
                 origin_url=origin_url,
                 branch=branch,
                 old_rev=old_rev,
-                reason="fetch_failed",
+                reason="fetch_timeout",
                 output="\n".join(output_lines),
+                target_tag=target_tag,
+            )
+        _append_process_output(output_lines, fetch_main_process)
+        if fetch_main_process.returncode != 0:
+            return GitUpdateResult(
+                eligible=True,
+                updated=False,
+                repo_root=repo_root,
+                origin_url=origin_url,
+                branch=branch,
+                old_rev=old_rev,
+                reason="fetch_main_failed",
+                output="\n".join(output_lines),
+                target_tag=target_tag,
             )
 
-        remote_rev = _rev_parse(repo_root, fetch_ref)
-        if not remote_rev:
+        output_lines.append(
+            f"[self-update] git fetch {policy.remote_name} {target_tag}"
+        )
+        try:
+            fetch_tag_process = _git(
+                ["fetch", policy.remote_name, f"{tag_ref}:{tag_ref}"],
+                cwd=repo_root,
+                timeout_seconds=policy.fetch_timeout_seconds,
+            )
+        except subprocess.TimeoutExpired:
+            return GitUpdateResult(
+                eligible=True,
+                updated=False,
+                repo_root=repo_root,
+                origin_url=origin_url,
+                branch=branch,
+                old_rev=old_rev,
+                reason="fetch_timeout",
+                output="\n".join(output_lines),
+                target_tag=target_tag,
+            )
+        _append_process_output(output_lines, fetch_tag_process)
+        if fetch_tag_process.returncode != 0:
+            return GitUpdateResult(
+                eligible=True,
+                updated=False,
+                repo_root=repo_root,
+                origin_url=origin_url,
+                branch=branch,
+                old_rev=old_rev,
+                reason="fetch_tag_failed",
+                output="\n".join(output_lines),
+                target_tag=target_tag,
+            )
+
+        remote_main_rev = _rev_parse(repo_root, remote_main_ref)
+        release_rev = _rev_parse(repo_root, f"{tag_ref}^{{commit}}")
+        if not remote_main_rev:
             return GitUpdateResult(
                 eligible=True,
                 updated=False,
@@ -296,9 +407,35 @@ def apply_git_update(
                 old_rev=old_rev,
                 reason="cannot_read_remote_ref",
                 output="\n".join(output_lines),
+                target_tag=target_tag,
+            )
+        if not release_rev:
+            return GitUpdateResult(
+                eligible=True,
+                updated=False,
+                repo_root=repo_root,
+                origin_url=origin_url,
+                branch=branch,
+                old_rev=old_rev,
+                reason="cannot_read_release_ref",
+                output="\n".join(output_lines),
+                target_tag=target_tag,
+            )
+        if not _is_ancestor(repo_root, release_rev, remote_main_rev):
+            return GitUpdateResult(
+                eligible=True,
+                updated=False,
+                repo_root=repo_root,
+                origin_url=origin_url,
+                branch=branch,
+                old_rev=old_rev,
+                remote_rev=release_rev,
+                reason="release_not_on_main",
+                output="\n".join(output_lines),
+                target_tag=target_tag,
             )
 
-        if remote_rev == old_rev:
+        if release_rev == old_rev:
             elapsed = time.perf_counter() - start
             output_lines.append(f"[self-update] up-to-date ({elapsed:.2f}s)")
             return GitUpdateResult(
@@ -309,15 +446,29 @@ def apply_git_update(
                 branch=branch,
                 old_rev=old_rev,
                 new_rev=old_rev,
-                remote_rev=remote_rev,
+                remote_rev=release_rev,
                 reason="up_to_date",
                 output="\n".join(output_lines),
+                target_tag=target_tag,
             )
 
-        # Fast-forward merge.
-        output_lines.append(f"[self-update] git merge --ff-only {fetch_ref}")
+        if not _is_ancestor(repo_root, old_rev, release_rev):
+            return GitUpdateResult(
+                eligible=True,
+                updated=False,
+                repo_root=repo_root,
+                origin_url=origin_url,
+                branch=branch,
+                old_rev=old_rev,
+                remote_rev=release_rev,
+                reason="release_not_fast_forward",
+                output="\n".join(output_lines),
+                target_tag=target_tag,
+            )
+
+        output_lines.append(f"[self-update] git merge --ff-only {target_tag}")
         merge_proc = _git(
-            ["merge", "--ff-only", fetch_ref],
+            ["merge", "--ff-only", release_rev],
             cwd=repo_root,
             timeout_seconds=policy.merge_timeout_seconds,
         )
@@ -333,9 +484,10 @@ def apply_git_update(
                 origin_url=origin_url,
                 branch=branch,
                 old_rev=old_rev,
-                remote_rev=remote_rev,
+                remote_rev=release_rev,
                 reason="merge_failed",
                 output="\n".join(output_lines),
+                target_tag=target_tag,
             )
 
         new_rev = _rev_parse(repo_root, "HEAD")
@@ -347,58 +499,19 @@ def apply_git_update(
                 origin_url=origin_url,
                 branch=branch,
                 old_rev=old_rev,
-                remote_rev=remote_rev,
+                remote_rev=release_rev,
                 reason="updated_but_cannot_read_new_head",
                 output="\n".join(output_lines),
+                target_tag=target_tag,
             )
 
-        changed = _diff_names(repo_root, old_rev, new_rev)
-
-        # Submodules (repo contains a submodule).
-        if policy.update_submodules:
-            # Always safe to run after update; it is a no-op if no submodules.
-            output_lines.append("[self-update] git submodule update --init --recursive")
-            sync_proc = _git(
-                ["submodule", "sync", "--recursive"],
-                cwd=repo_root,
-                timeout_seconds=policy.submodule_timeout_seconds,
-            )
-            if sync_proc.stdout.strip():
-                output_lines.append(sync_proc.stdout.strip())
-            if sync_proc.stderr.strip():
-                output_lines.append(sync_proc.stderr.strip())
-            update_proc = _git(
-                ["submodule", "update", "--init", "--recursive"],
-                cwd=repo_root,
-                timeout_seconds=policy.submodule_timeout_seconds,
-            )
-            if update_proc.stdout.strip():
-                output_lines.append(update_proc.stdout.strip())
-            if update_proc.stderr.strip():
-                output_lines.append(update_proc.stderr.strip())
-            # If submodule update fails, we still consider the main repo updated.
-
-        uv_synced = False
-        uv_sync_attempted = False
-        if policy.uv_sync_on_lock_change and (
-            "uv.lock" in changed or "pyproject.toml" in changed
-        ):
-            output_lines.append("[self-update] uv sync")
-            uv_sync_attempted = True
-            try:
-                uv_proc = _run(
-                    ["uv", "sync"],
-                    cwd=repo_root,
-                    timeout_seconds=policy.uv_sync_timeout_seconds,
-                )
-                if uv_proc.stdout.strip():
-                    output_lines.append(uv_proc.stdout.strip())
-                if uv_proc.stderr.strip():
-                    output_lines.append(uv_proc.stderr.strip())
-                uv_synced = uv_proc.returncode == 0
-            except FileNotFoundError:
-                output_lines.append("[self-update] uv not found; skip uv sync")
-                uv_sync_attempted = False
+        uv_synced, uv_sync_attempted = _sync_updated_checkout(
+            repo_root=repo_root,
+            policy=policy,
+            old_rev=old_rev,
+            new_rev=new_rev,
+            output_lines=output_lines,
+        )
 
         elapsed = time.perf_counter() - start
         output_lines.append(
@@ -413,11 +526,12 @@ def apply_git_update(
             branch=branch,
             old_rev=old_rev,
             new_rev=new_rev,
-            remote_rev=remote_rev,
+            remote_rev=release_rev,
             reason="updated",
             output="\n".join(output_lines),
             uv_synced=uv_synced,
             uv_sync_attempted=uv_sync_attempted,
+            target_tag=target_tag,
         )
 
 
@@ -524,23 +638,3 @@ def restart_process(
     if argv:
         args.extend(argv)
     os.execv(sys.executable, args)
-
-
-def format_update_result(result: GitUpdateResult) -> str:
-    parts: list[str] = []
-    parts.append(
-        f"eligible={result.eligible} updated={result.updated} reason={result.reason}"
-    )
-    if result.origin_url:
-        parts.append(f"origin={result.origin_url}")
-    if result.branch:
-        parts.append(f"branch={result.branch}")
-    if result.old_rev and result.new_rev:
-        parts.append(f"rev={result.old_rev[:8]}->{result.new_rev[:8]}")
-    if result.output.strip():
-        parts.append("output:\n" + result.output.strip())
-    return " | ".join(parts)
-
-
-def shell_quote_command(cmd: list[str]) -> str:
-    return " ".join(shlex.quote(part) for part in cmd)

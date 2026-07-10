@@ -1,7 +1,6 @@
 """Tests for WebUI settings loading.
 
-This module tests the load_webui_settings function to ensure proper
-parsing of the autostart_bot configuration field from config.toml.
+This module tests WebUI-specific configuration parsing.
 """
 
 from __future__ import annotations
@@ -31,6 +30,7 @@ autostart_bot = true
     assert settings.port == 8080
     assert settings.password == "test123"
     assert settings.autostart_bot is True
+    assert settings.check_updates is True
     assert settings.using_default_password is False
     assert settings.config_exists is True
 
@@ -55,6 +55,7 @@ autostart_bot = false
     assert settings.port == 8787
     assert settings.password == "mypassword"
     assert settings.autostart_bot is False
+    assert settings.check_updates is True
     assert settings.using_default_password is False
     assert settings.config_exists is True
 
@@ -75,6 +76,7 @@ password = "test"
     settings = load_webui_settings(config_file)
 
     assert settings.autostart_bot is False  # 默认值
+    assert settings.check_updates is True
     assert settings.using_default_password is False
     assert settings.config_exists is True
 
@@ -98,6 +100,7 @@ autostart_bot = true
     settings = load_webui_settings(config_file)
 
     assert settings.autostart_bot is True
+    assert settings.check_updates is True
     assert settings.using_default_password is True
     assert settings.password == "changeme"
 
@@ -119,6 +122,7 @@ autostart_bot = "true"
     settings = load_webui_settings(config_file)
 
     assert settings.autostart_bot is True
+    assert settings.check_updates is True
 
 
 def test_load_webui_settings_autostart_bot_numeric(tmp_path: Path) -> None:
@@ -138,6 +142,7 @@ autostart_bot = 1
     settings = load_webui_settings(config_file)
 
     assert settings.autostart_bot is True
+    assert settings.check_updates is True
 
     config_file.write_text(
         """
@@ -153,6 +158,7 @@ autostart_bot = 0
     settings = load_webui_settings(config_file)
 
     assert settings.autostart_bot is False
+    assert settings.check_updates is True
 
 
 def test_load_webui_settings_no_config_file() -> None:
@@ -163,5 +169,22 @@ def test_load_webui_settings_no_config_file() -> None:
     assert settings.port == 8787
     assert settings.password == "changeme"
     assert settings.autostart_bot is False  # 默认值
+    assert settings.check_updates is True
     assert settings.using_default_password is True
     assert settings.config_exists is False
+
+
+def test_load_webui_settings_check_updates_can_be_disabled(tmp_path: Path) -> None:
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(
+        """
+[webui]
+password = "test"
+check_updates = false
+""",
+        encoding="utf-8",
+    )
+
+    settings = load_webui_settings(config_file)
+
+    assert settings.check_updates is False

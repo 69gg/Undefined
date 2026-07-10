@@ -31,3 +31,16 @@ class GitHubRepoInfo:
     pushed_at: str
     archived: bool
     fork: bool
+
+
+@dataclass(frozen=True)
+class GitHubReleaseInfo:
+    """GitHub Release metadata used by the WebUI update flow."""
+
+    tag_name: str
+    name: str
+    html_url: str
+    published_at: str
+    target_commitish: str
+    draft: bool
+    prerelease: bool

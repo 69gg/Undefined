@@ -144,3 +144,73 @@ async def test_get_public_repo_info_uses_default_retry_policy(
         client_module.DEFAULT_REQUEST_RETRIES,
         client_module.DEFAULT_REQUEST_RETRIES,
     ]
+
+
+@pytest.mark.asyncio
+async def test_get_latest_public_release_parses_release_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    async def fake_request_with_retry(
+        method: str,
+        url: str,
+        **kwargs: Any,
+    ) -> _FakeResponse:
+        captured.update({"method": method, "url": url, **kwargs})
+        return _FakeResponse(
+            {
+                "tag_name": "v3.8.0",
+                "name": "Undefined v3.8.0",
+                "html_url": "https://github.com/69gg/Undefined/releases/tag/v3.8.0",
+                "published_at": "2026-07-10T08:00:00Z",
+                "target_commitish": "main",
+                "draft": False,
+                "prerelease": False,
+            }
+        )
+
+    monkeypatch.setattr(client_module, "request_with_retry", fake_request_with_retry)
+
+    release = await client_module.get_latest_public_release(
+        "https://github.com/69gg/Undefined",
+        request_timeout=12.0,
+        request_retries=1,
+        context={"request_id": "release-test"},
+    )
+
+    assert release.tag_name == "v3.8.0"
+    assert release.name == "Undefined v3.8.0"
+    assert release.target_commitish == "main"
+    assert captured["method"] == "GET"
+    assert captured["url"].endswith("/repos/69gg/Undefined/releases/latest")
+    assert captured["timeout"] == 12.0
+    assert captured["retries"] == 1
+    assert captured["proxy_scope"] == "github"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("payload", "message"),
+    [
+        ({"name": "missing tag"}, "tag_name"),
+        ({"tag_name": "v3.8.0", "draft": True}, "正式版本"),
+        ({"tag_name": "v3.8.0", "prerelease": True}, "正式版本"),
+    ],
+)
+async def test_get_latest_public_release_rejects_invalid_release(
+    monkeypatch: pytest.MonkeyPatch,
+    payload: dict[str, object],
+    message: str,
+) -> None:
+    async def fake_request_with_retry(
+        _method: str,
+        _url: str,
+        **_kwargs: Any,
+    ) -> _FakeResponse:
+        return _FakeResponse(payload)
+
+    monkeypatch.setattr(client_module, "request_with_retry", fake_request_with_retry)
+
+    with pytest.raises(ValueError, match=message):
+        await client_module.get_latest_public_release("69gg/Undefined")

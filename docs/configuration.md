@@ -962,12 +962,16 @@ Prompt caching 补充：
 | `port` | `8787` | WebUI 端口（1..65535） |
 | `password` | `changeme` | WebUI 登录密码 |
 | `autostart_bot` | `false` | WebUI 启动时是否自动启动机器人进程 |
+| `check_updates` | `true` | 打开 WebUI 时是否在后台检查 GitHub 正式 Release |
 
 关键行为：
 - 默认密码 `changeme` 禁止登录，必须先修改。
 - 未配置或为空时，会回退默认密码并标记为”默认密码模式”。
 - `webui.url/port/password/autostart_bot` 修改需重启 WebUI 进程（机器人主进程中也属于重启生效类）。
+- `check_updates` 支持热更新；关闭后只停止页面打开时的自动检查，概览页仍可手动检查。
 - `autostart_bot=true` 时，运行 `uv run Undefined-webui` 会自动拉起 bot 进程，无需手动点击启动按钮；与 WebUI 更新重启后的自动恢复机制（`pending_bot_autostart` marker）互不冲突。
+- 自动检查在 WebUI 鉴权成功后异步执行，失败不会阻塞或打扰页面。GitHub Release 查询在 WebUI 进程内缓存 15 分钟并合并并发请求。
+- 自动更新仅支持官方 `origin`、本地 `main` 和干净工作区；确认后会精确快进到最新正式 Release 标签，而不是拉取该标签之后尚未发版的 `main` 提交。
 
 ---
 
