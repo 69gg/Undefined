@@ -5,8 +5,45 @@ from __future__ import annotations
 
 from typing import Final
 
+_GENERATION_MODEL_ENV_PREFIXES: Final[dict[str, str]] = {
+    "agent": "AGENT",
+    "chat": "CHAT",
+    "grok": "GROK",
+    "naga": "NAGA",
+    "security": "SECURITY",
+    "vision": "VISION",
+}
+_GENERATION_MODEL_ENV_FIELDS: Final[dict[str, str]] = {
+    "api_key": "API_KEY",
+    "api_mode": "API_MODE",
+    "api_url": "API_URL",
+    "context_window_tokens": "CONTEXT_WINDOW_TOKENS",
+    "max_tokens": "MAX_TOKENS",
+    "model_name": "NAME",
+    "prompt_cache_enabled": "PROMPT_CACHE_ENABLED",
+    "queue_interval_seconds": "QUEUE_INTERVAL",
+    "reasoning_content_replay": "REASONING_CONTENT_REPLAY",
+    "reasoning_effort": "REASONING_EFFORT",
+    "reasoning_enabled": "REASONING_ENABLED",
+    "responses_force_stateless_replay": "RESPONSES_FORCE_STATELESS_REPLAY",
+    "responses_tool_choice_compat": "RESPONSES_TOOL_CHOICE_COMPAT",
+    "stream_enabled": "STREAM_ENABLED",
+    "system_prompt_as_user": "SYSTEM_PROMPT_AS_USER",
+    "thinking_budget_tokens": "THINKING_BUDGET_TOKENS",
+    "thinking_enabled": "THINKING_ENABLED",
+    "thinking_include_budget": "THINKING_INCLUDE_BUDGET",
+    "thinking_tool_call_compat": "THINKING_TOOL_CALL_COMPAT",
+    "use_proxy": "USE_PROXY",
+}
+_GENERATION_MODEL_ENV_REGISTRY: Final[dict[tuple[str, ...], str]] = {
+    ("models", model_name, field_name): f"{prefix}_MODEL_{suffix}"
+    for model_name, prefix in _GENERATION_MODEL_ENV_PREFIXES.items()
+    for field_name, suffix in _GENERATION_MODEL_ENV_FIELDS.items()
+}
+
 # TOML 路径 → 环境变量名；供 _get_value 在 TOML 缺省时回退，以及文档/工具生成
 ENV_REGISTRY: Final[dict[tuple[str, ...], str]] = {
+    **_GENERATION_MODEL_ENV_REGISTRY,
     ("access", "allowed_group_ids"): "ALLOWED_GROUP_IDS",
     ("access", "allowed_private_ids"): "ALLOWED_PRIVATE_IDS",
     ("access", "blocked_group_ids"): "BLOCKED_GROUP_IDS",
@@ -98,6 +135,16 @@ ENV_REGISTRY: Final[dict[tuple[str, ...], str]] = {
     ("models", "grok", "model_name"): "GROK_MODEL_NAME",
     ("models", "grok", "use_proxy"): "GROK_MODEL_USE_PROXY",
     ("models", "historian", "use_proxy"): "HISTORIAN_MODEL_USE_PROXY",
+    (
+        "models",
+        "historian",
+        "reasoning_content_replay",
+    ): "HISTORIAN_MODEL_REASONING_CONTENT_REPLAY",
+    (
+        "models",
+        "historian",
+        "system_prompt_as_user",
+    ): "HISTORIAN_MODEL_SYSTEM_PROMPT_AS_USER",
     ("models", "image_edit", "use_proxy"): "IMAGE_EDIT_MODEL_USE_PROXY",
     ("models", "image_gen", "use_proxy"): "IMAGE_GEN_MODEL_USE_PROXY",
     ("models", "naga", "api_key"): "NAGA_MODEL_API_KEY",
@@ -180,6 +227,16 @@ ENV_REGISTRY: Final[dict[tuple[str, ...], str]] = {
     ): "VISION_MODEL_RESPONSES_TOOL_CHOICE_COMPAT",
     ("models", "vision", "system_prompt_as_user"): "VISION_MODEL_SYSTEM_PROMPT_AS_USER",
     ("models", "summary", "use_proxy"): "SUMMARY_MODEL_USE_PROXY",
+    (
+        "models",
+        "summary",
+        "reasoning_content_replay",
+    ): "SUMMARY_MODEL_REASONING_CONTENT_REPLAY",
+    (
+        "models",
+        "summary",
+        "system_prompt_as_user",
+    ): "SUMMARY_MODEL_SYSTEM_PROMPT_AS_USER",
     ("messages", "use_proxy"): "MESSAGES_USE_PROXY",
     ("naga", "use_proxy"): "NAGA_USE_PROXY",
     ("onebot", "token"): "ONEBOT_TOKEN",

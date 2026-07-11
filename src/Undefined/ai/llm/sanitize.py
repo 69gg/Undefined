@@ -9,9 +9,15 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
+from copy import deepcopy
 from typing import Any
 
 from Undefined.ai.llm.types import ModelConfig
+from Undefined.ai.transports.openai_transport import (
+    CHAT_REASONING_REPLAY_KEY,
+    CHAT_REASONING_WIRE_FIELDS,
+    RESPONSES_REASONING_REPLAY_KEY,
+)
 from Undefined.config import Config, get_config
 from Undefined.utils.tool_calls import normalize_tool_arguments_json
 
@@ -30,8 +36,13 @@ _CHAT_COMPLETION_STRIP_THINKING_KEYS: frozenset[str] = frozenset(
 CHAT_COMPLETION_INTERNAL_MESSAGE_KEYS: frozenset[str] = frozenset(
     (
         "reasoning_content",
+        "reasoning_details",
+        "encrypted_content",
         *_CHAT_COMPLETION_STRIP_THINKING_KEYS,
+        CHAT_REASONING_REPLAY_KEY,
+        RESPONSES_REASONING_REPLAY_KEY,
         "_responses_output_items",
+        "_anthropic_content_blocks",
         "phase",
     )
 )
@@ -454,7 +465,7 @@ def sanitize_chat_completion_messages(
 
     本地历史里允许保留 reasoning_content 等兼容字段用于日志/回放；
     发往上游时默认剥离。``preserve_reasoning_content=True`` 时保留
-    ``reasoning_content`` 供多轮 CoT 续传，仍剥离其它内部字段。
+    原始推理字段供多轮 CoT 续传，仍剥离其它内部字段。
     """
     if not messages:
         return messages, 0, {}
@@ -468,9 +479,26 @@ def sanitize_chat_completion_messages(
             continue
 
         sanitized_message = message
+        preserved_reasoning_fields: set[str] = set()
+        if preserve_reasoning_content:
+            raw_reasoning = message.get(CHAT_REASONING_REPLAY_KEY)
+            if isinstance(raw_reasoning, dict):
+                sanitized_message = dict(message)
+                for key, value in raw_reasoning.items():
+                    field_name = str(key)
+                    if field_name not in CHAT_REASONING_WIRE_FIELDS:
+                        continue
+                    sanitized_message[field_name] = deepcopy(value)
+                    preserved_reasoning_fields.add(field_name)
+            else:
+                preserved_reasoning_fields.update(
+                    key
+                    for key in CHAT_REASONING_WIRE_FIELDS
+                    if key in message and message[key] is not None
+                )
         removed = False
         for key in CHAT_COMPLETION_INTERNAL_MESSAGE_KEYS:
-            if preserve_reasoning_content and key == "reasoning_content":
+            if preserve_reasoning_content and key in preserved_reasoning_fields:
                 continue
             if key not in sanitized_message:
                 continue
@@ -490,7 +518,7 @@ def sanitize_chat_completion_messages(
 def relocate_system_to_first_user(
     messages: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """将 system/developer 消息合并注入首条 user 消息（chat_completions 适配）。"""
+    """将 system/developer 消息合并注入首条 user（OpenAI Chat 适配）。"""
     if not messages:
         return messages
 
@@ -548,7 +576,7 @@ def prepare_chat_completion_messages(
     messages: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """按模型配置整理 Chat Completions 出站消息。"""
-    preserve_reasoning = bool(getattr(model_config, "reasoning_content_replay", False))
+    preserve_reasoning = bool(getattr(model_config, "reasoning_content_replay", True))
     prepared, _, _ = sanitize_chat_completion_messages(
         messages,
         preserve_reasoning_content=preserve_reasoning,

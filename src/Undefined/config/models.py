@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from ipaddress import ip_address
 from typing import Any
 
+from .api_modes import API_MODE_OPENAI_CHAT_COMPLETIONS, normalize_api_mode
+
 
 def format_netloc(host: str, port: int) -> str:
     """格式化 host:port 为合法 netloc，IPv6 地址自动加方括号。"""
@@ -36,21 +38,23 @@ class ModelPoolEntry:
     use_proxy: bool = False
     context_window_tokens: int = 8192
     queue_interval_seconds: float = 1.0
-    api_mode: str = "chat_completions"
+    api_mode: str = API_MODE_OPENAI_CHAT_COMPLETIONS
     thinking_enabled: bool = False
     thinking_budget_tokens: int = 0
     thinking_include_budget: bool = True
-    reasoning_effort_style: str = "openai"  # effort 传参风格：openai / anthropic
     thinking_tool_call_compat: bool = True
-    reasoning_content_replay: bool = False
+    reasoning_content_replay: bool = True
     system_prompt_as_user: bool = False
     responses_tool_choice_compat: bool = False
     responses_force_stateless_replay: bool = False
     prompt_cache_enabled: bool = True
     reasoning_enabled: bool = False
-    reasoning_effort: str = "medium"
+    reasoning_effort: str = "medium"  # 自定义 effort；adaptive 原样透传
     stream_enabled: bool = False
     request_params: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        self.api_mode = normalize_api_mode(self.api_mode)
 
 
 @dataclass
@@ -73,17 +77,16 @@ class ChatModelConfig:
     use_proxy: bool = False
     context_window_tokens: int = 8192
     queue_interval_seconds: float = 1.0
-    api_mode: str = "chat_completions"  # 请求 API 模式
+    api_mode: str = API_MODE_OPENAI_CHAT_COMPLETIONS  # 请求 API 模式
     thinking_enabled: bool = False  # 是否启用 thinking
     thinking_budget_tokens: int = 20000  # 思维预算 token 数量
     thinking_include_budget: bool = True  # 是否在请求中发送 budget_tokens
-    reasoning_effort_style: str = "openai"  # effort 传参风格：openai / anthropic
     thinking_tool_call_compat: bool = (
         True  # 思维链 + 工具调用兼容（本地回填 reasoning_content）
     )
-    reasoning_content_replay: bool = False  # 多轮工具调用时向上游续传 CoT
+    reasoning_content_replay: bool = True  # 多轮工具调用时向上游续传 CoT
     system_prompt_as_user: bool = (
-        False  # 将 system 合并注入首条 user（chat_completions）
+        False  # 将 system 合并注入首条 user（openai.chat_completions）
     )
     responses_tool_choice_compat: bool = (
         False  # Responses API 的 tool_choice 兼容模式（降级为字符串 required）
@@ -91,10 +94,13 @@ class ChatModelConfig:
     responses_force_stateless_replay: bool = False  # Responses API 续轮强制降级为 stateless replay（不使用 previous_response_id）
     prompt_cache_enabled: bool = True  # 是否启用自动 prompt_cache_key
     reasoning_enabled: bool = False  # 是否启用 reasoning.effort
-    reasoning_effort: str = "medium"  # reasoning effort 档位
+    reasoning_effort: str = "medium"  # 自定义 effort；adaptive 原样透传
     stream_enabled: bool = False  # 是否对上游启用流式请求
     request_params: dict[str, Any] = field(default_factory=dict)
     pool: ModelPool | None = None  # 模型池配置
+
+    def __post_init__(self) -> None:
+        self.api_mode = normalize_api_mode(self.api_mode)
 
 
 @dataclass
@@ -108,15 +114,14 @@ class VisionModelConfig:
     use_proxy: bool = False
     context_window_tokens: int = 8192
     queue_interval_seconds: float = 1.0
-    api_mode: str = "chat_completions"  # 请求 API 模式
+    api_mode: str = API_MODE_OPENAI_CHAT_COMPLETIONS  # 请求 API 模式
     thinking_enabled: bool = False  # 是否启用 thinking
     thinking_budget_tokens: int = 20000  # 思维预算 token 数量
     thinking_include_budget: bool = True  # 是否在请求中发送 budget_tokens
-    reasoning_effort_style: str = "openai"  # effort 传参风格：openai / anthropic
     thinking_tool_call_compat: bool = (
         True  # 思维链 + 工具调用兼容（本地回填 reasoning_content）
     )
-    reasoning_content_replay: bool = False
+    reasoning_content_replay: bool = True
     system_prompt_as_user: bool = False
     responses_tool_choice_compat: bool = (
         False  # Responses API 的 tool_choice 兼容模式（降级为字符串 required）
@@ -124,9 +129,12 @@ class VisionModelConfig:
     responses_force_stateless_replay: bool = False  # Responses API 续轮强制降级为 stateless replay（不使用 previous_response_id）
     prompt_cache_enabled: bool = True  # 是否启用自动 prompt_cache_key
     reasoning_enabled: bool = False  # 是否启用 reasoning.effort
-    reasoning_effort: str = "medium"  # reasoning effort 档位
+    reasoning_effort: str = "medium"  # 自定义 effort；adaptive 原样透传
     stream_enabled: bool = False  # 是否对上游启用流式请求
     request_params: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        self.api_mode = normalize_api_mode(self.api_mode)
 
 
 @dataclass
@@ -140,15 +148,14 @@ class SecurityModelConfig:
     use_proxy: bool = False
     context_window_tokens: int = 8192
     queue_interval_seconds: float = 1.0
-    api_mode: str = "chat_completions"  # 请求 API 模式
+    api_mode: str = API_MODE_OPENAI_CHAT_COMPLETIONS  # 请求 API 模式
     thinking_enabled: bool = False  # 是否启用 thinking
     thinking_budget_tokens: int = 0  # 思维预算 token 数量
     thinking_include_budget: bool = True  # 是否在请求中发送 budget_tokens
-    reasoning_effort_style: str = "openai"  # effort 传参风格：openai / anthropic
     thinking_tool_call_compat: bool = (
         True  # 思维链 + 工具调用兼容（本地回填 reasoning_content）
     )
-    reasoning_content_replay: bool = False
+    reasoning_content_replay: bool = True
     system_prompt_as_user: bool = False
     responses_tool_choice_compat: bool = (
         False  # Responses API 的 tool_choice 兼容模式（降级为字符串 required）
@@ -156,9 +163,12 @@ class SecurityModelConfig:
     responses_force_stateless_replay: bool = False  # Responses API 续轮强制降级为 stateless replay（不使用 previous_response_id）
     prompt_cache_enabled: bool = True  # 是否启用自动 prompt_cache_key
     reasoning_enabled: bool = False  # 是否启用 reasoning.effort
-    reasoning_effort: str = "medium"  # reasoning effort 档位
+    reasoning_effort: str = "medium"  # 自定义 effort；adaptive 原样透传
     stream_enabled: bool = False  # 是否对上游启用流式请求
     request_params: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        self.api_mode = normalize_api_mode(self.api_mode)
 
 
 @dataclass
@@ -202,15 +212,14 @@ class AgentModelConfig:
     use_proxy: bool = False
     context_window_tokens: int = 8192
     queue_interval_seconds: float = 1.0
-    api_mode: str = "chat_completions"  # 请求 API 模式
+    api_mode: str = API_MODE_OPENAI_CHAT_COMPLETIONS  # 请求 API 模式
     thinking_enabled: bool = False  # 是否启用 thinking
     thinking_budget_tokens: int = 0  # 思维预算 token 数量
     thinking_include_budget: bool = True  # 是否在请求中发送 budget_tokens
-    reasoning_effort_style: str = "openai"  # effort 传参风格：openai / anthropic
     thinking_tool_call_compat: bool = (
         True  # 思维链 + 工具调用兼容（本地回填 reasoning_content）
     )
-    reasoning_content_replay: bool = False
+    reasoning_content_replay: bool = True
     system_prompt_as_user: bool = False
     responses_tool_choice_compat: bool = (
         False  # Responses API 的 tool_choice 兼容模式（降级为字符串 required）
@@ -218,10 +227,13 @@ class AgentModelConfig:
     responses_force_stateless_replay: bool = False  # Responses API 续轮强制降级为 stateless replay（不使用 previous_response_id）
     prompt_cache_enabled: bool = True  # 是否启用自动 prompt_cache_key
     reasoning_enabled: bool = False  # 是否启用 reasoning.effort
-    reasoning_effort: str = "medium"  # reasoning effort 档位
+    reasoning_effort: str = "medium"  # 自定义 effort；adaptive 原样透传
     stream_enabled: bool = False  # 是否对上游启用流式请求
     request_params: dict[str, Any] = field(default_factory=dict)
     pool: ModelPool | None = None  # 模型池配置
+
+    def __post_init__(self) -> None:
+        self.api_mode = normalize_api_mode(self.api_mode)
 
 
 @dataclass
@@ -235,15 +247,23 @@ class GrokModelConfig:
     use_proxy: bool = False
     context_window_tokens: int = 8192
     queue_interval_seconds: float = 1.0
+    api_mode: str = API_MODE_OPENAI_CHAT_COMPLETIONS
     thinking_enabled: bool = False  # 是否启用 thinking
     thinking_budget_tokens: int = 20000  # 思维预算 token 数量
     thinking_include_budget: bool = True  # 是否在请求中发送 budget_tokens
-    reasoning_effort_style: str = "openai"  # effort 传参风格：openai / anthropic
+    thinking_tool_call_compat: bool = True
+    reasoning_content_replay: bool = True
+    system_prompt_as_user: bool = False
+    responses_tool_choice_compat: bool = False
+    responses_force_stateless_replay: bool = False
     prompt_cache_enabled: bool = True  # 是否启用自动 prompt_cache_key
     reasoning_enabled: bool = False  # 是否启用 reasoning.effort
-    reasoning_effort: str = "medium"  # reasoning effort 档位
+    reasoning_effort: str = "medium"  # 自定义 effort；adaptive 原样透传
     stream_enabled: bool = False  # 是否对上游启用流式请求
     request_params: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        self.api_mode = normalize_api_mode(self.api_mode)
 
 
 @dataclass

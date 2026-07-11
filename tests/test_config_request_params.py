@@ -3,6 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from Undefined.config.loader import Config
+from Undefined.config.models import (
+    AgentModelConfig,
+    ChatModelConfig,
+    GrokModelConfig,
+    SecurityModelConfig,
+    VisionModelConfig,
+)
 
 
 def _load_config(path: Path, text: str) -> Config:
@@ -152,11 +159,11 @@ background = "transparent"
 """,
     )
 
-    assert cfg.chat_model.api_mode == "responses"
+    assert cfg.chat_model.api_mode == "openai.responses"
     assert cfg.chat_model.reasoning_enabled is True
     assert cfg.chat_model.reasoning_effort == "high"
     assert cfg.chat_model.thinking_tool_call_compat is True
-    assert cfg.chat_model.reasoning_content_replay is False
+    assert cfg.chat_model.reasoning_content_replay is True
     assert cfg.chat_model.system_prompt_as_user is False
     assert cfg.chat_model.responses_tool_choice_compat is True
     assert cfg.chat_model.responses_force_stateless_replay is True
@@ -168,11 +175,11 @@ background = "transparent"
     }
 
     assert cfg.chat_model.pool is not None
-    assert cfg.chat_model.pool.models[0].api_mode == "chat_completions"
+    assert cfg.chat_model.pool.models[0].api_mode == "openai.chat_completions"
     assert cfg.chat_model.pool.models[0].reasoning_enabled is False
     assert cfg.chat_model.pool.models[0].reasoning_effort == "low"
     assert cfg.chat_model.pool.models[0].thinking_tool_call_compat is True
-    assert cfg.chat_model.pool.models[0].reasoning_content_replay is False
+    assert cfg.chat_model.pool.models[0].reasoning_content_replay is True
     assert cfg.chat_model.pool.models[0].system_prompt_as_user is False
     assert cfg.chat_model.pool.models[0].responses_tool_choice_compat is True
     assert cfg.chat_model.pool.models[0].responses_force_stateless_replay is True
@@ -184,7 +191,7 @@ background = "transparent"
         "provider": {"name": "pool"},
     }
 
-    assert cfg.vision_model.api_mode == "responses"
+    assert cfg.vision_model.api_mode == "openai.responses"
     assert cfg.vision_model.reasoning_enabled is True
     assert cfg.vision_model.reasoning_effort == "low"
     assert cfg.vision_model.responses_tool_choice_compat is True
@@ -212,7 +219,7 @@ background = "transparent"
     assert cfg.naga_model.stream_enabled is True
     assert cfg.naga_model.request_params == cfg.security_model.request_params
 
-    assert cfg.agent_model.api_mode == "responses"
+    assert cfg.agent_model.api_mode == "openai.responses"
     assert cfg.agent_model.reasoning_enabled is True
     assert cfg.agent_model.reasoning_effort == "minimal"
     assert cfg.agent_model.thinking_tool_call_compat is True
@@ -221,7 +228,7 @@ background = "transparent"
     assert cfg.agent_model.prompt_cache_enabled is False
     assert cfg.agent_model.stream_enabled is True
 
-    assert cfg.historian_model.api_mode == "chat_completions"
+    assert cfg.historian_model.api_mode == "openai.chat_completions"
     assert cfg.historian_model.reasoning_enabled is True
     assert cfg.historian_model.reasoning_effort == "xhigh"
     assert cfg.historian_model.thinking_tool_call_compat is True
@@ -234,7 +241,7 @@ background = "transparent"
         "metadata": {"source": "historian"},
         "response_format": {"type": "json_object"},
     }
-    assert cfg.summary_model.api_mode == "chat_completions"
+    assert cfg.summary_model.api_mode == "openai.chat_completions"
     assert cfg.summary_model.reasoning_enabled is True
     assert cfg.summary_model.reasoning_effort == "xhigh"
     assert cfg.summary_model.thinking_tool_call_compat is True
@@ -308,7 +315,7 @@ metadata = { source = "naga" }
     )
 
     assert cfg.naga_model.model_name == "gpt-naga"
-    assert cfg.naga_model.api_mode == "responses"
+    assert cfg.naga_model.api_mode == "openai.responses"
     assert cfg.naga_model.reasoning_enabled is False
     assert cfg.naga_model.reasoning_effort == "low"
     assert cfg.naga_model.request_params == {
@@ -328,3 +335,156 @@ grok_search_enabled = true
 
     assert cfg.grok_search_enabled is True
     assert cfg.grok_model.model_name == ""
+
+
+def test_all_generation_models_and_pools_support_transport_settings(
+    tmp_path: Path,
+) -> None:
+    cfg = _load_config(
+        tmp_path / "config.toml",
+        """
+[onebot]
+ws_url = "ws://127.0.0.1:3001"
+
+[models.chat]
+api_url = "https://provider.example"
+api_key = "chat-key"
+model_name = "chat-model"
+max_tokens = 8192
+api_mode = "anthropic.messages"
+reasoning_content_replay = false
+reasoning_enabled = true
+reasoning_effort = "Vendor-Custom"
+
+[models.chat.pool]
+enabled = true
+strategy = "round_robin"
+
+[[models.chat.pool.models]]
+api_url = "https://pool.example/v1"
+api_key = "pool-key"
+model_name = "chat-pool"
+max_tokens = 4096
+api_mode = "openai.responses"
+reasoning_content_replay = true
+reasoning_enabled = true
+reasoning_effort = "adaptive"
+
+[models.vision]
+api_url = "https://provider.example"
+api_key = "vision-key"
+model_name = "vision-model"
+api_mode = "anthropic.messages"
+reasoning_content_replay = false
+reasoning_enabled = true
+reasoning_effort = "Vendor-Custom"
+
+[models.security]
+api_url = "https://provider.example"
+api_key = "security-key"
+model_name = "security-model"
+max_tokens = 4096
+api_mode = "anthropic.messages"
+reasoning_content_replay = false
+reasoning_enabled = true
+reasoning_effort = "Vendor-Custom"
+
+[models.naga]
+api_url = "https://provider.example"
+api_key = "naga-key"
+model_name = "naga-model"
+max_tokens = 4096
+api_mode = "anthropic.messages"
+reasoning_content_replay = false
+reasoning_enabled = true
+reasoning_effort = "Vendor-Custom"
+
+[models.agent]
+api_url = "https://provider.example"
+api_key = "agent-key"
+model_name = "agent-model"
+max_tokens = 8192
+api_mode = "anthropic.messages"
+reasoning_content_replay = false
+reasoning_enabled = true
+reasoning_effort = "Vendor-Custom"
+thinking_include_budget = false
+thinking_tool_call_compat = false
+
+[models.agent.pool]
+enabled = true
+strategy = "round_robin"
+
+[[models.agent.pool.models]]
+api_url = "https://pool.example/v1"
+api_key = "pool-key"
+model_name = "agent-pool"
+max_tokens = 4096
+api_mode = "openai.responses"
+reasoning_content_replay = true
+reasoning_enabled = true
+reasoning_effort = "adaptive"
+
+[models.historian]
+model_name = "historian-model"
+api_mode = "anthropic.messages"
+reasoning_content_replay = false
+reasoning_enabled = true
+reasoning_effort = "Vendor-Custom"
+
+[models.summary]
+model_name = "summary-model"
+api_mode = "anthropic.messages"
+reasoning_content_replay = false
+reasoning_enabled = true
+reasoning_effort = "Vendor-Custom"
+
+[models.grok]
+api_url = "https://provider.example"
+api_key = "grok-key"
+model_name = "grok-model"
+api_mode = "anthropic.messages"
+reasoning_content_replay = false
+reasoning_enabled = true
+reasoning_effort = "Vendor-Custom"
+""",
+    )
+
+    generation_models: list[
+        ChatModelConfig
+        | VisionModelConfig
+        | SecurityModelConfig
+        | AgentModelConfig
+        | GrokModelConfig
+    ] = [
+        cfg.chat_model,
+        cfg.vision_model,
+        cfg.security_model,
+        cfg.naga_model,
+        cfg.agent_model,
+        cfg.historian_model,
+        cfg.summary_model,
+        cfg.grok_model,
+    ]
+    for model in generation_models:
+        assert model.api_mode == "anthropic.messages"
+        assert model.reasoning_content_replay is False
+        assert model.reasoning_enabled is True
+        assert model.reasoning_effort == "Vendor-Custom"
+        assert model.responses_tool_choice_compat is False
+
+    assert cfg.chat_model.pool is not None
+    assert cfg.agent_model.pool is not None
+    for entry in [
+        cfg.chat_model.pool.models[0],
+        cfg.agent_model.pool.models[0],
+    ]:
+        assert entry.api_mode == "openai.responses"
+        assert entry.reasoning_content_replay is True
+        assert entry.reasoning_enabled is True
+        assert entry.reasoning_effort == "adaptive"
+
+    assert cfg.historian_model.thinking_include_budget is False
+    assert cfg.historian_model.thinking_tool_call_compat is False
+    assert cfg.summary_model.thinking_include_budget is False
+    assert cfg.summary_model.thinking_tool_call_compat is False

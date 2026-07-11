@@ -324,7 +324,6 @@ class TestModelSelectorSelection:
                         api_mode="responses",
                         responses_tool_choice_compat=True,
                         responses_force_stateless_replay=True,
-                        reasoning_effort_style="anthropic",
                         stream_enabled=True,
                     )
                 ],
@@ -334,10 +333,9 @@ class TestModelSelectorSelection:
         result = model_selector.select_chat_config(primary, global_enabled=True)
 
         assert result.model_name == "pool-model"
-        assert result.api_mode == "responses"
+        assert result.api_mode == "openai.responses"
         assert result.responses_tool_choice_compat is True
         assert result.responses_force_stateless_replay is True
-        assert result.reasoning_effort_style == "anthropic"
         assert result.stream_enabled is True
 
     def test_select_agent_config_preserves_responses_flags(
@@ -361,7 +359,6 @@ class TestModelSelectorSelection:
                         api_mode="responses",
                         responses_tool_choice_compat=True,
                         responses_force_stateless_replay=True,
-                        reasoning_effort_style="anthropic",
                         stream_enabled=True,
                     )
                 ],
@@ -371,10 +368,9 @@ class TestModelSelectorSelection:
         result = model_selector.select_agent_config(primary, global_enabled=True)
 
         assert result.model_name == "pool-agent"
-        assert result.api_mode == "responses"
+        assert result.api_mode == "openai.responses"
         assert result.responses_tool_choice_compat is True
         assert result.responses_force_stateless_replay is True
-        assert result.reasoning_effort_style == "anthropic"
         assert result.stream_enabled is True
 
 

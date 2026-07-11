@@ -24,7 +24,6 @@ from ..resolvers import (
     _resolve_api_mode,
     _resolve_context_window_tokens,
     _resolve_reasoning_effort,
-    _resolve_reasoning_effort_style,
     _resolve_reasoning_content_replay,
     _resolve_responses_force_stateless_replay,
     _resolve_responses_tool_choice_compat,
@@ -57,7 +56,7 @@ def _parse_chat_model_config(data: dict[str, Any]) -> ChatModelConfig:
         tool_call_compat_env_key="CHAT_MODEL_THINKING_TOOL_CALL_COMPAT",
         legacy_env_key="CHAT_MODEL_DEEPSEEK_NEW_COT_SUPPORT",
     )
-    # OpenAI 兼容层：chat_completions / responses 及 reasoning 回放策略
+    # 传输模式、reasoning 与原始推理结构回放策略
     api_mode = _resolve_api_mode(data, "chat", "CHAT_MODEL_API_MODE")
     responses_tool_choice_compat = _resolve_responses_tool_choice_compat(
         data, "chat", "CHAT_MODEL_RESPONSES_TOOL_CHOICE_COMPAT"
@@ -147,13 +146,6 @@ def _parse_chat_model_config(data: dict[str, Any]) -> ChatModelConfig:
             20000,
         ),
         thinking_include_budget=thinking_include_budget,
-        reasoning_effort_style=_resolve_reasoning_effort_style(
-            _get_value(
-                data,
-                ("models", "chat", "reasoning_effort_style"),
-                "CHAT_MODEL_REASONING_EFFORT_STYLE",
-            ),
-        ),
         thinking_tool_call_compat=thinking_tool_call_compat,
         reasoning_content_replay=reasoning_content_replay,
         system_prompt_as_user=system_prompt_as_user,

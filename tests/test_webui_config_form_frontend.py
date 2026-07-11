@@ -73,6 +73,18 @@ def test_request_params_widget_contracts() -> None:
     assert "grid-column: 1 / -1" in css
 
 
+def test_model_transport_controls_use_canonical_modes_and_replay_defaults() -> None:
+    source = _read_source(CONFIG_FORM_JS)
+
+    assert '"openai.chat_completions"' in source
+    assert '"openai.responses"' in source
+    assert '"anthropic.messages"' in source
+    assert "reasoning_effort_style" not in source
+    assert "reasoning_content_replay: true" in source
+    assert "thinking_include_budget: true" in source
+    assert "stream_enabled: false" in source
+
+
 def test_request_params_nested_key_type_editors_lack_data_path() -> None:
     """key/type structural editors must not get data-path (or search will hide them)."""
     source = _read_source(CONFIG_FORM_JS)

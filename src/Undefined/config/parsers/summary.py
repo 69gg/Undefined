@@ -22,10 +22,11 @@ from ..models import (
 )
 from ..resolvers import (
     _resolve_api_mode,
+    _resolve_reasoning_content_replay,
     _resolve_reasoning_effort,
-    _resolve_reasoning_effort_style,
     _resolve_responses_force_stateless_replay,
     _resolve_responses_tool_choice_compat,
+    _resolve_system_prompt_as_user,
     _resolve_thinking_compat_flags,
 )
 
@@ -50,6 +51,8 @@ def _parse_summary_model_config(
         include_budget_env_key="SUMMARY_MODEL_THINKING_INCLUDE_BUDGET",
         tool_call_compat_env_key="SUMMARY_MODEL_THINKING_TOOL_CALL_COMPAT",
         legacy_env_key="SUMMARY_MODEL_DEEPSEEK_NEW_COT_SUPPORT",
+        include_budget_default=fallback.thinking_include_budget,
+        tool_call_compat_default=fallback.thinking_tool_call_compat,
     )
     api_mode = _resolve_api_mode(
         {"models": {"summary": s}},
@@ -68,6 +71,18 @@ def _parse_summary_model_config(
         "summary",
         "SUMMARY_MODEL_RESPONSES_FORCE_STATELESS_REPLAY",
         fallback.responses_force_stateless_replay,
+    )
+    reasoning_content_replay = _resolve_reasoning_content_replay(
+        {"models": {"summary": s}},
+        "summary",
+        "SUMMARY_MODEL_REASONING_CONTENT_REPLAY",
+        default=fallback.reasoning_content_replay,
+    )
+    system_prompt_as_user = _resolve_system_prompt_as_user(
+        {"models": {"summary": s}},
+        "summary",
+        "SUMMARY_MODEL_SYSTEM_PROMPT_AS_USER",
+        default=fallback.system_prompt_as_user,
     )
     prompt_cache_enabled = _coerce_bool(
         _get_value(
@@ -96,21 +111,9 @@ def _parse_summary_model_config(
                 s.get("thinking_budget_tokens"), fallback.thinking_budget_tokens
             ),
             thinking_include_budget=thinking_include_budget,
-            reasoning_effort_style=_resolve_reasoning_effort_style(
-                _get_value(
-                    {"models": {"summary": s}},
-                    ("models", "summary", "reasoning_effort_style"),
-                    "SUMMARY_MODEL_REASONING_EFFORT_STYLE",
-                ),
-                fallback.reasoning_effort_style,
-            ),
             thinking_tool_call_compat=thinking_tool_call_compat,
-            reasoning_content_replay=_coerce_bool(
-                s.get("reasoning_content_replay"), fallback.reasoning_content_replay
-            ),
-            system_prompt_as_user=_coerce_bool(
-                s.get("system_prompt_as_user"), fallback.system_prompt_as_user
-            ),
+            reasoning_content_replay=reasoning_content_replay,
+            system_prompt_as_user=system_prompt_as_user,
             responses_tool_choice_compat=responses_tool_choice_compat,
             responses_force_stateless_replay=responses_force_stateless_replay,
             prompt_cache_enabled=prompt_cache_enabled,

@@ -41,12 +41,17 @@ strategy = "round_robin"  # "default" | "round_robin" | "random"
 model_name = "claude-sonnet-4-20250514"
 api_url = "https://api.anthropic.com/v1"
 api_key = "sk-ant-xxx"
-# 其他字段（max_tokens, thinking_* 等）可选，缺省继承主模型
+api_mode = "anthropic.messages"
+thinking_enabled = true
+thinking_include_budget = false  # adaptive thinking
+reasoning_content_replay = true
+# 其他字段（max_tokens、reasoning_*、stream_enabled 等）可选，缺省继承主模型
 
 [[models.chat.pool.models]]
 model_name = "deepseek-chat"
 api_url = "https://api.deepseek.com/v1"
 api_key = "sk-ds-xxx"
+api_mode = "openai.chat_completions"
 ```
 
 ### 3. Agent 模型池
@@ -60,6 +65,8 @@ strategy = "round_robin"  # "default" | "round_robin" | "random"
 model_name = "claude-sonnet-4-20250514"
 api_url = "https://api.anthropic.com/v1"
 api_key = "sk-ant-xxx"
+api_mode = "anthropic.messages"
+reasoning_content_replay = true
 ```
 
 ### strategy 说明
@@ -70,7 +77,7 @@ api_key = "sk-ant-xxx"
 | `round_robin` | 按顺序轮流使用池中模型 |
 | `random` | 每次随机选择池中模型 |
 
-> `pool.models` 中只有 `model_name` 必填，其余字段缺省时继承主模型配置（含 `thinking_tool_call_compat`、`reasoning_content_replay`、`system_prompt_as_user` 等请求行为开关）。
+> `pool.models` 中只有 `model_name` 必填，其余字段缺省时继承主模型配置。每个条目均可独立设置 `api_mode`、完整 `thinking_*` / `reasoning_*`、`reasoning_content_replay`、Responses 兼容开关、`stream_enabled` 与 `request_params`。
 
 ## 私聊使用方法
 

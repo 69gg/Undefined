@@ -80,8 +80,8 @@ token = ""
 # zh: 是否让该模型请求使用 [proxy] 代理地址。默认关闭；模型池条目需在 entry 内单独配置。
 # en: Whether this model uses proxy addresses from [proxy]. Disabled by default; pool entries configure this per entry.
 use_proxy = false
-# zh: OpenAI-compatible 基址 URL，例如 https://api.openai.com/v1（legacy "/chat/completions" 已弃用但仍兼容）。
-# en: OpenAI-compatible base URL, e.g. https://api.openai.com/v1. Note: legacy "/chat/completions" is deprecated but still supported.
+# zh: Provider 基址；OpenAI 兼容接口通常为 .../v1，Anthropic 原生接口可写站点根地址或 .../v1。
+# en: Provider base URL; OpenAI-compatible APIs usually use .../v1, while native Anthropic accepts the site root or .../v1.
 api_url = ""
 # zh: Chat 模型 API Key。
 # en: Chat model API key.
@@ -99,14 +99,14 @@ context_window_tokens = 32768
 # zh: 队列发车间隔（秒，0 表示立即发车）。
 # en: Queue interval (seconds; 0 dispatches immediately).
 queue_interval_seconds = 1.0
-# zh: API 模式：传统 chat.completions 或新版 responses。
-# en: API mode: classic chat.completions or the newer responses API.
-api_mode = "chat_completions"
+# zh: API 模式：openai.chat_completions、openai.responses 或 anthropic.messages；旧无前缀值仍兼容但已弃用。
+# en: API mode: openai.chat_completions, openai.responses, or anthropic.messages. Legacy unprefixed values remain compatible but are deprecated.
+api_mode = "openai.chat_completions"
 # zh: 是否启用 reasoning.effort。
 # en: Enable reasoning.effort.
 reasoning_enabled = false
-# zh: reasoning effort 档位。
-# en: reasoning effort level.
+# zh: 自定义 reasoning effort；值为 adaptive 时原样发送 adaptive，其余值也原样透传。
+# en: Custom reasoning effort; adaptive is sent as adaptive and every other value is passed through unchanged.
 reasoning_effort = "medium"
 # zh: 是否启用 thinking（思维链）。
 # en: Enable thinking (reasoning).
@@ -114,20 +114,17 @@ thinking_enabled = false
 # zh: thinking 预算 tokens。
 # en: Thinking-budget tokens.
 thinking_budget_tokens = 20000
-# zh: 是否在请求中发送 budget_tokens（关闭后由提供商决定思维预算）。
-# en: Whether to include budget_tokens in the request (if disabled, the provider decides the thinking budget).
+# zh: 是否发送手动 thinking 预算；anthropic.messages 下关闭时使用 adaptive thinking。
+# en: Send a manual thinking budget; in anthropic.messages mode, disabling this selects adaptive thinking.
 thinking_include_budget = true
-# zh: reasoning effort 传参风格：openai（reasoning.effort）/ anthropic（output_config.effort）。
-# en: Reasoning effort wire format: openai (reasoning.effort) / anthropic (output_config.effort).
-reasoning_effort_style = "openai"
-# zh: 思维链工具调用兼容：多轮工具调用时在本地历史回填 reasoning_content（日志/回放），不向上游续传。
-# en: Thinking tool-call compatibility: locally store reasoning_content in history for multi-turn tool calls (logging/replay), not upstream replay.
+# zh: 思维链工具调用兼容：在本地历史保留可读 reasoning_content；是否向上游回传由 reasoning_content_replay 控制。
+# en: Thinking tool-call compatibility: retain readable reasoning_content locally; reasoning_content_replay controls upstream replay.
 thinking_tool_call_compat = true
-# zh: 多轮工具调用时是否将 CoT 续传给上游（Chat: reasoning_content；Responses: output items）。默认 false。
-# en: Relay chain-of-thought to upstream on multi-turn tool calls (Chat: reasoning_content; Responses: output items). Default false.
-reasoning_content_replay = false
-# zh: 是否将所有 system 提示词合并注入第一条 user 消息（适配不支持 system role 的模型）。默认 false。
-# en: Merge all system prompts into the first user message (for models without system role). Default false.
+# zh: 是否原样回传推理结构（Chat 兼容字段、Responses reasoning items/encrypted_content、Anthropic thinking/redacted blocks）。默认开启。
+# en: Replay native reasoning structures (Chat compatibility fields, Responses reasoning items/encrypted_content, Anthropic thinking/redacted blocks). Enabled by default.
+reasoning_content_replay = true
+# zh: 是否将所有 system 提示词合并注入第一条 user 消息（仅 openai.chat_completions）。默认关闭。
+# en: Merge all system prompts into the first user message (openai.chat_completions only). Disabled by default.
 system_prompt_as_user = false
 # zh: Responses API 的 tool_choice 兼容模式：仅在关闭时请求仍返回 500、怀疑上游不兼容对象型 tool_choice 时再尝试开启；开启后上报为 "required" 并只保留目标工具。当前已在 new-api v0.11.4-alpha.3 发现该问题。默认关闭。
 # en: Responses API tool_choice compatibility mode: only try enabling this when requests still return 500 with the default setting and you suspect the upstream does not support object-style tool_choice; it sends "required" and keeps only the selected tool. This issue is currently observed on new-api v0.11.4-alpha.3. Disabled by default.
@@ -135,8 +132,8 @@ responses_tool_choice_compat = false
 # zh: Responses API 续轮强制降级：启用后，多轮工具调用将始终跳过 previous_response_id，直接使用完整消息重放（stateless replay）。仅在上游不兼容 responses 状态续轮时使用。默认关闭。
 # en: Responses API force stateless replay: when enabled, multi-turn tool follow-ups always skip previous_response_id and replay the full message history instead. Use only when the upstream does not handle stateful responses follow-ups correctly. Disabled by default.
 responses_force_stateless_replay = false
-# zh: 是否启用自动 prompt_cache_key（建议开启，以提高相似请求的缓存命中率）。
-# en: Enable automatic prompt_cache_key generation (recommended).
+# zh: OpenAI 模式下是否自动生成 prompt_cache_key；Anthropic 模式请通过 request_params.cache_control 配置缓存。
+# en: Generate prompt_cache_key in OpenAI modes; use request_params.cache_control for Anthropic caching.
 prompt_cache_enabled = true
 # zh: 是否对上游模型 API 启用流式请求。
 # en: Enable streaming requests to the upstream model API.
@@ -165,8 +162,8 @@ models = []
 # zh: 是否让该模型请求使用 [proxy] 代理地址。默认关闭。
 # en: Whether this model uses proxy addresses from [proxy]. Disabled by default.
 use_proxy = false
-# zh: OpenAI-compatible 基址 URL，例如 https://api.openai.com/v1（legacy "/chat/completions" 已弃用但仍兼容）。
-# en: OpenAI-compatible base URL, e.g. https://api.openai.com/v1. Note: legacy "/chat/completions" is deprecated but still supported.
+# zh: Provider 基址；OpenAI 兼容接口通常为 .../v1，Anthropic 原生接口可写站点根地址或 .../v1。
+# en: Provider base URL; OpenAI-compatible APIs usually use .../v1, while native Anthropic accepts the site root or .../v1.
 api_url = ""
 # zh: Vision 模型 API Key。
 # en: Vision model API key.
@@ -184,14 +181,14 @@ context_window_tokens = 32768
 # zh: 队列发车间隔（秒，0 表示立即发车）。
 # en: Queue interval (seconds; 0 dispatches immediately).
 queue_interval_seconds = 1.0
-# zh: API 模式：传统 chat.completions 或新版 responses。
-# en: API mode: classic chat.completions or the newer responses API.
-api_mode = "chat_completions"
+# zh: API 模式：openai.chat_completions、openai.responses 或 anthropic.messages；旧无前缀值仍兼容但已弃用。
+# en: API mode: openai.chat_completions, openai.responses, or anthropic.messages. Legacy unprefixed values remain compatible but are deprecated.
+api_mode = "openai.chat_completions"
 # zh: 是否启用 reasoning.effort。
 # en: Enable reasoning.effort.
 reasoning_enabled = false
-# zh: reasoning effort 档位。
-# en: reasoning effort level.
+# zh: 自定义 reasoning effort；值为 adaptive 时原样发送 adaptive，其余值也原样透传。
+# en: Custom reasoning effort; adaptive is sent as adaptive and every other value is passed through unchanged.
 reasoning_effort = "medium"
 # zh: 是否启用 thinking（思维链）。
 # en: Enable thinking (reasoning).
@@ -199,20 +196,17 @@ thinking_enabled = false
 # zh: thinking 预算 tokens。
 # en: Thinking-budget tokens.
 thinking_budget_tokens = 20000
-# zh: 是否在请求中发送 budget_tokens（关闭后由提供商决定思维预算）。
-# en: Whether to include budget_tokens in the request (if disabled, the provider decides the thinking budget).
+# zh: 是否发送手动 thinking 预算；anthropic.messages 下关闭时使用 adaptive thinking。
+# en: Send a manual thinking budget; in anthropic.messages mode, disabling this selects adaptive thinking.
 thinking_include_budget = true
-# zh: reasoning effort 传参风格：openai（reasoning.effort）/ anthropic（output_config.effort）。
-# en: Reasoning effort wire format: openai (reasoning.effort) / anthropic (output_config.effort).
-reasoning_effort_style = "openai"
-# zh: 思维链工具调用兼容：多轮工具调用时在本地历史回填 reasoning_content（日志/回放），不向上游续传。
-# en: Thinking tool-call compatibility: locally store reasoning_content in history for multi-turn tool calls (logging/replay), not upstream replay.
+# zh: 思维链工具调用兼容：在本地历史保留可读 reasoning_content；是否向上游回传由 reasoning_content_replay 控制。
+# en: Thinking tool-call compatibility: retain readable reasoning_content locally; reasoning_content_replay controls upstream replay.
 thinking_tool_call_compat = true
-# zh: 多轮工具调用时是否将 CoT 续传给上游（Chat: reasoning_content；Responses: output items）。默认 false。
-# en: Relay chain-of-thought to upstream on multi-turn tool calls (Chat: reasoning_content; Responses: output items). Default false.
-reasoning_content_replay = false
-# zh: 是否将所有 system 提示词合并注入第一条 user 消息（适配不支持 system role 的模型）。默认 false。
-# en: Merge all system prompts into the first user message (for models without system role). Default false.
+# zh: 是否原样回传推理结构（Chat 兼容字段、Responses reasoning items/encrypted_content、Anthropic thinking/redacted blocks）。默认开启。
+# en: Replay native reasoning structures (Chat compatibility fields, Responses reasoning items/encrypted_content, Anthropic thinking/redacted blocks). Enabled by default.
+reasoning_content_replay = true
+# zh: 是否将所有 system 提示词合并注入第一条 user 消息（仅 openai.chat_completions）。默认关闭。
+# en: Merge all system prompts into the first user message (openai.chat_completions only). Disabled by default.
 system_prompt_as_user = false
 # zh: Responses API 的 tool_choice 兼容模式：仅在关闭时请求仍返回 500、怀疑上游不兼容对象型 tool_choice 时再尝试开启；开启后上报为 "required" 并只保留目标工具。当前已在 new-api v0.11.4-alpha.3 发现该问题。默认关闭。
 # en: Responses API tool_choice compatibility mode: only try enabling this when requests still return 500 with the default setting and you suspect the upstream does not support object-style tool_choice; it sends "required" and keeps only the selected tool. This issue is currently observed on new-api v0.11.4-alpha.3. Disabled by default.
@@ -220,8 +214,8 @@ responses_tool_choice_compat = false
 # zh: Responses API 续轮强制降级：启用后，多轮工具调用将始终跳过 previous_response_id，直接使用完整消息重放（stateless replay）。仅在上游不兼容 responses 状态续轮时使用。默认关闭。
 # en: Responses API force stateless replay: when enabled, multi-turn tool follow-ups always skip previous_response_id and replay the full message history instead. Use only when the upstream does not handle stateful responses follow-ups correctly. Disabled by default.
 responses_force_stateless_replay = false
-# zh: 是否启用自动 prompt_cache_key（建议开启，以提高相似请求的缓存命中率）。
-# en: Enable automatic prompt_cache_key generation (recommended).
+# zh: OpenAI 模式下是否自动生成 prompt_cache_key；Anthropic 模式请通过 request_params.cache_control 配置缓存。
+# en: Generate prompt_cache_key in OpenAI modes; use request_params.cache_control for Anthropic caching.
 prompt_cache_enabled = true
 # zh: 是否对上游模型 API 启用流式请求。
 # en: Enable streaming requests to the upstream model API.
@@ -240,8 +234,8 @@ enabled = true
 # zh: 是否让该模型请求使用 [proxy] 代理地址。默认关闭。
 # en: Whether this model uses proxy addresses from [proxy]. Disabled by default.
 use_proxy = false
-# zh: OpenAI-compatible 基址 URL，例如 https://api.openai.com/v1（legacy "/chat/completions" 已弃用但仍兼容）。
-# en: OpenAI-compatible base URL, e.g. https://api.openai.com/v1. Note: legacy "/chat/completions" is deprecated but still supported.
+# zh: Provider 基址；OpenAI 兼容接口通常为 .../v1，Anthropic 原生接口可写站点根地址或 .../v1。
+# en: Provider base URL; OpenAI-compatible APIs usually use .../v1, while native Anthropic accepts the site root or .../v1.
 api_url = ""
 # zh: Security 模型 API Key。
 # en: Security model API key.
@@ -259,14 +253,14 @@ context_window_tokens = 8192
 # zh: 队列发车间隔（秒，0 表示立即发车）。
 # en: Queue interval (seconds; 0 dispatches immediately).
 queue_interval_seconds = 1.0
-# zh: API 模式：传统 chat.completions 或新版 responses。
-# en: API mode: classic chat.completions or the newer responses API.
-api_mode = "chat_completions"
+# zh: API 模式：openai.chat_completions、openai.responses 或 anthropic.messages；旧无前缀值仍兼容但已弃用。
+# en: API mode: openai.chat_completions, openai.responses, or anthropic.messages. Legacy unprefixed values remain compatible but are deprecated.
+api_mode = "openai.chat_completions"
 # zh: 是否启用 reasoning.effort。
 # en: Enable reasoning.effort.
 reasoning_enabled = false
-# zh: reasoning effort 档位。
-# en: reasoning effort level.
+# zh: 自定义 reasoning effort；值为 adaptive 时原样发送 adaptive，其余值也原样透传。
+# en: Custom reasoning effort; adaptive is sent as adaptive and every other value is passed through unchanged.
 reasoning_effort = "medium"
 # zh: 是否启用 thinking（思维链）。
 # en: Enable thinking (reasoning).
@@ -274,20 +268,17 @@ thinking_enabled = false
 # zh: thinking 预算 tokens。
 # en: Thinking-budget tokens.
 thinking_budget_tokens = 0
-# zh: 是否在请求中发送 budget_tokens（关闭后由提供商决定思维预算）。
-# en: Whether to include budget_tokens in the request (if disabled, the provider decides the thinking budget).
+# zh: 是否发送手动 thinking 预算；anthropic.messages 下关闭时使用 adaptive thinking。
+# en: Send a manual thinking budget; in anthropic.messages mode, disabling this selects adaptive thinking.
 thinking_include_budget = true
-# zh: reasoning effort 传参风格：openai（reasoning.effort）/ anthropic（output_config.effort）。
-# en: Reasoning effort wire format: openai (reasoning.effort) / anthropic (output_config.effort).
-reasoning_effort_style = "openai"
-# zh: 思维链工具调用兼容：多轮工具调用时在本地历史回填 reasoning_content（日志/回放），不向上游续传。
-# en: Thinking tool-call compatibility: locally store reasoning_content in history for multi-turn tool calls (logging/replay), not upstream replay.
+# zh: 思维链工具调用兼容：在本地历史保留可读 reasoning_content；是否向上游回传由 reasoning_content_replay 控制。
+# en: Thinking tool-call compatibility: retain readable reasoning_content locally; reasoning_content_replay controls upstream replay.
 thinking_tool_call_compat = true
-# zh: 多轮工具调用时是否将 CoT 续传给上游（Chat: reasoning_content；Responses: output items）。默认 false。
-# en: Relay chain-of-thought to upstream on multi-turn tool calls (Chat: reasoning_content; Responses: output items). Default false.
-reasoning_content_replay = false
-# zh: 是否将所有 system 提示词合并注入第一条 user 消息（适配不支持 system role 的模型）。默认 false。
-# en: Merge all system prompts into the first user message (for models without system role). Default false.
+# zh: 是否原样回传推理结构（Chat 兼容字段、Responses reasoning items/encrypted_content、Anthropic thinking/redacted blocks）。默认开启。
+# en: Replay native reasoning structures (Chat compatibility fields, Responses reasoning items/encrypted_content, Anthropic thinking/redacted blocks). Enabled by default.
+reasoning_content_replay = true
+# zh: 是否将所有 system 提示词合并注入第一条 user 消息（仅 openai.chat_completions）。默认关闭。
+# en: Merge all system prompts into the first user message (openai.chat_completions only). Disabled by default.
 system_prompt_as_user = false
 # zh: Responses API 的 tool_choice 兼容模式：仅在关闭时请求仍返回 500、怀疑上游不兼容对象型 tool_choice 时再尝试开启；开启后上报为 "required" 并只保留目标工具。当前已在 new-api v0.11.4-alpha.3 发现该问题。默认关闭。
 # en: Responses API tool_choice compatibility mode: only try enabling this when requests still return 500 with the default setting and you suspect the upstream does not support object-style tool_choice; it sends "required" and keeps only the selected tool. This issue is currently observed on new-api v0.11.4-alpha.3. Disabled by default.
@@ -295,8 +286,8 @@ responses_tool_choice_compat = false
 # zh: Responses API 续轮强制降级：启用后，多轮工具调用将始终跳过 previous_response_id，直接使用完整消息重放（stateless replay）。仅在上游不兼容 responses 状态续轮时使用。默认关闭。
 # en: Responses API force stateless replay: when enabled, multi-turn tool follow-ups always skip previous_response_id and replay the full message history instead. Use only when the upstream does not handle stateful responses follow-ups correctly. Disabled by default.
 responses_force_stateless_replay = false
-# zh: 是否启用自动 prompt_cache_key（建议开启，以提高相似请求的缓存命中率）。
-# en: Enable automatic prompt_cache_key generation (recommended).
+# zh: OpenAI 模式下是否自动生成 prompt_cache_key；Anthropic 模式请通过 request_params.cache_control 配置缓存。
+# en: Generate prompt_cache_key in OpenAI modes; use request_params.cache_control for Anthropic caching.
 prompt_cache_enabled = true
 # zh: 是否对上游模型 API 启用流式请求。
 # en: Enable streaming requests to the upstream model API.
@@ -314,8 +305,8 @@ stream_enabled = false
 # zh: 是否让该模型请求使用 [proxy] 代理地址。默认关闭；即使回退 [models.security] endpoint，也使用本开关。
 # en: Whether this model uses proxy addresses from [proxy]. Disabled by default; this switch is used even when falling back to [models.security].
 use_proxy = false
-# zh: OpenAI-compatible 基址 URL，例如 https://api.openai.com/v1（legacy "/chat/completions" 已弃用但仍兼容）。
-# en: OpenAI-compatible base URL, e.g. https://api.openai.com/v1. Note: legacy "/chat/completions" is deprecated but still supported.
+# zh: Provider 基址；OpenAI 兼容接口通常为 .../v1，Anthropic 原生接口可写站点根地址或 .../v1。
+# en: Provider base URL; OpenAI-compatible APIs usually use .../v1, while native Anthropic accepts the site root or .../v1.
 api_url = ""
 # zh: Naga 审核模型 API Key。
 # en: Naga moderation model API key.
@@ -333,14 +324,14 @@ context_window_tokens = 8192
 # zh: 队列发车间隔（秒，0 表示立即发车）。
 # en: Queue interval (seconds; 0 dispatches immediately).
 queue_interval_seconds = 1.0
-# zh: API 模式：传统 chat.completions 或新版 responses。
-# en: API mode: classic chat.completions or the newer responses API.
-api_mode = "chat_completions"
+# zh: API 模式：openai.chat_completions、openai.responses 或 anthropic.messages；旧无前缀值仍兼容但已弃用。
+# en: API mode: openai.chat_completions, openai.responses, or anthropic.messages. Legacy unprefixed values remain compatible but are deprecated.
+api_mode = "openai.chat_completions"
 # zh: 是否启用 reasoning.effort。
 # en: Enable reasoning.effort.
 reasoning_enabled = false
-# zh: reasoning effort 档位。
-# en: reasoning effort level.
+# zh: 自定义 reasoning effort；值为 adaptive 时原样发送 adaptive，其余值也原样透传。
+# en: Custom reasoning effort; adaptive is sent as adaptive and every other value is passed through unchanged.
 reasoning_effort = "medium"
 # zh: 是否启用 thinking（思维链）。
 # en: Enable thinking (reasoning).
@@ -348,20 +339,17 @@ thinking_enabled = false
 # zh: thinking 预算 tokens。
 # en: Thinking-budget tokens.
 thinking_budget_tokens = 0
-# zh: 是否在请求中发送 budget_tokens（关闭后由提供商决定思维预算）。
-# en: Whether to include budget_tokens in the request (if disabled, the provider decides the thinking budget).
+# zh: 是否发送手动 thinking 预算；anthropic.messages 下关闭时使用 adaptive thinking。
+# en: Send a manual thinking budget; in anthropic.messages mode, disabling this selects adaptive thinking.
 thinking_include_budget = true
-# zh: reasoning effort 传参风格：openai（reasoning.effort）/ anthropic（output_config.effort）。
-# en: Reasoning effort wire format: openai (reasoning.effort) / anthropic (output_config.effort).
-reasoning_effort_style = "openai"
-# zh: 思维链工具调用兼容：多轮工具调用时在本地历史回填 reasoning_content（日志/回放），不向上游续传。
-# en: Thinking tool-call compatibility: locally store reasoning_content in history for multi-turn tool calls (logging/replay), not upstream replay.
+# zh: 思维链工具调用兼容：在本地历史保留可读 reasoning_content；是否向上游回传由 reasoning_content_replay 控制。
+# en: Thinking tool-call compatibility: retain readable reasoning_content locally; reasoning_content_replay controls upstream replay.
 thinking_tool_call_compat = true
-# zh: 多轮工具调用时是否将 CoT 续传给上游（Chat: reasoning_content；Responses: output items）。默认 false。
-# en: Relay chain-of-thought to upstream on multi-turn tool calls (Chat: reasoning_content; Responses: output items). Default false.
-reasoning_content_replay = false
-# zh: 是否将所有 system 提示词合并注入第一条 user 消息（适配不支持 system role 的模型）。默认 false。
-# en: Merge all system prompts into the first user message (for models without system role). Default false.
+# zh: 是否原样回传推理结构（Chat 兼容字段、Responses reasoning items/encrypted_content、Anthropic thinking/redacted blocks）。默认开启。
+# en: Replay native reasoning structures (Chat compatibility fields, Responses reasoning items/encrypted_content, Anthropic thinking/redacted blocks). Enabled by default.
+reasoning_content_replay = true
+# zh: 是否将所有 system 提示词合并注入第一条 user 消息（仅 openai.chat_completions）。默认关闭。
+# en: Merge all system prompts into the first user message (openai.chat_completions only). Disabled by default.
 system_prompt_as_user = false
 # zh: Responses API 的 tool_choice 兼容模式。
 # en: Responses API tool_choice compatibility mode.
@@ -383,8 +371,8 @@ stream_enabled = false
 # zh: 是否让该模型请求使用 [proxy] 代理地址。默认关闭；模型池条目需在 entry 内单独配置。
 # en: Whether this model uses proxy addresses from [proxy]. Disabled by default; pool entries configure this per entry.
 use_proxy = false
-# zh: OpenAI-compatible 基址 URL，例如 https://api.openai.com/v1（legacy "/chat/completions" 已弃用但仍兼容）。
-# en: OpenAI-compatible base URL, e.g. https://api.openai.com/v1. Note: legacy "/chat/completions" is deprecated but still supported.
+# zh: Provider 基址；OpenAI 兼容接口通常为 .../v1，Anthropic 原生接口可写站点根地址或 .../v1。
+# en: Provider base URL; OpenAI-compatible APIs usually use .../v1, while native Anthropic accepts the site root or .../v1.
 api_url = ""
 # zh: Agent 模型 API Key。
 # en: Agent model API key.
@@ -402,14 +390,14 @@ context_window_tokens = 32768
 # zh: 队列发车间隔（秒，0 表示立即发车）。
 # en: Queue interval (seconds; 0 dispatches immediately).
 queue_interval_seconds = 1.0
-# zh: API 模式：传统 chat.completions 或新版 responses。
-# en: API mode: classic chat.completions or the newer responses API.
-api_mode = "chat_completions"
+# zh: API 模式：openai.chat_completions、openai.responses 或 anthropic.messages；旧无前缀值仍兼容但已弃用。
+# en: API mode: openai.chat_completions, openai.responses, or anthropic.messages. Legacy unprefixed values remain compatible but are deprecated.
+api_mode = "openai.chat_completions"
 # zh: 是否启用 reasoning.effort。
 # en: Enable reasoning.effort.
 reasoning_enabled = false
-# zh: reasoning effort 档位。
-# en: reasoning effort level.
+# zh: 自定义 reasoning effort；值为 adaptive 时原样发送 adaptive，其余值也原样透传。
+# en: Custom reasoning effort; adaptive is sent as adaptive and every other value is passed through unchanged.
 reasoning_effort = "medium"
 # zh: 是否启用 thinking（思维链）。
 # en: Enable thinking (reasoning).
@@ -417,20 +405,17 @@ thinking_enabled = false
 # zh: thinking 预算 tokens。
 # en: Thinking-budget tokens.
 thinking_budget_tokens = 0
-# zh: 是否在请求中发送 budget_tokens（关闭后由提供商决定思维预算）。
-# en: Whether to include budget_tokens in the request (if disabled, the provider decides the thinking budget).
+# zh: 是否发送手动 thinking 预算；anthropic.messages 下关闭时使用 adaptive thinking。
+# en: Send a manual thinking budget; in anthropic.messages mode, disabling this selects adaptive thinking.
 thinking_include_budget = true
-# zh: reasoning effort 传参风格：openai（reasoning.effort）/ anthropic（output_config.effort）。
-# en: Reasoning effort wire format: openai (reasoning.effort) / anthropic (output_config.effort).
-reasoning_effort_style = "openai"
-# zh: 思维链工具调用兼容：多轮工具调用时在本地历史回填 reasoning_content（日志/回放），不向上游续传。
-# en: Thinking tool-call compatibility: locally store reasoning_content in history for multi-turn tool calls (logging/replay), not upstream replay.
+# zh: 思维链工具调用兼容：在本地历史保留可读 reasoning_content；是否向上游回传由 reasoning_content_replay 控制。
+# en: Thinking tool-call compatibility: retain readable reasoning_content locally; reasoning_content_replay controls upstream replay.
 thinking_tool_call_compat = true
-# zh: 多轮工具调用时是否将 CoT 续传给上游（Chat: reasoning_content；Responses: output items）。默认 false。
-# en: Relay chain-of-thought to upstream on multi-turn tool calls (Chat: reasoning_content; Responses: output items). Default false.
-reasoning_content_replay = false
-# zh: 是否将所有 system 提示词合并注入第一条 user 消息（适配不支持 system role 的模型）。默认 false。
-# en: Merge all system prompts into the first user message (for models without system role). Default false.
+# zh: 是否原样回传推理结构（Chat 兼容字段、Responses reasoning items/encrypted_content、Anthropic thinking/redacted blocks）。默认开启。
+# en: Replay native reasoning structures (Chat compatibility fields, Responses reasoning items/encrypted_content, Anthropic thinking/redacted blocks). Enabled by default.
+reasoning_content_replay = true
+# zh: 是否将所有 system 提示词合并注入第一条 user 消息（仅 openai.chat_completions）。默认关闭。
+# en: Merge all system prompts into the first user message (openai.chat_completions only). Disabled by default.
 system_prompt_as_user = false
 # zh: Responses API 的 tool_choice 兼容模式：仅在关闭时请求仍返回 500、怀疑上游不兼容对象型 tool_choice 时再尝试开启；开启后上报为 "required" 并只保留目标工具。当前已在 new-api v0.11.4-alpha.3 发现该问题。默认关闭。
 # en: Responses API tool_choice compatibility mode: only try enabling this when requests still return 500 with the default setting and you suspect the upstream does not support object-style tool_choice; it sends "required" and keeps only the selected tool. This issue is currently observed on new-api v0.11.4-alpha.3. Disabled by default.
@@ -438,8 +423,8 @@ responses_tool_choice_compat = false
 # zh: Responses API 续轮强制降级：启用后，多轮工具调用将始终跳过 previous_response_id，直接使用完整消息重放（stateless replay）。仅在上游不兼容 responses 状态续轮时使用。默认关闭。
 # en: Responses API force stateless replay: when enabled, multi-turn tool follow-ups always skip previous_response_id and replay the full message history instead. Use only when the upstream does not handle stateful responses follow-ups correctly. Disabled by default.
 responses_force_stateless_replay = false
-# zh: 是否启用自动 prompt_cache_key（建议开启，以提高相似请求的缓存命中率）。
-# en: Enable automatic prompt_cache_key generation (recommended).
+# zh: OpenAI 模式下是否自动生成 prompt_cache_key；Anthropic 模式请通过 request_params.cache_control 配置缓存。
+# en: Generate prompt_cache_key in OpenAI modes; use request_params.cache_control for Anthropic caching.
 prompt_cache_enabled = true
 # zh: 是否对上游模型 API 启用流式请求。
 # en: Enable streaming requests to the upstream model API.
@@ -468,8 +453,8 @@ models = []
 # zh: 是否让该模型请求使用 [proxy] 代理地址。默认关闭；即使回退 [models.agent] endpoint，也使用本开关。
 # en: Whether this model uses proxy addresses from [proxy]. Disabled by default; this switch is used even when falling back to [models.agent].
 use_proxy = false
-# zh: OpenAI-compatible 基址 URL，例如 https://api.openai.com/v1（legacy "/chat/completions" 已弃用但仍兼容）。
-# en: OpenAI-compatible base URL, e.g. https://api.openai.com/v1. Note: legacy "/chat/completions" is deprecated but still supported.
+# zh: Provider 基址；OpenAI 兼容接口通常为 .../v1，Anthropic 原生接口可写站点根地址或 .../v1。
+# en: Provider base URL; OpenAI-compatible APIs usually use .../v1, while native Anthropic accepts the site root or .../v1.
 api_url = ""
 # zh: 史官模型 API Key。
 # en: Historian model API key.
@@ -487,14 +472,14 @@ context_window_tokens = 32768
 # zh: 队列发车间隔（秒，0 表示立即发车）。
 # en: Queue interval (seconds; 0 dispatches immediately).
 queue_interval_seconds = 1.0
-# zh: API 模式：传统 chat.completions 或新版 responses。
-# en: API mode: classic chat.completions or the newer responses API.
-api_mode = "chat_completions"
+# zh: API 模式：openai.chat_completions、openai.responses 或 anthropic.messages；旧无前缀值仍兼容但已弃用。
+# en: API mode: openai.chat_completions, openai.responses, or anthropic.messages. Legacy unprefixed values remain compatible but are deprecated.
+api_mode = "openai.chat_completions"
 # zh: 是否启用 reasoning.effort。
 # en: Enable reasoning.effort.
 reasoning_enabled = false
-# zh: reasoning effort 档位。
-# en: reasoning effort level.
+# zh: 自定义 reasoning effort；值为 adaptive 时原样发送 adaptive，其余值也原样透传。
+# en: Custom reasoning effort; adaptive is sent as adaptive and every other value is passed through unchanged.
 reasoning_effort = "medium"
 # zh: 是否启用 thinking（思维链）。
 # en: Enable thinking (reasoning).
@@ -502,20 +487,17 @@ thinking_enabled = false
 # zh: thinking 预算 tokens。
 # en: Thinking-budget tokens.
 thinking_budget_tokens = 0
-# zh: 是否在请求中发送 budget_tokens（关闭后由提供商决定思维预算）。
-# en: Whether to include budget_tokens in the request (if disabled, the provider decides the thinking budget).
+# zh: 是否发送手动 thinking 预算；anthropic.messages 下关闭时使用 adaptive thinking。
+# en: Send a manual thinking budget; in anthropic.messages mode, disabling this selects adaptive thinking.
 thinking_include_budget = true
-# zh: reasoning effort 传参风格：openai（reasoning.effort）/ anthropic（output_config.effort）。
-# en: Reasoning effort wire format: openai (reasoning.effort) / anthropic (output_config.effort).
-reasoning_effort_style = "openai"
-# zh: 思维链工具调用兼容：多轮工具调用时在本地历史回填 reasoning_content（日志/回放），不向上游续传。
-# en: Thinking tool-call compatibility: locally store reasoning_content in history for multi-turn tool calls (logging/replay), not upstream replay.
+# zh: 思维链工具调用兼容：在本地历史保留可读 reasoning_content；是否向上游回传由 reasoning_content_replay 控制。
+# en: Thinking tool-call compatibility: retain readable reasoning_content locally; reasoning_content_replay controls upstream replay.
 thinking_tool_call_compat = true
-# zh: 多轮工具调用时是否将 CoT 续传给上游（Chat: reasoning_content；Responses: output items）。默认 false。
-# en: Relay chain-of-thought to upstream on multi-turn tool calls (Chat: reasoning_content; Responses: output items). Default false.
-reasoning_content_replay = false
-# zh: 是否将所有 system 提示词合并注入第一条 user 消息（适配不支持 system role 的模型）。默认 false。
-# en: Merge all system prompts into the first user message (for models without system role). Default false.
+# zh: 是否原样回传推理结构（Chat 兼容字段、Responses reasoning items/encrypted_content、Anthropic thinking/redacted blocks）。默认开启。
+# en: Replay native reasoning structures (Chat compatibility fields, Responses reasoning items/encrypted_content, Anthropic thinking/redacted blocks). Enabled by default.
+reasoning_content_replay = true
+# zh: 是否将所有 system 提示词合并注入第一条 user 消息（仅 openai.chat_completions）。默认关闭。
+# en: Merge all system prompts into the first user message (openai.chat_completions only). Disabled by default.
 system_prompt_as_user = false
 # zh: Responses API 的 tool_choice 兼容模式：仅在关闭时请求仍返回 500、怀疑上游不兼容对象型 tool_choice 时再尝试开启；开启后上报为 "required" 并只保留目标工具。当前已在 new-api v0.11.4-alpha.3 发现该问题。默认关闭。
 # en: Responses API tool_choice compatibility mode: only try enabling this when requests still return 500 with the default setting and you suspect the upstream does not support object-style tool_choice; it sends "required" and keeps only the selected tool. This issue is currently observed on new-api v0.11.4-alpha.3. Disabled by default.
@@ -523,8 +505,8 @@ responses_tool_choice_compat = false
 # zh: Responses API 续轮强制降级：启用后，多轮工具调用将始终跳过 previous_response_id，直接使用完整消息重放（stateless replay）。仅在上游不兼容 responses 状态续轮时使用。默认关闭。
 # en: Responses API force stateless replay: when enabled, multi-turn tool follow-ups always skip previous_response_id and replay the full message history instead. Use only when the upstream does not handle stateful responses follow-ups correctly. Disabled by default.
 responses_force_stateless_replay = false
-# zh: 是否启用自动 prompt_cache_key（建议开启，以提高相似请求的缓存命中率）。
-# en: Enable automatic prompt_cache_key generation (recommended).
+# zh: OpenAI 模式下是否自动生成 prompt_cache_key；Anthropic 模式请通过 request_params.cache_control 配置缓存。
+# en: Generate prompt_cache_key in OpenAI modes; use request_params.cache_control for Anthropic caching.
 prompt_cache_enabled = true
 # zh: 是否对上游模型 API 启用流式请求。
 # en: Enable streaming requests to the upstream model API.
@@ -540,8 +522,8 @@ stream_enabled = false
 # zh: 是否让该模型请求使用 [proxy] 代理地址。默认关闭；即使回退 [models.agent] endpoint，也使用本开关。
 # en: Whether this model uses proxy addresses from [proxy]. Disabled by default; this switch is used even when falling back to [models.agent].
 use_proxy = false
-# zh: OpenAI-compatible 基址 URL，例如 https://api.openai.com/v1（legacy "/chat/completions" 已弃用但仍兼容）。
-# en: OpenAI-compatible base URL, e.g. https://api.openai.com/v1. Note: legacy "/chat/completions" is deprecated but still supported.
+# zh: Provider 基址；OpenAI 兼容接口通常为 .../v1，Anthropic 原生接口可写站点根地址或 .../v1。
+# en: Provider base URL; OpenAI-compatible APIs usually use .../v1, while native Anthropic accepts the site root or .../v1.
 api_url = ""
 # zh: 消息总结模型 API Key。
 # en: Message-summary model API key.
@@ -559,14 +541,14 @@ context_window_tokens = 32768
 # zh: 队列发车间隔（秒，0 表示立即发车）。
 # en: Queue interval (seconds; 0 dispatches immediately).
 queue_interval_seconds = 1.0
-# zh: API 模式：传统 chat.completions 或新版 responses。
-# en: API mode: classic chat.completions or the newer responses API.
-api_mode = "chat_completions"
+# zh: API 模式：openai.chat_completions、openai.responses 或 anthropic.messages；旧无前缀值仍兼容但已弃用。
+# en: API mode: openai.chat_completions, openai.responses, or anthropic.messages. Legacy unprefixed values remain compatible but are deprecated.
+api_mode = "openai.chat_completions"
 # zh: 是否启用 reasoning.effort。
 # en: Enable reasoning.effort.
 reasoning_enabled = false
-# zh: reasoning effort 档位。
-# en: reasoning effort level.
+# zh: 自定义 reasoning effort；值为 adaptive 时原样发送 adaptive，其余值也原样透传。
+# en: Custom reasoning effort; adaptive is sent as adaptive and every other value is passed through unchanged.
 reasoning_effort = "medium"
 # zh: 是否启用 thinking（思维链）。
 # en: Enable thinking (reasoning).
@@ -574,20 +556,17 @@ thinking_enabled = false
 # zh: thinking 预算 tokens。
 # en: Thinking-budget tokens.
 thinking_budget_tokens = 0
-# zh: 是否在请求中发送 budget_tokens（关闭后由提供商决定思维预算）。
-# en: Whether to include budget_tokens in the request (if disabled, the provider decides the thinking budget).
+# zh: 是否发送手动 thinking 预算；anthropic.messages 下关闭时使用 adaptive thinking。
+# en: Send a manual thinking budget; in anthropic.messages mode, disabling this selects adaptive thinking.
 thinking_include_budget = true
-# zh: reasoning effort 传参风格：openai（reasoning.effort）/ anthropic（output_config.effort）。
-# en: Reasoning effort wire format: openai (reasoning.effort) / anthropic (output_config.effort).
-reasoning_effort_style = "openai"
-# zh: 思维链工具调用兼容：多轮工具调用时在本地历史回填 reasoning_content（日志/回放），不向上游续传。
-# en: Thinking tool-call compatibility: locally store reasoning_content in history for multi-turn tool calls (logging/replay), not upstream replay.
+# zh: 思维链工具调用兼容：在本地历史保留可读 reasoning_content；是否向上游回传由 reasoning_content_replay 控制。
+# en: Thinking tool-call compatibility: retain readable reasoning_content locally; reasoning_content_replay controls upstream replay.
 thinking_tool_call_compat = true
-# zh: 多轮工具调用时是否将 CoT 续传给上游（Chat: reasoning_content；Responses: output items）。默认 false。
-# en: Relay chain-of-thought to upstream on multi-turn tool calls (Chat: reasoning_content; Responses: output items). Default false.
-reasoning_content_replay = false
-# zh: 是否将所有 system 提示词合并注入第一条 user 消息（适配不支持 system role 的模型）。默认 false。
-# en: Merge all system prompts into the first user message (for models without system role). Default false.
+# zh: 是否原样回传推理结构（Chat 兼容字段、Responses reasoning items/encrypted_content、Anthropic thinking/redacted blocks）。默认开启。
+# en: Replay native reasoning structures (Chat compatibility fields, Responses reasoning items/encrypted_content, Anthropic thinking/redacted blocks). Enabled by default.
+reasoning_content_replay = true
+# zh: 是否将所有 system 提示词合并注入第一条 user 消息（仅 openai.chat_completions）。默认关闭。
+# en: Merge all system prompts into the first user message (openai.chat_completions only). Disabled by default.
 system_prompt_as_user = false
 # zh: Responses API 的 tool_choice 兼容模式：仅在关闭时请求仍返回 500、怀疑上游不兼容对象型 tool_choice 时再尝试开启；开启后上报为 "required" 并只保留目标工具。默认关闭。
 # en: Responses API tool_choice compatibility mode: only try enabling this when requests still return 500 with the default setting and you suspect the upstream does not support object-style tool_choice; it sends "required" and keeps only the selected tool. Disabled by default.
@@ -595,8 +574,8 @@ responses_tool_choice_compat = false
 # zh: Responses API 续轮强制降级：启用后，多轮工具调用将始终跳过 previous_response_id，直接使用完整消息重放（stateless replay）。仅在上游不兼容 responses 状态续轮时使用。默认关闭。
 # en: Responses API force stateless replay: when enabled, multi-turn tool follow-ups always skip previous_response_id and replay the full message history instead. Use only when the upstream does not handle stateful responses follow-ups correctly. Disabled by default.
 responses_force_stateless_replay = false
-# zh: 是否启用自动 prompt_cache_key（建议开启，以提高相似请求的缓存命中率）。
-# en: Enable automatic prompt_cache_key generation (recommended).
+# zh: OpenAI 模式下是否自动生成 prompt_cache_key；Anthropic 模式请通过 request_params.cache_control 配置缓存。
+# en: Generate prompt_cache_key in OpenAI modes; use request_params.cache_control for Anthropic caching.
 prompt_cache_enabled = true
 # zh: 是否对上游模型 API 启用流式请求。
 # en: Enable streaming requests to the upstream model API.
@@ -606,14 +585,14 @@ stream_enabled = false
 # en: Extra request-body params (optional), e.g. temperature or vendor-specific fields.
 [models.summary.request_params]
 
-# zh: Grok 搜索模型配置（仅供 web_agent 内的 grok_search 使用；固定走 chat.completions，不支持 tool call 兼容字段）。
-# en: Grok search model config (used only by grok_search inside web_agent; always uses chat completions and does not expose tool-call compatibility fields).
+# zh: Grok 搜索模型配置（仅供 web_agent 内的 grok_search 使用，支持与其他生成模型相同的 API/推理配置）。
+# en: Grok search model config (used only by grok_search inside web_agent, with the same API/reasoning controls as other generation models).
 [models.grok]
 # zh: 是否让该模型请求使用 [proxy] 代理地址。默认关闭。
 # en: Whether this model uses proxy addresses from [proxy]. Disabled by default.
 use_proxy = false
-# zh: OpenAI-compatible 基址 URL，例如 https://api.example.com/v1。
-# en: OpenAI-compatible base URL, e.g. https://api.example.com/v1.
+# zh: Provider 基址；格式由 api_mode 决定。
+# en: Provider base URL; its shape is determined by api_mode.
 api_url = ""
 # zh: Grok 搜索模型 API Key。
 # en: Grok search model API key.
@@ -631,11 +610,14 @@ context_window_tokens = 32768
 # zh: 队列发车间隔（秒，0 表示立即发车）。
 # en: Queue interval (seconds; 0 dispatches immediately).
 queue_interval_seconds = 1.0
+# zh: API 模式：openai.chat_completions、openai.responses 或 anthropic.messages；旧无前缀值仍兼容但已弃用。
+# en: API mode: openai.chat_completions, openai.responses, or anthropic.messages. Legacy unprefixed values remain compatible but are deprecated.
+api_mode = "openai.chat_completions"
 # zh: 是否启用 reasoning.effort。
 # en: Enable reasoning.effort.
 reasoning_enabled = false
-# zh: reasoning effort 档位。
-# en: reasoning effort level.
+# zh: 自定义 reasoning effort；值为 adaptive 时原样发送 adaptive，其余值也原样透传。
+# en: Custom reasoning effort; adaptive is sent as adaptive and every other value is passed through unchanged.
 reasoning_effort = "medium"
 # zh: 是否启用 thinking（思维链）。
 # en: Enable thinking (reasoning).
@@ -643,14 +625,26 @@ thinking_enabled = false
 # zh: thinking 预算 tokens。
 # en: Thinking-budget tokens.
 thinking_budget_tokens = 20000
-# zh: 是否在请求中发送 budget_tokens（关闭后由提供商决定思维预算）。
-# en: Whether to include budget_tokens in the request (if disabled, the provider decides the thinking budget).
+# zh: 是否发送手动 thinking 预算；anthropic.messages 下关闭时使用 adaptive thinking。
+# en: Send a manual thinking budget; in anthropic.messages mode, disabling this selects adaptive thinking.
 thinking_include_budget = true
-# zh: reasoning effort 传参风格：openai（reasoning_effort）/ anthropic（output_config.effort）。
-# en: Reasoning effort wire format: openai (reasoning_effort) / anthropic (output_config.effort).
-reasoning_effort_style = "openai"
-# zh: 是否启用自动 prompt_cache_key（建议开启，以提高相似请求的缓存命中率）。
-# en: Enable automatic prompt_cache_key generation (recommended).
+# zh: 思维链工具调用兼容：在本地历史保留可读 reasoning_content；是否向上游回传由 reasoning_content_replay 控制。
+# en: Thinking tool-call compatibility: retain readable reasoning_content locally; reasoning_content_replay controls upstream replay.
+thinking_tool_call_compat = true
+# zh: 是否原样回传推理结构（Chat 兼容字段、Responses reasoning items/encrypted_content、Anthropic thinking/redacted blocks）。默认开启。
+# en: Replay native reasoning structures (Chat compatibility fields, Responses reasoning items/encrypted_content, Anthropic thinking/redacted blocks). Enabled by default.
+reasoning_content_replay = true
+# zh: 是否将所有 system 提示词合并注入第一条 user 消息（仅 openai.chat_completions）。默认关闭。
+# en: Merge all system prompts into the first user message (openai.chat_completions only). Disabled by default.
+system_prompt_as_user = false
+# zh: Responses API 对象型 tool_choice 的兼容开关。默认关闭。
+# en: Compatibility switch for object-style Responses API tool_choice. Disabled by default.
+responses_tool_choice_compat = false
+# zh: Responses API 是否强制使用完整历史 stateless replay。默认关闭。
+# en: Force full-history stateless replay for the Responses API. Disabled by default.
+responses_force_stateless_replay = false
+# zh: OpenAI 模式下是否自动生成 prompt_cache_key；Anthropic 模式请通过 request_params.cache_control 配置缓存。
+# en: Generate prompt_cache_key in OpenAI modes; use request_params.cache_control for Anthropic caching.
 prompt_cache_enabled = true
 # zh: 是否对上游模型 API 启用流式请求。
 # en: Enable streaming requests to the upstream model API.

@@ -262,6 +262,7 @@ async def test_chat_request_strips_internal_reasoning_fields_from_messages() -> 
         api_key="sk-test",
         model_name="gpt-test",
         max_tokens=512,
+        reasoning_content_replay=False,
     )
     tool_calls = [
         {
@@ -499,7 +500,7 @@ async def test_responses_request_normalizes_tool_calls_and_usage() -> None:
         "total_tokens": 18,
     }
     assert result["_transport_state"] == {
-        "api_mode": "responses",
+        "api_mode": "openai.responses",
         "previous_response_id": "resp_1",
         "tool_result_start_index": 2,
     }
@@ -1061,9 +1062,7 @@ async def test_responses_transport_state_uses_previous_response_id_and_tool_outp
     }
 
 
-def test_build_request_body_responses_stateless_replay_strips_output_item_status() -> (
-    None
-):
+def test_build_request_body_responses_stateless_replay_strips_output_status() -> None:
     cfg = ChatModelConfig(
         api_url="https://api.openai.com/v1",
         api_key="sk-test",
@@ -1093,9 +1092,65 @@ def test_build_request_body_responses_stateless_replay_strips_output_item_status
         transport_state={"api_mode": "responses", "stateless_replay": True},
     )
 
-    replayed_message = body["input"][0]
+    replayed_message = body["input"][1]
     assert replayed_message["type"] == "message"
     assert "status" not in replayed_message
+
+
+def test_responses_replay_cleans_only_nullable_function_call_fields() -> None:
+    cfg = ChatModelConfig(
+        api_url="https://api.openai.com/v1",
+        api_key="sk-test",
+        model_name="gpt-test",
+        max_tokens=512,
+        api_mode="openai.responses",
+    )
+    body = build_request_body(
+        model_config=cfg,
+        messages=[
+            {
+                "role": "assistant",
+                "content": "",
+                RESPONSES_OUTPUT_ITEMS_KEY: [
+                    {
+                        "type": "reasoning",
+                        "id": "rs_1",
+                        "summary": [],
+                        "encrypted_content": None,
+                    },
+                    {
+                        "type": "function_call",
+                        "id": None,
+                        "namespace": None,
+                        "status": None,
+                        "call_id": "call_1",
+                        "name": "lookup",
+                        "arguments": "{}",
+                    },
+                    {
+                        "type": "function_call",
+                        "id": "fc_2",
+                        "namespace": "weather",
+                        "status": "completed",
+                        "call_id": "call_2",
+                        "name": "lookup",
+                        "arguments": "{}",
+                    },
+                ],
+            }
+        ],
+        max_tokens=128,
+        transport_state={"stateless_replay": True},
+    )
+
+    reasoning_item, plain_call, namespaced_call = body["input"]
+    assert reasoning_item["encrypted_content"] is None
+    assert "id" not in plain_call
+    assert "namespace" not in plain_call
+    assert "status" not in plain_call
+    assert namespaced_call["id"] == "fc_2"
+    assert namespaced_call["namespace"] == "weather"
+    assert "status" not in namespaced_call
 
 
 @pytest.mark.asyncio
@@ -1240,7 +1295,7 @@ async def test_responses_transport_state_uses_prefetched_message_count() -> None
     )
 
     assert result["_transport_state"] == {
-        "api_mode": "responses",
+        "api_mode": "openai.responses",
         "previous_response_id": "resp_prefetch",
         "tool_result_start_index": 3,
     }
@@ -1342,9 +1397,9 @@ async def test_responses_transport_state_uses_prefetched_message_count() -> None
     }
     assert extract_choices_content(result) == "all done"
     assert result["_transport_state"] == {
-        "api_mode": "responses",
+        "api_mode": "openai.responses",
         "previous_response_id": "resp_2",
-        "tool_result_start_index": 3,
+        "tool_result_start_index": 4,
         "stateless_replay": True,
     }
 
@@ -1477,9 +1532,9 @@ async def test_responses_followup_falls_back_to_stateless_replay_on_missing_call
     }
     assert extract_choices_content(result) == "all done"
     assert result["_transport_state"] == {
-        "api_mode": "responses",
+        "api_mode": "openai.responses",
         "previous_response_id": "resp_2",
-        "tool_result_start_index": 3,
+        "tool_result_start_index": 4,
         "stateless_replay": True,
     }
 
@@ -1570,50 +1625,71 @@ async def test_responses_tools_and_tool_choice_use_sanitized_api_names() -> None
     await requester._http_client.aclose()
 
 
+@pytest.mark.parametrize(
+    ("api_mode", "effort_field"),
+    [
+        ("openai.chat_completions", "reasoning_effort"),
+        ("openai.responses", "reasoning"),
+        ("anthropic.messages", "output_config"),
+    ],
+)
+@pytest.mark.parametrize("effort", ["adaptive", "Vendor-Custom"])
+def test_custom_reasoning_effort_follows_api_mode_unchanged(
+    api_mode: str,
+    effort_field: str,
+    effort: str,
+) -> None:
+    cfg = ChatModelConfig(
+        api_url="https://provider.example/v1",
+        api_key="sk-test",
+        model_name="reasoning-model",
+        max_tokens=4096,
+        api_mode=api_mode,
+        reasoning_enabled=True,
+        reasoning_effort=effort,
+    )
+
+    body = build_request_body(
+        model_config=cfg,
+        messages=[{"role": "user", "content": "hello"}],
+        max_tokens=2048,
+    )
+
+    if effort_field == "reasoning_effort":
+        assert body[effort_field] == effort
+    else:
+        assert body[effort_field]["effort"] == effort
+
+
 @pytest.mark.asyncio
-async def test_thinking_effort_anthropic_style_chat_completions() -> None:
-    """thinking_enabled + anthropic style → legacy thinking + output_config.effort."""
-    requester = ModelRequester(
-        http_client=httpx.AsyncClient(),
-        token_usage_storage=cast(TokenUsageStorage, _FakeUsageStorage()),
-    )
-    fake_client = _FakeClient()
-    setattr(
-        requester,
-        "_get_openai_client_for_model",
-        lambda _cfg: cast(AsyncOpenAI, fake_client),
-    )
+async def test_thinking_effort_follows_anthropic_messages_mode() -> None:
+    """Anthropic mode maps thinking and effort without a style switch."""
     cfg = ChatModelConfig(
         api_url="https://api.anthropic.com/v1",
         api_key="sk-test",
         model_name="claude-test",
-        max_tokens=4096,
+        max_tokens=16384,
+        api_mode="anthropic.messages",
         thinking_enabled=True,
         thinking_budget_tokens=8000,
         reasoning_enabled=True,
         reasoning_effort="max",
-        reasoning_effort_style="anthropic",
     )
 
-    await requester.request(
+    body = build_request_body(
         model_config=cfg,
         messages=[{"role": "user", "content": "hello"}],
-        max_tokens=1024,
-        call_type="chat",
+        max_tokens=10000,
     )
 
-    kw = fake_client.chat.completions.last_kwargs
-    assert kw is not None
-    assert kw["extra_body"]["thinking"] == {"type": "enabled", "budget_tokens": 8000}
-    assert kw["extra_body"]["output_config"] == {"effort": "max"}
-    assert "reasoning" not in kw.get("extra_body", {})
-
-    await requester._http_client.aclose()
+    assert body["thinking"] == {"type": "enabled", "budget_tokens": 8000}
+    assert body["output_config"] == {"effort": "max"}
+    assert "reasoning" not in body
 
 
 @pytest.mark.asyncio
-async def test_thinking_effort_openai_style_responses() -> None:
-    """thinking_enabled + openai style → legacy thinking + reasoning.effort."""
+async def test_thinking_effort_follows_openai_responses_mode() -> None:
+    """Responses mode maps custom effort into reasoning.effort."""
     requester = ModelRequester(
         http_client=httpx.AsyncClient(),
         token_usage_storage=cast(TokenUsageStorage, _FakeUsageStorage()),
@@ -1643,12 +1719,11 @@ async def test_thinking_effort_openai_style_responses() -> None:
         api_key="sk-test",
         model_name="gpt-test",
         max_tokens=4096,
-        api_mode="responses",
+        api_mode="openai.responses",
         thinking_enabled=True,
         thinking_budget_tokens=8000,
         reasoning_enabled=True,
         reasoning_effort="high",
-        reasoning_effort_style="openai",
     )
 
     await requester.request(

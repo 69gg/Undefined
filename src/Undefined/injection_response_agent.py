@@ -61,7 +61,7 @@ class InjectionResponseAgent:
         """
         start_time = time.perf_counter()
         try:
-            request_kwargs: dict[str, Any] = {"temperature": 1.1}
+            request_kwargs: dict[str, Any] = {}
             if (
                 get_api_mode(self.security_config) == API_MODE_CHAT_COMPLETIONS
                 and not self.security_config.thinking_enabled

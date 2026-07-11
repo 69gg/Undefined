@@ -273,8 +273,11 @@ const FIELD_SELECT_OPTION_RULES = [
 
 /** @type {Record<string, Array<string | { value: string, label: string }>>} */
 const FIELD_SELECT_OPTIONS = {
-    api_mode: ["chat_completions", "responses"],
-    reasoning_effort_style: ["openai", "anthropic"],
+    api_mode: [
+        "openai.chat_completions",
+        "openai.responses",
+        "anthropic.messages",
+    ],
     mode: ["off", "blacklist", "allowlist"],
     agent_call_message_enabled: ["none", "agent", "tools", "clean", "all"],
     level: ["DEBUG", "INFO", "WARNING", "ERROR"],
@@ -951,119 +954,46 @@ function createAotEntry(path, entry) {
     return div;
 }
 
+const MODEL_POOL_ENTRY_DEFAULTS = {
+    model_name: "",
+    api_url: "",
+    api_key: "",
+    api_mode: "openai.chat_completions",
+    max_tokens: 4096,
+    use_proxy: false,
+    context_window_tokens: 8192,
+    queue_interval_seconds: 1.0,
+    thinking_enabled: false,
+    thinking_budget_tokens: 0,
+    thinking_include_budget: true,
+    thinking_tool_call_compat: true,
+    reasoning_content_replay: true,
+    system_prompt_as_user: false,
+    responses_tool_choice_compat: false,
+    responses_force_stateless_replay: false,
+    prompt_cache_enabled: true,
+    reasoning_enabled: false,
+    reasoning_effort: "medium",
+    stream_enabled: false,
+    request_params: {},
+};
+
 function buildAotTemplate(path, arr) {
     if (arr && arr.length > 0) {
         const template = buildEmptyStructuredValue(arr[0]);
         if (AOT_PATHS.has(path)) {
-            if (
-                !Object.prototype.hasOwnProperty.call(
-                    template,
-                    "request_params",
-                )
-            ) {
-                template.request_params = {};
-            }
-            if (!Object.prototype.hasOwnProperty.call(template, "api_mode")) {
-                template.api_mode = "chat_completions";
-            }
-            if (
-                !Object.prototype.hasOwnProperty.call(
-                    template,
-                    "thinking_tool_call_compat",
-                )
-            ) {
-                template.thinking_tool_call_compat = true;
-            }
-            if (
-                !Object.prototype.hasOwnProperty.call(
-                    template,
-                    "context_window_tokens",
-                )
-            ) {
-                template.context_window_tokens = 8192;
-            }
-            if (
-                !Object.prototype.hasOwnProperty.call(
-                    template,
-                    "reasoning_content_replay",
-                )
-            ) {
-                template.reasoning_content_replay = false;
-            }
-            if (
-                !Object.prototype.hasOwnProperty.call(
-                    template,
-                    "system_prompt_as_user",
-                )
-            ) {
-                template.system_prompt_as_user = false;
-            }
-            if (
-                !Object.prototype.hasOwnProperty.call(
-                    template,
-                    "responses_tool_choice_compat",
-                )
-            ) {
-                template.responses_tool_choice_compat = false;
-            }
-            if (
-                !Object.prototype.hasOwnProperty.call(
-                    template,
-                    "responses_force_stateless_replay",
-                )
-            ) {
-                template.responses_force_stateless_replay = false;
-            }
-            if (
-                !Object.prototype.hasOwnProperty.call(
-                    template,
-                    "prompt_cache_enabled",
-                )
-            ) {
-                template.prompt_cache_enabled = true;
-            }
-            if (
-                !Object.prototype.hasOwnProperty.call(
-                    template,
-                    "reasoning_enabled",
-                )
-            ) {
-                template.reasoning_enabled = false;
-            }
-            if (
-                !Object.prototype.hasOwnProperty.call(
-                    template,
-                    "reasoning_effort",
-                )
-            ) {
-                template.reasoning_effort = "medium";
-            }
-            if (
-                !Object.prototype.hasOwnProperty.call(
-                    template,
-                    "reasoning_effort_style",
-                )
-            ) {
-                template.reasoning_effort_style = "openai";
+            for (const [key, value] of Object.entries(
+                MODEL_POOL_ENTRY_DEFAULTS,
+            )) {
+                if (!Object.prototype.hasOwnProperty.call(template, key)) {
+                    template[key] = isPlainObject(value) ? {} : value;
+                }
             }
         }
         return template;
     }
     return {
-        model_name: "",
-        api_url: "",
-        api_key: "",
-        api_mode: "chat_completions",
-        context_window_tokens: 8192,
-        thinking_tool_call_compat: true,
-        reasoning_content_replay: false,
-        system_prompt_as_user: false,
-        reasoning_effort_style: "openai",
-        responses_tool_choice_compat: false,
-        responses_force_stateless_replay: false,
-        prompt_cache_enabled: true,
-        reasoning_enabled: false,
-        reasoning_effort: "medium",
+        ...MODEL_POOL_ENTRY_DEFAULTS,
         request_params: {},
     };
 }

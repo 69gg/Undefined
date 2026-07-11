@@ -1,6 +1,6 @@
 """统一 LLM 模型请求封装与请求体构建。
 
-``ModelRequester`` 负责 OpenAI 兼容 API 的 chat/responses/embed/rerank 调用、
+``ModelRequester`` 负责 OpenAI、Anthropic 与兼容 API 的生成/检索调用、
 流式聚合与 token 用量记录；出站清洗与思维链提取委托 ``sanitize`` / ``thinking`` 子模块。
 """
 
@@ -19,10 +19,16 @@ from typing import Any
 from urllib.parse import parse_qsl, urlsplit, urlunsplit
 
 import httpx
+from anthropic import (
+    APIConnectionError as AnthropicAPIConnectionError,
+    APIStatusError as AnthropicAPIStatusError,
+    APITimeoutError as AnthropicAPITimeoutError,
+    AsyncAnthropic,
+)
 from openai import (
-    APIConnectionError,
-    APIStatusError,
-    APITimeoutError,
+    APIConnectionError as OpenAIAPIConnectionError,
+    APIStatusError as OpenAIAPIStatusError,
+    APITimeoutError as OpenAIAPITimeoutError,
     AsyncOpenAI,
 )
 
@@ -57,14 +63,18 @@ from Undefined.ai.parsing import extract_choices_content
 from Undefined.ai.retrieval import RetrievalRequester
 from Undefined.ai.tokens import TokenCounter
 from Undefined.ai.transports import (
+    API_MODE_ANTHROPIC_MESSAGES,
     API_MODE_CHAT_COMPLETIONS,
     API_MODE_RESPONSES,
+    build_anthropic_messages_request_body,
     build_responses_request_body,
     get_api_mode,
     get_effort_payload,
-    get_effort_style,
     get_thinking_payload,
+    normalize_anthropic_result,
+    normalize_chat_completions_result,
     normalize_responses_result,
+    split_anthropic_params,
 )
 from Undefined.config import Config, EmbeddingModelConfig, RerankModelConfig, get_config
 from Undefined.context import RequestContext
@@ -110,7 +120,6 @@ _CHAT_COMPLETIONS_RESERVED_FIELDS: frozenset[str] = (
             "stream",
             "stream_options",
             "thinking",
-            "reasoning",
             "reasoning_effort",
             "output_config",
         }
@@ -131,9 +140,27 @@ _RESPONSES_RESERVED_FIELDS: frozenset[str] = (
             "stream",
             "stream_options",
             "thinking",
-            "reasoning",
             "reasoning_effort",
             "output_config",
+        }
+    )
+    | _SDK_REQUEST_OPTION_FIELDS
+)
+
+_ANTHROPIC_RESERVED_FIELDS: frozenset[str] = (
+    frozenset(
+        {
+            "model",
+            "messages",
+            "system",
+            "max_tokens",
+            "tools",
+            "tool_choice",
+            "stream",
+            "thinking",
+            "reasoning",
+            "reasoning_effort",
+            "prompt_cache_key",
         }
     )
     | _SDK_REQUEST_OPTION_FIELDS
@@ -201,7 +228,7 @@ def _build_default_prompt_cache_key(model_config: ModelConfig, call_type: str) -
 
 
 def _responses_should_fallback_to_stateless_replay(
-    exc: APIStatusError,
+    exc: OpenAIAPIStatusError,
     request_body: dict[str, Any],
     *,
     stateless_replay: bool,
@@ -256,6 +283,35 @@ def _normalize_openai_base_url(
     return normalized, default_query, True
 
 
+def _normalize_anthropic_base_url(
+    api_url: str,
+) -> tuple[str, dict[str, object] | None, bool]:
+    """Normalize Anthropic endpoint-like URLs for the SDK's /v1/messages path."""
+    try:
+        parts = urlsplit(api_url)
+    except Exception:
+        return api_url, None, False
+
+    trimmed_path = (parts.path or "").rstrip("/")
+    new_path = trimmed_path
+    changed = False
+    if trimmed_path.endswith("/v1/messages"):
+        new_path = trimmed_path[: -len("/v1/messages")]
+        changed = True
+    elif trimmed_path.endswith("/v1"):
+        new_path = trimmed_path[: -len("/v1")]
+        changed = True
+
+    default_query: dict[str, object] | None = None
+    if parts.query:
+        default_query = {
+            key: value for key, value in parse_qsl(parts.query, keep_blank_values=True)
+        }
+        changed = True
+    normalized = urlunsplit(parts._replace(path=new_path, query="", fragment=""))
+    return normalized, default_query, changed
+
+
 def _warn_ignored_request_params(
     *,
     call_type: str,
@@ -284,17 +340,25 @@ def _build_effective_request_kwargs(
     )
     thinking_override = overrides["thinking"] if "thinking" in overrides else None
     has_thinking_override = "thinking" in overrides
-    reserved_fields = (
-        _RESPONSES_RESERVED_FIELDS
-        if get_api_mode(model_config) == API_MODE_RESPONSES
-        else _CHAT_COMPLETIONS_RESERVED_FIELDS
+    output_config_override = (
+        overrides["output_config"] if "output_config" in overrides else None
     )
+    has_output_config_override = "output_config" in overrides
+    api_mode = get_api_mode(model_config)
+    if api_mode == API_MODE_RESPONSES:
+        reserved_fields = _RESPONSES_RESERVED_FIELDS
+    elif api_mode == API_MODE_ANTHROPIC_MESSAGES:
+        reserved_fields = _ANTHROPIC_RESERVED_FIELDS
+    else:
+        reserved_fields = _CHAT_COMPLETIONS_RESERVED_FIELDS
     allowed, ignored = split_reserved_request_params(
         merged,
         reserved_fields,
     )
     if has_thinking_override:
         ignored.pop("thinking", None)
+    if has_output_config_override:
+        ignored.pop("output_config", None)
     _warn_ignored_request_params(
         call_type=call_type,
         model_name=model_config.model_name,
@@ -302,6 +366,8 @@ def _build_effective_request_kwargs(
     )
     if has_thinking_override:
         allowed["thinking"] = thinking_override
+    if has_output_config_override:
+        allowed["output_config"] = output_config_override
     return allowed
 
 
@@ -329,8 +395,13 @@ class ModelRequester:
             tuple[str, str, tuple[tuple[str, str], ...] | None, bool, str],
             AsyncOpenAI,
         ] = {}
+        self._anthropic_clients: dict[
+            tuple[str, str, tuple[tuple[str, str], ...] | None, bool, str],
+            AsyncAnthropic,
+        ] = {}
         self._token_counters: dict[str, TokenCounter] = {}
         self._warned_legacy_api_urls: set[str] = set()
+        self._warned_anthropic_api_urls: set[str] = set()
         self._background_tasks: set[asyncio.Task[Any]] = set()
         self._retrieval_requester = RetrievalRequester(
             get_openai_client=self._get_openai_client_for_model,
@@ -359,7 +430,7 @@ class ModelRequester:
         max_tokens: int = 8192,
         call_type: str = "chat",
         tools: list[dict[str, Any]] | None = None,
-        tool_choice: str = "auto",
+        tool_choice: Any = "auto",
         transport_state: dict[str, Any] | None = None,
         message_count_for_transport: int | None = None,
         **kwargs: Any,
@@ -367,9 +438,7 @@ class ModelRequester:
         """发送请求到模型 API。"""
         start_time = time.perf_counter()
         cot_compat = getattr(model_config, "thinking_tool_call_compat", False)
-        reasoning_replay = bool(
-            getattr(model_config, "reasoning_content_replay", False)
-        )
+        reasoning_replay = bool(getattr(model_config, "reasoning_content_replay", True))
         api_mode = get_api_mode(model_config)
         transport_message_count = (
             message_count_for_transport
@@ -456,9 +525,11 @@ class ModelRequester:
             call_type=call_type,
             overrides=dict(kwargs),
         )
-        if bool(
-            getattr(model_config, "prompt_cache_enabled", True)
-        ) and not effective_kwargs.get("prompt_cache_key"):
+        if (
+            api_mode != API_MODE_ANTHROPIC_MESSAGES
+            and bool(getattr(model_config, "prompt_cache_enabled", True))
+            and not effective_kwargs.get("prompt_cache_key")
+        ):
             effective_kwargs["prompt_cache_key"] = _build_default_prompt_cache_key(
                 model_config,
                 call_type,
@@ -514,14 +585,15 @@ class ModelRequester:
                 log_debug_json(logger, "[API请求体]", request_body)
 
             try:
-                raw_result = await self._request_with_openai(
+                raw_result = await self._request_with_provider(
                     model_config,
                     request_body,
                 )
-            except APIStatusError as exc:
+            except (OpenAIAPIStatusError, AnthropicAPIStatusError) as exc:
                 # Responses 续轮失败：自动切换 stateless replay 重发全量 input
                 if (
                     api_mode == API_MODE_RESPONSES
+                    and isinstance(exc, OpenAIAPIStatusError)
                     and _responses_should_fallback_to_stateless_replay(
                         exc,
                         request_body,
@@ -551,7 +623,7 @@ class ModelRequester:
                         log_debug_json(
                             logger, "[API请求体][stateless replay]", request_body
                         )
-                    raw_result = await self._request_with_openai(
+                    raw_result = await self._request_with_provider(
                         model_config,
                         request_body,
                     )
@@ -566,26 +638,25 @@ class ModelRequester:
                     raw_result.get("id") or result.get("id") or ""
                 ).strip()
                 if response_id:
-                    choice = result.get("choices", [{}])[0]
-                    message = (
-                        choice.get("message", {}) if isinstance(choice, dict) else {}
-                    )
-                    tool_calls = (
-                        message.get("tool_calls", [])
-                        if isinstance(message, dict)
-                        else []
-                    )
                     # 记录续轮锚点：下一轮只发送 tool_result 及之后的消息
                     result["_transport_state"] = {
                         "api_mode": api_mode,
                         "previous_response_id": response_id,
-                        "tool_result_start_index": transport_message_count
-                        + (1 if tool_calls else 0),
+                        # 调用方会先把本轮 assistant 响应追加到本地历史；
+                        # previous_response_id 已经包含它，下一轮只发送其后的新增输入。
+                        "tool_result_start_index": transport_message_count + 1,
                     }
                     if responses_stateless_replay:
                         result["_transport_state"]["stateless_replay"] = True
+            elif api_mode == API_MODE_ANTHROPIC_MESSAGES:
+                result = normalize_anthropic_result(
+                    raw_result,
+                    api_to_internal if api_to_internal else None,
+                )
             else:
-                result = self._normalize_result(raw_result)
+                result = normalize_chat_completions_result(
+                    self._normalize_result(raw_result)
+                )
             if api_to_internal:
                 result["_tool_name_map"] = {
                     "api_to_internal": api_to_internal,
@@ -626,7 +697,7 @@ class ModelRequester:
             )
 
             return result
-        except APIStatusError as exc:
+        except (OpenAIAPIStatusError, AnthropicAPIStatusError) as exc:
             response = exc.response
             try:
                 body = (
@@ -651,23 +722,25 @@ class ModelRequester:
                             idx = -1
                         if 0 <= idx < len(request_body["tools"]):
                             tool = request_body["tools"][idx]
-                            tool_name = (
-                                tool.get("function", {}).get("name")
-                                if isinstance(tool, dict)
-                                else ""
-                            )
+                            tool_name = ""
                             desc_len: int | None = None
                             desc_preview_text = ""
                             if isinstance(tool, dict):
                                 function = tool.get("function", {})
                                 if isinstance(function, dict):
+                                    tool_name = str(function.get("name") or "")
                                     desc = function.get("description")
-                                    if desc is not None:
-                                        desc_str = (
-                                            desc if isinstance(desc, str) else str(desc)
-                                        )
-                                        desc_len = len(desc_str)
-                                        desc_preview_text = desc_preview(desc_str)
+                                else:
+                                    desc = None
+                                if not tool_name:
+                                    tool_name = str(tool.get("name") or "")
+                                    desc = tool.get("description")
+                                if desc is not None:
+                                    desc_str = (
+                                        desc if isinstance(desc, str) else str(desc)
+                                    )
+                                    desc_len = len(desc_str)
+                                    desc_preview_text = desc_preview(desc_str)
                             logger.error(
                                 "[tools.invalid] index=%s name=%s desc_len=%s desc=%s param=%s",
                                 idx,
@@ -679,12 +752,17 @@ class ModelRequester:
             logger.error(
                 "[API响应错误] status=%s request_id=%s url=%s body=%s",
                 exc.status_code,
-                exc.request_id or "",
+                getattr(exc, "request_id", "") or "",
                 response.request.url,
                 redact_string(body),
             )
             raise
-        except (APIConnectionError, APITimeoutError) as exc:
+        except (
+            OpenAIAPIConnectionError,
+            OpenAIAPITimeoutError,
+            AnthropicAPIConnectionError,
+            AnthropicAPITimeoutError,
+        ) as exc:
             logger.error("[API连接错误] type=%s message=%s", type(exc).__name__, exc)
             raise
         except Exception as exc:
@@ -711,6 +789,15 @@ class ModelRequester:
                 redact_string(thinking),
             )
 
+    async def _request_with_provider(
+        self,
+        model_config: ModelConfig,
+        request_body: dict[str, Any],
+    ) -> dict[str, Any]:
+        if get_api_mode(model_config) == API_MODE_ANTHROPIC_MESSAGES:
+            return await self._request_with_anthropic(model_config, request_body)
+        return await self._request_with_openai(model_config, request_body)
+
     async def _request_with_openai(
         self,
         model_config: ModelConfig,
@@ -721,7 +808,6 @@ class ModelRequester:
             if bool(getattr(model_config, "stream_enabled", False)):
                 try:
                     return await self._request_with_openai_streaming(
-                        # client, model_config, request_body
                         client,
                         model_config,
                         request_body,
@@ -749,6 +835,52 @@ class ModelRequester:
             response = await client.chat.completions.create(**params)
             return self._response_to_dict(response)
 
+    async def _request_with_anthropic(
+        self,
+        model_config: ModelConfig,
+        request_body: dict[str, Any],
+    ) -> dict[str, Any]:
+        client = self._get_anthropic_client_for_model(model_config)
+        async with self._track_openai_client_use(client):
+            if bool(getattr(model_config, "stream_enabled", False)):
+                try:
+                    return await self._request_with_anthropic_streaming(
+                        client,
+                        request_body,
+                    )
+                except Exception as exc:
+                    if not should_fallback_from_stream(exc):
+                        raise
+                    logger.warning(
+                        "[API流式回退] model=%s api_mode=%s reason=%s",
+                        getattr(model_config, "model_name", ""),
+                        get_api_mode(model_config),
+                        type(exc).__name__,
+                    )
+            params, extra_body = split_anthropic_params(
+                without_stream_request_fields(request_body)
+            )
+            if extra_body:
+                params["extra_body"] = extra_body
+            response = await client.messages.create(**params)
+            return self._response_to_dict(response)
+
+    async def _request_with_anthropic_streaming(
+        self,
+        client: AsyncAnthropic,
+        request_body: dict[str, Any],
+    ) -> dict[str, Any]:
+        params, extra_body = split_anthropic_params(
+            without_stream_request_fields(request_body)
+        )
+        if extra_body:
+            params["extra_body"] = extra_body
+        async with client.messages.stream(**params) as stream:
+            async for _event in stream:
+                pass
+            response = await stream.get_final_message()
+        return self._response_to_dict(response)
+
     async def _request_with_openai_streaming(
         self,
         client: AsyncOpenAI,
@@ -765,34 +897,25 @@ class ModelRequester:
             )
         ensure_chat_stream_usage_options(stream_body)
         return await self._stream_chat_completions_request(
-            # client, stream_body, model_config
             client,
             stream_body,
-            model_config,
         )
 
     async def _stream_chat_completions_request(
         self,
         client: AsyncOpenAI,
         request_body: dict[str, Any],
-        model_config: ModelConfig,
     ) -> dict[str, Any]:
         params, extra_body = split_chat_completion_params(request_body)
         if extra_body:
             params["extra_body"] = extra_body
         response = await client.chat.completions.create(**params)
 
-        reasoning_replay = bool(
-            getattr(model_config, "reasoning_content_replay", False)
-        )
         chunks: list[dict[str, Any]] = []
         async for chunk in response:
             chunk_dict = self._response_to_dict(chunk)
             chunks.append(chunk_dict)
-        return aggregate_chat_completions_stream(
-            chunks,
-            reasoning_replay=reasoning_replay,
-        )
+        return aggregate_chat_completions_stream(chunks)
 
     async def _stream_responses_request(
         self,
@@ -852,10 +975,33 @@ class ModelRequester:
             model_config=model_config,
         )
 
+    def _get_anthropic_client_for_model(
+        self, model_config: ModelConfig
+    ) -> AsyncAnthropic:
+        base_url, default_query, changed = _normalize_anthropic_base_url(
+            model_config.api_url
+        )
+        if changed and model_config.api_url not in self._warned_anthropic_api_urls:
+            self._warned_anthropic_api_urls.add(model_config.api_url)
+            logger.warning(
+                "[配置兼容] Anthropic SDK 会自动请求 /v1/messages；"
+                "已规范化 base_url=%s（原值=%s）",
+                base_url,
+                model_config.api_url,
+            )
+        return self._get_anthropic_client(
+            base_url=base_url,
+            api_key=model_config.api_key,
+            default_query=default_query,
+            model_config=model_config,
+        )
+
     def clear_client_cache(self) -> None:
         old_openai_clients = list(self._openai_clients.values())
+        old_anthropic_clients = list(self._anthropic_clients.values())
         self._openai_clients.clear()
-        for client in old_openai_clients:
+        self._anthropic_clients.clear()
+        for client in [*old_openai_clients, *old_anthropic_clients]:
             self._openai_client_http_clients.pop(id(client), None)
         old_clients = list(self._owned_http_clients.values())
         self._owned_http_clients.clear()
@@ -863,6 +1009,7 @@ class ModelRequester:
 
     async def aclose(self) -> None:
         self._openai_clients.clear()
+        self._anthropic_clients.clear()
         closing_tasks = list(self._closing_http_client_tasks.values())
         if closing_tasks:
             await asyncio.gather(*closing_tasks, return_exceptions=True)
@@ -925,7 +1072,7 @@ class ModelRequester:
 
     @asynccontextmanager
     async def _track_openai_client_use(
-        self, client: AsyncOpenAI
+        self, client: AsyncOpenAI | AsyncAnthropic
     ) -> AsyncIterator[None]:
         http_client = self._openai_client_http_clients.get(id(client))
         if http_client is None:
@@ -1010,6 +1157,46 @@ class ModelRequester:
             http_client=http_client,
         )
         self._openai_clients[cache_key] = client
+        self._openai_client_http_clients[id(client)] = http_client
+        return client
+
+    def _get_anthropic_client(
+        self,
+        base_url: str,
+        api_key: str,
+        default_query: dict[str, object] | None,
+        model_config: ModelConfig,
+    ) -> AsyncAnthropic:
+        query_key = None
+        if default_query:
+            query_key = tuple(
+                sorted((str(key), str(value)) for key, value in default_query.items())
+            )
+        use_proxy = bool(getattr(model_config, "use_proxy", False))
+        proxy_config: Any | None = None
+        if self._config_getter is not None:
+            try:
+                proxy_config = self._config_getter()
+            except Exception:
+                proxy_config = None
+        proxy = get_configured_proxy(
+            base_url,
+            use_proxy=use_proxy,
+            config=proxy_config,
+        )
+        cache_key = (base_url, api_key, query_key, use_proxy, proxy or "")
+        client = self._anthropic_clients.get(cache_key)
+        if client is not None:
+            return client
+        http_client = self._get_http_client_for_model(use_proxy, proxy)
+        client = AsyncAnthropic(
+            api_key=api_key,
+            base_url=base_url,
+            timeout=480.0,
+            default_query=default_query,
+            http_client=http_client,
+        )
+        self._anthropic_clients[cache_key] = client
         self._openai_client_http_clients[id(client)] = http_client
         return client
 
@@ -1130,7 +1317,7 @@ def build_request_body(
     messages: list[dict[str, Any]],
     max_tokens: int,
     tools: list[dict[str, Any]] | None = None,
-    tool_choice: str = "auto",
+    tool_choice: Any = "auto",
     internal_to_api: dict[str, str] | None = None,
     transport_state: dict[str, Any] | None = None,
     **kwargs: Any,
@@ -1149,7 +1336,6 @@ def build_request_body(
             extra_kwargs["thinking"] = normalized
 
     if api_mode == API_MODE_RESPONSES:
-        extra_kwargs.pop("reasoning", None)
         extra_kwargs.pop("reasoning_effort", None)
         extra_kwargs.pop("output_config", None)
         return build_responses_request_body(
@@ -1163,13 +1349,22 @@ def build_request_body(
             transport_state=transport_state,
         )
 
+    if api_mode == API_MODE_ANTHROPIC_MESSAGES:
+        return build_anthropic_messages_request_body(
+            model_config,
+            messages,
+            max_tokens,
+            tools=tools,
+            tool_choice=tool_choice,
+            extra_kwargs=extra_kwargs,
+        )
+
     body: dict[str, Any] = {
         "model": model_config.model_name,
         "messages": prepare_chat_completion_messages(model_config, messages),
         "max_tokens": max_tokens,
     }
 
-    extra_kwargs.pop("reasoning", None)
     extra_kwargs.pop("reasoning_effort", None)
     extra_kwargs.pop("output_config", None)
 
@@ -1179,12 +1374,7 @@ def build_request_body(
 
     effort_payload = get_effort_payload(model_config)
     if effort_payload is not None:
-        style = get_effort_style(model_config)
-        # Anthropic 风格走 output_config，OpenAI 风格走 reasoning_effort
-        if style == "anthropic":
-            body["output_config"] = effort_payload
-        else:
-            body["reasoning_effort"] = effort_payload["effort"]
+        body["reasoning_effort"] = effort_payload["effort"]
 
     if tools:
         body["tools"] = tools

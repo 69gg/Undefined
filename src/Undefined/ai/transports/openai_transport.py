@@ -4,18 +4,30 @@ import json
 from copy import deepcopy
 from typing import Any
 
-API_MODE_CHAT_COMPLETIONS = "chat_completions"
-API_MODE_RESPONSES = "responses"
-_VALID_API_MODES = {API_MODE_CHAT_COMPLETIONS, API_MODE_RESPONSES}
+from Undefined.config.api_modes import (
+    API_MODE_OPENAI_CHAT_COMPLETIONS,
+    API_MODE_OPENAI_RESPONSES,
+    normalize_api_mode,
+)
+
+API_MODE_CHAT_COMPLETIONS = API_MODE_OPENAI_CHAT_COMPLETIONS
+API_MODE_RESPONSES = API_MODE_OPENAI_RESPONSES
 RESPONSES_OUTPUT_ITEMS_KEY = "_responses_output_items"
+CHAT_REASONING_REPLAY_KEY = "_chat_reasoning_replay"
+RESPONSES_REASONING_REPLAY_KEY = "_responses_reasoning_replay"
 _RESPONSES_REPLAY_STRIP_KEYS = {"status"}
+_RESPONSES_REASONING_ITEM_TYPES = {"reasoning", "compaction"}
 
-
-def normalize_api_mode(value: Any, default: str = API_MODE_CHAT_COMPLETIONS) -> str:
-    text = str(value or default).strip().lower()
-    if text not in _VALID_API_MODES:
-        return default
-    return text
+CHAT_REASONING_WIRE_FIELDS: tuple[str, ...] = (
+    "reasoning_content",
+    "reasoning_details",
+    "reasoning",
+    "encrypted_content",
+    "thinking",
+)
+_RESPONSES_COMPAT_REASONING_FIELDS: frozenset[str] = frozenset(
+    field for field in CHAT_REASONING_WIRE_FIELDS if field != "reasoning"
+)
 
 
 def get_api_mode(model_config: Any) -> str:
@@ -25,14 +37,11 @@ def get_api_mode(model_config: Any) -> str:
 
 
 def normalize_reasoning_effort(value: Any, default: str = "medium") -> str:
-    return str(value or default).strip().lower()
+    return str(value if value is not None else default).strip() or default
 
 
 def get_reasoning_payload(model_config: Any) -> dict[str, Any] | None:
     return get_effort_payload(model_config)
-
-
-_VALID_REASONING_EFFORT_STYLES = {"openai", "anthropic"}
 
 
 def get_thinking_payload(model_config: Any) -> dict[str, Any] | None:
@@ -54,15 +63,6 @@ def get_effort_payload(model_config: Any) -> dict[str, Any] | None:
             getattr(model_config, "reasoning_effort", "medium")
         )
     }
-
-
-def get_effort_style(model_config: Any) -> str:
-    style = (
-        str(getattr(model_config, "reasoning_effort_style", "openai") or "openai")
-        .strip()
-        .lower()
-    )
-    return style if style in _VALID_REASONING_EFFORT_STYLES else "openai"
 
 
 def _stringify_content(value: Any) -> str:
@@ -116,6 +116,109 @@ def _stringify_content(value: Any) -> str:
             return _stringify_content(value.get("content"))
         return json.dumps(value, ensure_ascii=False, default=str)
     return str(value)
+
+
+def _reasoning_detail_text(value: Any) -> str:
+    if not isinstance(value, list):
+        return ""
+    chunks: list[str] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        item_type = str(item.get("type") or "").strip().lower()
+        if item_type in {"reasoning.text", "reasoning_text"}:
+            text = item.get("text")
+            if text is not None:
+                chunks.append(str(text))
+        elif item_type in {"reasoning.summary", "summary_text"}:
+            summary = item.get("summary")
+            if summary is None:
+                summary = item.get("text")
+            if summary is not None:
+                chunks.append(str(summary))
+    return "\n".join(chunk for chunk in chunks if chunk).strip()
+
+
+def _structured_reasoning_text(value: Any) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, list):
+        detail_text = _reasoning_detail_text(value)
+        if detail_text:
+            return detail_text
+        chunks = [_structured_reasoning_text(item) for item in value]
+        return "\n".join(chunk for chunk in chunks if chunk).strip()
+    if not isinstance(value, dict):
+        return ""
+    for key in ("text", "summary", "content", "reasoning_content", "thinking"):
+        if key not in value:
+            continue
+        text = _structured_reasoning_text(value.get(key))
+        if text:
+            return text
+    return ""
+
+
+def extract_chat_reasoning_text(message: dict[str, Any]) -> str:
+    """Extract readable reasoning without exposing opaque encrypted payloads."""
+    direct = message.get("reasoning_content")
+    if direct is not None:
+        text = _structured_reasoning_text(direct)
+        if text:
+            return text
+    details = _reasoning_detail_text(message.get("reasoning_details"))
+    if details:
+        return details
+    for key in ("reasoning", "thinking"):
+        text = _structured_reasoning_text(message.get(key))
+        if text:
+            return text
+    return ""
+
+
+def copy_chat_reasoning_wire_fields(message: dict[str, Any]) -> dict[str, Any]:
+    """Copy only known reasoning fields that compatible Chat APIs round-trip."""
+    return {
+        key: deepcopy(message[key])
+        for key in CHAT_REASONING_WIRE_FIELDS
+        if key in message and message[key] is not None
+    }
+
+
+def normalize_chat_completions_result(result: dict[str, Any]) -> dict[str, Any]:
+    """Attach readable and lossless reasoning metadata to Chat responses."""
+    choices = result.get("choices")
+    if not isinstance(choices, list):
+        return result
+
+    normalized = dict(result)
+    normalized_choices: list[Any] = []
+    changed = False
+    for choice in choices:
+        if not isinstance(choice, dict):
+            normalized_choices.append(choice)
+            continue
+        message = choice.get("message")
+        if not isinstance(message, dict):
+            normalized_choices.append(choice)
+            continue
+        wire_fields = copy_chat_reasoning_wire_fields(message)
+        readable = extract_chat_reasoning_text(message)
+        if not wire_fields and not readable:
+            normalized_choices.append(choice)
+            continue
+        normalized_message = dict(message)
+        if wire_fields:
+            normalized_message[CHAT_REASONING_REPLAY_KEY] = wire_fields
+        if readable and normalized_message.get("reasoning_content") is None:
+            normalized_message["reasoning_content"] = readable
+        normalized_choice = dict(choice)
+        normalized_choice["message"] = normalized_message
+        normalized_choices.append(normalized_choice)
+        changed = True
+    if changed:
+        normalized["choices"] = normalized_choices
+    return normalized
 
 
 def _response_text_part_type(role: str) -> str:
@@ -200,9 +303,30 @@ def _content_to_response_parts(
     return parts
 
 
+def _responses_compat_reasoning_fields(
+    message: dict[str, Any],
+    *,
+    allow_readable_fallback: bool,
+) -> dict[str, Any]:
+    raw_reasoning = message.get(RESPONSES_REASONING_REPLAY_KEY)
+    if isinstance(raw_reasoning, dict):
+        replay_fields = {
+            str(key): deepcopy(value)
+            for key, value in raw_reasoning.items()
+            if str(key) in _RESPONSES_COMPAT_REASONING_FIELDS and value is not None
+        }
+        if replay_fields:
+            return replay_fields
+    if allow_readable_fallback and message.get("reasoning_content") is not None:
+        return {"reasoning_content": deepcopy(message["reasoning_content"])}
+    return {}
+
+
 def _message_to_responses_input(
     message: dict[str, Any],
     internal_to_api: dict[str, str],
+    *,
+    preserve_reasoning: bool,
 ) -> list[dict[str, Any]]:
     role = str(message.get("role", "")).strip().lower()
     if not role:
@@ -223,13 +347,64 @@ def _message_to_responses_input(
     if role == "assistant":
         output_items = message.get(RESPONSES_OUTPUT_ITEMS_KEY)
         if isinstance(output_items, list):
-            replay_items = _copy_responses_output_items(output_items, internal_to_api)
+            replay_items = _copy_responses_output_items(
+                output_items,
+                internal_to_api,
+                preserve_reasoning=preserve_reasoning,
+            )
             if replay_items:
+                if preserve_reasoning:
+                    has_original_reasoning = any(
+                        str(item.get("type") or "").strip().lower()
+                        in _RESPONSES_REASONING_ITEM_TYPES
+                        or any(
+                            field in item and item[field] is not None
+                            for field in _RESPONSES_COMPAT_REASONING_FIELDS
+                        )
+                        for item in replay_items
+                    )
+                    compat_reasoning = _responses_compat_reasoning_fields(
+                        message,
+                        allow_readable_fallback=not has_original_reasoning,
+                    )
+                    if compat_reasoning:
+                        assistant_item = next(
+                            (
+                                item
+                                for item in replay_items
+                                if str(item.get("type") or "").strip().lower()
+                                == "message"
+                                and str(item.get("role") or "").strip().lower()
+                                == "assistant"
+                            ),
+                            None,
+                        )
+                        if assistant_item is None:
+                            assistant_item = {
+                                "type": "message",
+                                "role": "assistant",
+                                "content": _content_to_response_parts(
+                                    message.get("content"), role="assistant"
+                                ),
+                            }
+                            replay_items.insert(0, assistant_item)
+                        for key, value in compat_reasoning.items():
+                            assistant_item[str(key)] = deepcopy(value)
                 return replay_items
 
     items: list[dict[str, Any]] = []
     content_parts = _content_to_response_parts(message.get("content"), role=role)
-    if role in {"user", "assistant", "system", "developer"} and content_parts:
+    compat_reasoning = (
+        _responses_compat_reasoning_fields(
+            message,
+            allow_readable_fallback=True,
+        )
+        if role == "assistant" and preserve_reasoning
+        else {}
+    )
+    if role in {"user", "assistant", "system", "developer"} and (
+        content_parts or compat_reasoning
+    ):
         item: dict[str, Any] = {
             "type": "message",
             "role": role,
@@ -239,6 +414,8 @@ def _message_to_responses_input(
             phase = message.get("phase")
             if phase is not None:
                 item["phase"] = str(phase)
+            for key, value in compat_reasoning.items():
+                item[key] = value
         items.append(item)
 
     if role == "assistant":
@@ -287,20 +464,20 @@ def _messages_to_responses_input(
     internal_to_api: dict[str, str],
     *,
     include_system: bool,
+    preserve_reasoning: bool,
 ) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     for message in messages:
         role = str(message.get("role", "")).strip().lower()
         if not include_system and role in {"system", "developer"}:
             continue
-        if (
-            not include_system
-            and role == "assistant"
-            and not message.get("content")
-            and not message.get("tool_calls")
-        ):
-            continue
-        items.extend(_message_to_responses_input(message, internal_to_api))
+        items.extend(
+            _message_to_responses_input(
+                message,
+                internal_to_api,
+                preserve_reasoning=preserve_reasoning,
+            )
+        )
     return items
 
 
@@ -376,6 +553,8 @@ def _normalize_responses_tool_choice(
 def _copy_responses_output_items(
     items: list[Any],
     name_mapping: dict[str, str] | None = None,
+    *,
+    preserve_reasoning: bool = True,
 ) -> list[dict[str, Any]]:
     copied: list[dict[str, Any]] = []
     for item in items:
@@ -383,11 +562,40 @@ def _copy_responses_output_items(
             continue
         cloned = deepcopy(item)
         item_type = str(cloned.get("type", "")).strip().lower()
+        if not preserve_reasoning and item_type in _RESPONSES_REASONING_ITEM_TYPES:
+            continue
+        if not preserve_reasoning:
+            for key in CHAT_REASONING_WIRE_FIELDS:
+                cloned.pop(key, None)
+            content = cloned.get("content")
+            if isinstance(content, list):
+                cloned["content"] = [
+                    part
+                    for part in content
+                    if not isinstance(part, dict)
+                    or (
+                        str(part.get("type") or "").strip().lower()
+                        not in {
+                            "reasoning_text",
+                            "summary_text",
+                            "thinking",
+                            "redacted_thinking",
+                        }
+                        and not str(part.get("type") or "")
+                        .strip()
+                        .lower()
+                        .startswith("reasoning.")
+                    )
+                ]
         if item_type == "function_call" and name_mapping:
             name = str(cloned.get("name", "")).strip()
             if name:
                 cloned["name"] = name_mapping.get(name, name)
         if item_type == "function_call":
+            if cloned.get("namespace") is None:
+                cloned.pop("namespace", None)
+            if cloned.get("id") is None:
+                cloned.pop("id", None)
             item_id = str(cloned.get("id") or "").strip()
             call_id = str(cloned.get("call_id") or "").strip()
             # Some compatibility gateways incorrectly mirror the model's call_id into
@@ -442,12 +650,14 @@ def build_responses_request_body(
     }
     thinking = get_thinking_payload(model_config)
     effort_payload = get_effort_payload(model_config)
+    reasoning_value = extra_kwargs.pop("reasoning", None)
+    if reasoning_value is not None and not isinstance(reasoning_value, dict):
+        raise ValueError("Responses reasoning 请求参数必须是对象")
+    reasoning = deepcopy(reasoning_value) if isinstance(reasoning_value, dict) else {}
     if effort_payload is not None:
-        style = get_effort_style(model_config)
-        if style == "anthropic":
-            body["output_config"] = effort_payload
-        else:
-            body["reasoning"] = effort_payload
+        reasoning["effort"] = effort_payload["effort"]
+    if reasoning:
+        body["reasoning"] = reasoning
     if thinking is not None:
         body["thinking"] = thinking
     if tools:
@@ -500,25 +710,36 @@ def build_responses_request_body(
         extra_kwargs["text"] = text_value
 
     include_values = _normalize_include_values(extra_kwargs.pop("include", None))
-    reasoning_replay = bool(getattr(model_config, "reasoning_content_replay", False))
-    if (
-        stateless_replay or reasoning_replay
-    ) and "reasoning.encrypted_content" not in include_values:
-        include_values.append("reasoning.encrypted_content")
+    reasoning_replay = bool(getattr(model_config, "reasoning_content_replay", True))
+    if reasoning_replay:
+        if "reasoning.encrypted_content" not in include_values:
+            include_values.append("reasoning.encrypted_content")
+    else:
+        include_values = [
+            value for value in include_values if value != "reasoning.encrypted_content"
+        ]
     if include_values:
         body["include"] = include_values
+
+    instructions = _messages_to_instruction_text(messages)
+    if instructions:
+        # previous_response_id 不会继承上一轮 instructions，续轮时也必须显式发送。
+        body["instructions"] = instructions
 
     if previous_response_id and not stateless_replay:
         body["previous_response_id"] = previous_response_id
         body["input"] = _messages_to_responses_input(
-            messages[start_index:], internal_to_api, include_system=True
+            messages[start_index:],
+            internal_to_api,
+            include_system=True,
+            preserve_reasoning=reasoning_replay,
         )
     else:
-        instructions = _messages_to_instruction_text(messages)
-        if instructions:
-            body["instructions"] = instructions
         body["input"] = _messages_to_responses_input(
-            messages, internal_to_api, include_system=False
+            messages,
+            internal_to_api,
+            include_system=False,
+            preserve_reasoning=reasoning_replay,
         )
 
     body.update(extra_kwargs)
@@ -528,7 +749,12 @@ def build_responses_request_body(
 def _collect_reasoning_text(output: list[dict[str, Any]]) -> str:
     chunks: list[str] = []
     for item in output:
-        if not isinstance(item, dict) or item.get("type") != "reasoning":
+        if not isinstance(item, dict):
+            continue
+        direct_text = extract_chat_reasoning_text(item)
+        if direct_text:
+            chunks.append(direct_text)
+        if item.get("type") != "reasoning":
             continue
         content = item.get("content")
         if isinstance(content, list):
@@ -613,7 +839,18 @@ def normalize_responses_result(
     output_items = _copy_responses_output_items(output, api_to_internal)
     if output_items:
         message[RESPONSES_OUTPUT_ITEMS_KEY] = output_items
+    # Official Responses uses root-level `reasoning` for request configuration,
+    # not generated reasoning content. Native content lives in output items.
+    root_reasoning_fields = {
+        key: deepcopy(result[key])
+        for key in _RESPONSES_COMPAT_REASONING_FIELDS
+        if key in result and result[key] is not None
+    }
+    if root_reasoning_fields:
+        message[RESPONSES_REASONING_REPLAY_KEY] = root_reasoning_fields
     reasoning_content = _collect_reasoning_text(output)
+    if not reasoning_content:
+        reasoning_content = extract_chat_reasoning_text(root_reasoning_fields)
     if reasoning_content:
         message["reasoning_content"] = reasoning_content
     if tool_calls:
