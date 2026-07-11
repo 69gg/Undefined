@@ -299,10 +299,16 @@ def _thinking_payload(model_config: Any, max_tokens: int) -> dict[str, Any] | No
     if not bool(getattr(model_config, "thinking_include_budget", True)):
         return {"type": "adaptive"}
     budget = int(getattr(model_config, "thinking_budget_tokens", 0))
-    if budget < 1024 or budget >= max_tokens:
+    if budget < 1024:
         raise ValueError(
-            "Anthropic 手动 thinking 要求 thinking_budget_tokens >= 1024 "
-            f"且小于本次 max_tokens ({max_tokens})，当前为 {budget}；"
+            "Anthropic 手动 thinking 要求 thinking_budget_tokens >= 1024，"
+            f"当前为 {budget}；如需 adaptive thinking，请设置 "
+            "thinking_include_budget=false"
+        )
+    if max_tokens > 0 and budget >= max_tokens:
+        raise ValueError(
+            "Anthropic 手动 thinking 要求 thinking_budget_tokens "
+            f"小于本次 max_tokens ({max_tokens})，当前为 {budget}；"
             "如需 adaptive thinking，请设置 thinking_include_budget=false"
         )
     return {"type": "enabled", "budget_tokens": budget}
@@ -328,10 +334,14 @@ def _validate_thinking_override(value: Any, max_tokens: int) -> dict[str, Any] |
         budget = int(raw_budget) if raw_budget is not None else 0
     except (TypeError, ValueError) as exc:
         raise ValueError("Anthropic enabled thinking 必须提供 budget_tokens") from exc
-    if budget < 1024 or budget >= max_tokens:
+    if budget < 1024:
         raise ValueError(
-            "Anthropic 手动 thinking 要求 budget_tokens >= 1024 "
-            f"且小于本次 max_tokens ({max_tokens})，当前为 {budget}"
+            f"Anthropic 手动 thinking 要求 budget_tokens >= 1024，当前为 {budget}"
+        )
+    if max_tokens > 0 and budget >= max_tokens:
+        raise ValueError(
+            "Anthropic 手动 thinking 要求 budget_tokens "
+            f"小于本次 max_tokens ({max_tokens})，当前为 {budget}"
         )
     thinking["type"] = "enabled"
     thinking["budget_tokens"] = budget
@@ -348,10 +358,9 @@ def build_anthropic_messages_request_body(
     extra_kwargs: dict[str, Any],
 ) -> dict[str, Any]:
     """Build a canonical Anthropic Messages request body."""
-    body: dict[str, Any] = {
-        "model": getattr(model_config, "model_name"),
-        "max_tokens": max_tokens,
-    }
+    body: dict[str, Any] = {"model": getattr(model_config, "model_name")}
+    if max_tokens > 0:
+        body["max_tokens"] = max_tokens
     preserve_reasoning = bool(getattr(model_config, "reasoning_content_replay", True))
     body["messages"] = _messages_to_anthropic(
         messages,

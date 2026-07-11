@@ -327,7 +327,14 @@ async def test_execute_auto_reply_send_msg_cb_passes_history_message(
 
 
 @pytest.mark.asyncio
-async def test_execute_queued_llm_call_coerces_max_tokens_to_int() -> None:
+@pytest.mark.parametrize(
+    ("raw_max_tokens", "expected_max_tokens"),
+    [("123", 123), (0, 0), (-5, -5), (None, 4096)],
+)
+async def test_execute_queued_llm_call_preserves_non_positive_max_tokens(
+    raw_max_tokens: Any,
+    expected_max_tokens: int,
+) -> None:
     coordinator: Any = object.__new__(AICoordinator)
     model_config = SimpleNamespace(model_name="chat-model", max_tokens="4096")
     result = {"choices": [{"message": {"content": "ok"}}]}
@@ -345,7 +352,7 @@ async def test_execute_queued_llm_call_coerces_max_tokens_to_int() -> None:
             "request_id": "req-1",
             "model_config": model_config,
             "messages": [{"role": "user", "content": "hello"}],
-            "max_tokens": "123",
+            "max_tokens": raw_max_tokens,
             "call_type": "test_call",
             "skip_prefetch_tools": True,
         },
@@ -353,6 +360,6 @@ async def test_execute_queued_llm_call_coerces_max_tokens_to_int() -> None:
 
     request_model.assert_awaited_once()
     assert request_model.await_args is not None
-    assert request_model.await_args.kwargs["max_tokens"] == 123
+    assert request_model.await_args.kwargs["max_tokens"] == expected_max_tokens
     assert request_model.await_args.kwargs["skip_prefetch_tools"] is True
     set_llm_call_result.assert_called_once_with("req-1", result)

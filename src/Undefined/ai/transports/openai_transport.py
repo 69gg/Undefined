@@ -644,10 +644,9 @@ def build_responses_request_body(
     internal_to_api: dict[str, str],
     transport_state: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    body: dict[str, Any] = {
-        "model": getattr(model_config, "model_name"),
-        "max_output_tokens": max_tokens,
-    }
+    body: dict[str, Any] = {"model": getattr(model_config, "model_name")}
+    if max_tokens > 0:
+        body["max_output_tokens"] = max_tokens
     thinking = get_thinking_payload(model_config)
     effort_payload = get_effort_payload(model_config)
     reasoning_value = extra_kwargs.pop("reasoning", None)

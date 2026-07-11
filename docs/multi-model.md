@@ -46,6 +46,7 @@ thinking_enabled = true
 thinking_include_budget = false  # adaptive thinking
 reasoning_content_replay = true
 # 其他字段（max_tokens、reasoning_*、stream_enabled 等）可选，缺省继承主模型
+# max_tokens 设为 0 或负数时不发送 API 上限字段，使用服务端默认值
 
 [[models.chat.pool.models]]
 model_name = "deepseek-chat"
@@ -78,6 +79,8 @@ reasoning_content_replay = true
 | `random` | 每次随机选择池中模型 |
 
 > `pool.models` 中只有 `model_name` 必填，其余字段缺省时继承主模型配置。每个条目均可独立设置 `api_mode`、完整 `thinking_*` / `reasoning_*`、`reasoning_content_replay`、Responses 兼容开关、`stream_enabled` 与 `request_params`。
+
+`max_tokens` 也会按条目独立继承或覆盖；显式设为 `0` 或负数会保留该值，并在实际模型请求中省略对应 token 上限字段。
 
 ## 私聊使用方法
 

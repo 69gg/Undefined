@@ -350,7 +350,7 @@ ws_url = "ws://127.0.0.1:3001"
 api_url = "https://provider.example"
 api_key = "chat-key"
 model_name = "chat-model"
-max_tokens = 8192
+max_tokens = 0
 api_mode = "anthropic.messages"
 reasoning_content_replay = false
 reasoning_enabled = true
@@ -364,7 +364,7 @@ strategy = "round_robin"
 api_url = "https://pool.example/v1"
 api_key = "pool-key"
 model_name = "chat-pool"
-max_tokens = 4096
+max_tokens = -2
 api_mode = "openai.responses"
 reasoning_content_replay = true
 reasoning_enabled = true
@@ -374,6 +374,7 @@ reasoning_effort = "adaptive"
 api_url = "https://provider.example"
 api_key = "vision-key"
 model_name = "vision-model"
+max_tokens = -1
 api_mode = "anthropic.messages"
 reasoning_content_replay = false
 reasoning_enabled = true
@@ -383,7 +384,7 @@ reasoning_effort = "Vendor-Custom"
 api_url = "https://provider.example"
 api_key = "security-key"
 model_name = "security-model"
-max_tokens = 4096
+max_tokens = 0
 api_mode = "anthropic.messages"
 reasoning_content_replay = false
 reasoning_enabled = true
@@ -393,7 +394,7 @@ reasoning_effort = "Vendor-Custom"
 api_url = "https://provider.example"
 api_key = "naga-key"
 model_name = "naga-model"
-max_tokens = 4096
+max_tokens = -1
 api_mode = "anthropic.messages"
 reasoning_content_replay = false
 reasoning_enabled = true
@@ -403,7 +404,7 @@ reasoning_effort = "Vendor-Custom"
 api_url = "https://provider.example"
 api_key = "agent-key"
 model_name = "agent-model"
-max_tokens = 8192
+max_tokens = 0
 api_mode = "anthropic.messages"
 reasoning_content_replay = false
 reasoning_enabled = true
@@ -419,7 +420,7 @@ strategy = "round_robin"
 api_url = "https://pool.example/v1"
 api_key = "pool-key"
 model_name = "agent-pool"
-max_tokens = 4096
+max_tokens = -2
 api_mode = "openai.responses"
 reasoning_content_replay = true
 reasoning_enabled = true
@@ -427,6 +428,7 @@ reasoning_effort = "adaptive"
 
 [models.historian]
 model_name = "historian-model"
+max_tokens = -1
 api_mode = "anthropic.messages"
 reasoning_content_replay = false
 reasoning_enabled = true
@@ -434,6 +436,7 @@ reasoning_effort = "Vendor-Custom"
 
 [models.summary]
 model_name = "summary-model"
+max_tokens = 0
 api_mode = "anthropic.messages"
 reasoning_content_replay = false
 reasoning_enabled = true
@@ -443,6 +446,7 @@ reasoning_effort = "Vendor-Custom"
 api_url = "https://provider.example"
 api_key = "grok-key"
 model_name = "grok-model"
+max_tokens = -1
 api_mode = "anthropic.messages"
 reasoning_content_replay = false
 reasoning_enabled = true
@@ -473,6 +477,17 @@ reasoning_effort = "Vendor-Custom"
         assert model.reasoning_effort == "Vendor-Custom"
         assert model.responses_tool_choice_compat is False
 
+    assert [model.max_tokens for model in generation_models] == [
+        0,
+        -1,
+        0,
+        -1,
+        0,
+        -1,
+        0,
+        -1,
+    ]
+
     assert cfg.chat_model.pool is not None
     assert cfg.agent_model.pool is not None
     for entry in [
@@ -483,6 +498,7 @@ reasoning_effort = "Vendor-Custom"
         assert entry.reasoning_content_replay is True
         assert entry.reasoning_enabled is True
         assert entry.reasoning_effort == "adaptive"
+        assert entry.max_tokens == -2
 
     assert cfg.historian_model.thinking_include_budget is False
     assert cfg.historian_model.thinking_tool_call_compat is False

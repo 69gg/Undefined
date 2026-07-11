@@ -155,6 +155,37 @@ class _FakeStreamingClient:
         return _create
 
 
+@pytest.mark.parametrize(
+    ("api_mode", "token_field"),
+    [
+        ("openai.chat_completions", "max_tokens"),
+        ("openai.responses", "max_output_tokens"),
+        ("anthropic.messages", "max_tokens"),
+    ],
+)
+@pytest.mark.parametrize("max_tokens", [0, -1])
+def test_build_request_body_omits_non_positive_token_limit(
+    api_mode: str,
+    token_field: str,
+    max_tokens: int,
+) -> None:
+    cfg = ChatModelConfig(
+        api_url="https://api.example.com/v1",
+        api_key="sk-test",
+        model_name="test-model",
+        max_tokens=max_tokens,
+        api_mode=api_mode,
+    )
+
+    body = build_request_body(
+        model_config=cfg,
+        messages=[{"role": "user", "content": "hello"}],
+        max_tokens=max_tokens,
+    )
+
+    assert token_field not in body
+
+
 @pytest.mark.asyncio
 async def test_chat_request_uses_model_reasoning_and_request_params(
     caplog: pytest.LogCaptureFixture,

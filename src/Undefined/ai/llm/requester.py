@@ -24,6 +24,7 @@ from anthropic import (
     APIStatusError as AnthropicAPIStatusError,
     APITimeoutError as AnthropicAPITimeoutError,
     AsyncAnthropic,
+    omit as anthropic_omit,
 )
 from openai import (
     APIConnectionError as OpenAIAPIConnectionError,
@@ -93,6 +94,18 @@ __all__ = ["ModelRequester", "build_request_body", "ModelConfig"]
 _SDK_REQUEST_OPTION_FIELDS: frozenset[str] = frozenset(
     {"extra_headers", "extra_query", "extra_body", "timeout"}
 )
+
+
+def _prepare_anthropic_sdk_params(request_body: dict[str, Any]) -> dict[str, Any]:
+    params, extra_body = split_anthropic_params(
+        without_stream_request_fields(request_body)
+    )
+    if "max_tokens" not in params:
+        # The SDK requires this keyword, but ``omit`` removes it from the HTTP body.
+        params["max_tokens"] = anthropic_omit
+    if extra_body:
+        params["extra_body"] = extra_body
+    return params
 
 
 def _deduplicate_http_clients(
@@ -857,11 +870,7 @@ class ModelRequester:
                         get_api_mode(model_config),
                         type(exc).__name__,
                     )
-            params, extra_body = split_anthropic_params(
-                without_stream_request_fields(request_body)
-            )
-            if extra_body:
-                params["extra_body"] = extra_body
+            params = _prepare_anthropic_sdk_params(request_body)
             response = await client.messages.create(**params)
             return self._response_to_dict(response)
 
@@ -870,11 +879,7 @@ class ModelRequester:
         client: AsyncAnthropic,
         request_body: dict[str, Any],
     ) -> dict[str, Any]:
-        params, extra_body = split_anthropic_params(
-            without_stream_request_fields(request_body)
-        )
-        if extra_body:
-            params["extra_body"] = extra_body
+        params = _prepare_anthropic_sdk_params(request_body)
         async with client.messages.stream(**params) as stream:
             async for _event in stream:
                 pass
@@ -1362,8 +1367,9 @@ def build_request_body(
     body: dict[str, Any] = {
         "model": model_config.model_name,
         "messages": prepare_chat_completion_messages(model_config, messages),
-        "max_tokens": max_tokens,
     }
+    if max_tokens > 0:
+        body["max_tokens"] = max_tokens
 
     extra_kwargs.pop("reasoning_effort", None)
     extra_kwargs.pop("output_config", None)
