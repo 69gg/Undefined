@@ -21,7 +21,13 @@ from Undefined.utils.self_update import (
     normalize_release_tag,
     restart_process,
 )
-from ._shared import check_auth, get_bot, get_settings, routes
+from ._shared import (
+    check_auth,
+    get_bot,
+    get_pending_bot_autostart_marker,
+    get_settings,
+    routes,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +35,7 @@ _RELEASE_CACHE_TTL_SECONDS = 15 * 60.0
 _release_cache: GitHubReleaseInfo | None = None
 _release_cache_expires_at = 0.0
 _release_fetch_task: asyncio.Task[GitHubReleaseInfo] | None = None
+_release_restart_task: asyncio.Task[None] | None = None
 
 
 def _truncate(text: str, *, max_chars: int = 12000) -> str:
@@ -47,15 +54,35 @@ def _release_fetch_done(task: asyncio.Task[GitHubReleaseInfo]) -> None:
     task.exception()
 
 
+def _release_restart_done(task: asyncio.Task[None]) -> None:
+    global _release_restart_task
+    if _release_restart_task is task:
+        _release_restart_task = None
+    if task.cancelled():
+        return
+    error = task.exception()
+    if error is not None:
+        logger.error(
+            "[WebUI][更新] WebUI 重启任务失败: %s: %r",
+            type(error).__name__,
+            error,
+        )
+
+
 def _reset_release_cache() -> None:
     """Reset process-local state for isolated app instances and tests."""
-    global _release_cache, _release_cache_expires_at, _release_fetch_task
+    global _release_cache, _release_cache_expires_at
+    global _release_fetch_task, _release_restart_task
     fetch_task = _release_fetch_task
+    restart_task = _release_restart_task
     _release_cache = None
     _release_cache_expires_at = 0.0
     _release_fetch_task = None
+    _release_restart_task = None
     if fetch_task is not None and not fetch_task.done():
         fetch_task.cancel()
+    if restart_task is not None and not restart_task.done():
+        restart_task.cancel()
 
 
 async def _fetch_latest_release(
@@ -270,6 +297,8 @@ async def update_check_handler(request: web.Request) -> Response:
 @routes.post("/api/v1/management/update-restart")
 @routes.post("/api/update-restart")
 async def update_restart_handler(request: web.Request) -> Response:
+    global _release_restart_task
+
     if not check_auth(request):
         return web.json_response({"error": "Unauthorized"}, status=401)
 
@@ -339,10 +368,16 @@ async def update_restart_handler(request: web.Request) -> Response:
                 "target_version": latest_version,
             }
         )
+    repo_root = eligibility.repo_root
+    if repo_root is None:
+        logger.warning("[WebUI][更新] Git 仓库状态可更新但缺少仓库根目录")
+        return web.json_response(
+            {"success": False, "error": "update_failed"}, status=500
+        )
 
     bot = get_bot(request)
     was_running = bool(bot.status().get("running"))
-    marker = Path("data/cache/pending_bot_autostart")
+    marker = get_pending_bot_autostart_marker(repo_root)
     if was_running:
         try:
             await asyncio.wait_for(bot.stop(), timeout=8)
@@ -369,10 +404,14 @@ async def update_restart_handler(request: web.Request) -> Response:
             )
 
     try:
-        result = await asyncio.to_thread(
-            apply_git_release_update,
-            policy,
-            release_tag=latest_version,
+        result = await asyncio.wait_for(
+            asyncio.to_thread(
+                apply_git_release_update,
+                policy,
+                release_tag=latest_version,
+                start_dir=repo_root,
+            ),
+            timeout=policy.update_timeout_seconds,
         )
     except Exception as exc:
         logger.exception("[WebUI][更新] Release 更新执行异常")
@@ -423,10 +462,12 @@ async def update_restart_handler(request: web.Request) -> Response:
 
     async def _restart_soon() -> None:
         await asyncio.sleep(0.25)
-        if result.repo_root is not None:
-            restart_process(module="Undefined.webui", chdir=result.repo_root)
-            return
-        restart_process(module="Undefined.webui", chdir=None)
+        restart_process(module="Undefined.webui", chdir=result.repo_root or repo_root)
 
-    asyncio.create_task(_restart_soon(), name="webui-release-restart")
+    if _release_restart_task is None or _release_restart_task.done():
+        restart_task = asyncio.create_task(
+            _restart_soon(), name="webui-release-restart"
+        )
+        _release_restart_task = restart_task
+        restart_task.add_done_callback(_release_restart_done)
     return web.json_response(payload)

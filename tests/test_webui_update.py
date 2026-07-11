@@ -12,7 +12,12 @@ import pytest
 from aiohttp import web
 
 from Undefined.github.models import GitHubReleaseInfo
-from Undefined.utils.self_update import GitUpdatePolicy, GitUpdateResult
+from Undefined.utils import io as async_io
+from Undefined.utils.self_update import (
+    GitUpdatePolicy,
+    GitUpdateResult,
+    apply_git_release_update,
+)
 from Undefined.webui.routes import _bot
 from Undefined.webui.routes._shared import BOT_APP_KEY, SETTINGS_APP_KEY
 
@@ -275,8 +280,10 @@ async def test_update_restart_applies_confirmed_release_tag(
         _policy: object,
         *,
         release_tag: str,
+        start_dir: Path,
     ) -> GitUpdateResult:
         applied["release_tag"] = release_tag
+        applied["start_dir"] = start_dir
         return GitUpdateResult(
             eligible=True,
             updated=True,
@@ -289,6 +296,10 @@ async def test_update_restart_applies_confirmed_release_tag(
         )
 
     created_coroutines: list[Coroutine[Any, Any, None]] = []
+    created_task = MagicMock()
+    created_task.done.return_value = False
+    created_task.cancelled.return_value = False
+    created_task.exception.return_value = None
 
     def fake_create_task(
         coroutine: Coroutine[Any, Any, None],
@@ -298,7 +309,7 @@ async def test_update_restart_applies_confirmed_release_tag(
         assert name == "webui-release-restart"
         created_coroutines.append(coroutine)
         coroutine.close()
-        return MagicMock()
+        return created_task
 
     monkeypatch.setattr(_bot, "_load_release_payload", fake_release_payload)
     monkeypatch.setattr(
@@ -328,11 +339,103 @@ async def test_update_restart_applies_confirmed_release_tag(
     )
     data = _payload(response)
 
-    assert applied == {"release_tag": "v3.8.0"}
+    assert applied == {"release_tag": "v3.8.0", "start_dir": Path("/repo")}
     assert data["updated"] is True
     assert data["will_restart"] is True
     assert data["target_version"] == "v3.8.0"
     assert len(created_coroutines) == 1
+    assert _bot._release_restart_task is created_task
+    done_callback = created_task.add_done_callback.call_args.args[0]
+    done_callback(created_task)
+    assert _bot._release_restart_task is None
+
+
+@pytest.mark.asyncio
+async def test_update_restart_timeout_restores_bot_and_repo_marker(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    _authenticated: None,
+) -> None:
+    async def fake_release_payload(
+        _policy: object,
+    ) -> tuple[dict[str, object], None]:
+        return (
+            {
+                "success": True,
+                "checked": True,
+                "current_version": "v3.7.1",
+                "latest_version": "v3.8.0",
+                "update_available": True,
+                "release": {"name": "Undefined v3.8.0"},
+                "cached": True,
+            },
+            None,
+        )
+
+    async def slow_to_thread(
+        function: Any,
+        *args: Any,
+        **kwargs: Any,
+    ) -> Any:
+        assert function is apply_git_release_update
+        assert kwargs["start_dir"] == tmp_path
+        await asyncio.Event().wait()
+
+    marker_paths: list[Path] = []
+
+    async def track_marker_write(path: Path, content: str) -> None:
+        assert content == "1"
+        marker_paths.append(path)
+
+    bot = MagicMock()
+    bot.status.return_value = {"running": True}
+    bot.stop = AsyncMock()
+    bot.start = AsyncMock()
+    policy = GitUpdatePolicy(update_timeout_seconds=0.01)
+    monkeypatch.setattr(_bot, "GitUpdatePolicy", lambda: policy)
+    monkeypatch.setattr(_bot, "_load_release_payload", fake_release_payload)
+    monkeypatch.setattr(
+        _bot,
+        "_check_git_eligibility",
+        AsyncMock(
+            return_value=GitUpdateResult(
+                eligible=True,
+                updated=False,
+                repo_root=tmp_path,
+                reason="eligible",
+            )
+        ),
+    )
+    monkeypatch.setattr(asyncio, "to_thread", slow_to_thread)
+    monkeypatch.setattr(async_io, "write_text", track_marker_write)
+    delete_marker = AsyncMock()
+    monkeypatch.setattr(async_io, "delete_file", delete_marker)
+
+    response = await _bot.update_restart_handler(
+        cast(
+            web.Request,
+            cast(
+                Any,
+                _request(
+                    json_body={"target_version": "v3.8.0"},
+                    bot=bot,
+                ),
+            ),
+        )
+    )
+    data = _payload(response)
+    marker = tmp_path / "data" / "cache" / "pending_bot_autostart"
+
+    assert cast(web.Response, response).status == 500
+    assert data == {
+        "success": False,
+        "error": "update_failed",
+        "detail": "TimeoutError",
+    }
+    assert marker_paths == [marker]
+    delete_marker.assert_awaited_once_with(marker)
+    bot.stop.assert_awaited_once()
+    bot.start.assert_awaited_once()
 
 
 @pytest.mark.asyncio

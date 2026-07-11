@@ -103,6 +103,14 @@ def test_update_frontend_checks_once_automatically_and_allows_manual_check() -> 
     assert "void checkForUpdates()" in auth_js
 
 
+def test_update_dialog_only_links_https_releases() -> None:
+    bot_js = _read("src/Undefined/webui/static/js/bot.js")
+
+    assert 'releaseUrl.startsWith("https://")' in bot_js
+    assert 'releaseLink.removeAttribute("href")' in bot_js
+    assert "releaseLink.hidden = true" in bot_js
+
+
 def test_update_dialog_has_mobile_and_reduced_motion_compatible_styles() -> None:
     components_css = _read("src/Undefined/webui/static/css/components.css")
     responsive_css = _read("src/Undefined/webui/static/css/responsive.css")

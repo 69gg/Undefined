@@ -23,6 +23,8 @@ SESSION_STORE_APP_KEY = web.AppKey("session_store", SessionStore)
 SETTINGS_APP_KEY = web.AppKey("settings", WebUISettings)
 REDIRECT_TO_CONFIG_ONCE_APP_KEY = web.AppKey("redirect_to_config_once", bool)
 
+_PENDING_BOT_AUTOSTART_MARKER = Path("data/cache/pending_bot_autostart")
+
 SESSION_COOKIE = "undefined_webui"
 TOKEN_COOKIE = "undefined_webui_token"
 SESSION_TTL_SECONDS = 8 * 60 * 60
@@ -32,6 +34,10 @@ LOGIN_BLOCK_SECONDS = 15 * 60
 
 _LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 _LOGIN_BLOCKED_UNTIL: dict[str, float] = {}
+
+
+def get_pending_bot_autostart_marker(repo_root: Path) -> Path:
+    return repo_root / _PENDING_BOT_AUTOSTART_MARKER
 
 
 def get_bot(request: web.Request) -> BotProcessController:

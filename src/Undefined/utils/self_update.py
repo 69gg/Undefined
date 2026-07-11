@@ -34,6 +34,7 @@ class GitUpdatePolicy:
     merge_timeout_seconds: float = 90.0
     submodule_timeout_seconds: float = 180.0
     uv_sync_timeout_seconds: float = 20 * 60.0
+    update_timeout_seconds: float = 30 * 60.0
 
 
 @dataclass(frozen=True)

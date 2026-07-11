@@ -47,6 +47,13 @@ def _make_settings(*, autostart_bot: bool) -> WebUISettings:
     )
 
 
+def _set_repo_root(monkeypatch: pytest.MonkeyPatch, repo_root: Path) -> None:
+    monkeypatch.setattr(
+        "Undefined.webui.app.resolve_repo_root",
+        lambda _start_dir: repo_root,
+    )
+
+
 @pytest.fixture(autouse=True)
 def _patch_config_manager(monkeypatch: pytest.MonkeyPatch) -> None:
     """统一 mock 配置管理器，避免真实热重载副作用。"""
@@ -63,10 +70,7 @@ async def test_on_startup_with_autostart_enabled(
     """测试 autostart_bot=true 时调用 bot.start()。"""
     bot = _make_bot()
     app = _make_app(bot, _make_settings(autostart_bot=True))
-
-    # 确保 pending_bot_autostart marker 不存在
-    marker_path = tmp_path / "pending_bot_autostart"
-    monkeypatch.setattr("Undefined.webui.app.Path", lambda _: marker_path)
+    _set_repo_root(monkeypatch, tmp_path)
 
     await on_startup(app)
 
@@ -81,14 +85,27 @@ async def test_on_startup_with_autostart_disabled(
     """测试 autostart_bot=false 时不调用 bot.start()。"""
     bot = _make_bot()
     app = _make_app(bot, _make_settings(autostart_bot=False))
-
-    # 确保 pending_bot_autostart marker 不存在
-    marker_path = tmp_path / "pending_bot_autostart"
-    monkeypatch.setattr("Undefined.webui.app.Path", lambda _: marker_path)
+    _set_repo_root(monkeypatch, tmp_path)
 
     await on_startup(app)
 
     bot.start.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_on_startup_without_repo_still_honors_autostart(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bot = _make_bot()
+    app = _make_app(bot, _make_settings(autostart_bot=True))
+    monkeypatch.setattr(
+        "Undefined.webui.app.resolve_repo_root",
+        lambda _start_dir: None,
+    )
+
+    await on_startup(app)
+
+    bot.start.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -105,15 +122,7 @@ async def test_on_startup_recovery_marker_takes_priority(
     marker_path = tmp_path / "data" / "cache" / "pending_bot_autostart"
     marker_path.parent.mkdir(parents=True, exist_ok=True)
     marker_path.touch()
-
-    original_path = Path
-
-    def mock_path_factory(path_str: str) -> Path:
-        if path_str == "data/cache/pending_bot_autostart":
-            return marker_path
-        return original_path(path_str)
-
-    monkeypatch.setattr("Undefined.webui.app.Path", mock_path_factory)
+    _set_repo_root(monkeypatch, tmp_path)
 
     await on_startup(app)
 
@@ -136,15 +145,7 @@ async def test_on_startup_marker_does_not_double_start_with_autostart(
     marker_path = tmp_path / "data" / "cache" / "pending_bot_autostart"
     marker_path.parent.mkdir(parents=True, exist_ok=True)
     marker_path.touch()
-
-    original_path = Path
-
-    def mock_path_factory(path_str: str) -> Path:
-        if path_str == "data/cache/pending_bot_autostart":
-            return marker_path
-        return original_path(path_str)
-
-    monkeypatch.setattr("Undefined.webui.app.Path", mock_path_factory)
+    _set_repo_root(monkeypatch, tmp_path)
 
     await on_startup(app)
 
@@ -161,10 +162,7 @@ async def test_on_startup_autostart_failure_does_not_block_webui(
     bot = _make_bot()
     bot.start.side_effect = RuntimeError("Bot start failed")
     app = _make_app(bot, _make_settings(autostart_bot=True))
-
-    # 确保 pending_bot_autostart marker 不存在
-    marker_path = tmp_path / "pending_bot_autostart"
-    monkeypatch.setattr("Undefined.webui.app.Path", lambda _: marker_path)
+    _set_repo_root(monkeypatch, tmp_path)
 
     # 执行启动钩子（不应抛出异常）
     await on_startup(app)

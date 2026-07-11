@@ -11,6 +11,7 @@ from aiohttp import web
 from Undefined.config import load_webui_settings, get_config_manager, get_config
 from Undefined.utils.cors import is_allowed_cors_origin, normalize_origin
 from Undefined.utils import io as async_io
+from Undefined.utils.self_update import resolve_repo_root
 from .core import BotProcessController, SessionStore
 from .routes import routes
 from .routes._shared import (
@@ -18,6 +19,7 @@ from .routes._shared import (
     REDIRECT_TO_CONFIG_ONCE_APP_KEY,
     SESSION_STORE_APP_KEY,
     SETTINGS_APP_KEY,
+    get_pending_bot_autostart_marker,
 )
 from .utils import ensure_config_toml
 
@@ -238,8 +240,13 @@ async def on_startup(app: web.Application) -> None:
     # If we restarted WebUI after an update and the bot was previously running,
     # auto-start it again.
     try:
-        marker = Path("data/cache/pending_bot_autostart")
-        if await async_io.exists(marker):
+        repo_root = await asyncio.to_thread(resolve_repo_root, Path.cwd())
+        marker = (
+            get_pending_bot_autostart_marker(repo_root)
+            if repo_root is not None
+            else None
+        )
+        if marker is not None and await async_io.exists(marker):
             await async_io.delete_file(marker)
             await bot.start()
             logger.info("[WebUI] 检测到自动恢复标记，已尝试启动机器人进程")

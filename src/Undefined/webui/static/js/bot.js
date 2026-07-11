@@ -264,7 +264,7 @@ function renderUpdateDialog(payload) {
 
     const releaseLink = get("updateReleaseLink");
     const releaseUrl = String(payload?.release?.url || "").trim();
-    if (releaseUrl) {
+    if (releaseUrl.startsWith("https://")) {
         releaseLink.href = releaseUrl;
         releaseLink.hidden = false;
     } else {
