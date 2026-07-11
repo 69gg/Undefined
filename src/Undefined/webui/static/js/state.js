@@ -210,6 +210,10 @@ const state = {
     systemTimer: null,
     saveTimer: null,
     saveStatus: "idle",
+    updateCheckStarted: false,
+    updateApplying: false,
+    updateDialogPayload: null,
+    updateDialogPreviousFocus: null,
     fetchBackoff: { status: 0, system: 0, logs: 0 },
     nextFetchAt: { status: 0, system: 0, logs: 0 },
 };

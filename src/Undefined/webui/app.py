@@ -11,6 +11,7 @@ from aiohttp import web
 from Undefined.config import load_webui_settings, get_config_manager, get_config
 from Undefined.utils.cors import is_allowed_cors_origin, normalize_origin
 from Undefined.utils import io as async_io
+from Undefined.utils.self_update import resolve_repo_root
 from .core import BotProcessController, SessionStore
 from .routes import routes
 from .routes._shared import (
@@ -18,14 +19,9 @@ from .routes._shared import (
     REDIRECT_TO_CONFIG_ONCE_APP_KEY,
     SESSION_STORE_APP_KEY,
     SETTINGS_APP_KEY,
+    get_pending_bot_autostart_marker,
 )
 from .utils import ensure_config_toml
-from Undefined.utils.self_update import (
-    GitUpdatePolicy,
-    apply_git_update,
-    format_update_result,
-    restart_process,
-)
 
 # 初始化 WebUI 自身日志
 logging.basicConfig(
@@ -244,8 +240,13 @@ async def on_startup(app: web.Application) -> None:
     # If we restarted WebUI after an update and the bot was previously running,
     # auto-start it again.
     try:
-        marker = Path("data/cache/pending_bot_autostart")
-        if await async_io.exists(marker):
+        repo_root = await asyncio.to_thread(resolve_repo_root, Path.cwd())
+        marker = (
+            get_pending_bot_autostart_marker(repo_root)
+            if repo_root is not None
+            else None
+        )
+        if marker is not None and await async_io.exists(marker):
             await async_io.delete_file(marker)
             await bot.start()
             logger.info("[WebUI] 检测到自动恢复标记，已尝试启动机器人进程")
@@ -298,7 +299,13 @@ def create_app(*, redirect_to_config_once: bool = False) -> web.Application:
     app[REDIRECT_TO_CONFIG_ONCE_APP_KEY] = redirect_to_config_once
 
     def _on_config_change(config: Any, changes: dict[str, Any]) -> None:
-        webui_keys = {"webui_url", "webui_port", "webui_password"}
+        webui_keys = {
+            "webui_url",
+            "webui_port",
+            "webui_password",
+            "webui_autostart_bot",
+            "webui_check_updates",
+        }
         if any(key.startswith("webui.") for key in changes) or webui_keys.intersection(
             changes
         ):
@@ -324,21 +331,6 @@ def create_app(*, redirect_to_config_once: bool = False) -> web.Application:
 
 def run() -> None:
     _init_webui_file_handler()
-
-    # Git-based auto update (only for official origin/main).
-    try:
-        update_result = apply_git_update(GitUpdatePolicy())
-        logger.info("[WebUI][自更新] %s", format_update_result(update_result))
-        if update_result.updated and update_result.repo_root is not None:
-            if update_result.uv_sync_attempted and not update_result.uv_synced:
-                logger.warning(
-                    "[WebUI][自更新] 代码已更新但 uv sync 失败，跳过自动重启（避免启动失败）"
-                )
-            else:
-                logger.warning("[WebUI][自更新] 检测到更新，正在重启 WebUI...")
-                restart_process(module="Undefined.webui", chdir=update_result.repo_root)
-    except Exception as exc:
-        logger.warning("[WebUI][自更新] 检查更新失败，将继续启动: %s", exc)
 
     created = ensure_config_toml()
     settings = load_webui_settings()

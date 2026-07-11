@@ -14,6 +14,7 @@ async function login(pwd, statusId, buttonId) {
             state.authenticated = true;
             await checkSession();
             refreshUI();
+            void checkForUpdates();
             s.innerText = "";
         } else {
             if (data.code === "default_password") {

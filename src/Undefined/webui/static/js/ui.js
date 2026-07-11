@@ -24,6 +24,9 @@ function updateI18N() {
     updateSaveStatusText();
     updateConfigStateLabel();
     renderLogs();
+    if (state.updateDialogPayload && typeof renderUpdateDialog === "function") {
+        renderUpdateDialog(state.updateDialogPayload);
+    }
 }
 
 function updateToggleLabels() {

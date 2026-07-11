@@ -49,6 +49,7 @@ def load_domains(
         "webui_port": webui_settings.port,
         "webui_password": webui_settings.password,
         "webui_autostart_bot": webui_settings.autostart_bot,
+        "webui_check_updates": webui_settings.check_updates,
         "api": api_config,
         "cognitive": cognitive,
         "memes": memes,

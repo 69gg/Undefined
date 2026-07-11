@@ -181,32 +181,250 @@ function startWebuiRestartPoll() {
                 location.reload();
             }
         } catch (e) {}
-        if (attempts > 60) clearInterval(timer);
+        if (attempts > 60) {
+            clearInterval(timer);
+            state.updateApplying = false;
+            setButtonLoading(get("updateDialogConfirm"), false);
+            showToast(t("update.restart_timeout"), "error", 8000);
+        }
     }, 1000);
 }
 
-async function updateAndRestartWebui(button) {
+const UPDATE_REASON_KEYS = new Set([
+    "not_a_git_repo",
+    "git_not_found",
+    "git_check_failed",
+    "missing_origin",
+    "detached_head",
+    "origin_mismatch",
+    "branch_mismatch",
+    "dirty_worktree",
+    "invalid_release_tag",
+    "cannot_read_head",
+    "fetch_timeout",
+    "fetch_main_failed",
+    "fetch_tag_failed",
+    "cannot_read_remote_ref",
+    "cannot_read_release_ref",
+    "release_not_on_main",
+    "release_not_fast_forward",
+    "merge_failed",
+    "updated_but_cannot_read_new_head",
+]);
+
+const UPDATE_ERROR_KEYS = new Set([
+    "release_check_failed",
+    "invalid_json",
+    "invalid_release_tag",
+    "bot_stop_timeout",
+    "bot_stop_failed",
+    "restore_marker_failed",
+    "update_failed",
+]);
+
+function updateReasonText(reason) {
+    const normalized = String(reason || "").trim();
+    if (UPDATE_REASON_KEYS.has(normalized)) {
+        return t(`update.reason.${normalized}`);
+    }
+    return normalized || t("update.reason.unknown");
+}
+
+function updateErrorText(error) {
+    const normalized = String(error || "").trim();
+    if (UPDATE_ERROR_KEYS.has(normalized)) {
+        return t(`update.error.${normalized}`);
+    }
+    return normalized || t("update.failed");
+}
+
+function formatUpdateReleaseMeta(payload) {
+    const release = payload?.release || {};
+    const parts = [];
+    if (release.name) parts.push(String(release.name));
+    if (release.published_at) {
+        const published = new Date(release.published_at);
+        if (!Number.isNaN(published.getTime())) {
+            parts.push(
+                `${t("update.published")}: ${new Intl.DateTimeFormat(
+                    state.lang === "zh" ? "zh-CN" : "en-US",
+                    { dateStyle: "medium" },
+                ).format(published)}`,
+            );
+        }
+    }
+    return parts.join(" · ");
+}
+
+function renderUpdateDialog(payload) {
+    state.updateDialogPayload = payload;
+    get("updateCurrentVersion").textContent = payload.current_version || "--";
+    get("updateLatestVersion").textContent = payload.latest_version || "--";
+    get("updateReleaseMeta").textContent = formatUpdateReleaseMeta(payload);
+
+    const releaseLink = get("updateReleaseLink");
+    const releaseUrl = String(payload?.release?.url || "").trim();
+    if (releaseUrl.startsWith("https://")) {
+        releaseLink.href = releaseUrl;
+        releaseLink.hidden = false;
+    } else {
+        releaseLink.removeAttribute("href");
+        releaseLink.hidden = true;
+    }
+
+    const eligibilityMessage = get("updateEligibilityMessage");
+    const eligible = payload.eligible !== false;
+    eligibilityMessage.hidden = eligible;
+    eligibilityMessage.textContent = eligible
+        ? ""
+        : `${t("update.unavailable")}: ${updateReasonText(payload.reason)}`;
+    const confirmButton = get("updateDialogConfirm");
+    confirmButton.disabled = !eligible;
+    confirmButton.setAttribute("aria-disabled", eligible ? "false" : "true");
+}
+
+function openUpdateDialog(payload) {
+    const backdrop = get("updateDialogBackdrop");
+    const dialog = get("updateDialog");
+    if (!backdrop || !dialog) return;
+
+    renderUpdateDialog(payload);
+    state.updateDialogPreviousFocus = document.activeElement;
+    backdrop.hidden = false;
+    backdrop.setAttribute("aria-hidden", "false");
+    document.body.classList.add("update-dialog-open");
+    trapFocus(dialog);
+    get("updateDialogCancel")?.focus();
+}
+
+function closeUpdateDialog() {
+    if (state.updateApplying) return;
+    const backdrop = get("updateDialogBackdrop");
+    const dialog = get("updateDialog");
+    if (!backdrop || backdrop.hidden) return;
+
+    releaseFocus(dialog);
+    backdrop.hidden = true;
+    backdrop.setAttribute("aria-hidden", "true");
+    document.body.classList.remove("update-dialog-open");
+    state.updateDialogPayload = null;
+    const previousFocus = state.updateDialogPreviousFocus;
+    state.updateDialogPreviousFocus = null;
+    if (previousFocus && typeof previousFocus.focus === "function") {
+        previousFocus.focus();
+    }
+}
+
+async function checkForUpdates({ manual = false, button = null } = {}) {
     if (!state.authenticated) {
-        showToast(t("auth.unauthorized"), "error", 5000);
+        if (manual) showToast(t("auth.unauthorized"), "error", 5000);
         return;
     }
-    setButtonLoading(button, true);
+    if (!manual) {
+        if (state.updateCheckStarted) return;
+        state.updateCheckStarted = true;
+    }
+
+    if (manual) setButtonLoading(button, true);
     try {
-        showToast(t("update.working"), "info", 4000);
-        const res = await api("/api/update-restart", { method: "POST" });
+        const endpoint = manual
+            ? "/api/update-check?manual=true"
+            : "/api/update-check";
+        const res = await api(endpoint);
         const data = await res.json();
-        if (!data.success) throw new Error(data.error || t("update.failed"));
-        if (!data.eligible) {
+        if (!res.ok || !data.success) {
+            throw new Error(updateErrorText(data.error));
+        }
+        if (!data.checked) return;
+        if (data.update_available) {
+            openUpdateDialog(data);
+            return;
+        }
+        if (manual) showToast(t("update.up_to_date"), "success", 4000);
+    } catch (error) {
+        if (manual) {
             showToast(
-                `${t("update.not_eligible")}: ${data.reason || ""}`.trim(),
-                "warning",
+                `${t("update.check_failed")}: ${error.message || error}`,
+                "error",
                 7000,
             );
+        } else {
+            console.debug("[UpdateCheck]", error);
+        }
+    } finally {
+        if (manual) setButtonLoading(button, false);
+    }
+}
+
+function initUpdateDialog() {
+    const backdrop = get("updateDialogBackdrop");
+    if (!backdrop || backdrop.dataset.bound === "true") return;
+    backdrop.dataset.bound = "true";
+
+    get("updateDialogCancel").addEventListener("click", closeUpdateDialog);
+    get("updateDialogConfirm").addEventListener("click", () => {
+        const payload = state.updateDialogPayload;
+        if (!payload || payload.eligible === false) return;
+        updateAndRestartWebui(
+            get("updateDialogConfirm"),
+            payload.latest_version,
+        );
+    });
+    backdrop.addEventListener("click", (event) => {
+        if (event.target === backdrop) closeUpdateDialog();
+    });
+    backdrop.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+            event.preventDefault();
+            closeUpdateDialog();
+        }
+    });
+}
+
+async function updateAndRestartWebui(button, targetVersion) {
+    if (!state.authenticated || state.updateApplying) return;
+
+    state.updateApplying = true;
+    setButtonLoading(button, true);
+    let restartScheduled = false;
+    try {
+        const res = await api("/api/update-restart", {
+            method: "POST",
+            body: JSON.stringify({ target_version: targetVersion }),
+        });
+        const data = await res.json();
+        if (res.status === 409 && data.error === "release_changed") {
+            state.updateApplying = false;
+            setButtonLoading(button, false);
+            closeUpdateDialog();
+            showToast(t("update.release_changed"), "info", 5000);
+            await checkForUpdates({ manual: true });
+            return;
+        }
+        if (!res.ok || !data.success) {
+            throw new Error(updateErrorText(data.error));
+        }
+        if (!data.eligible) {
+            renderUpdateDialog({
+                ...state.updateDialogPayload,
+                eligible: false,
+                reason: data.reason,
+            });
             return;
         }
         if (data.will_restart === false) {
             if (data.output) console.log(data.output);
-            showToast(t("update.no_restart"), "warning", 8000);
+            const message =
+                data.reason === "up_to_date"
+                    ? t("update.up_to_date")
+                    : data.uv_sync_attempted && !data.uv_synced
+                      ? t("update.dependency_sync_failed")
+                      : `${t("update.no_restart")}: ${updateReasonText(data.reason)}`;
+            showToast(
+                message,
+                data.reason === "up_to_date" ? "info" : "warning",
+                8000,
+            );
             return;
         }
         showToast(
@@ -216,15 +434,21 @@ async function updateAndRestartWebui(button) {
             data.updated ? "success" : "info",
             6000,
         );
+        restartScheduled = true;
         startWebuiRestartPoll();
-    } catch (e) {
+    } catch (error) {
         showToast(
-            `${t("update.failed")}: ${e.message || e}`.trim(),
+            `${t("update.failed")}: ${error.message || error}`.trim(),
             "error",
             8000,
         );
     } finally {
-        setButtonLoading(button, false);
+        if (!restartScheduled) {
+            state.updateApplying = false;
+            setButtonLoading(button, false);
+            const payload = state.updateDialogPayload;
+            if (payload?.eligible === false) button.disabled = true;
+        }
     }
 }
 

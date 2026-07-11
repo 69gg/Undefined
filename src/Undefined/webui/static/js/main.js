@@ -491,6 +491,8 @@ async function init() {
         }
     };
 
+    initUpdateDialog();
+
     if (
         window.RuntimeController &&
         typeof window.RuntimeController.init === "function"
@@ -686,7 +688,7 @@ async function init() {
     const updateRestartBtn = get("btnUpdateRestart");
     if (updateRestartBtn)
         updateRestartBtn.onclick = () =>
-            updateAndRestartWebui(updateRestartBtn);
+            checkForUpdates({ manual: true, button: updateRestartBtn });
 
     const pauseLogsBtn = get("btnPauseLogs");
     if (pauseLogsBtn) {
@@ -1006,6 +1008,7 @@ async function init() {
     try {
         const session = await checkSession();
         state.authenticated = !!session.authenticated;
+        if (state.authenticated) void checkForUpdates();
         if (
             state.authenticated &&
             state.authRefreshToken &&

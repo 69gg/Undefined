@@ -140,6 +140,7 @@ class Config:
     webui_port: int
     webui_password: str
     webui_autostart_bot: bool
+    webui_check_updates: bool
     api: APIConfig
     # Code Delivery Agent
     code_delivery_enabled: bool

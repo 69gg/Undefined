@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from Undefined.github.models import GitHubRepoInfo
+from Undefined.github.models import GitHubReleaseInfo, GitHubRepoInfo
 from Undefined.github.parser import normalize_github_repo_id
 from Undefined.skills.http_client import request_with_retry
 
@@ -174,3 +174,45 @@ async def get_public_repo_info(
     if not info.repo_id:
         raise ValueError("GitHub API 返回缺少仓库 ID")
     return info
+
+
+async def get_latest_public_release(
+    repo_id: str,
+    *,
+    request_timeout: float = DEFAULT_REQUEST_TIMEOUT_SECONDS,
+    request_retries: int = DEFAULT_REQUEST_RETRIES,
+    context: dict[str, object] | None = None,
+) -> GitHubReleaseInfo:
+    """获取 public GitHub 仓库的最新正式 Release。"""
+    normalized = normalize_github_repo_id(repo_id)
+    if normalized is None:
+        raise ValueError(f"无法解析 GitHub 仓库标识: {repo_id}")
+
+    response = await request_with_retry(
+        "GET",
+        f"{_API_BASE_URL}/repos/{normalized}/releases/latest",
+        headers=_HEADERS,
+        timeout=request_timeout,
+        follow_redirects=True,
+        context=context,
+        retries=request_retries,
+        proxy_scope="github",
+    )
+    payload = response.json()
+    if not isinstance(payload, dict):
+        raise ValueError("GitHub Release API 返回格式异常")
+
+    release = GitHubReleaseInfo(
+        tag_name=_as_str(payload.get("tag_name")),
+        name=_as_str(payload.get("name")),
+        html_url=_as_str(payload.get("html_url")),
+        published_at=_as_str(payload.get("published_at")),
+        target_commitish=_as_str(payload.get("target_commitish")),
+        draft=bool(payload.get("draft")),
+        prerelease=bool(payload.get("prerelease")),
+    )
+    if not release.tag_name:
+        raise ValueError("GitHub Release API 返回缺少 tag_name")
+    if release.draft or release.prerelease:
+        raise ValueError("GitHub Release API 未返回正式版本")
+    return release

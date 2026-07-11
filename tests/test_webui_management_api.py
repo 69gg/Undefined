@@ -390,6 +390,8 @@ def test_create_app_registers_management_routes() -> None:
     assert ("DELETE", "/api/v1/management/runtime/schedules/{task_id}") in routes
     assert ("POST", "/api/v1/management/config/validate") in routes
     assert ("POST", "/api/v1/management/bot/start") in routes
+    assert ("GET", "/api/v1/management/update-check") in routes
+    assert ("POST", "/api/v1/management/update-restart") in routes
     assert ("POST", "/api/v1/management/runtime/chat/jobs") in routes
     assert ("GET", "/api/v1/management/runtime/chat/jobs/active") in routes
     assert ("GET", "/api/v1/management/runtime/chat/jobs/{job_id}") in routes

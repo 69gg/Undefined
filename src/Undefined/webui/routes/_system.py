@@ -219,6 +219,7 @@ async def capabilities_probe_handler(request: web.Request) -> Response:
                 "status": True,
                 "start": True,
                 "stop": True,
+                "update_check": True,
                 "update_restart": True,
             },
             "runtime": {
