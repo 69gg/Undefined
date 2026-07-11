@@ -184,6 +184,8 @@ const state = {
     config: {},
     comments: {},
     configCollapsed: {},
+    configSearchCollapsed: {},
+    configSearchModeActive: false,
     configSearch: "",
     configLoading: false,
     configLoaded: false,

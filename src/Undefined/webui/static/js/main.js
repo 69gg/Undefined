@@ -197,6 +197,9 @@ function switchTab(tab) {
     document.querySelectorAll(".tab-content").forEach((el) => {
         el.classList.toggle("active", el.id === `tab-${tab}`);
     });
+    if (tab === "config") {
+        window.requestAnimationFrame(updateConfigSectionStickyOffset);
+    }
 
     if (tab === "overview") {
         if (!document.hidden) {
@@ -492,6 +495,7 @@ async function init() {
     };
 
     initUpdateDialog();
+    initConfigFormLayout();
 
     if (
         window.RuntimeController &&

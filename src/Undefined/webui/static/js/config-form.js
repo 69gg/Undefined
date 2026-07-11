@@ -1,3 +1,63 @@
+let configFormLayoutInitialized = false;
+let configLayoutResizeObserver = null;
+
+function getConfigStickyChromeElements() {
+    return [
+        document.querySelector("#tab-config > .header.sticky"),
+        document.querySelector(".mobile-topbar"),
+    ].filter(Boolean);
+}
+
+function updateConfigSectionStickyOffset() {
+    const form = get("formSections");
+    if (!form) return;
+
+    const stickyHeight = getConfigStickyChromeElements().reduce(
+        (height, element) => {
+            const styles = window.getComputedStyle(element);
+            if (
+                styles.display === "none" ||
+                !["fixed", "sticky"].includes(styles.position)
+            ) {
+                return height;
+            }
+            const elementHeight = element.getBoundingClientRect().height;
+            const containingBlock = element.parentElement;
+            if (
+                styles.position === "sticky" &&
+                containingBlock &&
+                containingBlock.getBoundingClientRect().height <=
+                    elementHeight + 1
+            ) {
+                return height;
+            }
+            return Math.max(height, elementHeight);
+        },
+        0,
+    );
+    form.style.setProperty(
+        "--config-section-sticky-offset",
+        `${Math.ceil(stickyHeight)}px`,
+    );
+}
+
+function initConfigFormLayout() {
+    if (configFormLayoutInitialized) return;
+    configFormLayoutInitialized = true;
+
+    const chromeElements = getConfigStickyChromeElements();
+    if ("ResizeObserver" in window) {
+        configLayoutResizeObserver = new ResizeObserver(() =>
+            updateConfigSectionStickyOffset(),
+        );
+        chromeElements.forEach((element) =>
+            configLayoutResizeObserver.observe(element),
+        );
+    }
+    window.addEventListener("resize", updateConfigSectionStickyOffset);
+    window.requestAnimationFrame(updateConfigSectionStickyOffset);
+}
+
 async function loadConfig() {
     if (state.configLoading) return;
     state.configLoading = true;
@@ -92,6 +152,7 @@ function buildConfigForm() {
     if (!container) return;
     container.textContent = "";
 
+    let sectionIndex = 0;
     for (const [section, values] of Object.entries(state.config)) {
         if (typeof values !== "object" || Array.isArray(values)) continue;
 
@@ -114,17 +175,32 @@ function buildConfigForm() {
 
         const toggle = document.createElement("button");
         toggle.type = "button";
-        toggle.className = "btn ghost btn-sm";
+        toggle.className = "btn ghost btn-sm config-section-toggle";
         toggle.dataset.section = section;
         toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
-        toggle.innerText = collapsed
+
+        const toggleIcon = document.createElement("span");
+        toggleIcon.className = "config-section-toggle-icon";
+        toggleIcon.setAttribute("aria-hidden", "true");
+        toggle.appendChild(toggleIcon);
+
+        const toggleLabel = document.createElement("span");
+        toggleLabel.className = "config-section-toggle-label";
+        toggleLabel.innerText = collapsed
             ? t("config.expand_section")
             : t("config.collapse_section");
+        toggle.appendChild(toggleLabel);
         toggle.addEventListener("click", () => toggleSection(section));
         actions.appendChild(toggle);
 
         header.appendChild(actions);
         card.appendChild(header);
+
+        const body = document.createElement("div");
+        body.className = "config-card-body";
+        body.id = `config-section-body-${sectionIndex}`;
+        toggle.setAttribute("aria-controls", body.id);
+        sectionIndex += 1;
 
         const sectionComment = getComment(section);
         if (sectionComment) {
@@ -132,58 +208,137 @@ function buildConfigForm() {
             hint.className = "form-section-hint";
             hint.innerText = sectionComment;
             hint.dataset.commentPath = section;
-            card.appendChild(hint);
+            body.appendChild(hint);
         }
 
         const fieldGrid = document.createElement("div");
         fieldGrid.className = "form-fields";
-        card.appendChild(fieldGrid);
+        body.appendChild(fieldGrid);
 
         for (const [key, val] of Object.entries(values)) {
             fieldGrid.appendChild(createEditorNode(`${section}.${key}`, val));
         }
+        card.appendChild(body);
         container.appendChild(card);
     }
 
     updateConfigSearchIndex();
     applyConfigFilter();
+    updateConfigSectionStickyOffset();
+}
+
+function isConfigSearchActive() {
+    return state.configSearch.trim().length > 0;
+}
+
+function syncConfigSearchMode(searchActive) {
+    if (state.configSearchModeActive === searchActive) return;
+    state.configSearchModeActive = searchActive;
+    state.configSearchCollapsed = {};
+}
+
+function updateConfigSectionPresentations() {
+    const searchActive = isConfigSearchActive();
+    document.querySelectorAll(".config-card").forEach((card) => {
+        const section = card.dataset.section;
+        if (!section) return;
+
+        const collapsed = searchActive
+            ? !!state.configSearchCollapsed[section]
+            : !!state.configCollapsed[section];
+        card.classList.toggle("is-collapsed", collapsed);
+
+        const toggle = card.querySelector(".config-section-toggle");
+        if (!toggle) return;
+        const label = toggle.querySelector(".config-section-toggle-label");
+        if (label) {
+            label.innerText = collapsed
+                ? t("config.expand_section")
+                : t("config.collapse_section");
+        }
+        toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    });
+}
+
+function preserveConfigViewportAnchor(anchor, update) {
+    const beforeTop = anchor?.getBoundingClientRect().top;
+    update();
+    if (!anchor || !anchor.isConnected || !Number.isFinite(beforeTop)) return;
+
+    const afterTop = anchor.getBoundingClientRect().top;
+    const delta = afterTop - beforeTop;
+    if (Math.abs(delta) < 0.5) return;
+    window.scrollBy({ top: delta, left: 0, behavior: "auto" });
+}
+
+function findConfigViewportAnchor() {
+    const form = get("formSections");
+    if (!form) return null;
+    const rawOffset = window
+        .getComputedStyle(form)
+        .getPropertyValue("--config-section-sticky-offset");
+    const stickyOffset = Number.parseFloat(rawOffset) || 0;
+    let firstVisible = null;
+
+    for (const header of document.querySelectorAll(".config-card-header")) {
+        const card = header.closest(".config-card");
+        if (!card || card.classList.contains("is-hidden")) continue;
+        const headerRect = header.getBoundingClientRect();
+        const cardRect = card.getBoundingClientRect();
+        if (cardRect.bottom <= stickyOffset || headerRect.top >= innerHeight) {
+            continue;
+        }
+        if (
+            headerRect.top <= stickyOffset + 1 &&
+            cardRect.bottom > stickyOffset
+        ) {
+            return header;
+        }
+        if (!firstVisible && headerRect.bottom > stickyOffset) {
+            firstVisible = header;
+        }
+    }
+    return firstVisible;
 }
 
 function toggleSection(section) {
-    state.configCollapsed[section] = !state.configCollapsed[section];
-    document.querySelectorAll(".config-card").forEach((card) => {
-        if (card.dataset.section !== section) return;
-        const collapsed = !!state.configCollapsed[section];
-        card.classList.toggle("is-collapsed", collapsed);
-        const toggle = card.querySelector(".config-card-actions button");
-        if (toggle) {
-            toggle.innerText = collapsed
-                ? t("config.expand_section")
-                : t("config.collapse_section");
-            toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
-        }
+    const card = Array.from(document.querySelectorAll(".config-card")).find(
+        (candidate) => candidate.dataset.section === section,
+    );
+    const anchor = card?.querySelector(".config-card-header") || null;
+    preserveConfigViewportAnchor(anchor, () => {
+        const collapseState = isConfigSearchActive()
+            ? state.configSearchCollapsed
+            : state.configCollapsed;
+        collapseState[section] = !collapseState[section];
+        updateConfigSectionPresentations();
     });
 }
 
 function setAllSectionsCollapsed(collapsed) {
-    document.querySelectorAll(".config-card").forEach((card) => {
-        const section = card.dataset.section;
-        if (!section) return;
-        state.configCollapsed[section] = collapsed;
-        card.classList.toggle("is-collapsed", collapsed);
-        const toggle = card.querySelector(".config-card-actions button");
-        if (toggle) {
-            toggle.innerText = collapsed
-                ? t("config.expand_section")
-                : t("config.collapse_section");
-            toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
-        }
+    const searchActive = isConfigSearchActive();
+    const anchor = findConfigViewportAnchor();
+    preserveConfigViewportAnchor(anchor, () => {
+        const collapseState = searchActive
+            ? state.configSearchCollapsed
+            : state.configCollapsed;
+        document.querySelectorAll(".config-card").forEach((card) => {
+            const section = card.dataset.section;
+            if (
+                section &&
+                (!searchActive || !card.classList.contains("is-hidden"))
+            ) {
+                collapseState[section] = collapsed;
+            }
+        });
+        updateConfigSectionPresentations();
     });
 }
 
 function applyConfigFilter() {
     if (!state.configLoaded) return;
     const query = state.configSearch.trim().toLowerCase();
+    syncConfigSearchMode(query.length > 0);
     let matchCount = 0;
     document.querySelectorAll(".config-card").forEach((card) => {
         let cardMatches = 0;
@@ -204,13 +359,13 @@ function applyConfigFilter() {
                 ? ""
                 : "none";
         });
-        card.classList.toggle("force-open", query.length > 0);
         card.classList.toggle(
             "is-hidden",
             query.length > 0 && cardMatches === 0,
         );
         matchCount += cardMatches;
     });
+    updateConfigSectionPresentations();
     if (query.length > 0 && matchCount === 0) {
         setConfigState("empty");
     } else if (state.configLoaded) {

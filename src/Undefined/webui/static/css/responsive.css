@@ -217,8 +217,7 @@
     flex-direction: row;
   }
   .form-grid {
-    column-count: 1;
-    column-width: auto;
+    gap: 18px;
   }
   .form-fields { grid-template-columns: 1fr; }
 
