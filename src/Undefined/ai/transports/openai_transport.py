@@ -210,7 +210,7 @@ def normalize_chat_completions_result(result: dict[str, Any]) -> dict[str, Any]:
         normalized_message = dict(message)
         if wire_fields:
             normalized_message[CHAT_REASONING_REPLAY_KEY] = wire_fields
-        if readable and normalized_message.get("reasoning_content") is None:
+        if readable and not normalized_message.get("reasoning_content"):
             normalized_message["reasoning_content"] = readable
         normalized_choice = dict(choice)
         normalized_choice["message"] = normalized_message
@@ -750,10 +750,10 @@ def _collect_reasoning_text(output: list[dict[str, Any]]) -> str:
     for item in output:
         if not isinstance(item, dict):
             continue
-        direct_text = extract_chat_reasoning_text(item)
-        if direct_text:
-            chunks.append(direct_text)
         if item.get("type") != "reasoning":
+            direct_text = extract_chat_reasoning_text(item)
+            if direct_text:
+                chunks.append(direct_text)
             continue
         content = item.get("content")
         if isinstance(content, list):

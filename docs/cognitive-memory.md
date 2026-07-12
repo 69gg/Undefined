@@ -309,7 +309,7 @@ data/cognitive/
 | `api_url` | str | 继承 agent | OpenAI 兼容 base URL |
 | `api_key` | str | 继承 agent | API 密钥 |
 | `model_name` | str | 继承 agent | 模型名称 |
-| `max_tokens` | int | 继承 agent | 最大生成 tokens；`<= 0` 时请求不发送上限字段 |
+| `max_tokens` | int | 继承 agent | 最大生成 tokens；OpenAI 模式下 `<= 0` 时不发送上限，Anthropic Messages 要求为正整数 |
 
 ### [cognitive.historian]
 

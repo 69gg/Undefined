@@ -121,6 +121,24 @@ assert(partial.total === 2, "leading tail fragment must remain a separate record
 assert(partial.matched === 1, "leading tail fragment must remain searchable");
 assert(partial.filtered.length === 2, "all available fragment lines must be returned");
 
+const isoRange = controller.filterLogLines(raw, {
+  timeFrom: new Date(firstTimestamp - 1).toISOString(),
+  timeTo: new Date(firstTimestamp + 1).toISOString(),
+});
+assert(isoRange.matched === 1, "record filter must accept ISO timestamp strings");
+
+const numericRange = controller.filterLogLines(raw, {
+  timeFrom: firstTimestamp - 1,
+  timeTo: firstTimestamp + 1,
+});
+assert(numericRange.matched === 1, "record filter must preserve numeric timestamps");
+
+const invalidRange = controller.filterLogLines(raw, {
+  timeFrom: "not-a-date",
+  timeTo: "still-not-a-date",
+});
+assert(invalidRange.matched === 3, "invalid timestamps must not activate a filter");
+
 console.log(JSON.stringify({ ok: true, total: records.length }));
 """
     completed = subprocess.run(

@@ -267,7 +267,10 @@ def _normalize_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return normalized
 
 
-def _normalize_tool_choice(tool_choice: Any) -> dict[str, Any] | None:
+def _normalize_tool_choice(
+    tool_choice: Any,
+    internal_to_api: dict[str, str] | None = None,
+) -> dict[str, Any] | None:
     if isinstance(tool_choice, str):
         value = tool_choice.strip().lower()
         if value == "required":
@@ -289,6 +292,8 @@ def _normalize_tool_choice(tool_choice: Any) -> dict[str, Any] | None:
         )
         name_text = str(name or "").strip()
         if name_text:
+            if internal_to_api:
+                name_text = internal_to_api.get(name_text, name_text)
             return {"type": "tool", "name": name_text}
     return None
 
@@ -356,11 +361,17 @@ def build_anthropic_messages_request_body(
     tools: list[dict[str, Any]] | None,
     tool_choice: Any,
     extra_kwargs: dict[str, Any],
+    internal_to_api: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Build a canonical Anthropic Messages request body."""
-    body: dict[str, Any] = {"model": getattr(model_config, "model_name")}
-    if max_tokens > 0:
-        body["max_tokens"] = max_tokens
+    if max_tokens <= 0:
+        raise ValueError(
+            f"Anthropic Messages 要求 max_tokens 为正整数，当前为 {max_tokens}"
+        )
+    body: dict[str, Any] = {
+        "model": getattr(model_config, "model_name"),
+        "max_tokens": max_tokens,
+    }
     preserve_reasoning = bool(getattr(model_config, "reasoning_content_replay", True))
     body["messages"] = _messages_to_anthropic(
         messages,
@@ -400,7 +411,7 @@ def build_anthropic_messages_request_body(
         normalized_tools = _normalize_tools(tools)
         if normalized_tools:
             body["tools"] = normalized_tools
-            normalized_choice = _normalize_tool_choice(tool_choice)
+            normalized_choice = _normalize_tool_choice(tool_choice, internal_to_api)
             if normalized_choice is not None:
                 thinking_active = isinstance(thinking, dict) and thinking.get(
                     "type"

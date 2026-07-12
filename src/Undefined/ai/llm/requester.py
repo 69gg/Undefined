@@ -24,7 +24,6 @@ from anthropic import (
     APIStatusError as AnthropicAPIStatusError,
     APITimeoutError as AnthropicAPITimeoutError,
     AsyncAnthropic,
-    omit as anthropic_omit,
 )
 from openai import (
     APIConnectionError as OpenAIAPIConnectionError,
@@ -100,9 +99,6 @@ def _prepare_anthropic_sdk_params(request_body: dict[str, Any]) -> dict[str, Any
     params, extra_body = split_anthropic_params(
         without_stream_request_fields(request_body)
     )
-    if "max_tokens" not in params:
-        # The SDK requires this keyword, but ``omit`` removes it from the HTTP body.
-        params["max_tokens"] = anthropic_omit
     if extra_body:
         params["extra_body"] = extra_body
     return params
@@ -1362,6 +1358,7 @@ def build_request_body(
             tools=tools,
             tool_choice=tool_choice,
             extra_kwargs=extra_kwargs,
+            internal_to_api=internal_to_api,
         )
 
     body: dict[str, Any] = {

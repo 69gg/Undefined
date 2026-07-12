@@ -47,7 +47,7 @@ responses_force_stateless_replay = false
 说明：
 - `api_mode = "openai.chat_completions"` 时，`thinking_enabled` 发送兼容接口常用的 `thinking`，`reasoning_enabled` 发送顶层 `reasoning_effort`。回放支持 `reasoning_content`、OpenRouter `reasoning_details`、签名和加密字段。
 - `api_mode = "openai.responses"` 时，多轮工具调用默认使用 `previous_response_id + function_call_output`；`responses_force_stateless_replay=true` 才改为完整 `output` items 重放。工具结果使用 `call_id` 关联，`function_call.id` 仅保留模型返回的合法 `fc_*` id。
-- `api_mode = "anthropic.messages"` 时使用官方 `AsyncAnthropic` Messages SDK，并转换 system、图片、工具和 tool result；`thinking_include_budget=false` 使用 adaptive thinking，手动预算必须至少 1024 且小于本次 `max_tokens`。
+- `api_mode = "anthropic.messages"` 时使用官方 `AsyncAnthropic` Messages SDK，并转换 system、图片、工具和 tool result；`max_tokens` 必须为正整数，`thinking_include_budget=false` 使用 adaptive thinking，手动预算必须至少 1024 且小于本次 `max_tokens`。
 - `reasoning_effort` 保持自定义输入：`adaptive` 原样发送，其余值也原样透传；具体字段位置由 `api_mode` 自动决定，不再需要 style 配置。
 - `reasoning_content_replay` 默认 `true`，优先按历史顺序原样回传全部原生推理结构；设为 `false` 会过滤明文、summary、签名和加密推理材料。
 - `thinking_tool_call_compat` 默认 `true`，用于在本地历史保留可读 `reasoning_content`，供日志和旧历史回退。

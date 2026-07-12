@@ -34,7 +34,7 @@ class ModelPoolEntry:
     api_url: str
     api_key: str
     model_name: str
-    max_tokens: int  # 非正数时不发送输出 token 上限
+    max_tokens: int  # OpenAI 模式非正数时省略；Anthropic Messages 要求正整数
     use_proxy: bool = False
     context_window_tokens: int = 8192
     queue_interval_seconds: float = 1.0
@@ -73,7 +73,7 @@ class ChatModelConfig:
     api_url: str
     api_key: str
     model_name: str
-    max_tokens: int  # 非正数时不发送输出 token 上限
+    max_tokens: int  # OpenAI 模式非正数时省略；Anthropic Messages 要求正整数
     use_proxy: bool = False
     context_window_tokens: int = 8192
     queue_interval_seconds: float = 1.0
@@ -110,7 +110,7 @@ class VisionModelConfig:
     api_url: str
     api_key: str
     model_name: str
-    max_tokens: int = 8192  # 最大输出 tokens；非正数时不发送上限
+    max_tokens: int = 8192  # OpenAI 模式非正数时省略；Anthropic Messages 要求正整数
     use_proxy: bool = False
     context_window_tokens: int = 8192
     queue_interval_seconds: float = 1.0
@@ -144,7 +144,7 @@ class SecurityModelConfig:
     api_url: str
     api_key: str
     model_name: str
-    max_tokens: int  # 非正数时不发送输出 token 上限
+    max_tokens: int  # OpenAI 模式非正数时省略；Anthropic Messages 要求正整数
     use_proxy: bool = False
     context_window_tokens: int = 8192
     queue_interval_seconds: float = 1.0
@@ -208,7 +208,7 @@ class AgentModelConfig:
     api_url: str
     api_key: str
     model_name: str
-    max_tokens: int = 4096  # 非正数时不发送输出 token 上限
+    max_tokens: int = 4096  # OpenAI 模式非正数时省略；Anthropic Messages 要求正整数
     use_proxy: bool = False
     context_window_tokens: int = 8192
     queue_interval_seconds: float = 1.0
@@ -243,7 +243,7 @@ class GrokModelConfig:
     api_url: str
     api_key: str
     model_name: str
-    max_tokens: int = 8192  # 非正数时不发送输出 token 上限
+    max_tokens: int = 8192  # OpenAI 模式非正数时省略；Anthropic Messages 要求正整数
     use_proxy: bool = False
     context_window_tokens: int = 8192
     queue_interval_seconds: float = 1.0

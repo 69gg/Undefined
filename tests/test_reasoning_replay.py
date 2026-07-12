@@ -90,6 +90,53 @@ def test_chat_replay_prefers_original_reasoning_fields() -> None:
     assert message[CHAT_REASONING_REPLAY_KEY] == original_wire
 
 
+def test_chat_readable_reasoning_replaces_empty_compat_field() -> None:
+    result = normalize_chat_completions_result(
+        {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "answer",
+                        "reasoning_content": "",
+                        "reasoning_details": [
+                            {"type": "reasoning.text", "text": "analysis"}
+                        ],
+                    }
+                }
+            ]
+        }
+    )
+
+    message = result["choices"][0]["message"]
+    assert message["reasoning_content"] == "analysis"
+    assert message[CHAT_REASONING_REPLAY_KEY]["reasoning_content"] == ""
+
+
+def test_responses_reasoning_items_use_native_text_extraction_once() -> None:
+    result = normalize_responses_result(
+        {
+            "output": [
+                {
+                    "type": "reasoning",
+                    "reasoning": "analysis",
+                    "content": [{"type": "reasoning_text", "text": "analysis"}],
+                    "summary": [{"type": "summary_text", "text": "summary"}],
+                },
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [],
+                    "reasoning_content": "compat reasoning",
+                },
+            ]
+        }
+    )
+
+    message = result["choices"][0]["message"]
+    assert message["reasoning_content"] == "analysis\nsummary\ncompat reasoning"
+
+
 def test_chat_replay_switch_strips_every_reasoning_wire_field() -> None:
     message = {
         "role": "assistant",

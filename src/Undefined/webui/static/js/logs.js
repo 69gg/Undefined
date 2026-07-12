@@ -167,6 +167,17 @@
         return getLevelRank(recordLevel) >= getLevelRank(target);
     }
 
+    function normalizeFilterTimestamp(value) {
+        if (typeof value === "number") {
+            return Number.isFinite(value) ? value : 0;
+        }
+        if (typeof value !== "string" || !value.trim()) return 0;
+        const numeric = Number(value);
+        if (Number.isFinite(numeric)) return numeric;
+        const parsed = Date.parse(value);
+        return Number.isFinite(parsed) ? parsed : 0;
+    }
+
     function recordMatchesFilters(record, options) {
         if (!shouldKeepRecord(record.level, options)) return false;
 
@@ -178,8 +189,8 @@
             return false;
         }
 
-        const timeFrom = Number(options.timeFrom) || 0;
-        const timeTo = Number(options.timeTo) || 0;
+        const timeFrom = normalizeFilterTimestamp(options.timeFrom);
+        const timeTo = normalizeFilterTimestamp(options.timeTo);
         if (record.timestamp !== null) {
             if (timeFrom && record.timestamp < timeFrom) return false;
             if (timeTo && record.timestamp > timeTo) return false;

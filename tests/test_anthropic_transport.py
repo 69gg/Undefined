@@ -1,14 +1,17 @@
 from __future__ import annotations
 
-import json
 from types import TracebackType
 from typing import Any, cast
 
 import httpx
 import pytest
-from anthropic import AsyncAnthropic, omit
+from anthropic import AsyncAnthropic
 
-from Undefined.ai.llm import ModelRequester, build_request_body
+from Undefined.ai.llm import (
+    ModelRequester,
+    _encode_tool_name_for_api,
+    build_request_body,
+)
 from Undefined.ai.transports import (
     ANTHROPIC_CONTENT_BLOCKS_KEY,
     normalize_anthropic_result,
@@ -190,40 +193,24 @@ def test_anthropic_adaptive_thinking_and_manual_budget_validation() -> None:
             max_tokens=4096,
         )
 
-    for unlimited_max_tokens in (0, -1):
-        unlimited_body = build_request_body(
-            model_config=_config(
-                thinking_enabled=True,
-                thinking_include_budget=True,
-                thinking_budget_tokens=4096,
-            ),
+
+@pytest.mark.parametrize("max_tokens", [0, -1])
+def test_anthropic_rejects_non_positive_max_tokens(max_tokens: int) -> None:
+    with pytest.raises(ValueError, match="max_tokens 为正整数"):
+        build_request_body(
+            model_config=_config(max_tokens=max_tokens),
             messages=[{"role": "user", "content": "hello"}],
-            max_tokens=unlimited_max_tokens,
+            max_tokens=max_tokens,
         )
-        assert "max_tokens" not in unlimited_body
-        assert unlimited_body["thinking"] == {
-            "type": "enabled",
-            "budget_tokens": 4096,
-        }
-
-    override_body = build_request_body(
-        model_config=_config(),
-        messages=[{"role": "user", "content": "hello"}],
-        max_tokens=0,
-        thinking={"type": "enabled", "budget_tokens": 4096},
-    )
-    assert "max_tokens" not in override_body
-    assert override_body["thinking"] == {
-        "type": "enabled",
-        "budget_tokens": 4096,
-    }
 
 
-def test_anthropic_disabled_thinking_keeps_forced_tool_choice() -> None:
+def test_anthropic_disabled_thinking_keeps_mapped_forced_tool_choice() -> None:
+    internal_name = "lookup.weather@bj"
+    api_name = _encode_tool_name_for_api(internal_name)
     tool = {
         "type": "function",
         "function": {
-            "name": "lookup",
+            "name": api_name,
             "parameters": {"type": "object", "properties": {}},
         },
     }
@@ -232,12 +219,14 @@ def test_anthropic_disabled_thinking_keeps_forced_tool_choice() -> None:
         messages=[{"role": "user", "content": "hello"}],
         max_tokens=4096,
         tools=[tool],
-        tool_choice={"type": "function", "function": {"name": "lookup"}},
+        tool_choice={"type": "function", "function": {"name": internal_name}},
+        internal_to_api={internal_name: api_name},
         thinking={"type": "disabled"},
     )
 
     assert body["thinking"] == {"type": "disabled"}
-    assert body["tool_choice"] == {"type": "tool", "name": "lookup"}
+    assert body["tools"][0]["name"] == api_name
+    assert body["tool_choice"] == {"type": "tool", "name": api_name}
 
 
 def test_anthropic_raw_thinking_blocks_replay_in_original_order() -> None:
@@ -292,11 +281,12 @@ def test_anthropic_raw_thinking_blocks_replay_in_original_order() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("stream_enabled", [False, True])
-@pytest.mark.parametrize("max_tokens", [4096, 0, -1])
 async def test_requester_uses_anthropic_sdk_messages_interface(
     stream_enabled: bool,
-    max_tokens: int,
 ) -> None:
+    max_tokens = 4096
+    internal_tool_name = "lookup.weather@bj"
+    api_tool_name = _encode_tool_name_for_api(internal_tool_name)
     response = {
         "id": "msg_1",
         "content": [{"type": "text", "text": "hello"}],
@@ -332,6 +322,20 @@ async def test_requester_uses_anthropic_sdk_messages_interface(
         messages=[{"role": "user", "content": "hello"}],
         max_tokens=max_tokens,
         call_type="chat",
+        tools=[
+            {
+                "type": "function",
+                "function": {
+                    "name": internal_tool_name,
+                    "description": "Look up weather",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }
+        ],
+        tool_choice={
+            "type": "function",
+            "function": {"name": internal_tool_name},
+        },
     )
 
     assert result["choices"][0]["message"]["content"] == "hello"
@@ -348,59 +352,10 @@ async def test_requester_uses_anthropic_sdk_messages_interface(
         "format": {"type": "json_schema", "schema": {}},
     }
     assert request_kwargs["cache_control"] == {"type": "ephemeral"}
-    if max_tokens > 0:
-        assert request_kwargs["max_tokens"] == max_tokens
-    else:
-        assert request_kwargs["max_tokens"] is omit
+    assert request_kwargs["max_tokens"] == max_tokens
+    assert request_kwargs["tools"][0]["name"] == api_tool_name
+    assert request_kwargs["tool_choice"] == {
+        "type": "tool",
+        "name": api_tool_name,
+    }
     await http_client.aclose()
-
-
-@pytest.mark.asyncio
-async def test_anthropic_sdk_omits_non_positive_max_tokens_from_http_body() -> None:
-    request_body: dict[str, Any] = {}
-
-    async def handler(request: httpx.Request) -> httpx.Response:
-        decoded = json.loads(request.content)
-        assert isinstance(decoded, dict)
-        request_body.update(decoded)
-        return httpx.Response(
-            200,
-            request=request,
-            json={
-                "id": "msg_1",
-                "type": "message",
-                "role": "assistant",
-                "model": "claude-test",
-                "content": [{"type": "text", "text": "hello"}],
-                "stop_reason": "end_turn",
-                "stop_sequence": None,
-                "usage": {"input_tokens": 2, "output_tokens": 1},
-            },
-        )
-
-    http_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    anthropic_client = AsyncAnthropic(
-        api_key="sk-ant-test",
-        base_url="https://provider.example",
-        timeout=480.0,
-        http_client=http_client,
-    )
-    requester = ModelRequester(
-        http_client=http_client,
-        token_usage_storage=cast(TokenUsageStorage, _FakeUsageStorage()),
-    )
-    setattr(
-        requester,
-        "_get_anthropic_client_for_model",
-        lambda _cfg: anthropic_client,
-    )
-
-    result = await requester.request(
-        model_config=_config(max_tokens=0),
-        messages=[{"role": "user", "content": "hello"}],
-        max_tokens=0,
-    )
-
-    assert result["choices"][0]["message"]["content"] == "hello"
-    assert "max_tokens" not in request_body
-    await anthropic_client.close()

@@ -160,11 +160,10 @@ class _FakeStreamingClient:
     [
         ("openai.chat_completions", "max_tokens"),
         ("openai.responses", "max_output_tokens"),
-        ("anthropic.messages", "max_tokens"),
     ],
 )
 @pytest.mark.parametrize("max_tokens", [0, -1])
-def test_build_request_body_omits_non_positive_token_limit(
+def test_openai_request_body_omits_non_positive_token_limit(
     api_mode: str,
     token_field: str,
     max_tokens: int,

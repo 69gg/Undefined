@@ -237,7 +237,7 @@ model_name = "gpt-4o-mini"
 | `api_url` | Provider 基址；OpenAI 兼容接口通常为 `.../v1`，Anthropic 原生接口可写站点根地址或 `.../v1` |
 | `api_key` | API Key |
 | `model_name` | 模型名 |
-| `max_tokens` | 最大输出 token；设为 `0` 或负数时不发送 API 上限字段，使用服务端默认值 |
+| `max_tokens` | 最大输出 token；OpenAI 模式下设为 `0` 或负数时不发送上限字段，Anthropic Messages 要求为正整数 |
 | `context_window_tokens` | 模型上下文窗口上限（token），用于 `/summary` 分块与 Prompt 预算；解析默认 `8192`，须按上游模型能力配置 |
 | `queue_interval_seconds` | 该模型请求队列发车间隔（秒，`0` 表示立即发车） |
 | `use_proxy` | 是否让该模型请求使用 `[proxy]` 中配置的代理地址；默认 `false`，各模型种类独立配置 |
@@ -275,9 +275,9 @@ model_name = "gpt-4o-mini"
   - 仅建议在默认关闭时请求仍返回 500，再尝试开启这些兼容开关
   - 当前已知 `new-api v0.11.4-alpha.3` 存在这类兼容问题
 - `api_mode="anthropic.messages"`：走 `AsyncAnthropic.messages.create(...)` / `messages.stream(...)`
-  - `max_tokens > 0` 时发送 `max_tokens`；为 `0` 或负数时通过 SDK 的 `omit` 哨兵从实际 HTTP 请求体中省略，由上游决定默认值（要求该字段必填的上游会拒绝请求）
+  - 官方 Messages API 将 `max_tokens` 定义为必填字段；运行时要求其为正整数并原样发送，`0` 或负数会在请求发出前报错
   - 自动转换顶层 `system`、图片、函数工具、`tool_use` / `tool_result`，不使用手写 HTTP 请求
-  - `thinking_enabled=true` 且 `thinking_include_budget=true` 时发送 `thinking={type="enabled", budget_tokens=...}`；预算必须 `>=1024`，并且仅在 `max_tokens > 0` 时必须严格小于本次上限
+  - `thinking_enabled=true` 且 `thinking_include_budget=true` 时发送 `thinking={type="enabled", budget_tokens=...}`；预算必须 `>=1024` 且严格小于本次 `max_tokens`
   - `thinking_include_budget=false` 时发送 `thinking={type="adaptive"}`
   - `reasoning_enabled=true` 时发送 `output_config.effort`，值按 `reasoning_effort` 原样透传；其他 `output_config` 键继续保留
   - 回放开启时按原顺序发送完整 `thinking` / `redacted_thinking` / `text` / `tool_use` blocks；关闭时只过滤 thinking 与 redacted blocks
@@ -291,7 +291,7 @@ Prompt caching 补充：
 
 `request_params` 说明：
 - 适合放 provider 私有请求体字段，例如 `metadata`、`temperature`、兼容网关扩展参数等。
-- `reasoning_effort` 与 `thinking` 由正式配置字段控制；兼容 Chat 的 `reasoning` 对象、Responses 的 `reasoning.summary` 等附加键、Anthropic 的其他 `output_config` 键可以通过 `request_params` 配置，专用 effort 配置优先。
+- `reasoning_effort` 与 `thinking` 由正式配置字段控制，`request_params` 中的同名保留字段不能覆盖；兼容 Chat 的 `reasoning` 对象、Responses 的 `reasoning.summary` 等附加键、Anthropic 的其他 `output_config` 键属于明确的合并例外，专用 effort 配置优先。
 - 消息总结分块读取 `[models.summary].context_window_tokens`（未单独配置时回退 `[models.agent]`）；不再使用硬编码窗口或 `request_params` 里的 `context_length` 类字段。
 
 #### 思维链续传迁移说明
@@ -512,9 +512,10 @@ Prompt caching 补充：
 
 `request_params` 说明：
 - 仅用于**请求体**字段，不包含 `api_key`、`base_url`、`timeout`、`extra_headers` 等 client 选项。
-- `openai.chat_completions` 保留字段：`model`、`messages`、`max_tokens`、`tools`、`tool_choice`、`stream`、`stream_options`、`thinking`、`reasoning_effort`、`output_config`；兼容网关的 `reasoning` 对象允许透传。专用 `max_tokens` 配置仅在值为正数时发送。
-- `openai.responses` 保留字段：`model`、`input`、`instructions`、`max_output_tokens`、`tools`、`tool_choice`、`previous_response_id`、`stream`、`stream_options`、`thinking`、`reasoning_effort`、`output_config`；`request_params.reasoning` 的附加键允许透传并与专用 effort 合并。专用 `max_tokens` 配置仅在值为正数时映射为 `max_output_tokens`。历史 `output` items 由运行时维护，不要手工覆盖 `function_call.id` / `call_id`。
-- `anthropic.messages` 保留字段：`model`、`messages`、`system`、`max_tokens`、`tools`、`tool_choice`、`stream`、`thinking`、`reasoning`、`reasoning_effort`、`prompt_cache_key`；`request_params.output_config` 会与专用 effort 合并。专用 `max_tokens` 配置仅在值为正数时发送。
+- 以下各模式列出的**运行时保留字段**由正式参数或专用配置派生；`request_params` 中的同名值会被忽略，不能覆盖最终请求体。未列出的字段才会透传，另行说明的合并字段除外。
+- `openai.chat_completions` 运行时保留字段：`model`、`messages`、`max_tokens`、`tools`、`tool_choice`、`stream`、`stream_options`、`thinking`、`reasoning_effort`、`output_config`。`request_params.reasoning` 是兼容网关的透传例外；专用 `max_tokens` 仅在值为正数时发送，非正数时省略。
+- `openai.responses` 运行时保留字段：`model`、`input`、`instructions`、`max_output_tokens`、`tools`、`tool_choice`、`previous_response_id`、`stream`、`stream_options`、`thinking`、`reasoning_effort`、`output_config`。`request_params.reasoning` 是合并例外，其 `summary` 等附加键会保留，专用 effort 会覆盖同名 `effort`；专用 `max_tokens` 仅在值为正数时映射为 `max_output_tokens`，非正数时省略。历史 `output` items 由运行时维护，不要手工覆盖 `function_call.id` / `call_id`。
+- `anthropic.messages` 运行时保留字段：`model`、`messages`、`system`、`max_tokens`、`tools`、`tool_choice`、`stream`、`thinking`、`reasoning`、`reasoning_effort`、`prompt_cache_key`。`request_params.output_config` 是合并例外，其中其他键会保留，专用 effort 会覆盖同名 `effort`；`max_tokens` 必须为正整数并原样发送。
 - 启用 `stream_enabled` 且使用 `openai.chat_completions` 时，运行时自动发送 `stream_options.include_usage=true`；Responses 与 Anthropic 分别使用各自 SDK 的流式接口并聚合最终响应。
 - 流式请求仅在明确的流式参数不兼容错误或 SDK 未实现时回退到非流式请求；鉴权、限流、网络、超时、解析或代码异常会直接暴露，便于定位真实问题。
 - embedding 保留字段：`model`、`input`、`dimensions`。

@@ -89,8 +89,8 @@ api_key = ""
 # zh: Chat 模型名称。
 # en: Chat model name.
 model_name = ""
-# zh: 最大生成 tokens；设为 0 或负数时不发送上限字段，使用服务端默认值。
-# en: Max generation tokens; set to 0 or a negative value to omit the limit and use the server default.
+# zh: 最大生成 tokens；OpenAI 模式下非正数会省略上限，Anthropic Messages 要求为正整数。
+# en: Max generation tokens; non-positive values omit the limit in OpenAI modes, while Anthropic Messages requires a positive integer.
 max_tokens = 8192
 
 # zh: 模型上下文窗口上限（token），用于 /summary 分块与 Prompt 预算；须与上游模型能力一致。
@@ -171,8 +171,8 @@ api_key = ""
 # zh: Vision 模型名称。
 # en: Vision model name.
 model_name = ""
-# zh: Vision 模型最大输出 tokens；设为 0 或负数时不发送上限字段。启用 thinking 时若设置正数，建议留足思维链和工具调用余量。
-# en: Vision model max output tokens; set to 0 or a negative value to omit the limit. With thinking and a positive limit, leave room for reasoning and tool calls.
+# zh: Vision 模型最大输出 tokens；OpenAI 模式下非正数会省略上限，Anthropic Messages 要求为正整数。启用 thinking 时需留足思维链和工具调用余量。
+# en: Vision model max output tokens; non-positive values omit the limit in OpenAI modes, while Anthropic Messages requires a positive integer. Leave room for reasoning and tool calls when thinking is enabled.
 max_tokens = 8192
 
 # zh: 模型上下文窗口上限（token），用于 /summary 分块与 Prompt 预算；须与上游模型能力一致。
@@ -243,8 +243,8 @@ api_key = ""
 # zh: Security 模型名称。
 # en: Security model name.
 model_name = ""
-# zh: 可选限制：最大生成 tokens；设为 0 或负数时不发送上限字段，使用服务端默认值。
-# en: Optional max generation limit; set to 0 or a negative value to omit it and use the server default.
+# zh: 可选限制：OpenAI 模式下非正数会省略上限，Anthropic Messages 要求为正整数。
+# en: Optional generation limit; non-positive values omit it in OpenAI modes, while Anthropic Messages requires a positive integer.
 max_tokens = 100
 
 # zh: 模型上下文窗口上限（token），用于 /summary 分块与 Prompt 预算；须与上游模型能力一致。
@@ -314,8 +314,8 @@ api_key = ""
 # zh: Naga 审核模型名称。
 # en: Naga moderation model name.
 model_name = ""
-# zh: 可选限制：最大生成 tokens；设为 0 或负数时不发送上限字段，使用服务端默认值。
-# en: Optional max generation limit; set to 0 or a negative value to omit it and use the server default.
+# zh: 可选限制：OpenAI 模式下非正数会省略上限，Anthropic Messages 要求为正整数。
+# en: Optional generation limit; non-positive values omit it in OpenAI modes, while Anthropic Messages requires a positive integer.
 max_tokens = 160
 
 # zh: 模型上下文窗口上限（token），用于 /summary 分块与 Prompt 预算；须与上游模型能力一致。
@@ -380,8 +380,8 @@ api_key = ""
 # zh: Agent 模型名称。
 # en: Agent model name.
 model_name = ""
-# zh: 可选限制：最大生成 tokens；设为 0 或负数时不发送上限字段，使用服务端默认值。
-# en: Optional max generation limit; set to 0 or a negative value to omit it and use the server default.
+# zh: 可选限制：OpenAI 模式下非正数会省略上限，Anthropic Messages 要求为正整数。
+# en: Optional generation limit; non-positive values omit it in OpenAI modes, while Anthropic Messages requires a positive integer.
 max_tokens = 4096
 
 # zh: 模型上下文窗口上限（token），用于 /summary 分块与 Prompt 预算；须与上游模型能力一致。
@@ -462,8 +462,8 @@ api_key = ""
 # zh: 史官模型名称。
 # en: Historian model name.
 model_name = ""
-# zh: 可选限制：最大生成 tokens；设为 0 或负数时不发送上限字段，使用服务端默认值。
-# en: Optional max generation limit; set to 0 or a negative value to omit it and use the server default.
+# zh: 可选限制：OpenAI 模式下非正数会省略上限，Anthropic Messages 要求为正整数。
+# en: Optional generation limit; non-positive values omit it in OpenAI modes, while Anthropic Messages requires a positive integer.
 max_tokens = 4096
 
 # zh: 模型上下文窗口上限（token），用于 /summary 分块与 Prompt 预算；须与上游模型能力一致。
@@ -531,8 +531,8 @@ api_key = ""
 # zh: 消息总结模型名称。
 # en: Message-summary model name.
 model_name = ""
-# zh: 可选限制：最大生成 tokens；设为 0 或负数时不发送上限字段，使用服务端默认值。
-# en: Optional max generation limit; set to 0 or a negative value to omit it and use the server default.
+# zh: 可选限制：OpenAI 模式下非正数会省略上限，Anthropic Messages 要求为正整数。
+# en: Optional generation limit; non-positive values omit it in OpenAI modes, while Anthropic Messages requires a positive integer.
 max_tokens = 4096
 
 # zh: 模型上下文窗口上限（token），用于 /summary 分块与 Prompt 预算；须与上游模型能力一致。
@@ -600,8 +600,8 @@ api_key = ""
 # zh: Grok 搜索模型名称。
 # en: Grok search model name.
 model_name = ""
-# zh: 可选限制：最大生成 tokens；设为 0 或负数时不发送上限字段，使用服务端默认值。
-# en: Optional max generation limit; set to 0 or a negative value to omit it and use the server default.
+# zh: 可选限制：OpenAI 模式下非正数会省略上限，Anthropic Messages 要求为正整数。
+# en: Optional generation limit; non-positive values omit it in OpenAI modes, while Anthropic Messages requires a positive integer.
 max_tokens = 8192
 
 # zh: 模型上下文窗口上限（token），用于 /summary 分块与 Prompt 预算；须与上游模型能力一致。
@@ -980,8 +980,8 @@ intro_autogen_enabled = true
 # zh: 队列发车间隔（秒，0 表示立即发车）。
 # en: Queue interval (seconds; 0 dispatches immediately).
 intro_autogen_queue_interval = 1.0
-# zh: 单次生成最大 token；设为 0 或负数时不发送上限字段，使用服务端默认值。
-# en: Max tokens per generation; set to 0 or a negative value to omit the limit and use the server default.
+# zh: 单次生成最大 token；OpenAI 模式下非正数会省略上限，Anthropic Messages 要求为正整数。
+# en: Max tokens per generation; non-positive values omit the limit in OpenAI modes, while Anthropic Messages requires a positive integer.
 intro_autogen_max_tokens = 8192
 # zh: Hash 缓存路径。
 # en: Hash cache path.
