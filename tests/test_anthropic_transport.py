@@ -295,67 +295,69 @@ async def test_requester_uses_anthropic_sdk_messages_interface(
     }
     fake_client = _FakeAnthropicClient(response)
     http_client = httpx.AsyncClient()
-    requester = ModelRequester(
-        http_client=http_client,
-        token_usage_storage=cast(TokenUsageStorage, _FakeUsageStorage()),
-    )
-    setattr(
-        requester,
-        "_get_anthropic_client_for_model",
-        lambda _cfg: cast(AsyncAnthropic, fake_client),
-    )
+    try:
+        requester = ModelRequester(
+            http_client=http_client,
+            token_usage_storage=cast(TokenUsageStorage, _FakeUsageStorage()),
+        )
+        setattr(
+            requester,
+            "_get_anthropic_client_for_model",
+            lambda _cfg: cast(AsyncAnthropic, fake_client),
+        )
 
-    result = await requester.request(
-        model_config=_config(
+        result = await requester.request(
+            model_config=_config(
+                max_tokens=max_tokens,
+                stream_enabled=stream_enabled,
+                reasoning_enabled=True,
+                reasoning_effort="high",
+                request_params={
+                    "cache_control": {"type": "ephemeral"},
+                    "output_config": {
+                        "effort": "low",
+                        "format": {"type": "json_schema", "schema": {}},
+                    },
+                },
+            ),
+            messages=[{"role": "user", "content": "hello"}],
             max_tokens=max_tokens,
-            stream_enabled=stream_enabled,
-            reasoning_enabled=True,
-            reasoning_effort="high",
-            request_params={
-                "cache_control": {"type": "ephemeral"},
-                "output_config": {
-                    "effort": "low",
-                    "format": {"type": "json_schema", "schema": {}},
+            call_type="chat",
+            tools=[
+                {
+                    "type": "function",
+                    "function": {
+                        "name": internal_tool_name,
+                        "description": "Look up weather",
+                        "parameters": {"type": "object", "properties": {}},
+                    },
                 },
-            },
-        ),
-        messages=[{"role": "user", "content": "hello"}],
-        max_tokens=max_tokens,
-        call_type="chat",
-        tools=[
-            {
+            ],
+            tool_choice={
                 "type": "function",
-                "function": {
-                    "name": internal_tool_name,
-                    "description": "Look up weather",
-                    "parameters": {"type": "object", "properties": {}},
-                },
-            }
-        ],
-        tool_choice={
-            "type": "function",
-            "function": {"name": internal_tool_name},
-        },
-    )
+                "function": {"name": internal_tool_name},
+            },
+        )
 
-    assert result["choices"][0]["message"]["content"] == "hello"
-    if stream_enabled:
-        assert len(fake_client.messages.stream_calls) == 1
-        assert fake_client.messages.create_calls == []
-        request_kwargs = fake_client.messages.stream_calls[0]
-    else:
-        assert len(fake_client.messages.create_calls) == 1
-        assert fake_client.messages.stream_calls == []
-        request_kwargs = fake_client.messages.create_calls[0]
-    assert request_kwargs["output_config"] == {
-        "effort": "high",
-        "format": {"type": "json_schema", "schema": {}},
-    }
-    assert request_kwargs["cache_control"] == {"type": "ephemeral"}
-    assert request_kwargs["max_tokens"] == max_tokens
-    assert request_kwargs["tools"][0]["name"] == api_tool_name
-    assert request_kwargs["tool_choice"] == {
-        "type": "tool",
-        "name": api_tool_name,
-    }
-    await http_client.aclose()
+        assert result["choices"][0]["message"]["content"] == "hello"
+        if stream_enabled:
+            assert len(fake_client.messages.stream_calls) == 1
+            assert fake_client.messages.create_calls == []
+            request_kwargs = fake_client.messages.stream_calls[0]
+        else:
+            assert len(fake_client.messages.create_calls) == 1
+            assert fake_client.messages.stream_calls == []
+            request_kwargs = fake_client.messages.create_calls[0]
+        assert request_kwargs["output_config"] == {
+            "effort": "high",
+            "format": {"type": "json_schema", "schema": {}},
+        }
+        assert request_kwargs["cache_control"] == {"type": "ephemeral"}
+        assert request_kwargs["max_tokens"] == max_tokens
+        assert request_kwargs["tools"][0]["name"] == api_tool_name
+        assert request_kwargs["tool_choice"] == {
+            "type": "tool",
+            "name": api_tool_name,
+        }
+    finally:
+        await http_client.aclose()
