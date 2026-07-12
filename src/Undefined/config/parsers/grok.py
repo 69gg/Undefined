@@ -21,9 +21,13 @@ from ..models import (
     GrokModelConfig,
 )
 from ..resolvers import (
+    _resolve_api_mode,
     _resolve_context_window_tokens,
     _resolve_reasoning_effort,
-    _resolve_reasoning_effort_style,
+    _resolve_reasoning_content_replay,
+    _resolve_responses_force_stateless_replay,
+    _resolve_responses_tool_choice_compat,
+    _resolve_system_prompt_as_user,
 )
 
 logger = logging.getLogger(__name__)
@@ -62,6 +66,7 @@ def _parse_grok_model_config(data: dict[str, Any]) -> GrokModelConfig:
         ),
         context_window_tokens=context_window_tokens,
         queue_interval_seconds=queue_interval_seconds,
+        api_mode=_resolve_api_mode(data, "grok", "GROK_MODEL_API_MODE"),
         thinking_enabled=_coerce_bool(
             _get_value(
                 data,
@@ -86,12 +91,33 @@ def _parse_grok_model_config(data: dict[str, Any]) -> GrokModelConfig:
             ),
             True,
         ),
-        reasoning_effort_style=_resolve_reasoning_effort_style(
+        thinking_tool_call_compat=_coerce_bool(
             _get_value(
                 data,
-                ("models", "grok", "reasoning_effort_style"),
-                "GROK_MODEL_REASONING_EFFORT_STYLE",
+                ("models", "grok", "thinking_tool_call_compat"),
+                "GROK_MODEL_THINKING_TOOL_CALL_COMPAT",
             ),
+            True,
+        ),
+        reasoning_content_replay=_resolve_reasoning_content_replay(
+            data,
+            "grok",
+            "GROK_MODEL_REASONING_CONTENT_REPLAY",
+        ),
+        system_prompt_as_user=_resolve_system_prompt_as_user(
+            data,
+            "grok",
+            "GROK_MODEL_SYSTEM_PROMPT_AS_USER",
+        ),
+        responses_tool_choice_compat=_resolve_responses_tool_choice_compat(
+            data,
+            "grok",
+            "GROK_MODEL_RESPONSES_TOOL_CHOICE_COMPAT",
+        ),
+        responses_force_stateless_replay=_resolve_responses_force_stateless_replay(
+            data,
+            "grok",
+            "GROK_MODEL_RESPONSES_FORCE_STATELESS_REPLAY",
         ),
         prompt_cache_enabled=_coerce_bool(
             _get_value(

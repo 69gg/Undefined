@@ -149,9 +149,9 @@ class BackgroundMixin:
         queue_lane = str(request.get("_queue_lane") or QUEUE_LANE_BACKGROUND)
         call_type = str(request.get("call_type", "background") or "background")
         try:
-            max_tokens_raw = request.get("max_tokens") or getattr(
-                request["model_config"], "max_tokens", 4096
-            )
+            max_tokens_raw = request.get("max_tokens")
+            if max_tokens_raw is None:
+                max_tokens_raw = getattr(request["model_config"], "max_tokens", 4096)
             max_tokens = int(max_tokens_raw) if max_tokens_raw is not None else 4096
             result = await self.ai.request_model(
                 model_config=request["model_config"],

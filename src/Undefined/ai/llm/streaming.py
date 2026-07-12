@@ -7,12 +7,20 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from typing import Any
 
-from openai import APIStatusError
+from anthropic import APIStatusError as AnthropicAPIStatusError
+from openai import APIStatusError as OpenAIAPIStatusError
 
-from Undefined.ai.llm.thinking import stringify_thinking
-from Undefined.ai.transports import API_MODE_CHAT_COMPLETIONS, API_MODE_RESPONSES
+from Undefined.ai.transports import (
+    API_MODE_CHAT_COMPLETIONS,
+    API_MODE_RESPONSES,
+    CHAT_REASONING_REPLAY_KEY,
+    CHAT_REASONING_WIRE_FIELDS,
+    normalize_api_mode,
+    normalize_chat_completions_result,
+)
 
 _CHAT_COMPLETIONS_KNOWN_FIELDS: set[str] = {
     "model",
@@ -140,7 +148,9 @@ def ensure_chat_stream_usage_options(body: dict[str, Any]) -> None:
         body["stream_options"] = {**stream_options, "include_usage": True}
 
 
-def _status_error_text(exc: APIStatusError) -> str:
+def _status_error_text(
+    exc: OpenAIAPIStatusError | AnthropicAPIStatusError,
+) -> str:
     parts = [str(exc)]
     body = getattr(exc, "body", None)
     if isinstance(body, dict):
@@ -160,7 +170,7 @@ def should_fallback_from_stream(exc: Exception) -> bool:
     """判定流式失败是否应降级为非流式重试。"""
     if isinstance(exc, NotImplementedError):
         return True
-    if not isinstance(exc, APIStatusError):
+    if not isinstance(exc, (OpenAIAPIStatusError, AnthropicAPIStatusError)):
         return False
     # 仅对明确的 stream 参数/能力错误做回退，避免掩盖其它 4xx
     if exc.status_code not in _STREAM_FALLBACK_STATUS_CODES:
@@ -212,7 +222,7 @@ def extract_stream_usage(
             usage = response.get("usage")
     if not isinstance(usage, dict):
         return None
-    if api_mode == API_MODE_RESPONSES:
+    if normalize_api_mode(api_mode, warn_legacy=False) == API_MODE_RESPONSES:
         return {
             "input_tokens": int(usage.get("input_tokens", 0) or 0),
             "output_tokens": int(usage.get("output_tokens", 0) or 0),
@@ -274,14 +284,28 @@ def merge_tool_call_delta(
         )
 
 
+def _merge_reasoning_wire_value(current: Any, incoming: Any) -> Any:
+    """Merge streaming reasoning fragments without changing their wire shape."""
+    if current is None:
+        return deepcopy(incoming)
+    if isinstance(current, str) and isinstance(incoming, str):
+        return current + incoming
+    if isinstance(current, list) and isinstance(incoming, list):
+        return [*current, *deepcopy(incoming)]
+    if isinstance(current, dict) and isinstance(incoming, dict):
+        merged = deepcopy(current)
+        for key, value in incoming.items():
+            merged[key] = _merge_reasoning_wire_value(merged.get(key), value)
+        return merged
+    return deepcopy(incoming)
+
+
 def aggregate_chat_completions_stream(
     chunks: list[dict[str, Any]],
-    *,
-    reasoning_replay: bool,
 ) -> dict[str, Any]:
     """将 Chat Completions 流式 chunk 列表聚合为完整响应 dict。"""
     content_parts: list[str] = []
-    reasoning_parts: list[str] = []
+    reasoning_wire: dict[str, Any] = {}
     tool_calls: list[dict[str, Any]] = []
     usage: dict[str, Any] | None = None
     finish_reason = "stop"
@@ -307,10 +331,13 @@ def aggregate_chat_completions_stream(
             content_delta = stringify_stream_delta(delta.get("content"))
             if content_delta:
                 content_parts.append(content_delta)
-            if reasoning_replay:
-                reasoning_delta = stringify_thinking(delta.get("reasoning_content"))
-                if reasoning_delta:
-                    reasoning_parts.append(reasoning_delta)
+            for field_name in CHAT_REASONING_WIRE_FIELDS:
+                if field_name not in delta or delta[field_name] is None:
+                    continue
+                reasoning_wire[field_name] = _merge_reasoning_wire_value(
+                    reasoning_wire.get(field_name),
+                    delta[field_name],
+                )
             raw_tool_calls = delta.get("tool_calls")
             # 无 tool_calls 与有 tool_calls 走不同分支
             if isinstance(raw_tool_calls, list):
@@ -326,10 +353,10 @@ def aggregate_chat_completions_stream(
         "role": role,
         "content": "".join(content_parts),
     }
-    if reasoning_replay:
-        reasoning_text = "".join(reasoning_parts).strip()
-        if reasoning_text:
-            message["reasoning_content"] = reasoning_text
+    if reasoning_wire:
+        for field_name, value in reasoning_wire.items():
+            message[field_name] = value
+        message[CHAT_REASONING_REPLAY_KEY] = deepcopy(reasoning_wire)
     # 无 tool_calls 与有 tool_calls 走不同分支
     if tool_calls:
         message["tool_calls"] = tool_calls
@@ -344,24 +371,170 @@ def aggregate_chat_completions_stream(
     }
     if usage is not None:
         result["usage"] = usage
-    return result
+    return normalize_chat_completions_result(result)
 
 
 def aggregate_responses_stream(events: list[dict[str, Any]]) -> dict[str, Any]:
     """将 Responses 流式事件列表聚合为完整响应 dict。"""
-    output_items: list[dict[str, Any]] = []
+    output_items_by_index: dict[int, dict[str, Any]] = {}
+    unindexed_output_items: list[dict[str, Any]] = []
     output_text_parts: list[str] = []
     usage: dict[str, Any] | None = None
     final_response: dict[str, Any] | None = None
+    compatible_reasoning: dict[str, Any] = {}
 
     for event_dict in events:
         usage = extract_stream_usage(event_dict, api_mode=API_MODE_RESPONSES) or usage
+        for source in (event_dict, event_dict.get("delta")):
+            if not isinstance(source, dict):
+                continue
+            for field_name in CHAT_REASONING_WIRE_FIELDS:
+                if field_name == "reasoning":
+                    # Responses root `reasoning` is configuration, not output CoT.
+                    continue
+                if field_name not in source or source[field_name] is None:
+                    continue
+                compatible_reasoning[field_name] = _merge_reasoning_wire_value(
+                    compatible_reasoning.get(field_name),
+                    source[field_name],
+                )
         event_type = str(event_dict.get("type") or "").strip().lower()
         response = event_dict.get("response")
+        raw_output_index = event_dict.get("output_index")
+        try:
+            output_index = (
+                int(raw_output_index) if raw_output_index is not None else None
+            )
+        except (TypeError, ValueError):
+            output_index = None
+
+        if event_type in {
+            "response.output_item.added",
+            "response.output_item.done",
+        }:
+            item = extract_stream_response_item(event_dict)
+            if isinstance(item, dict):
+                cloned_item = deepcopy(item)
+                if output_index is None:
+                    unindexed_output_items.append(cloned_item)
+                else:
+                    output_items_by_index[output_index] = cloned_item
+            continue
         if event_type == "response.output_text.delta":
             delta = stringify_stream_delta(event_dict.get("delta"))
             if delta:
                 output_text_parts.append(delta)
+                if output_index is not None:
+                    item = output_items_by_index.setdefault(
+                        output_index,
+                        {"type": "message", "role": "assistant", "content": []},
+                    )
+                    content = item.setdefault("content", [])
+                    if isinstance(content, list):
+                        raw_content_index = event_dict.get("content_index")
+                        try:
+                            content_index = int(raw_content_index or 0)
+                        except (TypeError, ValueError):
+                            content_index = 0
+                        while len(content) <= content_index:
+                            content.append({"type": "output_text", "text": ""})
+                        part = content[content_index]
+                        if isinstance(part, dict):
+                            part["type"] = "output_text"
+                            part["text"] = str(part.get("text") or "") + delta
+            continue
+        if event_type == "response.function_call_arguments.delta":
+            if output_index is not None:
+                item = output_items_by_index.setdefault(
+                    output_index,
+                    {
+                        "type": "function_call",
+                        "id": str(event_dict.get("item_id") or ""),
+                        "arguments": "",
+                    },
+                )
+                item["arguments"] = str(item.get("arguments") or "") + str(
+                    event_dict.get("delta") or ""
+                )
+            continue
+        if event_type == "response.content_part.added":
+            part = event_dict.get("part")
+            if output_index is not None and isinstance(part, dict):
+                item = output_items_by_index.setdefault(
+                    output_index,
+                    {"type": "message", "role": "assistant", "content": []},
+                )
+                content = item.setdefault("content", [])
+                if isinstance(content, list):
+                    raw_content_index = event_dict.get("content_index")
+                    try:
+                        content_index = int(raw_content_index or 0)
+                    except (TypeError, ValueError):
+                        content_index = 0
+                    while len(content) <= content_index:
+                        content.append({})
+                    content[content_index] = deepcopy(part)
+            continue
+        if event_type == "response.reasoning_summary_part.added":
+            part = event_dict.get("part")
+            if output_index is not None and isinstance(part, dict):
+                item = output_items_by_index.setdefault(
+                    output_index,
+                    {
+                        "type": "reasoning",
+                        "id": str(event_dict.get("item_id") or ""),
+                        "summary": [],
+                    },
+                )
+                summary = item.setdefault("summary", [])
+                if isinstance(summary, list):
+                    raw_summary_index = event_dict.get("summary_index")
+                    try:
+                        summary_index = int(raw_summary_index or 0)
+                    except (TypeError, ValueError):
+                        summary_index = 0
+                    while len(summary) <= summary_index:
+                        summary.append({})
+                    summary[summary_index] = deepcopy(part)
+            continue
+        if event_type in {
+            "response.reasoning_summary_text.delta",
+            "response.reasoning_text.delta",
+        }:
+            if output_index is not None:
+                item = output_items_by_index.setdefault(
+                    output_index,
+                    {
+                        "type": "reasoning",
+                        "id": str(event_dict.get("item_id") or ""),
+                        "summary": [],
+                    },
+                )
+                list_key = (
+                    "summary"
+                    if event_type == "response.reasoning_summary_text.delta"
+                    else "content"
+                )
+                parts = item.setdefault(list_key, [])
+                if isinstance(parts, list):
+                    raw_part_index = event_dict.get(
+                        "summary_index" if list_key == "summary" else "content_index"
+                    )
+                    try:
+                        part_index = int(raw_part_index or 0)
+                    except (TypeError, ValueError):
+                        part_index = 0
+                    part_type = (
+                        "summary_text" if list_key == "summary" else "reasoning_text"
+                    )
+                    while len(parts) <= part_index:
+                        parts.append({"type": part_type, "text": ""})
+                    part = parts[part_index]
+                    if isinstance(part, dict):
+                        part["type"] = part_type
+                        part["text"] = str(part.get("text") or "") + str(
+                            event_dict.get("delta") or ""
+                        )
             continue
         if event_type == "response.completed":
             if isinstance(response, dict):
@@ -371,20 +544,35 @@ def aggregate_responses_stream(events: list[dict[str, Any]]) -> dict[str, Any]:
         if not isinstance(item, dict):
             continue
         item_type = str(item.get("type") or "").strip().lower()
-        if item_type in ("message", "function_call", "reasoning"):
-            output_items.append(item)
+        if item_type:
+            cloned_item = deepcopy(item)
+            if output_index is None:
+                unindexed_output_items.append(cloned_item)
+            else:
+                output_items_by_index[output_index] = cloned_item
 
     if final_response is not None:
-        if usage is not None and not isinstance(final_response.get("usage"), dict):
+        if (
+            usage is not None and not isinstance(final_response.get("usage"), dict)
+        ) or compatible_reasoning:
             final_response = dict(final_response)
+        if usage is not None and not isinstance(final_response.get("usage"), dict):
             final_response["usage"] = usage
+        for field_name, value in compatible_reasoning.items():
+            if final_response.get(field_name) is None:
+                final_response[field_name] = value
         return final_response
 
     # 未收到 completed 事件时，用增量 delta 合成最小可用响应
+    output_items = [
+        output_items_by_index[index] for index in sorted(output_items_by_index)
+    ]
+    output_items.extend(unindexed_output_items)
     synthesized: dict[str, Any] = {
         "output": output_items,
         "output_text": "".join(output_text_parts),
     }
     if usage is not None:
         synthesized["usage"] = usage
+    synthesized.update(compatible_reasoning)
     return synthesized

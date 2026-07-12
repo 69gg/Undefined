@@ -9,19 +9,16 @@ from typing import Any
 
 from Undefined.utils.request_params import merge_request_params
 
+from ..api_modes import normalize_api_mode
 from ..coercers import (
     _coerce_bool,
     _coerce_float,
     _coerce_int,
     _coerce_str,
     _normalize_queue_interval,
-    _VALID_API_MODES,
 )
 from ..models import AgentModelConfig, ChatModelConfig, ModelPool, ModelPoolEntry
-from ..resolvers import (
-    _resolve_reasoning_effort,
-    _resolve_reasoning_effort_style,
-)
+from ..resolvers import _resolve_reasoning_effort
 
 logger = logging.getLogger(__name__)
 
@@ -72,16 +69,10 @@ def _parse_model_pool(
                     ),
                     primary_config.queue_interval_seconds,
                 ),
-                api_mode=(
-                    _coerce_str(item.get("api_mode"), primary_config.api_mode)
-                    .strip()
-                    .lower()
-                )
-                if _coerce_str(item.get("api_mode"), primary_config.api_mode)
-                .strip()
-                .lower()
-                in _VALID_API_MODES
-                else primary_config.api_mode,
+                api_mode=normalize_api_mode(
+                    item.get("api_mode"),
+                    primary_config.api_mode,
+                ),
                 thinking_enabled=_coerce_bool(
                     item.get("thinking_enabled"), primary_config.thinking_enabled
                 ),
@@ -92,10 +83,6 @@ def _parse_model_pool(
                 thinking_include_budget=_coerce_bool(
                     item.get("thinking_include_budget"),
                     primary_config.thinking_include_budget,
-                ),
-                reasoning_effort_style=_resolve_reasoning_effort_style(
-                    item.get("reasoning_effort_style"),
-                    primary_config.reasoning_effort_style,
                 ),
                 thinking_tool_call_compat=_coerce_bool(
                     item.get("thinking_tool_call_compat"),

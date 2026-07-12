@@ -1,8 +1,8 @@
 /*
  * WebUI 日志过滤工具
  * - 统一日志等级与同义词
- * - 兼容多种日志格式
- * - 支持“该等级及以上”的过滤模式
+ * - 按时间戳起始行聚合多行日志记录
+ * - 统一处理关键词、等级和时间范围过滤
  */
 
 (function (global) {
@@ -97,6 +97,16 @@
         return null;
     }
 
+    function parseLogTimestamp(line) {
+        if (!line) return null;
+        const match = stripAnsi(line).match(TIMESTAMP_RE);
+        if (!match) return null;
+        const timestamp = new Date(
+            match[0].replace(" ", "T").replace(",", "."),
+        ).getTime();
+        return Number.isFinite(timestamp) ? timestamp : null;
+    }
+
     function splitLogRecords(lines) {
         const records = [];
         let current = null;
@@ -111,7 +121,11 @@
             }
 
             if (!current) {
-                current = { lines: [], level: null };
+                current = {
+                    lines: [],
+                    level: null,
+                    timestamp: isStart ? parseLogTimestamp(line) : null,
+                };
             }
 
             const detected = parseLogLevel(line);
@@ -127,6 +141,14 @@
         }
 
         return records;
+    }
+
+    function parseLogRecords(raw) {
+        if (!raw) return [];
+        const lines = raw.split(/\r?\n/);
+        return splitLogRecords(lines).filter((record) =>
+            record.lines.some((line) => line.length > 0),
+        );
     }
 
     function getLevelRank(level) {
@@ -145,28 +167,66 @@
         return getLevelRank(recordLevel) >= getLevelRank(target);
     }
 
-    function filterLogLines(raw, options) {
+    function normalizeFilterTimestamp(value) {
+        if (typeof value === "number") {
+            return Number.isFinite(value) ? value : 0;
+        }
+        if (typeof value !== "string" || !value.trim()) return 0;
+        const numeric = Number(value);
+        if (Number.isFinite(numeric)) return numeric;
+        const parsed = Date.parse(value);
+        return Number.isFinite(parsed) ? parsed : 0;
+    }
+
+    function recordMatchesFilters(record, options) {
+        if (!shouldKeepRecord(record.level, options)) return false;
+
+        const query = String(options.query || "")
+            .trim()
+            .toLowerCase();
+        const searchableText = stripAnsi(record.lines.join("\n")).toLowerCase();
+        if (query && !searchableText.includes(query)) {
+            return false;
+        }
+
+        const timeFrom = normalizeFilterTimestamp(options.timeFrom);
+        const timeTo = normalizeFilterTimestamp(options.timeTo);
+        if (record.timestamp !== null) {
+            if (timeFrom && record.timestamp < timeFrom) return false;
+            if (timeTo && record.timestamp > timeTo) return false;
+        }
+        return true;
+    }
+
+    function filterLogRecords(raw, options) {
         const safeOptions = options || {};
-        const rawLines = raw ? raw.split(/\r?\n/) : [];
-        const records = splitLogRecords(rawLines);
-        const filtered = [];
+        const records = parseLogRecords(raw);
+        const filtered = records.filter((record) =>
+            recordMatchesFilters(record, safeOptions),
+        );
+        return {
+            records: filtered,
+            total: records.length,
+            matched: filtered.length,
+        };
+    }
 
-        records.forEach((record) => {
-            if (shouldKeepRecord(record.level, safeOptions)) {
-                filtered.push(...record.lines);
-            }
-        });
-
-        const total = rawLines.filter((line) => line.length > 0).length;
-        const matched = filtered.filter((line) => line.length > 0).length;
-
-        return { filtered, total, matched };
+    function filterLogLines(raw, options) {
+        const result = filterLogRecords(raw, options);
+        return {
+            filtered: result.records.flatMap((record) => record.lines),
+            total: result.total,
+            matched: result.matched,
+        };
     }
 
     global.LogsController = {
         LOG_LEVEL_DEFS,
         LOG_LEVELS: getLogLevels(),
         parseLogLevel,
+        parseLogTimestamp,
+        parseLogRecords,
+        filterLogRecords,
         filterLogLines,
         getLevelRank,
     };

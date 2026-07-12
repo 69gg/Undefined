@@ -33,22 +33,24 @@ api_url = "https://api.openai.com/v1"
 api_key = "..."
 model_name = "gpt-4o-mini"
 max_tokens = 4096
-api_mode = "chat_completions"
+api_mode = "openai.chat_completions"
 reasoning_enabled = false
 reasoning_effort = "medium"
 thinking_enabled = false
 thinking_budget_tokens = 0
 thinking_tool_call_compat = true
+reasoning_content_replay = true
 responses_tool_choice_compat = false
 responses_force_stateless_replay = false
 ```
 
 说明：
-- `api_mode = "chat_completions"` 时，`thinking_*` 仍按原逻辑生效；若开启 `reasoning_enabled`，会按 OpenAI 标准发送顶层 `reasoning_effort`。
-- `api_mode = "chat_completions"` 没有标准 reasoning item / encrypted reasoning 续轮协议；本地历史里的 `reasoning_content` 不会作为 message 字段发回上游。
-- `api_mode = "responses"` 时，`thinking_*` 与 `reasoning_*` 分别独立控制 `thinking` 和 `reasoning.effort` / `output_config.effort`；Agent 的多轮工具调用默认使用 `previous_response_id + function_call_output` 续轮；若开启 `responses_force_stateless_replay`，则会改为标准 `output` items 重放，并自动补 `reasoning.encrypted_content`。
-- `api_mode = "responses"` 的工具关联字段遵循 OpenAI 标准：工具结果回传使用 `function_call_output.call_id`；`function_call.id` 若存在，应为模型生成的 output item id（通常为 `fc_*`），不能把 `call_*` 写到 `id`。
-- `thinking_tool_call_compat` 默认 `true`，会把内部兼容字段 `reasoning_content` 回填到本地消息历史，便于日志、回放和兼容读取。
+- `api_mode = "openai.chat_completions"` 时，`thinking_enabled` 发送兼容接口常用的 `thinking`，`reasoning_enabled` 发送顶层 `reasoning_effort`。回放支持 `reasoning_content`、OpenRouter `reasoning_details`、签名和加密字段。
+- `api_mode = "openai.responses"` 时，多轮工具调用默认使用 `previous_response_id + function_call_output`；`responses_force_stateless_replay=true` 才改为完整 `output` items 重放。工具结果使用 `call_id` 关联，`function_call.id` 仅保留模型返回的合法 `fc_*` id。
+- `api_mode = "anthropic.messages"` 时使用官方 `AsyncAnthropic` Messages SDK，并转换 system、图片、工具和 tool result；`max_tokens` 必须为正整数，`thinking_include_budget=false` 使用 adaptive thinking，手动预算必须至少 1024 且小于本次 `max_tokens`。
+- `reasoning_effort` 保持自定义输入：`adaptive` 原样发送，其余值也原样透传；具体字段位置由 `api_mode` 自动决定，不再需要 style 配置。
+- `reasoning_content_replay` 默认 `true`，优先按历史顺序原样回传全部原生推理结构；设为 `false` 会过滤明文、summary、签名和加密推理材料。
+- `thinking_tool_call_compat` 默认 `true`，用于在本地历史保留可读 `reasoning_content`，供日志和旧历史回退。
 
 兼容的环境变量（会覆盖 `config.toml`）：
 
@@ -57,9 +59,10 @@ AGENT_MODEL_API_URL=
 AGENT_MODEL_API_KEY=
 AGENT_MODEL_NAME=
 AGENT_MODEL_MAX_TOKENS=4096
-AGENT_MODEL_API_MODE=chat_completions
+AGENT_MODEL_API_MODE=openai.chat_completions
 AGENT_MODEL_REASONING_ENABLED=false
 AGENT_MODEL_REASONING_EFFORT=medium
+AGENT_MODEL_REASONING_CONTENT_REPLAY=true
 AGENT_MODEL_THINKING_ENABLED=false
 AGENT_MODEL_THINKING_BUDGET_TOKENS=0
 AGENT_MODEL_THINKING_TOOL_CALL_COMPAT=true

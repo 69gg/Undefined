@@ -7,6 +7,7 @@ from __future__ import annotations
 import logging
 
 from ..admin import load_local_admins
+from ..api_modes import API_MODE_OPENAI_CHAT_COMPLETIONS
 from ..models import (
     AgentModelConfig,
     ChatModelConfig,
@@ -112,7 +113,7 @@ def _log_debug_info(
             cfg.model_name,
             cfg.api_url,
             bool(cfg.api_key),
-            getattr(cfg, "api_mode", "chat_completions"),
+            getattr(cfg, "api_mode", API_MODE_OPENAI_CHAT_COMPLETIONS),
             cfg.thinking_enabled,
             getattr(cfg, "reasoning_enabled", False),
             getattr(cfg, "reasoning_effort", "medium"),

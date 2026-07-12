@@ -64,3 +64,33 @@ def test_registry_uses_scoped_proxy_env_keys() -> None:
         ENV_REGISTRY[("models", "image_gen", "use_proxy")]
         == "IMAGE_GEN_MODEL_USE_PROXY"
     )
+
+
+def test_generation_transport_env_keys_cover_every_primary_model() -> None:
+    for model_name, prefix in {
+        "chat": "CHAT",
+        "vision": "VISION",
+        "security": "SECURITY",
+        "naga": "NAGA",
+        "agent": "AGENT",
+        "grok": "GROK",
+    }.items():
+        assert ENV_REGISTRY[("models", model_name, "api_mode")] == (
+            f"{prefix}_MODEL_API_MODE"
+        )
+        assert ENV_REGISTRY[("models", model_name, "reasoning_content_replay")] == (
+            f"{prefix}_MODEL_REASONING_CONTENT_REPLAY"
+        )
+        assert ENV_REGISTRY[("models", model_name, "reasoning_effort")] == (
+            f"{prefix}_MODEL_REASONING_EFFORT"
+        )
+        assert ENV_REGISTRY[("models", model_name, "thinking_enabled")] == (
+            f"{prefix}_MODEL_THINKING_ENABLED"
+        )
+
+    assert ENV_REGISTRY[("models", "historian", "reasoning_content_replay")] == (
+        "HISTORIAN_MODEL_REASONING_CONTENT_REPLAY"
+    )
+    assert ENV_REGISTRY[("models", "summary", "reasoning_content_replay")] == (
+        "SUMMARY_MODEL_REASONING_CONTENT_REPLAY"
+    )

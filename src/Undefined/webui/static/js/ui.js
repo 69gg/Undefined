@@ -156,16 +156,7 @@ function updateAuthPanels() {
 }
 
 function updateSectionToggleLabels() {
-    document.querySelectorAll(".config-card").forEach((card) => {
-        const section = card.dataset.section;
-        const toggle = card.querySelector(".config-card-actions button");
-        if (!toggle || !section) return;
-        const collapsed = !!state.configCollapsed[section];
-        toggle.innerText = collapsed
-            ? t("config.expand_section")
-            : t("config.collapse_section");
-        toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
-    });
+    updateConfigSectionPresentations();
 }
 
 function updateThemeColor(theme) {
@@ -242,7 +233,7 @@ function setConfigState(mode) {
     if (!mode) {
         stateEl.style.display = "none";
         stateEl.dataset.i18nState = "";
-        grid.style.display = "block";
+        grid.style.display = "";
         return;
     }
     const keyMap = {
@@ -254,6 +245,5 @@ function setConfigState(mode) {
     stateEl.dataset.i18nState = key;
     stateEl.innerText = t(key);
     stateEl.style.display = "block";
-    grid.style.display =
-        mode === "loading" || mode === "error" ? "none" : "block";
+    grid.style.display = mode === "loading" || mode === "error" ? "none" : "";
 }

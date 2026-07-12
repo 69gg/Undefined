@@ -7,6 +7,8 @@ import logging
 import socket
 import time
 from typing import Any
+
+from Undefined.config.api_modes import API_MODE_OPENAI_CHAT_COMPLETIONS
 from urllib.parse import urlsplit
 
 from aiohttp import ClientSession, ClientTimeout
@@ -98,7 +100,9 @@ def _build_internal_model_probe_payload(mcfg: Any) -> dict[str, Any]:
     if hasattr(mcfg, "context_window_tokens"):
         payload["context_window_tokens"] = getattr(mcfg, "context_window_tokens", 8192)
     if hasattr(mcfg, "api_mode"):
-        payload["api_mode"] = getattr(mcfg, "api_mode", "chat_completions")
+        payload["api_mode"] = getattr(
+            mcfg, "api_mode", API_MODE_OPENAI_CHAT_COMPLETIONS
+        )
     if hasattr(mcfg, "thinking_enabled"):
         payload["thinking_enabled"] = getattr(mcfg, "thinking_enabled", False)
     if hasattr(mcfg, "thinking_tool_call_compat"):
@@ -107,7 +111,7 @@ def _build_internal_model_probe_payload(mcfg: Any) -> dict[str, Any]:
         )
     if hasattr(mcfg, "reasoning_content_replay"):
         payload["reasoning_content_replay"] = getattr(
-            mcfg, "reasoning_content_replay", False
+            mcfg, "reasoning_content_replay", True
         )
     if hasattr(mcfg, "system_prompt_as_user"):
         payload["system_prompt_as_user"] = getattr(mcfg, "system_prompt_as_user", False)

@@ -187,9 +187,11 @@ def normalize_thinking_override(
         raw_type = value.get("type")
         if isinstance(raw_type, str):
             type_value = raw_type.strip().lower()
-            if type_value in {"enabled", "disabled"}:
+            if type_value in {"enabled", "disabled", "adaptive"}:
                 # DeepSeek 仅接受 {type: enabled|disabled}，其它字段原样透传
                 if is_deepseek:
+                    if type_value == "adaptive":
+                        return None
                     return {"type": type_value}
                 normalized = dict(value)
                 normalized["type"] = type_value
@@ -212,7 +214,9 @@ def normalize_thinking_override(
 
     if isinstance(value, str):
         type_value = value.strip().lower()
-        if type_value in {"enabled", "disabled"}:
+        if type_value in {"enabled", "disabled", "adaptive"}:
+            if is_deepseek and type_value == "adaptive":
+                return None
             return {"type": type_value}
 
     return None

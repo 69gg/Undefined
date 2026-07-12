@@ -267,9 +267,9 @@ async def test_responses_stateless_fallback_keeps_dynamic_tool_schema() -> None:
     assert replay_request["input"][1]["name"] == "tool_search"
     assert replay_request["input"][2]["call_id"] == "call_search"
     assert result["_transport_state"] == {
-        "api_mode": "responses",
+        "api_mode": "openai.responses",
         "previous_response_id": "resp_replayed",
-        "tool_result_start_index": len(messages),
+        "tool_result_start_index": len(messages) + 1,
         "stateless_replay": True,
     }
 

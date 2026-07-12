@@ -308,7 +308,7 @@ def test_webchat_frontend_lazy_load_preserves_scroll_offset() -> None:
 def test_webui_logs_fetch_more_tail_lines_by_default() -> None:
     source = _read_source(LOG_VIEW_JS)
 
-    assert "const LOG_TAIL_LINES = 1000;" in source
+    assert "const LOG_TAIL_LINES = 5000;" in source
     assert 'lines: "200"' not in source
     assert "lines: String(LOG_TAIL_LINES)" in source
 

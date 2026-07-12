@@ -148,7 +148,3 @@ def _get_value(
             _warn_env_fallback(env_key)
             return env_value
     return None
-
-
-_VALID_API_MODES = {"chat_completions", "responses"}
-_VALID_REASONING_EFFORT_STYLES = {"openai", "anthropic"}

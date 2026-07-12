@@ -230,58 +230,68 @@ model_name = "gpt-4o-mini"
 
 ### 4.4 `[models]` 模型配置总览
 
-### 4.4.1 通用字段（chat/vision/security/agent/historian）
+### 4.4.1 生成模型通用字段
 
 | 字段 | 含义 |
 |---|---|
-| `api_url` | OpenAI-compatible 基址（建议 `.../v1`） |
+| `api_url` | Provider 基址；OpenAI 兼容接口通常为 `.../v1`，Anthropic 原生接口可写站点根地址或 `.../v1` |
 | `api_key` | API Key |
 | `model_name` | 模型名 |
-| `max_tokens` | 最大输出 token（vision 无此字段） |
+| `max_tokens` | 最大输出 token；OpenAI 模式下设为 `0` 或负数时不发送上限字段，Anthropic Messages 要求为正整数 |
 | `context_window_tokens` | 模型上下文窗口上限（token），用于 `/summary` 分块与 Prompt 预算；解析默认 `8192`，须按上游模型能力配置 |
 | `queue_interval_seconds` | 该模型请求队列发车间隔（秒，`0` 表示立即发车） |
 | `use_proxy` | 是否让该模型请求使用 `[proxy]` 中配置的代理地址；默认 `false`，各模型种类独立配置 |
-| `api_mode` | 请求模式：`chat_completions` 或 `responses` |
-| `reasoning_enabled` | 是否启用 `reasoning.effort` |
-| `reasoning_effort` | `reasoning.effort` 档位：`none` / `minimal` / `low` / `medium` / `high` / `xhigh` |
+| `api_mode` | `openai.chat_completions`、`openai.responses` 或 `anthropic.messages`；旧 `chat_completions` / `responses` 仍兼容但会告警 |
+| `reasoning_enabled` | 是否发送当前 API mode 对应的 effort 参数 |
+| `reasoning_effort` | 自定义 effort 字符串；`adaptive` 原样发送，其余值也不做枚举或大小写改写 |
 | `thinking_enabled` | 是否启用旧式 `thinking` 参数 |
 | `thinking_budget_tokens` | thinking 预算 |
-| `thinking_include_budget` | 是否发送 `budget_tokens` |
-| `thinking_tool_call_compat` | Tool Calls 兼容模式：在**本地历史**回填 `reasoning_content` / `_responses_output_items`（日志与回放）；**不**向上游续传；默认 `true` |
-| `reasoning_content_replay` | 多轮工具调用时是否将 CoT **续传给上游**（Chat：`reasoning_content`；Responses：output items + `reasoning.encrypted_content`）；默认 `false` |
-| `system_prompt_as_user` | 是否将所有 `system`/`developer` 消息合并注入首条 `user`（仅 `chat_completions`）；默认 `false` |
+| `thinking_include_budget` | 是否发送手动 `budget_tokens`；`anthropic.messages` 下关闭时使用 adaptive thinking |
+| `thinking_tool_call_compat` | 是否在本地历史保留兼容的可读 `reasoning_content`；默认 `true` |
+| `reasoning_content_replay` | 是否向上游原样回传推理载体；覆盖 Chat 兼容字段、Responses reasoning items / encrypted content、Anthropic thinking / redacted blocks；默认 `true` |
+| `system_prompt_as_user` | 是否将所有 `system`/`developer` 消息合并注入首条 `user`（仅 `openai.chat_completions`）；默认 `false` |
 | `responses_tool_choice_compat` | `responses` 下的 `tool_choice` 兼容开关：仅建议在默认关闭时请求仍返回 500、怀疑上游不兼容对象型 `tool_choice` 时再尝试开启；开启后降级为字符串 `"required"`；默认 `false` |
 | `responses_force_stateless_replay` | `responses` 下的续轮强制降级开关：启用后多轮工具调用始终跳过 `previous_response_id`，改为完整消息重放；默认 `false` |
-| `prompt_cache_enabled` | 是否自动生成稳定的 `prompt_cache_key` 以提升相似请求缓存命中率；默认 `true` |
+| `prompt_cache_enabled` | OpenAI 模式下是否自动生成稳定的 `prompt_cache_key`；Anthropic 模式不发送该字段；默认 `true` |
 | `request_params` | 额外请求体参数（透传给模型 API，保留字段会忽略） |
 
 请求模式说明：
-- `api_mode="chat_completions"`：走 `client.chat.completions.create(...)`
-  - `thinking_enabled=true` 时发送旧式 `thinking`
-  - `reasoning_enabled=true` 时按 OpenAI 标准发送顶层 `reasoning_effort="..."`；仅 `reasoning_effort_style="anthropic"` 时改发 `output_config={ effort = ... }`
-  - 默认（`reasoning_content_replay=false`）：`reasoning_content` 仅保存在本地历史，出站 Chat 请求会剥离该字段
-  - `reasoning_content_replay=true` 时：多轮工具调用会在 Chat 出站消息中保留 `reasoning_content`；流式响应会累积 `delta.reasoning_content`
-  - MiMo 等 thinking 模型常见组合：`api_mode=chat_completions` + `reasoning_content_replay=true`
-- `api_mode="responses"`：走 `client.responses.create(...)`
-  - 仅在 `reasoning_enabled=true` 时按 OpenAI 标准发送 `reasoning={ effort = ... }`
+- `api_mode="openai.chat_completions"`：走 `AsyncOpenAI.chat.completions.create(...)`
+  - `max_tokens > 0` 时发送 `max_tokens`；为 `0` 或负数时省略
+  - `thinking_enabled=true` 时发送兼容接口常用的顶层 `thinking`
+  - `reasoning_enabled=true` 时发送顶层 `reasoning_effort="..."`
+  - 回放开启时优先恢复响应原始字段：`reasoning_content`、`reasoning_details`、`reasoning`、`encrypted_content`、`thinking`；OpenRouter 的 `reasoning_details` 数组、签名与密文保持原顺序和原值
+  - 旧历史没有原始载体时，才回退到可读 `reasoning_content`
+- `api_mode="openai.responses"`：走 `AsyncOpenAI.responses.create(...)`
+  - `max_tokens > 0` 时映射为 `max_output_tokens`；为 `0` 或负数时省略
+  - `reasoning_enabled=true` 时发送 `reasoning.effort`；`request_params.reasoning` 的 `summary` 等其他键会保留并与 effort 合并
   - 若 `request_params` 里带 `response_format` / `verbosity`，会自动映射到 `text.format` / `text.verbosity`
   - 默认使用官方对象格式：`{"type":"function","name":"..."}`
   - `responses_tool_choice_compat=true` 时，会把指定函数的 `tool_choice` 降级为字符串 `"required"`，并只保留目标工具，用于兼容部分不完整代理
-  - `responses_force_stateless_replay=true` 时，多轮工具调用会始终跳过 `previous_response_id`，直接走完整消息重放；续轮时会优先回放标准 `output` items（含 reasoning item），并自动补 `include=["reasoning.encrypted_content"]`
-  - `reasoning_content_replay=true` 时，**首次** Responses 请求也会请求 `reasoning.encrypted_content`，便于后续 stateless replay；与 `responses_force_stateless_replay` 可组合使用（网关弱时建议同时开启后者）
+  - 默认使用 `previous_response_id + function_call_output` 增量续轮，并在每轮重新发送当前 `instructions`
+  - `responses_force_stateless_replay=true` 时跳过 `previous_response_id`，按历史顺序回放原始 `output` items；推理回放开启时自动请求并回放 `reasoning.encrypted_content`
+  - SDK 展开的 `function_call.id=null` / `namespace=null` 只在 function call replay item 上定向删除；真实 `fc_*` id、非空 namespace 与其他显式 null 不做全局清洗
   - Responses 工具续轮遵循 OpenAI 的标准字段语义：工具结果使用 `function_call_output.call_id` 关联前一轮工具调用；`function_call.id` 若存在，必须是模型生成的 output item id（通常为 `fc_*`），不能把 `call_*` 误写进 `id`
   - 仅建议在默认关闭时请求仍返回 500，再尝试开启这些兼容开关
   - 当前已知 `new-api v0.11.4-alpha.3` 存在这类兼容问题
-  - 旧式 `thinking_*` 不会下发到 `responses`
+- `api_mode="anthropic.messages"`：走 `AsyncAnthropic.messages.create(...)` / `messages.stream(...)`
+  - 官方 Messages API 将 `max_tokens` 定义为必填字段；运行时要求其为正整数并原样发送，`0` 或负数会在请求发出前报错
+  - 自动转换顶层 `system`、图片、函数工具、`tool_use` / `tool_result`，不使用手写 HTTP 请求
+  - `thinking_enabled=true` 且 `thinking_include_budget=true` 时发送 `thinking={type="enabled", budget_tokens=...}`；预算必须 `>=1024` 且严格小于本次 `max_tokens`
+  - `thinking_include_budget=false` 时发送 `thinking={type="adaptive"}`
+  - `reasoning_enabled=true` 时发送 `output_config.effort`，值按 `reasoning_effort` 原样透传；其他 `output_config` 键继续保留
+  - 回放开启时按原顺序发送完整 `thinking` / `redacted_thinking` / `text` / `tool_use` blocks；关闭时只过滤 thinking 与 redacted blocks
+  - Anthropic thinking 开启时不支持强制指定工具，强制 `tool_choice` 会降级为 `auto`
 
 Prompt caching 补充：
-- 当 `prompt_cache_enabled=true` 且未显式设置 `prompt_cache_key` 时，运行时会按“模型名 + call_type + 会话作用域”自动生成稳定 key。
+- `openai.chat_completions` / `openai.responses` 下，当 `prompt_cache_enabled=true` 且未显式设置 `prompt_cache_key` 时，运行时会按“模型名 + call_type + 会话作用域”自动生成稳定 key。
+- `anthropic.messages` 不发送 OpenAI 的 `prompt_cache_key`；需要 Anthropic prompt caching 时，通过 `request_params.cache_control` 配置官方 `cache_control`。
 - 该 key 只用于提升路由稳定性，不改变 prompt 内容。
 - 想提高缓存命中率时，仍应尽量把静态内容放前面、把高频变化内容放后面。
 
 `request_params` 说明：
 - 适合放 provider 私有请求体字段，例如 `metadata`、`temperature`、兼容网关扩展参数等。
-- 不要再通过 `request_params` 传 `reasoning` / `reasoning_effort` / `thinking`；这些现在有正式配置字段控制。
+- `reasoning_effort` 与 `thinking` 由正式配置字段控制，`request_params` 中的同名保留字段不能覆盖；兼容 Chat 的 `reasoning` 对象、Responses 的 `reasoning.summary` 等附加键、Anthropic 的其他 `output_config` 键属于明确的合并例外，专用 effort 配置优先。
 - 消息总结分块读取 `[models.summary].context_window_tokens`（未单独配置时回退 `[models.agent]`）；不再使用硬编码窗口或 `request_params` 里的 `context_length` 类字段。
 
 #### 思维链续传迁移说明
@@ -290,13 +300,12 @@ Prompt caching 补充：
 
 | 开关 | 作用 |
 |------|------|
-| `thinking_tool_call_compat=true`（默认） | 多轮工具调用时在**本地历史**回填 `reasoning_content` / `_responses_output_items`，供日志与回放；**出站请求仍剥离**该字段 |
-| `reasoning_content_replay=true`（默认 `false`） | 多轮工具调用时将 CoT **续传给上游**（Chat：`reasoning_content`；Responses：`reasoning.encrypted_content` 等） |
+| `thinking_tool_call_compat=true`（默认） | 在本地历史保留兼容的可读 `reasoning_content`，供日志与旧历史回退 |
+| `reasoning_content_replay=true`（默认） | 优先原样回传当前有效历史中的全部原生推理结构；旧历史缺少原始结构时才回退 `reasoning_content` |
 
 **升级建议**：
-- 若你使用的 thinking 模型在多轮工具调用时返回 400，且错误提示缺少 `reasoning_content` / reasoning item，请在对应模型节开启 `reasoning_content_replay = true`。
-- 仅需要本地调试/回放思维链、不希望增大上游 payload 时，保持 `reasoning_content_replay = false` 即可。
-- MiMo / DeepSeek 等常见组合：`api_mode = "chat_completions"` + `reasoning_content_replay = true`（必要时叠加 `responses_force_stateless_replay = true`）。
+- 若不希望向上游发送任何明文、summary、签名或加密推理材料，请在对应模型节显式设置 `reasoning_content_replay = false`。
+- MiMo / DeepSeek 等兼容接口通常使用 `api_mode = "openai.chat_completions"`；Responses 兼容网关仅在状态续轮不可用时再开启 `responses_force_stateless_replay`。
 
 兼容字段（旧配置）：
 - `models.<x>.deepseek_new_cot_support`
@@ -308,28 +317,30 @@ Prompt caching 补充：
 默认：
 - `max_tokens=8192`
 - `queue_interval_seconds=1.0`（`0` 表示立即发车，`<0` 回退 `1.0`）
-- `api_mode="chat_completions"`
+- `api_mode="openai.chat_completions"`
 - `reasoning_enabled=false`
 - `reasoning_effort="medium"`
 - `thinking_budget_tokens=20000`
 - `thinking_tool_call_compat=true`
+- `reasoning_content_replay=true`
 - `responses_tool_choice_compat=false`
 - `responses_force_stateless_replay=false`
 - `use_proxy=false`
 
 补充：
-- 若上游只对 `/v1/responses` 识别自定义参数，可将 `api_mode` 切到 `responses`。
-- `[models.chat.request_params]` 仍可放 `temperature`、`response_format`、`verbosity` 或兼容网关私有字段，但不再用于 `reasoning` 配置。
+- 若上游只提供 `/v1/responses`，可将 `api_mode` 切到 `openai.responses`。
+- `[models.chat.request_params]` 可放 `temperature`、`response_format`、`verbosity`、兼容网关 `reasoning` 对象或其他私有字段。
 
 ### 4.4.3 `[models.vision]` 视觉模型
 
 默认：
 - `queue_interval_seconds=1.0`（`0` 表示立即发车，`<0` 回退 `1.0`）
-- `api_mode="chat_completions"`
+- `api_mode="openai.chat_completions"`
 - `reasoning_enabled=false`
 - `reasoning_effort="medium"`
 - `thinking_budget_tokens=20000`
 - `thinking_tool_call_compat=true`
+- `reasoning_content_replay=true`
 - `responses_tool_choice_compat=false`
 - `responses_force_stateless_replay=false`
 - `use_proxy=false`
@@ -338,7 +349,7 @@ Prompt caching 补充：
 
 字段：
 - 额外开关：`enabled=true`
-- 默认：`max_tokens=100`、`queue_interval_seconds=1.0`（`0` 表示立即发车，`<0` 回退 `1.0`）、`api_mode="chat_completions"`、`reasoning_enabled=false`、`reasoning_effort="medium"`、`thinking_budget_tokens=0`、`thinking_tool_call_compat=true`、`responses_tool_choice_compat=false`、`responses_force_stateless_replay=false`、`use_proxy=false`
+- 默认：`max_tokens=100`、`queue_interval_seconds=1.0`（`0` 表示立即发车，`<0` 回退 `1.0`）、`api_mode="openai.chat_completions"`、`reasoning_enabled=false`、`reasoning_effort="medium"`、`thinking_budget_tokens=0`、`thinking_tool_call_compat=true`、`reasoning_content_replay=true`、`responses_tool_choice_compat=false`、`responses_force_stateless_replay=false`、`use_proxy=false`
 
 关键回退逻辑：
 - 若 `api_url/api_key/model_name` 任一缺失，会自动回退为 chat 模型（并告警）。
@@ -352,13 +363,14 @@ Prompt caching 补充：
 默认：
 - `max_tokens=160`
 - `queue_interval_seconds=1.0`（`0` 表示立即发车，`<0` 回退 `1.0`）
-- `api_mode="chat_completions"`
+- `api_mode="openai.chat_completions"`
 - `reasoning_enabled=false`
 - `reasoning_effort="medium"`
 - `thinking_enabled=false`
 - `thinking_budget_tokens=0`
 - `thinking_include_budget=true`
 - `thinking_tool_call_compat=true`
+- `reasoning_content_replay=true`
 - `responses_tool_choice_compat=false`
 - `responses_force_stateless_replay=false`
 - `use_proxy=false`
@@ -371,10 +383,11 @@ Prompt caching 补充：
 默认：
 - `max_tokens=4096`
 - `queue_interval_seconds=1.0`（`0` 表示立即发车，`<0` 回退 `1.0`）
-- `api_mode="chat_completions"`
+- `api_mode="openai.chat_completions"`
 - `reasoning_enabled=false`
 - `reasoning_effort="medium"`
 - `thinking_tool_call_compat=true`
+- `reasoning_content_replay=true`
 - `responses_tool_choice_compat=false`
 - `responses_force_stateless_replay=false`
 - `use_proxy=false`
@@ -403,19 +416,21 @@ Prompt caching 补充：
 默认：
 - `max_tokens=8192`
 - `queue_interval_seconds=1.0`（`0` 表示立即发车，`<0` 回退 `1.0`）
-- 固定走 `chat_completions`
+- `api_mode="openai.chat_completions"`
 - `reasoning_enabled=false`
 - `reasoning_effort="medium"`
 - `thinking_enabled=false`
 - `thinking_budget_tokens=20000`
 - `thinking_include_budget=true`
-- `reasoning_effort_style="openai"`
+- `thinking_tool_call_compat=true`
+- `reasoning_content_replay=true`
+- `responses_tool_choice_compat=false`
+- `responses_force_stateless_replay=false`
 - `use_proxy=false`
 
 补充：
-- 该模型节不提供 `api_mode`。
-- 该模型节不提供 `thinking_tool_call_compat`、`responses_tool_choice_compat`、`responses_force_stateless_replay`。
-- `[models.grok.request_params]` 的保留字段规则与 `chat_completions` 一致。
+- Grok 与其他生成模型一样支持三种 `api_mode` 及完整 thinking/reasoning/replay 配置。
+- `[models.grok.request_params]` 的保留字段规则由所选 `api_mode` 决定。
 
 ### 4.4.9 模型池
 
@@ -436,8 +451,9 @@ Prompt caching 补充：
 `models` 条目支持字段：
 - `model_name`（必填）
 - `api_url` / `api_key` / `max_tokens` / `queue_interval_seconds`
-- `api_mode` / `reasoning_enabled` / `reasoning_effort` / `responses_tool_choice_compat` / `responses_force_stateless_replay`
-- `thinking_*` / `request_params`
+- `api_mode` / `reasoning_enabled` / `reasoning_effort` / `reasoning_content_replay`
+- `thinking_*` / `system_prompt_as_user` / `responses_tool_choice_compat` / `responses_force_stateless_replay`
+- `prompt_cache_enabled` / `stream_enabled` / `request_params`
 - 以上可选字段缺省继承主模型
 - `use_proxy` 是每个池条目独立开关，默认 `false`，不继承主模型，也没有池级总开关
 - `queue_interval_seconds=0` 表示立即发车；`<0` 时回退到主模型间隔。
@@ -496,9 +512,11 @@ Prompt caching 补充：
 
 `request_params` 说明：
 - 仅用于**请求体**字段，不包含 `api_key`、`base_url`、`timeout`、`extra_headers` 等 client 选项。
-- 聊天类（`chat_completions`）保留字段：`model`、`messages`、`max_tokens`、`tools`、`tool_choice`、`stream`、`stream_options`、`thinking`、`reasoning`、`reasoning_effort`、`output_config`。
-- 聊天类（`responses`）保留字段：`model`、`input`、`instructions`、`max_output_tokens`、`tools`、`tool_choice`、`previous_response_id`、`stream`、`stream_options`、`thinking`、`reasoning`、`reasoning_effort`、`output_config`。启用 `responses_force_stateless_replay` 时会主动跳过 `previous_response_id`。历史 `output` items 由运行时自动维护；不要通过 `request_params` 手工注入或覆盖 `function_call.id` / `call_id`。
-- 启用 `stream_enabled` 且使用 `chat_completions` 时，运行时会自动发送 `stream_options.include_usage=true`，以便 OpenAI 兼容接口在流式尾包返回 usage 并维持 token 统计。
+- 以下各模式列出的**运行时保留字段**由正式参数或专用配置派生；`request_params` 中的同名值会被忽略，不能覆盖最终请求体。未列出的字段才会透传，另行说明的合并字段除外。
+- `openai.chat_completions` 运行时保留字段：`model`、`messages`、`max_tokens`、`tools`、`tool_choice`、`stream`、`stream_options`、`thinking`、`reasoning_effort`、`output_config`。`request_params.reasoning` 是兼容网关的透传例外；专用 `max_tokens` 仅在值为正数时发送，非正数时省略。
+- `openai.responses` 运行时保留字段：`model`、`input`、`instructions`、`max_output_tokens`、`tools`、`tool_choice`、`previous_response_id`、`stream`、`stream_options`、`thinking`、`reasoning_effort`、`output_config`。`request_params.reasoning` 是合并例外，其 `summary` 等附加键会保留，专用 effort 会覆盖同名 `effort`；专用 `max_tokens` 仅在值为正数时映射为 `max_output_tokens`，非正数时省略。历史 `output` items 由运行时维护，不要手工覆盖 `function_call.id` / `call_id`。
+- `anthropic.messages` 运行时保留字段：`model`、`messages`、`system`、`max_tokens`、`tools`、`tool_choice`、`stream`、`thinking`、`reasoning`、`reasoning_effort`、`prompt_cache_key`。`request_params.output_config` 是合并例外，其中其他键会保留，专用 effort 会覆盖同名 `effort`；`max_tokens` 必须为正整数并原样发送。
+- 启用 `stream_enabled` 且使用 `openai.chat_completions` 时，运行时自动发送 `stream_options.include_usage=true`；Responses 与 Anthropic 分别使用各自 SDK 的流式接口并聚合最终响应。
 - 流式请求仅在明确的流式参数不兼容错误或 SDK 未实现时回退到非流式请求；鉴权、限流、网络、超时、解析或代码异常会直接暴露，便于定位真实问题。
 - embedding 保留字段：`model`、`input`、`dimensions`。
 - rerank 保留字段：`model`、`query`、`documents`、`top_n`、`return_documents`。
@@ -1336,7 +1354,17 @@ Prompt caching 补充：
 | `models.agent.api_mode` | `AGENT_MODEL_API_MODE` |
 | `models.agent.api_url` | `AGENT_MODEL_API_URL` |
 | `models.agent.context_window_tokens` | `AGENT_MODEL_CONTEXT_WINDOW_TOKENS` |
+| `models.agent.max_tokens` | `AGENT_MODEL_MAX_TOKENS` |
 | `models.agent.model_name` | `AGENT_MODEL_NAME` |
+| `models.agent.prompt_cache_enabled` | `AGENT_MODEL_PROMPT_CACHE_ENABLED` |
+| `models.agent.queue_interval_seconds` | `AGENT_MODEL_QUEUE_INTERVAL` |
+| `models.agent.reasoning_effort` | `AGENT_MODEL_REASONING_EFFORT` |
+| `models.agent.reasoning_enabled` | `AGENT_MODEL_REASONING_ENABLED` |
+| `models.agent.stream_enabled` | `AGENT_MODEL_STREAM_ENABLED` |
+| `models.agent.thinking_budget_tokens` | `AGENT_MODEL_THINKING_BUDGET_TOKENS` |
+| `models.agent.thinking_enabled` | `AGENT_MODEL_THINKING_ENABLED` |
+| `models.agent.thinking_include_budget` | `AGENT_MODEL_THINKING_INCLUDE_BUDGET` |
+| `models.agent.thinking_tool_call_compat` | `AGENT_MODEL_THINKING_TOOL_CALL_COMPAT` |
 | `models.agent.use_proxy` | `AGENT_MODEL_USE_PROXY` |
 | `models.agent.reasoning_content_replay` | `AGENT_MODEL_REASONING_CONTENT_REPLAY` |
 | `models.agent.responses_force_stateless_replay` | `AGENT_MODEL_RESPONSES_FORCE_STATELESS_REPLAY` |
@@ -1353,6 +1381,15 @@ Prompt caching 补充：
 | `models.chat.context_window_tokens` | `CHAT_MODEL_CONTEXT_WINDOW_TOKENS` |
 | `models.chat.max_tokens` | `CHAT_MODEL_MAX_TOKENS` |
 | `models.chat.model_name` | `CHAT_MODEL_NAME` |
+| `models.chat.prompt_cache_enabled` | `CHAT_MODEL_PROMPT_CACHE_ENABLED` |
+| `models.chat.queue_interval_seconds` | `CHAT_MODEL_QUEUE_INTERVAL` |
+| `models.chat.reasoning_effort` | `CHAT_MODEL_REASONING_EFFORT` |
+| `models.chat.reasoning_enabled` | `CHAT_MODEL_REASONING_ENABLED` |
+| `models.chat.stream_enabled` | `CHAT_MODEL_STREAM_ENABLED` |
+| `models.chat.thinking_budget_tokens` | `CHAT_MODEL_THINKING_BUDGET_TOKENS` |
+| `models.chat.thinking_enabled` | `CHAT_MODEL_THINKING_ENABLED` |
+| `models.chat.thinking_include_budget` | `CHAT_MODEL_THINKING_INCLUDE_BUDGET` |
+| `models.chat.thinking_tool_call_compat` | `CHAT_MODEL_THINKING_TOOL_CALL_COMPAT` |
 | `models.chat.use_proxy` | `CHAT_MODEL_USE_PROXY` |
 | `models.chat.reasoning_content_replay` | `CHAT_MODEL_REASONING_CONTENT_REPLAY` |
 | `models.chat.responses_force_stateless_replay` | `CHAT_MODEL_RESPONSES_FORCE_STATELESS_REPLAY` |
@@ -1374,10 +1411,24 @@ Prompt caching 补充：
 | TOML 路径 | 环境变量 |
 |-----------|----------|
 | `models.grok.api_key` | `GROK_MODEL_API_KEY` |
+| `models.grok.api_mode` | `GROK_MODEL_API_MODE` |
 | `models.grok.api_url` | `GROK_MODEL_API_URL` |
 | `models.grok.context_window_tokens` | `GROK_MODEL_CONTEXT_WINDOW_TOKENS` |
 | `models.grok.max_tokens` | `GROK_MODEL_MAX_TOKENS` |
 | `models.grok.model_name` | `GROK_MODEL_NAME` |
+| `models.grok.prompt_cache_enabled` | `GROK_MODEL_PROMPT_CACHE_ENABLED` |
+| `models.grok.queue_interval_seconds` | `GROK_MODEL_QUEUE_INTERVAL` |
+| `models.grok.reasoning_content_replay` | `GROK_MODEL_REASONING_CONTENT_REPLAY` |
+| `models.grok.reasoning_effort` | `GROK_MODEL_REASONING_EFFORT` |
+| `models.grok.reasoning_enabled` | `GROK_MODEL_REASONING_ENABLED` |
+| `models.grok.responses_force_stateless_replay` | `GROK_MODEL_RESPONSES_FORCE_STATELESS_REPLAY` |
+| `models.grok.responses_tool_choice_compat` | `GROK_MODEL_RESPONSES_TOOL_CHOICE_COMPAT` |
+| `models.grok.stream_enabled` | `GROK_MODEL_STREAM_ENABLED` |
+| `models.grok.system_prompt_as_user` | `GROK_MODEL_SYSTEM_PROMPT_AS_USER` |
+| `models.grok.thinking_budget_tokens` | `GROK_MODEL_THINKING_BUDGET_TOKENS` |
+| `models.grok.thinking_enabled` | `GROK_MODEL_THINKING_ENABLED` |
+| `models.grok.thinking_include_budget` | `GROK_MODEL_THINKING_INCLUDE_BUDGET` |
+| `models.grok.thinking_tool_call_compat` | `GROK_MODEL_THINKING_TOOL_CALL_COMPAT` |
 | `models.grok.use_proxy` | `GROK_MODEL_USE_PROXY` |
 
 #### `models.historian`
@@ -1385,6 +1436,8 @@ Prompt caching 补充：
 | TOML 路径 | 环境变量 |
 |-----------|----------|
 | `models.historian.use_proxy` | `HISTORIAN_MODEL_USE_PROXY` |
+| `models.historian.reasoning_content_replay` | `HISTORIAN_MODEL_REASONING_CONTENT_REPLAY` |
+| `models.historian.system_prompt_as_user` | `HISTORIAN_MODEL_SYSTEM_PROMPT_AS_USER` |
 
 #### `models.image_edit`
 
@@ -1406,7 +1459,17 @@ Prompt caching 补充：
 | `models.naga.api_mode` | `NAGA_MODEL_API_MODE` |
 | `models.naga.api_url` | `NAGA_MODEL_API_URL` |
 | `models.naga.context_window_tokens` | `NAGA_MODEL_CONTEXT_WINDOW_TOKENS` |
+| `models.naga.max_tokens` | `NAGA_MODEL_MAX_TOKENS` |
 | `models.naga.model_name` | `NAGA_MODEL_NAME` |
+| `models.naga.prompt_cache_enabled` | `NAGA_MODEL_PROMPT_CACHE_ENABLED` |
+| `models.naga.queue_interval_seconds` | `NAGA_MODEL_QUEUE_INTERVAL` |
+| `models.naga.reasoning_effort` | `NAGA_MODEL_REASONING_EFFORT` |
+| `models.naga.reasoning_enabled` | `NAGA_MODEL_REASONING_ENABLED` |
+| `models.naga.stream_enabled` | `NAGA_MODEL_STREAM_ENABLED` |
+| `models.naga.thinking_budget_tokens` | `NAGA_MODEL_THINKING_BUDGET_TOKENS` |
+| `models.naga.thinking_enabled` | `NAGA_MODEL_THINKING_ENABLED` |
+| `models.naga.thinking_include_budget` | `NAGA_MODEL_THINKING_INCLUDE_BUDGET` |
+| `models.naga.thinking_tool_call_compat` | `NAGA_MODEL_THINKING_TOOL_CALL_COMPAT` |
 | `models.naga.use_proxy` | `NAGA_MODEL_USE_PROXY` |
 | `models.naga.reasoning_content_replay` | `NAGA_MODEL_REASONING_CONTENT_REPLAY` |
 | `models.naga.responses_force_stateless_replay` | `NAGA_MODEL_RESPONSES_FORCE_STATELESS_REPLAY` |
@@ -1431,7 +1494,17 @@ Prompt caching 补充：
 | `models.security.api_mode` | `SECURITY_MODEL_API_MODE` |
 | `models.security.api_url` | `SECURITY_MODEL_API_URL` |
 | `models.security.context_window_tokens` | `SECURITY_MODEL_CONTEXT_WINDOW_TOKENS` |
+| `models.security.max_tokens` | `SECURITY_MODEL_MAX_TOKENS` |
 | `models.security.model_name` | `SECURITY_MODEL_NAME` |
+| `models.security.prompt_cache_enabled` | `SECURITY_MODEL_PROMPT_CACHE_ENABLED` |
+| `models.security.queue_interval_seconds` | `SECURITY_MODEL_QUEUE_INTERVAL` |
+| `models.security.reasoning_effort` | `SECURITY_MODEL_REASONING_EFFORT` |
+| `models.security.reasoning_enabled` | `SECURITY_MODEL_REASONING_ENABLED` |
+| `models.security.stream_enabled` | `SECURITY_MODEL_STREAM_ENABLED` |
+| `models.security.thinking_budget_tokens` | `SECURITY_MODEL_THINKING_BUDGET_TOKENS` |
+| `models.security.thinking_enabled` | `SECURITY_MODEL_THINKING_ENABLED` |
+| `models.security.thinking_include_budget` | `SECURITY_MODEL_THINKING_INCLUDE_BUDGET` |
+| `models.security.thinking_tool_call_compat` | `SECURITY_MODEL_THINKING_TOOL_CALL_COMPAT` |
 | `models.security.use_proxy` | `SECURITY_MODEL_USE_PROXY` |
 | `models.security.reasoning_content_replay` | `SECURITY_MODEL_REASONING_CONTENT_REPLAY` |
 | `models.security.responses_force_stateless_replay` | `SECURITY_MODEL_RESPONSES_FORCE_STATELESS_REPLAY` |
@@ -1446,7 +1519,17 @@ Prompt caching 补充：
 | `models.vision.api_mode` | `VISION_MODEL_API_MODE` |
 | `models.vision.api_url` | `VISION_MODEL_API_URL` |
 | `models.vision.context_window_tokens` | `VISION_MODEL_CONTEXT_WINDOW_TOKENS` |
+| `models.vision.max_tokens` | `VISION_MODEL_MAX_TOKENS` |
 | `models.vision.model_name` | `VISION_MODEL_NAME` |
+| `models.vision.prompt_cache_enabled` | `VISION_MODEL_PROMPT_CACHE_ENABLED` |
+| `models.vision.queue_interval_seconds` | `VISION_MODEL_QUEUE_INTERVAL` |
+| `models.vision.reasoning_effort` | `VISION_MODEL_REASONING_EFFORT` |
+| `models.vision.reasoning_enabled` | `VISION_MODEL_REASONING_ENABLED` |
+| `models.vision.stream_enabled` | `VISION_MODEL_STREAM_ENABLED` |
+| `models.vision.thinking_budget_tokens` | `VISION_MODEL_THINKING_BUDGET_TOKENS` |
+| `models.vision.thinking_enabled` | `VISION_MODEL_THINKING_ENABLED` |
+| `models.vision.thinking_include_budget` | `VISION_MODEL_THINKING_INCLUDE_BUDGET` |
+| `models.vision.thinking_tool_call_compat` | `VISION_MODEL_THINKING_TOOL_CALL_COMPAT` |
 | `models.vision.use_proxy` | `VISION_MODEL_USE_PROXY` |
 | `models.vision.reasoning_content_replay` | `VISION_MODEL_REASONING_CONTENT_REPLAY` |
 | `models.vision.responses_force_stateless_replay` | `VISION_MODEL_RESPONSES_FORCE_STATELESS_REPLAY` |
@@ -1458,6 +1541,8 @@ Prompt caching 补充：
 | TOML 路径 | 环境变量 |
 |-----------|----------|
 | `models.summary.use_proxy` | `SUMMARY_MODEL_USE_PROXY` |
+| `models.summary.reasoning_content_replay` | `SUMMARY_MODEL_REASONING_CONTENT_REPLAY` |
+| `models.summary.system_prompt_as_user` | `SUMMARY_MODEL_SYSTEM_PROMPT_AS_USER` |
 
 #### `messages`
 

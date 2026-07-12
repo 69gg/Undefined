@@ -1,4 +1,4 @@
-const LOG_TAIL_LINES = 1000;
+const LOG_TAIL_LINES = 5000;
 
 async function fetchLogs(force = false) {
     if (!force && !shouldFetch("logs")) return;
@@ -38,41 +38,24 @@ async function fetchLogs(force = false) {
 function filterLogLines(raw) {
     const query = state.logSearch.trim().toLowerCase();
     const rawLines = raw ? raw.split(/\r?\n/) : [];
-    const base = window.LogsController
-        ? window.LogsController.filterLogLines(raw, {
-              level: state.logLevel,
-              gte: state.logLevelGte,
-          })
-        : { filtered: rawLines, total: rawLines.length };
-
-    let filtered = base.filtered;
-    if (query)
-        filtered = filtered.filter((line) =>
-            line.toLowerCase().includes(query),
-        );
-
-    // Time range filtering
     const timeFrom = state.logTimeFrom
         ? new Date(state.logTimeFrom).getTime()
         : 0;
     const timeTo = state.logTimeTo ? new Date(state.logTimeTo).getTime() : 0;
-    if (timeFrom || timeTo) {
-        const tsRe = /^(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2})/;
-        const result = [];
-        let include = true;
-        for (const line of filtered) {
-            const m = line.match(tsRe);
-            if (m) {
-                const ts = new Date(m[1].replace(" ", "T")).getTime();
-                include =
-                    (!timeFrom || ts >= timeFrom) && (!timeTo || ts <= timeTo);
-            }
-            if (include) result.push(line);
-        }
-        filtered = result;
+    if (window.LogsController) {
+        return window.LogsController.filterLogLines(raw, {
+            level: state.logLevel,
+            gte: state.logLevelGte,
+            query,
+            timeFrom: Number.isFinite(timeFrom) ? timeFrom : 0,
+            timeTo: Number.isFinite(timeTo) ? timeTo : 0,
+        });
     }
 
-    const total = base.total ?? rawLines.length;
+    const filtered = query
+        ? rawLines.filter((line) => line.toLowerCase().includes(query))
+        : rawLines;
+    const total = rawLines.filter((line) => line.length > 0).length;
     const matched = filtered.filter((line) => line.length > 0).length;
     return { filtered, total, matched };
 }

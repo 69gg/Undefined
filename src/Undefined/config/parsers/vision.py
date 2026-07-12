@@ -24,7 +24,6 @@ from ..resolvers import (
     _resolve_api_mode,
     _resolve_context_window_tokens,
     _resolve_reasoning_effort,
-    _resolve_reasoning_effort_style,
     _resolve_reasoning_content_replay,
     _resolve_responses_force_stateless_replay,
     _resolve_responses_tool_choice_compat,
@@ -148,13 +147,6 @@ def _parse_vision_model_config(data: dict[str, Any]) -> VisionModelConfig:
             20000,
         ),
         thinking_include_budget=thinking_include_budget,
-        reasoning_effort_style=_resolve_reasoning_effort_style(
-            _get_value(
-                data,
-                ("models", "vision", "reasoning_effort_style"),
-                "VISION_MODEL_REASONING_EFFORT_STYLE",
-            ),
-        ),
         thinking_tool_call_compat=thinking_tool_call_compat,
         reasoning_content_replay=reasoning_content_replay,
         system_prompt_as_user=system_prompt_as_user,

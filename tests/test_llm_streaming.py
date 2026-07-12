@@ -399,7 +399,7 @@ class TestAggregateChatCompletionsStream:
         return {"choices": [{"delta": {}, "finish_reason": finish_reason}]}
 
     def test_empty_chunks_returns_empty_message(self) -> None:
-        result = aggregate_chat_completions_stream([], reasoning_replay=False)
+        result = aggregate_chat_completions_stream([])
         assert result["choices"][0]["message"]["content"] == ""
         assert result["choices"][0]["finish_reason"] == "stop"
 
@@ -410,12 +410,12 @@ class TestAggregateChatCompletionsStream:
             self._text_chunk("world"),
             self._final_chunk(),
         ]
-        result = aggregate_chat_completions_stream(chunks, reasoning_replay=False)
+        result = aggregate_chat_completions_stream(chunks)
         assert result["choices"][0]["message"]["content"] == "Hello, world"
 
     def test_finish_reason_captured(self) -> None:
         chunks = [self._final_chunk("tool_calls")]
-        result = aggregate_chat_completions_stream(chunks, reasoning_replay=False)
+        result = aggregate_chat_completions_stream(chunks)
         assert result["choices"][0]["finish_reason"] == "tool_calls"
 
     def test_usage_extracted(self) -> None:
@@ -423,7 +423,7 @@ class TestAggregateChatCompletionsStream:
             self._text_chunk("hi"),
             {"usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8}},
         ]
-        result = aggregate_chat_completions_stream(chunks, reasoning_replay=False)
+        result = aggregate_chat_completions_stream(chunks)
         assert result["usage"]["total_tokens"] == 8
 
     def test_tool_calls_aggregated(self) -> None:
@@ -461,7 +461,7 @@ class TestAggregateChatCompletionsStream:
                 ]
             },
         ]
-        result = aggregate_chat_completions_stream(chunks, reasoning_replay=False)
+        result = aggregate_chat_completions_stream(chunks)
         msg = result["choices"][0]["message"]
         assert "tool_calls" in msg
         assert msg["tool_calls"][0]["function"]["arguments"] == '{"msg": "hello"}'
@@ -482,12 +482,12 @@ class TestAggregateChatCompletionsStream:
                 ]
             },
         ]
-        result = aggregate_chat_completions_stream(chunks, reasoning_replay=True)
+        result = aggregate_chat_completions_stream(chunks)
         msg = result["choices"][0]["message"]
         assert "reasoning_content" in msg
         assert "thinking step 1" in msg["reasoning_content"]
 
-    def test_reasoning_content_not_collected_when_replay_disabled(self) -> None:
+    def test_reasoning_content_is_collected_before_replay_policy(self) -> None:
         chunks = [
             {
                 "choices": [
@@ -498,9 +498,9 @@ class TestAggregateChatCompletionsStream:
                 ]
             }
         ]
-        result = aggregate_chat_completions_stream(chunks, reasoning_replay=False)
+        result = aggregate_chat_completions_stream(chunks)
         msg = result["choices"][0]["message"]
-        assert "reasoning_content" not in msg
+        assert msg["reasoning_content"] == "thoughts"
 
 
 # ---------------------------------------------------------------------------

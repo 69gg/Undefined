@@ -15,6 +15,8 @@ from Undefined.utils import io as async_io
 
 CONFIG_FORM_JS: Final[Path] = Path("src/Undefined/webui/static/js/config-form.js")
 COMPONENTS_CSS: Final[Path] = Path("src/Undefined/webui/static/css/components.css")
+RESPONSIVE_CSS: Final[Path] = Path("src/Undefined/webui/static/css/responsive.css")
+UI_JS: Final[Path] = Path("src/Undefined/webui/static/js/ui.js")
 
 
 def _read_source(path: Path) -> str:
@@ -29,6 +31,175 @@ def _has_bare_form_group_query(source: str) -> bool:
         'querySelectorAll(".form-group")' in source
         or '".form-group:not(.is-hidden)"' in source
     )
+
+
+def _css_rule(source: str, selector: str) -> str:
+    marker = f"{selector} {{"
+    start = source.index(marker) + len(marker)
+    return source[start : source.index("}", start)]
+
+
+def test_config_form_uses_stable_single_column_layout() -> None:
+    css = _read_source(COMPONENTS_CSS)
+    responsive = _read_source(RESPONSIVE_CSS)
+
+    form_rule = _css_rule(css, ".form-grid")
+    assert "display: grid" in form_rule
+    assert "grid-template-columns: minmax(0, 1fr)" in form_rule
+    assert "column-width" not in form_rule
+    assert "column-count" not in responsive
+
+    card_rule = _css_rule(css, ".config-card")
+    assert "inline-block" not in card_rule
+    assert "break-inside" not in card_rule
+    assert "margin-bottom: 0" in card_rule
+
+    header_rule = _css_rule(css, ".config-card-header")
+    assert "position: sticky" in header_rule
+    assert "top: var(--config-section-sticky-offset)" in header_rule
+    assert "minmax(260px, 1fr)" in css
+
+
+def test_config_state_does_not_override_grid_display() -> None:
+    source = _read_source(UI_JS)
+    state_fn = source.split("function setConfigState(mode)", 1)[1].split(
+        "function ", 1
+    )[0]
+
+    assert 'grid.style.display = "block"' not in state_fn
+    assert 'grid.style.display = ""' in state_fn
+
+
+def test_config_search_temporarily_expands_without_changing_saved_state() -> None:
+    if shutil.which("node") is None:
+        pytest.skip("node is required for config section behavior test")
+
+    source = _read_source(CONFIG_FORM_JS)
+    script = r"""
+const fs = require("node:fs");
+const vm = require("node:vm");
+const source = fs.readFileSync(0, "utf8");
+
+class TokenList {
+  constructor(initial = []) { this.values = new Set(initial); }
+  contains(value) { return this.values.has(value); }
+  toggle(value, force) {
+    if (force) this.values.add(value);
+    else this.values.delete(value);
+  }
+}
+
+function createButton() {
+  return {
+    attributes: {},
+    title: "",
+    setAttribute(name, value) { this.attributes[name] = String(value); },
+    removeAttribute(name) { delete this.attributes[name]; },
+  };
+}
+
+const label = { innerText: "" };
+const toggle = createButton();
+toggle.querySelector = (selector) =>
+  selector === ".config-section-toggle-label" ? label : null;
+
+const card = {
+  dataset: { section: "models" },
+  classList: new TokenList(["config-card"]),
+  querySelector(selector) {
+    return selector === ".config-section-toggle" ? toggle : null;
+  },
+};
+const expandAll = createButton();
+const collapseAll = createButton();
+const state = {
+  configSearch: "model",
+  configCollapsed: { models: true },
+  configSearchCollapsed: {},
+  configSearchModeActive: false,
+};
+const context = {
+  state,
+  document: {
+    querySelectorAll(selector) {
+      return selector === ".config-card" ? [card] : [];
+    },
+  },
+  get(id) {
+    if (id === "btnExpandAll") return expandAll;
+    if (id === "btnCollapseAll") return collapseAll;
+    return null;
+  },
+  t(key) {
+    const values = {
+      "config.expand_section": "Expand",
+      "config.collapse_section": "Collapse",
+    };
+    return values[key] || key;
+  },
+  window: {},
+  console,
+  setTimeout,
+  clearTimeout,
+};
+vm.runInNewContext(source, context);
+
+context.syncConfigSearchMode(true);
+context.updateConfigSectionPresentations();
+if (state.configCollapsed.models !== true) {
+  throw new Error("search must not mutate saved collapse state");
+}
+if (card.classList.contains("is-collapsed")) {
+  throw new Error("matching collapsed section must be temporarily expanded");
+}
+if (toggle.attributes["aria-expanded"] !== "true") {
+  throw new Error("temporary expansion must update aria-expanded");
+}
+context.toggleSection("models");
+if (!card.classList.contains("is-collapsed")) {
+  throw new Error("section toggle must keep working during search");
+}
+if (state.configCollapsed.models !== true) {
+  throw new Error("search toggle must not mutate saved collapse state");
+}
+
+state.configSearch = "";
+context.syncConfigSearchMode(false);
+context.updateConfigSectionPresentations();
+if (!card.classList.contains("is-collapsed")) {
+  throw new Error("clearing search must restore saved collapse state");
+}
+if (toggle.attributes["aria-expanded"] !== "false") {
+  throw new Error("restored collapse state must update aria-expanded");
+}
+if (label.innerText !== "Expand") {
+  throw new Error("restored collapsed section must use expand label");
+}
+
+console.log(JSON.stringify({ ok: true }));
+"""
+    completed = subprocess.run(
+        ["node", "-e", script],
+        input=source,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert completed.returncode == 0, (
+        "config section behavior test failed:\n"
+        f"stdout={completed.stdout}\nstderr={completed.stderr}"
+    )
+    assert json.loads(completed.stdout.strip().splitlines()[-1])["ok"] is True
+
+
+def test_config_collapse_preserves_the_visible_section_anchor() -> None:
+    source = _read_source(CONFIG_FORM_JS)
+
+    assert "function preserveConfigViewportAnchor(anchor, update)" in source
+    assert "function findConfigViewportAnchor()" in source
+    assert 'window.scrollBy({ top: delta, left: 0, behavior: "auto" })' in source
+    assert "preserveConfigViewportAnchor(anchor" in source
 
 
 def test_config_search_filters_only_path_bearing_form_groups() -> None:
@@ -71,6 +242,18 @@ def test_request_params_widget_contracts() -> None:
     assert "config-request-params" in source
     assert ".form-group.config-request-params" in css
     assert "grid-column: 1 / -1" in css
+
+
+def test_model_transport_controls_use_canonical_modes_and_replay_defaults() -> None:
+    source = _read_source(CONFIG_FORM_JS)
+
+    assert '"openai.chat_completions"' in source
+    assert '"openai.responses"' in source
+    assert '"anthropic.messages"' in source
+    assert "reasoning_effort_style" not in source
+    assert "reasoning_content_replay: true" in source
+    assert "thinking_include_budget: true" in source
+    assert "stream_enabled: false" in source
 
 
 def test_request_params_nested_key_type_editors_lack_data_path() -> None:

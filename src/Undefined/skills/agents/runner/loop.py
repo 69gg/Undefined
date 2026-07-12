@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from Undefined.ai.transports.openai_transport import RESPONSES_OUTPUT_ITEMS_KEY
+from Undefined.ai.transports import copy_transport_message_metadata
 from Undefined.skills.agents.runner.context import prepare_agent_run
 from Undefined.skills.agents.runner.tools import execute_assistant_tool_calls
 from Undefined.skills.agents.runner.webchat_utils import (
@@ -150,7 +150,6 @@ async def run_agent_with_tools(
             choice: dict[str, Any] = result.get("choices", [{}])[0]
             message: dict[str, Any] = choice.get("message", {})
             content: str = message.get("content") or ""
-            reasoning_content: str | None = message.get("reasoning_content")
             tool_calls: list[dict[str, Any]] = message.get("tool_calls", [])
 
             # 模型同时返回文本与工具调用时，优先走工具路径
@@ -171,15 +170,15 @@ async def run_agent_with_tools(
                 "content": content,
                 "tool_calls": tool_calls,
             }
-            output_items = message.get(RESPONSES_OUTPUT_ITEMS_KEY)
-            if isinstance(output_items, list):
-                assistant_message[RESPONSES_OUTPUT_ITEMS_KEY] = output_items
             # 部分模型需回放 reasoning_content 以兼容 thinking + tool_call
             capture_reasoning = bool(
                 getattr(prepared.agent_config, "thinking_tool_call_compat", False)
-            ) or bool(getattr(prepared.agent_config, "reasoning_content_replay", False))
-            if capture_reasoning and reasoning_content is not None:
-                assistant_message["reasoning_content"] = reasoning_content
+            ) or bool(getattr(prepared.agent_config, "reasoning_content_replay", True))
+            copy_transport_message_metadata(
+                message,
+                assistant_message,
+                include_readable_reasoning=capture_reasoning,
+            )
             messages.append(assistant_message)
 
             # 并发执行 tool_calls，结果以 role=tool 消息回填

@@ -108,7 +108,7 @@ curl http://127.0.0.1:8788/openapi.json
 | `scheduler` | `object` | 定时任务调度摘要（`available`、`count`、`running`） |
 | `api` | `object` | Runtime API 配置（`enabled`、`host`、`port`、`openapi_enabled`） |
 | `skills` | `object` | 技能统计，包含 `tools`、`toolsets`、`agents`、`pipelines`、`commands`、`anthropic_skills` 子对象 |
-| `models` | `object` | 模型配置；聊天类模型包含 `model_name`、脱敏 `api_url`、`api_mode`、`thinking_enabled`、`thinking_tool_call_compat`、`reasoning_content_replay`、`system_prompt_as_user`、`responses_tool_choice_compat`、`responses_force_stateless_replay`、`prompt_cache_enabled`、`reasoning_enabled`、`reasoning_effort` |
+| `models` | `object` | 模型配置；生成模型包含 `model_name`、脱敏 `api_url`、canonical `api_mode`（`openai.chat_completions` / `openai.responses` / `anthropic.messages`）、`thinking_enabled`、`thinking_tool_call_compat`、`reasoning_content_replay`、`system_prompt_as_user`、`responses_tool_choice_compat`、`responses_force_stateless_replay`、`prompt_cache_enabled`、`reasoning_enabled`、`reasoning_effort` |
 
 `skills` 下各分类均提供轻量摘要：`tools` 是当前可调用工具总表，`toolsets` 单独拆出 `skills/toolsets/` 下的工具集工具，`agents` 对应 `skills/agents/`，`pipelines` 对应 `skills/pipelines/`，`commands` 对应 `skills/commands/`，`anthropic_skills` 对应全局 Anthropic Skills。常规注册表子对象结构：
 
@@ -131,10 +131,10 @@ curl http://127.0.0.1:8788/openapi.json
   "chat_model": {
     "model_name": "claude-sonnet-4-20250514",
     "api_url": "https://api.example.com/...",
-    "api_mode": "responses",
+    "api_mode": "openai.responses",
     "thinking_enabled": false,
     "thinking_tool_call_compat": true,
-    "reasoning_content_replay": false,
+    "reasoning_content_replay": true,
     "system_prompt_as_user": false,
     "responses_tool_choice_compat": false,
     "responses_force_stateless_replay": false,
@@ -145,7 +145,7 @@ curl http://127.0.0.1:8788/openapi.json
 }
 ```
 
-说明：`responses_tool_choice_compat` 与 `responses_force_stateless_replay` 通常都保持 `false`；仅建议在 `responses` 请求默认配置下仍返回 `500`，且怀疑上游不兼容状态续轮时再尝试开启。当前已知 `new-api v0.11.4-alpha.3` 存在该兼容问题。
+说明：`reasoning_content_replay` 默认开启；关闭后不会向上游发送明文、summary、签名或加密推理材料。`responses_tool_choice_compat` 与 `responses_force_stateless_replay` 通常保持 `false`，仅在 `openai.responses` 兼容网关不支持官方对象型工具选择或状态续轮时尝试开启。
 
 #### 外部探针响应字段
 

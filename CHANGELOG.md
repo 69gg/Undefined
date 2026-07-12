@@ -1,3 +1,19 @@
+## v3.8.0 多协议 LLM SDK、推理回放与 WebUI 可用性
+
+本版本重构生成模型请求层，统一 OpenAI Chat Completions、OpenAI Responses 与 Anthropic Messages 的 SDK 调用和配置语义，补全多轮工具调用中的原生推理载体回放，并修复 WebUI 配置编辑器与多行日志查询的可用性问题。
+
+- 新增原生 Anthropic Messages 支持。`api_mode` 现使用 `openai.chat_completions`、`openai.responses`、`anthropic.messages` 三种规范名称；旧 `chat_completions` / `responses` 仍兼容并给出弃用提示。Anthropic 链路通过官方 `AsyncAnthropic` SDK 调用，支持系统提示、图片、函数工具、`tool_use` / `tool_result`、流式与非流式响应、usage 统计及错误归一化。
+- 完善推理内容采集与原样回放。流式和非流式响应会保留 Chat 兼容接口的 `reasoning_content`、`reasoning_details`、`reasoning`、`encrypted_content`、`thinking`，Responses 的原始 reasoning output items 与 `reasoning.encrypted_content`，以及 Anthropic 的 `thinking` / `redacted_thinking` blocks；`reasoning_content_replay` 默认开启，续轮时按原顺序优先回传当前有效历史中的全部原生推理结构，仅在旧历史缺少原始载体时回退到可读 `reasoning_content`，关闭后不向上游回放这些内容。
+- 统一 reasoning / thinking 参数语义。移除 `reasoning_effort_style`，运行时根据 `api_mode` 自动映射到 Chat 的 `reasoning_effort`、Responses 的 `reasoning.effort` 或 Anthropic 的 `output_config.effort`；`reasoning_effort` 继续接受自定义字符串，`adaptive` 与其他值均保持原样透传。Anthropic thinking 可在显式预算和 adaptive thinking 间切换，并校验预算与输出上限关系。
+- 加固 OpenAI 请求与工具续轮。Chat Completions 采用广泛兼容的 reasoning / thinking 字段处理；Responses 支持合并 `request_params.reasoning` 的附加键、自动请求加密推理内容、`previous_response_id` 增量续轮及完整 output item 无状态回放，并只定向清理 SDK 展开的无效 function call 空字段，保留真实 item id、namespace 和显式值。
+- 统一输出上限语义。OpenAI Chat / Responses 下，所有生成模型、后台协调任务及模型池条目的 `max_tokens` 设为 `0` 或负数时不发送输出 token 上限，交由服务端使用默认值；正数在 Chat 中发送为 `max_tokens`，在 Responses 中发送为 `max_output_tokens`。Anthropic Messages 按官方必填约束要求 `max_tokens > 0`，非正数会在请求发出前明确报错。
+- 补齐模型与模型池配置能力。Chat、Vision、Security、Agent、Historian、Summary、Grok、Naga 等生成模型节及池内条目统一支持规范 `api_mode`、reasoning、thinking、推理回放、Responses 兼容、prompt cache、stream 与 `request_params` 配置；Grok 不再固定使用 Chat Completions。同步环境变量注册、配置模板、热更新解析和 WebUI 字段说明。
+- 稳定 WebUI 配置编辑体验。配置分组保持固定纵向顺序并按可用宽度排布字段，长分组的标题与折叠入口保持可见；局部编辑、展开折叠和搜索不再造成分组跳动、控件消失或无关状态丢失，清除搜索后恢复用户原有折叠状态，并补充“全部展开 / 全部折叠”操作。
+- 优化 WebUI 日志查询。按时间戳起始行聚合完整日志记录，关键词、等级与时间范围过滤均以整条记录为单位；命中多行 JSON、工具参数或异常堆栈任一续行时保留并展示整条日志。WebUI 默认加载行数由 1000 提升到 5000，历史日志、实时流和高亮行为保持一致。
+- 同步配置、模型对接、OpenAPI、WebUI、认知记忆与 Agent 文档，并新增 Anthropic transport、推理回放、请求参数、模型池、配置编辑器和多行日志过滤回归测试。
+
+---
+
 ## v3.7.1 WebUI Release 更新提示
 
 本版本将更新流程从启动时自动拉取改为 WebUI 内的可控交互：页面登录后在后台静默检查最新正式 GitHub Release，仅在发现新版本时提示用户，并在明确确认后拉取对应 Release 标签并重启。

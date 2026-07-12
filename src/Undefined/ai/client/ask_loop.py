@@ -13,7 +13,7 @@ from Undefined.ai.client.setup import (
     _build_invalid_tool_call_response,
 )
 from Undefined.ai.tool_search import TOOL_SEARCH_NAME, ToolSearchSession
-from Undefined.ai.transports.openai_transport import RESPONSES_OUTPUT_ITEMS_KEY
+from Undefined.ai.transports import copy_transport_message_metadata
 from Undefined.ai.tooling import END_CO_CALL_REJECT_CONTENT
 from Undefined.context import RequestContext
 from Undefined.render import render_html_to_image, render_markdown_to_html
@@ -394,7 +394,7 @@ class ClientAskLoopMixin(ClientQueueMixin):
         conversation_ended = False
         cot_compat = getattr(effective_chat_config, "thinking_tool_call_compat", False)
         capture_reasoning = cot_compat or bool(
-            getattr(effective_chat_config, "reasoning_content_replay", False)
+            getattr(effective_chat_config, "reasoning_content_replay", True)
         )
         cot_compat_logged = False
         cot_missing_logged = False
@@ -577,8 +577,11 @@ class ClientAskLoopMixin(ClientQueueMixin):
                         "role": "assistant",
                         "content": content,
                     }
-                    if capture_reasoning and reasoning_content is not None:
-                        assistant_retry_message["reasoning_content"] = reasoning_content
+                    copy_transport_message_metadata(
+                        message,
+                        assistant_retry_message,
+                        include_readable_reasoning=capture_reasoning,
+                    )
                     messages.append(assistant_retry_message)
                     messages.append(
                         {
@@ -599,11 +602,11 @@ class ClientAskLoopMixin(ClientQueueMixin):
                 phase = message.get("phase")
                 if phase is not None:
                     assistant_message["phase"] = phase
-                output_items = message.get(RESPONSES_OUTPUT_ITEMS_KEY)
-                if isinstance(output_items, list):
-                    assistant_message[RESPONSES_OUTPUT_ITEMS_KEY] = output_items
-                if capture_reasoning and reasoning_content is not None:
-                    assistant_message["reasoning_content"] = reasoning_content
+                copy_transport_message_metadata(
+                    message,
+                    assistant_message,
+                    include_readable_reasoning=capture_reasoning,
+                )
                 messages.append(assistant_message)
 
                 tool_tasks: list[asyncio.Task[Any]] = []
