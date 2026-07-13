@@ -61,6 +61,10 @@ uv run playwright install
 
 `render.render_latex` 会优先使用 Python 依赖中的 `matplotlib` mathtext 在本地渲染常见数学公式，不需要额外安装系统 TeX。mathtext 无法处理的复杂内容会回退到 MathJax + Playwright；如果运行环境无法访问 MathJax CDN，请在配置中启用 HTTP/HTTPS 代理。
 
+`render.render_html` / `render.render_markdown` 的 `layout=long` 与普通渲染复用同一套 Playwright 运行时，无需新增系统依赖。HTML 中的外部图片、字体和脚本仍需要宿主机可访问对应地址；需要代理时使用 `[render].use_proxy`。
+
+如果 Playwright 自带 Chromium 未安装，渲染器会尝试复用系统已安装的 Chrome/Chromium。需要指定其他路径时，设置 `[render].browser_executable_path`；与 Playwright 自带版本相比，系统浏览器的版本兼容性不受 Playwright 保证，因此生产环境仍优先执行 `uv run playwright install`。
+
 ### 4. 配置环境
 
 复制示例配置文件 `config.toml.example` 为 `config.toml` 并填写你的配置信息。

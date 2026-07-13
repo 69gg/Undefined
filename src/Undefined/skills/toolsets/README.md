@@ -135,9 +135,9 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
 
 ### Render（渲染）
 
-- `render.render_html`: 将 HTML 渲染为图片
+- `render.render_html`: 将 HTML 渲染为普通图片或指定宽度的单张长图
 - `render.render_latex`: 将 LaTeX 渲染为图片；常见公式本地渲染，复杂内容回退 MathJax + Playwright
-- `render.render_markdown`: 将 Markdown 渲染为图片
+- `render.render_markdown`: 将 Markdown 渲染为普通图片或指定宽度的单张长图
 
 ### Memes（表情包）
 

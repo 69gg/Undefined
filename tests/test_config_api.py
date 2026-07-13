@@ -187,6 +187,9 @@ tool_invoke_callback_timeout = 0
 def test_render_config_defaults_to_auto(tmp_path: Path) -> None:
     cfg = _load_config(tmp_path / "config.toml", "")
     assert cfg.render_browser_max_concurrency == 0
+    assert cfg.render_browser_executable_path == ""
+    assert cfg.render_long_image_default_width == 900
+    assert cfg.render_long_image_default_padding == 28
 
 
 def test_render_config_accepts_custom_value(tmp_path: Path) -> None:
@@ -195,9 +198,15 @@ def test_render_config_accepts_custom_value(tmp_path: Path) -> None:
         """
 [render]
 browser_max_concurrency = 4
+browser_executable_path = "/opt/chrome/chrome"
+long_image_default_width = 1080
+long_image_default_padding = 36
 """,
     )
     assert cfg.render_browser_max_concurrency == 4
+    assert cfg.render_browser_executable_path == "/opt/chrome/chrome"
+    assert cfg.render_long_image_default_width == 1080
+    assert cfg.render_long_image_default_padding == 36
 
 
 def test_render_config_invalid_values_fallback_to_auto(tmp_path: Path) -> None:
@@ -206,9 +215,13 @@ def test_render_config_invalid_values_fallback_to_auto(tmp_path: Path) -> None:
         """
 [render]
 browser_max_concurrency = -3
+long_image_default_width = -1
+long_image_default_padding = 999
 """,
     )
     assert cfg.render_browser_max_concurrency == 0
+    assert cfg.render_long_image_default_width == 320
+    assert cfg.render_long_image_default_padding == 159
 
 
 def test_prompt_system_info_defaults_to_disabled(tmp_path: Path) -> None:

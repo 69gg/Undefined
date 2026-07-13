@@ -153,15 +153,23 @@ Undefined 搭载了基于 ChromaDB 向量数据库的后台认知系统，无需
 
 | 工具 | 说明 |
 |---|---|
-| `render.render_markdown` | 将 Markdown 文本（含表格、代码块、标题等）渲染为图片发送 |
+| `render.render_markdown` | 将 Markdown 文本（含表格、代码块、标题等）渲染为普通图片或单张长图 |
 | `render.render_latex` | 将 LaTeX 数学公式渲染为图片；常见公式本地渲染，复杂内容回退 MathJax + Playwright（详见[部署文档](deployment.md#3-安装渲染运行时)） |
-| `render.render_html` | 将 HTML 内容渲染为图片 |
+| `render.render_html` | 将完整 HTML/CSS/脚本渲染为普通图片或单张长图 |
 
 支持 `embed`（嵌入回复）和 `send`（直接发送）两种图片交付方式。
+
+HTML 和 Markdown 工具都支持显式长图版式：
+
+- `layout=default`：保持原有页面与居中宽版布局，不接受 `width` / `padding`。
+- `layout=long`：输出一张高度随内容延伸的 PNG，去除两侧外部留白。`width` 表示最终图片像素宽度，`padding` 表示内边距。
+- 未指定宽度和内边距时，默认为 `900px` 和 `28px`，可在 `[render]` 中调整。HTML 全幅设计可显式传 `padding=0`。
 
 **示例：**
 > *"请把这段数学公式渲染成图片发给我：$E=mc^2$"*
 > *"请把下面这份 Markdown 表格渲染成图片。"*
+> *"请把这份 Markdown 渲染成 900px 宽的单张长图，不要两侧留白。"*
+> *"把这份完整 HTML 按长图渲染，宽 1080px、内边距 0。"*
 
 ---
 

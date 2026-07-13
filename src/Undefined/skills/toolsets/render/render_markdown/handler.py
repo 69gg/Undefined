@@ -5,6 +5,7 @@ import logging
 import uuid
 
 from Undefined.attachments import scope_from_context
+from Undefined.skills.toolsets.render.layout import resolve_render_layout
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,14 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     if delivery not in {"embed", "send"}:
         return f"delivery 无效：{delivery}。仅支持 embed 或 send"
 
+    layout_options, layout_error = resolve_render_layout(
+        args,
+        context,
+        content_kind="markdown",
+    )
+    if layout_error is not None or layout_options is None:
+        return layout_error or "渲染布局参数无效"
+
     if delivery == "send" and message_type and message_type not in ("group", "private"):
         return "消息类型必须是 group 或 private"
 
@@ -59,7 +68,11 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
         try:
             html_content = await render_markdown_to_html(content)
-            await render_html_to_image(html_content, str(filepath))
+            await render_html_to_image(
+                html_content,
+                str(filepath),
+                **layout_options.render_kwargs(),
+            )
         except Exception as e:
             logger.exception(f"Markdown 渲染失败: {e}")
             return "Markdown 渲染失败，请稍后重试"

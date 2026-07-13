@@ -211,7 +211,19 @@ def test_compute_render_cache_key_is_deterministic_and_distinct() -> None:
     a_again = compute_render_cache_key("<p>x</p>", 1280, None, None)
     b = compute_render_cache_key("<p>y</p>", 1280, None, None)
     c = compute_render_cache_key("<p>x</p>", 1024, None, None)
+    css_scale = compute_render_cache_key(
+        "<p>x</p>", 1280, None, None, screenshot_scale="css"
+    )
+    styled = compute_render_cache_key(
+        "<p>x</p>",
+        1280,
+        None,
+        None,
+        screenshot_style="body { margin: 0; }",
+    )
 
     assert a == a_again
     assert a != b
     assert a != c
+    assert a != css_scale
+    assert a != styled

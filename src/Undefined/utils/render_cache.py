@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 import shutil
 import time
@@ -331,12 +332,21 @@ def compute_render_cache_key(
     viewport_width: int,
     screenshot_selector: str | None,
     proxy: str | None,
+    screenshot_scale: str = "device",
+    screenshot_style: str | None = None,
 ) -> str:
-    data = (
-        html_content
-        + f"|{viewport_width}"
-        + f"|{str(screenshot_selector) if screenshot_selector is not None else ''}"
-        + f"|{str(proxy) if proxy is not None else ''}"
+    data = json.dumps(
+        {
+            "html_content": html_content,
+            "proxy": proxy,
+            "screenshot_scale": screenshot_scale,
+            "screenshot_selector": screenshot_selector,
+            "screenshot_style": screenshot_style,
+            "viewport_width": viewport_width,
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
     )
     return hashlib.sha256(data.encode()).hexdigest()
 

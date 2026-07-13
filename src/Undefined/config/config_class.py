@@ -123,7 +123,10 @@ class Config:
     network_request_timeout: float
     network_request_retries: int
     render_browser_max_concurrency: int
+    render_browser_executable_path: str
     render_use_proxy: bool
+    render_long_image_default_width: int
+    render_long_image_default_padding: int
     api_xxapi_base_url: str
     api_xingzhige_base_url: str
     api_jkyai_base_url: str
