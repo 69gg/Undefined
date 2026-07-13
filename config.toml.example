@@ -1095,8 +1095,8 @@ request_retries = 0
 # zh: HTML/Markdown 图片渲染配置。
 # en: HTML/Markdown image rendering settings.
 [render]
-# zh: 是否让 crawl4ai、HTML/Markdown/LaTeX 渲染中的远程资源使用 [proxy] 代理地址。默认关闭。
-# en: Whether crawl4ai and remote resources in HTML/Markdown/LaTeX rendering use proxy addresses from [proxy]. Disabled by default.
+# zh: 是否让 crawl4ai 等网页抓取链路使用 [proxy] 代理地址。HTML/Markdown 浏览器渲染始终离线。默认关闭。
+# en: Whether crawl4ai and other web crawling paths use proxy addresses from [proxy]. HTML/Markdown browser rendering is always offline. Disabled by default.
 use_proxy = false
 # zh: 渲染浏览器最大同时开启数量。0 表示自动：Linux 默认 1，其它平台默认 2。
 # en: Max concurrent render browser pages. 0 = auto: Linux defaults to 1, other platforms default to 2.

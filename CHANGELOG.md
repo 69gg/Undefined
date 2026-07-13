@@ -5,7 +5,7 @@
 - 扩展 `render.render_html` 与 `render.render_markdown`。新增 `layout=long`、`width` 和 `padding` 参数；长图默认宽度为 900 像素、内边距为 28 像素，并可通过 `[network]` 配置统一调整。默认布局保持原有行为，避免影响现有调用。
 - 优化长图版式与输出尺寸。长图模式移除页面外部留白和 Markdown 内容最大宽度限制，使正文填满指定画布；截图使用 CSS 像素缩放，最终图片宽度与请求的 `width` 一致，便于聊天平台直接预览和发送。
 - 完善渲染浏览器选择。新增 `render_browser_executable_path` 配置；Playwright 内置浏览器缺失时自动探测系统 Chrome / Chromium，显式配置路径无效或其他启动错误仍会直接报告，避免掩盖真实故障。
-- 收紧 HTML 渲染网络边界。渲染页面加载资源前会阻断本机、私网、保留地址和本地文件访问，并禁用 Service Worker 绕过；公共 CDN、外部样式与脚本仍可正常使用。
+- 收紧 HTML 渲染网络边界。BrowserContext 强制离线、禁用 Service Worker，并在上下文级终止全部网络请求，不再依赖可被 DNS 重绑定绕过的主机名预检；内联 CSS、脚本及 `data:` / `blob:` 资源仍可使用。LaTeX 同步收敛为本地 mathtext 渲染，复杂且不受支持的 TeX 不再等待外部 MathJax CDN。
 - 加固渲染缓存与配置集成。缓存键纳入截图缩放和样式参数，避免不同布局错误复用缓存；同步环境变量、热更新边界、配置模板、部署与使用文档，并补充长图参数、缓存隔离、浏览器回退和实际渲染回归测试。
 
 ---

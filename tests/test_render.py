@@ -446,7 +446,7 @@ async def test_render_html_to_image_passes_long_screenshot_options(
 
 
 @pytest.mark.asyncio
-async def test_render_html_with_page_blocks_private_network_by_default(
+async def test_render_html_with_page_disables_external_network_by_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     context_kwargs: dict[str, Any] = {}
@@ -454,21 +454,13 @@ async def test_render_html_with_page_blocks_private_network_by_default(
     route_pattern = ""
     route_handler: Any = None
 
-    class _FakeRequest:
-        def __init__(self, url: str) -> None:
-            self.url = url
-
     class _FakeRoute:
         def __init__(self, url: str) -> None:
-            self.request = _FakeRequest(url)
+            self.url = url
             self.aborted = False
-            self.continued = False
 
         async def abort(self) -> None:
             self.aborted = True
-
-        async def continue_(self) -> None:
-            self.continued = True
 
     class _FakePage:
         def set_default_timeout(self, _timeout_ms: int) -> None:
@@ -503,22 +495,15 @@ async def test_render_html_with_page_blocks_private_network_by_default(
 
     async def _callback(_page: Any) -> None:
         assert route_handler is not None
-        private_routes = [
+        network_routes = [
             _FakeRoute("http://127.0.0.1:8080/private"),
-            _FakeRoute("http://192.168.1.10/private"),
-            _FakeRoute("http://metadata.google.internal/computeMetadata/v1/"),
-            _FakeRoute("file:///etc/passwd"),
+            _FakeRoute("https://dns-rebinding.example/resource"),
+            _FakeRoute("https://example.com/app.js"),
         ]
-        public_route = _FakeRoute("https://example.com/app.js")
 
-        for route in private_routes:
+        for route in network_routes:
             await route_handler(route)
             assert route.aborted is True
-            assert route.continued is False
-
-        await route_handler(public_route)
-        assert public_route.aborted is False
-        assert public_route.continued is True
 
     monkeypatch.setattr(render_module, "_get_browser", _fake_get_browser)
     monkeypatch.setattr(render_module, "_get_semaphore", _fake_get_semaphore)
@@ -528,4 +513,5 @@ async def test_render_html_with_page_blocks_private_network_by_default(
 
     assert html_seen == html
     assert route_pattern == "**/*"
+    assert context_kwargs["offline"] is True
     assert context_kwargs["service_workers"] == "block"

@@ -154,8 +154,8 @@ Undefined 搭载了基于 ChromaDB 向量数据库的后台认知系统，无需
 | 工具 | 说明 |
 |---|---|
 | `render.render_markdown` | 将 Markdown 文本（含表格、代码块、标题等）渲染为普通图片或单张长图 |
-| `render.render_latex` | 将 LaTeX 数学公式渲染为图片；常见公式本地渲染，复杂内容回退 MathJax + Playwright（详见[部署文档](deployment.md#3-安装渲染运行时)） |
-| `render.render_html` | 将完整 HTML/CSS/脚本渲染为普通图片或单张长图；默认阻断本机、私网和本地文件访问 |
+| `render.render_latex` | 通过本地 `matplotlib.mathtext` 将常见 LaTeX 数学公式渲染为图片或 PDF；不访问外部网络，复杂 TeX 环境可能不受支持 |
+| `render.render_html` | 将完整 HTML、内联 CSS/脚本渲染为普通图片或单张长图；浏览器上下文完全离线，不加载外部资源 |
 
 支持 `embed`（嵌入回复）和 `send`（直接发送）两种图片交付方式。
 

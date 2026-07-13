@@ -2,7 +2,7 @@
     "type": "function",
     "function": {
         "name": "render_html",
-        "description": "将 HTML 内容渲染为图片。默认返回可嵌入回复的图片 UID（embed），也可直接发送到指定目标（send）。支持完整 HTML、CSS、外部资源和脚本；需要窄幅、高度随内容延伸且无两侧外部留白时，使用 layout=long。",
+        "description": "将 HTML 内容渲染为图片。默认返回可嵌入回复的图片 UID（embed），也可直接发送到指定目标（send）。支持完整 HTML、内联 CSS、脚本和 data:/blob: 资源；浏览器上下文不加载外部资源。需要窄幅、高度随内容延伸且无两侧外部留白时，使用 layout=long。",
         "parameters": {
             "type": "object",
             "properties": {

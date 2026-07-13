@@ -3,7 +3,7 @@
 渲染相关工具集合，工具名以 `render.*` 命名。
 
 主要能力：
-- HTML 渲染，保留完整 CSS、公共网络资源与脚本执行，并默认阻断本机、私网和本地文件访问
+- HTML 渲染，支持内联 CSS、脚本和 `data:` / `blob:` 资源；浏览器上下文默认完全离线，不加载外部资源
 - Markdown 渲染
 - LaTeX 渲染
 - HTML/Markdown 可显式传 `layout=long`、`width`、`padding` 输出无两侧外部留白的单张长图

@@ -31,15 +31,17 @@ uv sync --group dev -p 3.12
 uv run playwright install
 ```
 
-### LaTeX 渲染环境
+### 渲染环境
 
-`render.render_latex` 会优先使用 Python 依赖中的 `matplotlib` mathtext 在本地渲染常见数学公式，不需要额外安装系统 TeX。mathtext 无法处理的复杂内容会回退到 MathJax + Playwright，因此请确保已经执行：
+`render.render_latex` 使用 Python 依赖中的 `matplotlib.mathtext` 本地渲染常见数学公式，不需要系统 TeX、Playwright 或外部网络。复杂 TeX 环境和自定义宏可能不受支持。
+
+HTML 和 Markdown 图片渲染需要 Playwright：
 
 ```bash
 uv run playwright install
 ```
 
-如果运行环境无法访问 MathJax CDN，请在配置中启用 HTTP/HTTPS 代理，或尽量使用 mathtext 支持的常见数学公式语法。
+渲染 BrowserContext 强制离线；外部图片、字体、样式和脚本不会加载，应改为内联资源。
 
 ### Node.js / Rust / Tauri
 

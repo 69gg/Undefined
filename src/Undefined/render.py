@@ -1,13 +1,11 @@
 """HTML 渲染模块：将 HTML/Markdown 渲染为图片"""
 
 import asyncio
-import ipaddress
 import logging
 import sys
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, Literal, TypeVar
-from urllib.parse import urlsplit
 
 import markdown
 from playwright.async_api import Browser, Page, Playwright, Route, async_playwright
@@ -68,16 +66,6 @@ _SYSTEM_CHROMIUM_COMMANDS = (
     "chromium",
     "chromium-browser",
     "microsoft-edge-stable",
-)
-_NETWORK_SCHEMES: frozenset[str] = frozenset({"http", "https", "ws", "wss"})
-_LOCAL_RESOURCE_SCHEMES: frozenset[str] = frozenset({"about", "blob", "data"})
-_PRIVATE_HOST_SUFFIXES: tuple[str, ...] = (
-    ".home.arpa",
-    ".internal",
-    ".lan",
-    ".local",
-    ".localdomain",
-    ".localhost",
 )
 _RenderResult = TypeVar("_RenderResult")
 
@@ -299,7 +287,7 @@ async def render_html_to_image(
         screenshot_scale: 输出像素尺度，device 按 DPR 输出，css 按 CSS 像素输出
         screenshot_style: 仅在截图期间注入的 CSS 样式
         timeout_ms: 截图超时时间（毫秒），默认 60000
-        proxy: 可选浏览器代理地址
+        proxy: 保留用于调用兼容和缓存隔离；离线上下文不会发出网络请求
     """
     cache = await get_render_cache()
     cache_key = compute_render_cache_key(
@@ -366,13 +354,12 @@ async def render_html_with_page(
         try:
             context_kwargs: dict[str, Any] = {
                 "device_scale_factor": 2,
+                "offline": True,
                 "service_workers": "block",
                 "viewport": {"width": viewport_width, "height": 800},
             }
-            if proxy:
-                context_kwargs["proxy"] = {"server": proxy}
             context = await browser.new_context(**context_kwargs)
-            await context.route("**/*", _guard_render_request)
+            await context.route("**/*", _abort_render_network_request)
             page = await context.new_page()
             page.set_default_timeout(timeout_ms)
             await page.set_content(html_content)
@@ -385,37 +372,6 @@ async def render_html_with_page(
                 _render_active_count = max(0, _render_active_count - 1)
 
 
-def _is_restricted_render_url(url: str) -> bool:
-    """判断页面资源是否会访问本机、私网或非 Web 资源。"""
-    try:
-        parsed = urlsplit(url)
-        scheme = parsed.scheme.lower()
-        hostname = parsed.hostname
-    except ValueError:
-        return True
-
-    if scheme in _LOCAL_RESOURCE_SCHEMES:
-        return False
-    if scheme not in _NETWORK_SCHEMES or hostname is None:
-        return True
-
-    normalized_host = hostname.rstrip(".").lower()
-    if not normalized_host:
-        return True
-
-    try:
-        address = ipaddress.ip_address(normalized_host)
-    except ValueError:
-        return "." not in normalized_host or normalized_host.endswith(
-            _PRIVATE_HOST_SUFFIXES
-        )
-    else:
-        return not address.is_global
-
-
-async def _guard_render_request(route: Route) -> None:
-    """阻断 HTML 渲染页面对本机和私网的网络访问。"""
-    if _is_restricted_render_url(route.request.url):
-        await route.abort()
-        return
-    await route.continue_()
+async def _abort_render_network_request(route: Route) -> None:
+    """终止渲染上下文中的所有网络请求，避免 DNS 重绑定绕过。"""
+    await route.abort()
