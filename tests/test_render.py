@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 
 import Undefined.render as render_module
+from Undefined.utils.io import write_bytes
 
 
 def _reset_render_state() -> None:
@@ -222,7 +223,7 @@ async def test_get_browser_uses_configured_executable(
     tmp_path: Path,
 ) -> None:
     executable = tmp_path / "chrome"
-    executable.write_bytes(b"binary")
+    await write_bytes(executable, b"binary")
     browser = object()
 
     class _FakeChromium:
@@ -272,6 +273,9 @@ async def test_render_html_with_page_closes_context_when_new_page_fails(
     class _FailingContext:
         def __init__(self) -> None:
             self.closed = False
+
+        async def route(self, pattern: str, _handler: Any) -> None:
+            assert pattern == "**/*"
 
         async def new_page(self) -> Any:
             raise RuntimeError("new page failed")
@@ -345,6 +349,9 @@ async def test_render_html_with_page_active_count_stays_non_negative_after_close
             pass
 
     class _FakeContext:
+        async def route(self, pattern: str, _handler: Any) -> None:
+            assert pattern == "**/*"
+
         async def new_page(self) -> _FakePage:
             return _FakePage()
 
@@ -439,11 +446,29 @@ async def test_render_html_to_image_passes_long_screenshot_options(
 
 
 @pytest.mark.asyncio
-async def test_render_html_with_page_keeps_html_and_javascript_enabled(
+async def test_render_html_with_page_blocks_private_network_by_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     context_kwargs: dict[str, Any] = {}
     html_seen = ""
+    route_pattern = ""
+    route_handler: Any = None
+
+    class _FakeRequest:
+        def __init__(self, url: str) -> None:
+            self.url = url
+
+    class _FakeRoute:
+        def __init__(self, url: str) -> None:
+            self.request = _FakeRequest(url)
+            self.aborted = False
+            self.continued = False
+
+        async def abort(self) -> None:
+            self.aborted = True
+
+        async def continue_(self) -> None:
+            self.continued = True
 
     class _FakePage:
         def set_default_timeout(self, _timeout_ms: int) -> None:
@@ -454,6 +479,11 @@ async def test_render_html_with_page_keeps_html_and_javascript_enabled(
             html_seen = html_content
 
     class _FakeContext:
+        async def route(self, pattern: str, handler: Any) -> None:
+            nonlocal route_handler, route_pattern
+            route_pattern = pattern
+            route_handler = handler
+
         async def new_page(self) -> _FakePage:
             return _FakePage()
 
@@ -472,7 +502,23 @@ async def test_render_html_with_page_keeps_html_and_javascript_enabled(
         return asyncio.Semaphore(1)
 
     async def _callback(_page: Any) -> None:
-        return None
+        assert route_handler is not None
+        private_routes = [
+            _FakeRoute("http://127.0.0.1:8080/private"),
+            _FakeRoute("http://192.168.1.10/private"),
+            _FakeRoute("http://metadata.google.internal/computeMetadata/v1/"),
+            _FakeRoute("file:///etc/passwd"),
+        ]
+        public_route = _FakeRoute("https://example.com/app.js")
+
+        for route in private_routes:
+            await route_handler(route)
+            assert route.aborted is True
+            assert route.continued is False
+
+        await route_handler(public_route)
+        assert public_route.aborted is False
+        assert public_route.continued is True
 
     monkeypatch.setattr(render_module, "_get_browser", _fake_get_browser)
     monkeypatch.setattr(render_module, "_get_semaphore", _fake_get_semaphore)
@@ -481,4 +527,5 @@ async def test_render_html_with_page_keeps_html_and_javascript_enabled(
     await render_module.render_html_with_page(html, _callback)
 
     assert html_seen == html
-    assert "java_script_enabled" not in context_kwargs
+    assert route_pattern == "**/*"
+    assert context_kwargs["service_workers"] == "block"

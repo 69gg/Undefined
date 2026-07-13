@@ -155,7 +155,7 @@ Undefined 搭载了基于 ChromaDB 向量数据库的后台认知系统，无需
 |---|---|
 | `render.render_markdown` | 将 Markdown 文本（含表格、代码块、标题等）渲染为普通图片或单张长图 |
 | `render.render_latex` | 将 LaTeX 数学公式渲染为图片；常见公式本地渲染，复杂内容回退 MathJax + Playwright（详见[部署文档](deployment.md#3-安装渲染运行时)） |
-| `render.render_html` | 将完整 HTML/CSS/脚本渲染为普通图片或单张长图 |
+| `render.render_html` | 将完整 HTML/CSS/脚本渲染为普通图片或单张长图；默认阻断本机、私网和本地文件访问 |
 
 支持 `embed`（嵌入回复）和 `send`（直接发送）两种图片交付方式。
 

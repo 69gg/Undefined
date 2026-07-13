@@ -23,9 +23,9 @@ from ..search import normalize_search_priority
 
 logger = logging.getLogger(__name__)
 
-_LONG_IMAGE_MIN_WIDTH = 320
-_LONG_IMAGE_MAX_WIDTH = 2048
-_LONG_IMAGE_MAX_PADDING = 160
+_LONG_IMAGE_MIN_WIDTH: int = 320
+_LONG_IMAGE_MAX_WIDTH: int = 2048
+_LONG_IMAGE_MAX_PADDING: int = 160
 
 
 def load_network(

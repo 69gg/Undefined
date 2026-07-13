@@ -181,6 +181,20 @@ async def is_file(file_path: Path | str) -> bool:
     return await asyncio.to_thread(Path(file_path).is_file)
 
 
+async def resolve_path(file_path: Path | str) -> Path:
+    """在线程中展开用户目录并解析绝对路径。"""
+
+    def sync_resolve() -> Path:
+        return Path(file_path).expanduser().resolve()
+
+    return await asyncio.to_thread(sync_resolve)
+
+
+async def find_executable(command: str) -> str | None:
+    """在线程中查找 PATH 中的可执行文件。"""
+    return await asyncio.to_thread(shutil.which, command)
+
+
 async def get_file_size(file_path: Path | str) -> int:
     """异步读取文件大小（字节）。"""
     return await asyncio.to_thread(lambda: Path(file_path).stat().st_size)

@@ -1,18 +1,20 @@
 """HTML 渲染模块：将 HTML/Markdown 渲染为图片"""
 
 import asyncio
+import ipaddress
 import logging
-import shutil
 import sys
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from playwright.async_api import async_playwright, Browser, Page, Playwright
+from typing import Any, Literal, TypeVar
+from urllib.parse import urlsplit
 
 import markdown
+from playwright.async_api import Browser, Page, Playwright, Route, async_playwright
 
-from typing import Any, Literal, TypeVar
 
 from Undefined.config import get_config
+from Undefined.utils.io import find_executable, is_file, resolve_path
 from Undefined.utils.render_cache import compute_render_cache_key, get_render_cache
 
 logger = logging.getLogger(__name__)
@@ -67,6 +69,16 @@ _SYSTEM_CHROMIUM_COMMANDS = (
     "chromium-browser",
     "microsoft-edge-stable",
 )
+_NETWORK_SCHEMES: frozenset[str] = frozenset({"http", "https", "ws", "wss"})
+_LOCAL_RESOURCE_SCHEMES: frozenset[str] = frozenset({"about", "blob", "data"})
+_PRIVATE_HOST_SUFFIXES: tuple[str, ...] = (
+    ".home.arpa",
+    ".internal",
+    ".lan",
+    ".local",
+    ".localdomain",
+    ".localhost",
+)
 _RenderResult = TypeVar("_RenderResult")
 
 
@@ -97,7 +109,7 @@ def _resolve_render_browser_max_concurrency() -> int:
     return configured_limit
 
 
-def _resolve_configured_browser_executable() -> str | None:
+async def _resolve_configured_browser_executable() -> str | None:
     """读取显式配置的浏览器路径；配置错误时不静默回退。"""
     try:
         runtime_config = get_config(strict=False)
@@ -111,20 +123,16 @@ def _resolve_configured_browser_executable() -> str | None:
     if not configured:
         return None
 
-    path = Path(configured).expanduser()
-    if not path.is_absolute():
-        path = (Path.cwd() / path).resolve()
-    else:
-        path = path.resolve()
-    if not path.is_file():
+    path = await resolve_path(configured)
+    if not await is_file(path):
         raise FileNotFoundError(f"配置的渲染浏览器不存在: {path}")
     return str(path)
 
 
-def _find_system_browser_executable() -> str | None:
+async def _find_system_browser_executable() -> str | None:
     """在 Playwright 自带 Chromium 缺失时查找已安装的系统浏览器。"""
     for command in _SYSTEM_CHROMIUM_COMMANDS:
-        executable = shutil.which(command)
+        executable = await find_executable(command)
         if executable:
             return executable
     return None
@@ -146,7 +154,7 @@ async def _get_browser() -> Browser:
         if _browser is not None:
             return _browser
 
-        configured_executable = _resolve_configured_browser_executable()
+        configured_executable = await _resolve_configured_browser_executable()
         playwright = await async_playwright().start()
         try:
             if configured_executable is not None:
@@ -158,7 +166,7 @@ async def _get_browser() -> Browser:
                 try:
                     browser = await playwright.chromium.launch(headless=True)
                 except Exception as exc:
-                    system_executable = _find_system_browser_executable()
+                    system_executable = await _find_system_browser_executable()
                     if (
                         not _is_missing_playwright_browser(exc)
                         or system_executable is None
@@ -358,11 +366,13 @@ async def render_html_with_page(
         try:
             context_kwargs: dict[str, Any] = {
                 "device_scale_factor": 2,
+                "service_workers": "block",
                 "viewport": {"width": viewport_width, "height": 800},
             }
             if proxy:
                 context_kwargs["proxy"] = {"server": proxy}
             context = await browser.new_context(**context_kwargs)
+            await context.route("**/*", _guard_render_request)
             page = await context.new_page()
             page.set_default_timeout(timeout_ms)
             await page.set_content(html_content)
@@ -373,3 +383,39 @@ async def render_html_with_page(
                     await context.close()
             finally:
                 _render_active_count = max(0, _render_active_count - 1)
+
+
+def _is_restricted_render_url(url: str) -> bool:
+    """判断页面资源是否会访问本机、私网或非 Web 资源。"""
+    try:
+        parsed = urlsplit(url)
+        scheme = parsed.scheme.lower()
+        hostname = parsed.hostname
+    except ValueError:
+        return True
+
+    if scheme in _LOCAL_RESOURCE_SCHEMES:
+        return False
+    if scheme not in _NETWORK_SCHEMES or hostname is None:
+        return True
+
+    normalized_host = hostname.rstrip(".").lower()
+    if not normalized_host:
+        return True
+
+    try:
+        address = ipaddress.ip_address(normalized_host)
+    except ValueError:
+        return "." not in normalized_host or normalized_host.endswith(
+            _PRIVATE_HOST_SUFFIXES
+        )
+    else:
+        return not address.is_global
+
+
+async def _guard_render_request(route: Route) -> None:
+    """阻断 HTML 渲染页面对本机和私网的网络访问。"""
+    if _is_restricted_render_url(route.request.url):
+        await route.abort()
+        return
+    await route.continue_()

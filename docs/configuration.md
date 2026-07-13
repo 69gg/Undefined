@@ -768,7 +768,7 @@ Prompt caching 补充：
 - 显式修改 `browser_executable_path` 后需重启 Bot；仅当 Playwright 报告自带浏览器缺失时才会自动回退到系统浏览器，其他启动错误仍会原样报出。
 - 配置变更会对后续新的渲染请求生效；已在执行中的渲染任务不受影响。
 - `render.render_html` 和 `render.render_markdown` 默认使用 `layout=default`，视觉效果与旧版一致。显式传 `layout=long` 时，高度按内容自动延伸，使用 CSS 像素截图保证 `width` 对应最终图片宽度，并去掉两侧外部留白。
-- `width` 可选范围为 `320..2048`，`padding` 可选范围为 `0..160`；两者只能与 `layout=long` 一起使用。HTML 长图仍支持完整 CSS、外部资源与脚本；`padding=0` 可用于全幅设计。
+- `width` 可选范围为 `320..2048`，`padding` 可选范围为 `0..160`；两者只能与 `layout=long` 一起使用。HTML 长图仍支持完整 CSS、公共网络资源与脚本，但渲染页面默认阻断本机、私网和本地文件访问；`padding=0` 可用于全幅设计。
 
 #### `[render.cache]` HTML 渲染结果缓存
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -12,6 +11,7 @@ from Undefined.skills.toolsets.render.render_html.handler import execute as rend
 from Undefined.skills.toolsets.render.render_markdown.handler import (
     execute as render_markdown,
 )
+from Undefined.utils.io import is_file, read_json, write_bytes
 
 
 class _FakeAttachmentRegistry:
@@ -22,7 +22,7 @@ class _FakeAttachmentRegistry:
         **kwargs: Any,
     ) -> Any:
         assert scope_key == "private:42"
-        assert Path(local_path).is_file()
+        assert await is_file(local_path)
         assert kwargs["kind"] == "image"
         return SimpleNamespace(uid="pic_long_image")
 
@@ -78,7 +78,7 @@ async def test_render_html_long_layout_uses_explicit_final_width(
         **kwargs: Any,
     ) -> None:
         calls.append((html_content, kwargs))
-        Path(output_path).write_bytes(b"png")
+        await write_bytes(output_path, b"png")
 
     monkeypatch.setattr(paths, "RENDER_CACHE_DIR", tmp_path)
     html = """<!DOCTYPE html><html><body><script src="https://example.com/a.js"></script></body></html>"""
@@ -123,7 +123,7 @@ async def test_render_markdown_long_layout_uses_configured_defaults(
         **kwargs: Any,
     ) -> None:
         calls.append(kwargs)
-        Path(output_path).write_bytes(b"png")
+        await write_bytes(output_path, b"png")
 
     monkeypatch.setattr(paths, "RENDER_CACHE_DIR", tmp_path)
     context = _render_context(
@@ -166,7 +166,7 @@ async def test_render_markdown_default_layout_preserves_original_call(
         **kwargs: Any,
     ) -> None:
         calls.append(kwargs)
-        Path(output_path).write_bytes(b"png")
+        await write_bytes(output_path, b"png")
 
     monkeypatch.setattr(paths, "RENDER_CACHE_DIR", tmp_path)
     result = await render_markdown(
@@ -182,11 +182,13 @@ async def test_render_markdown_default_layout_preserves_original_call(
 
 
 @pytest.mark.parametrize("tool_name", ["render_html", "render_markdown"])
-def test_render_tool_schema_exposes_long_layout(tool_name: str) -> None:
+@pytest.mark.asyncio
+async def test_render_tool_schema_exposes_long_layout(tool_name: str) -> None:
     config_path = (
         Path("src/Undefined/skills/toolsets/render") / tool_name / "config.json"
     )
-    schema = json.loads(config_path.read_text(encoding="utf-8"))
+    schema = await read_json(config_path)
+    assert isinstance(schema, dict)
     properties = schema["function"]["parameters"]["properties"]
 
     assert properties["layout"]["enum"] == ["default", "long"]
