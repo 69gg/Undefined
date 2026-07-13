@@ -1,3 +1,14 @@
+## v3.8.1 可配置长图渲染与浏览器运行时回退
+
+本版本为 AI 渲染工具新增适合长内容发送的长图布局，可精确控制成图宽度与内边距；同时完善 Playwright 浏览器选择，在缺少内置浏览器时可使用已配置或系统安装的 Chrome / Chromium 完成渲染。
+
+- 扩展 `render.render_html` 与 `render.render_markdown`。新增 `layout=long`、`width` 和 `padding` 参数；长图默认宽度为 900 像素、内边距为 28 像素，并可通过 `[network]` 配置统一调整。默认布局保持原有行为，避免影响现有调用。
+- 优化长图版式与输出尺寸。长图模式移除页面外部留白和 Markdown 内容最大宽度限制，使正文填满指定画布；截图使用 CSS 像素缩放，最终图片宽度与请求的 `width` 一致，便于聊天平台直接预览和发送。
+- 完善渲染浏览器选择。新增 `render_browser_executable_path` 配置；Playwright 内置浏览器缺失时自动探测系统 Chrome / Chromium，显式配置路径无效或其他启动错误仍会直接报告，避免掩盖真实故障。
+- 加固渲染缓存与配置集成。缓存键纳入截图缩放和样式参数，避免不同布局错误复用缓存；同步环境变量、热更新边界、配置模板、部署与使用文档，并补充长图参数、缓存隔离、浏览器回退和实际渲染回归测试。
+
+---
+
 ## v3.8.0 多协议 LLM SDK、推理回放与 WebUI 可用性
 
 本版本重构生成模型请求层，统一 OpenAI Chat Completions、OpenAI Responses 与 Anthropic Messages 的 SDK 调用和配置语义，补全多轮工具调用中的原生推理载体回放，并修复 WebUI 配置编辑器与多行日志查询的可用性问题。
