@@ -342,7 +342,11 @@ async def render_html_with_page(
     timeout_ms: int = 60000,
     proxy: str | None = None,
 ) -> _RenderResult:
-    """在共享浏览器实例中打开 HTML 页面并交给调用方渲染。"""
+    """在共享浏览器实例中打开 HTML 页面并交给调用方渲染。
+
+    ``proxy`` 在移出 ``context_kwargs`` 后仍刻意保留，以兼容现有调用；上层
+    ``render_html_to_image`` 继续用它隔离缓存键，离线浏览器上下文不会使用它。
+    """
     browser = await _get_browser()
     semaphore = await _get_semaphore()
 
