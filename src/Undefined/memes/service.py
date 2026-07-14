@@ -31,10 +31,9 @@ from Undefined.memes.models import (
     MemeSourceRecord,
     build_search_text,
 )
+from Undefined.memes.search import MemeSearchMixin
 from Undefined.memes.store import MemeStore
 from Undefined.memes.vector_store import MemeVectorStore
-from Undefined.utils.message_targets import resolve_delivery_address
-from Undefined.utils.coerce import safe_int
 from Undefined.utils.paths import ensure_dir
 
 logger = logging.getLogger(__name__)
@@ -48,7 +47,7 @@ __all__ = [
 ]
 
 
-class MemeService:
+class MemeService(MemeSearchMixin):
     def __init__(
         self,
         *,
@@ -613,71 +612,6 @@ class MemeService:
             "sort": normalized_sort,
             "items": items,
         }
-
-    async def send_meme_by_uid(self, uid: str, context: dict[str, Any]) -> str:
-        record = await self._store.get(uid)
-        if record is None or not record.enabled or record.status != "ready":
-            return f"发送失败：未找到可用表情包 UID：{uid}"
-
-        sender = context.get("sender")
-        if sender is None:
-            return "发送失败：当前上下文缺少 sender"
-
-        tool_args = {
-            "target_type": context.get("target_type"),
-            "target_id": context.get("target_id"),
-        }
-        target, target_error = resolve_delivery_address(tool_args, context)
-        if target_error or target is None:
-            return f"发送失败：{target_error or '无法确定目标会话'}"
-        local_path = Path(record.blob_path)
-        if not local_path.is_file():
-            return f"发送失败：表情包文件不存在：{uid}"
-        file_uri = local_path.resolve().as_uri()
-        cq_message = f"[CQ:image,file={file_uri},subType=1]"
-        history_message = f"[图片 uid={record.uid} name={local_path.name}]"
-        history_attachment = await self.resolve_global_image(uid)
-        history_attachments = (
-            [history_attachment.prompt_ref()]
-            if history_attachment is not None
-            else None
-        )
-
-        preferred_temp_group_id = safe_int(context.get("group_id")) or None
-        send_address_message = getattr(sender, "send_address_message", None)
-        if callable(send_address_message):
-            sent_message_id = await send_address_message(
-                target,
-                cq_message,
-                preferred_temp_group_id=preferred_temp_group_id,
-                history_message=history_message,
-                attachments=history_attachments,
-            )
-        elif target.channel == "group":
-            sent_message_id = await sender.send_group_message(
-                target.target_id,
-                cq_message,
-                history_message=history_message,
-                attachments=history_attachments,
-            )
-        elif target.channel == "qq":
-            sent_message_id = await sender.send_private_message(
-                target.target_id,
-                cq_message,
-                preferred_temp_group_id=preferred_temp_group_id,
-                history_message=history_message,
-                attachments=history_attachments,
-            )
-        else:
-            return "发送失败：当前 sender 不支持微信投递地址"
-
-        now = _now_iso()
-        updated_record = await self._store.increment_use(uid, now)
-        if updated_record is not None:
-            await self._vector_store.upsert(updated_record)
-        if sent_message_id is not None:
-            return f"表情包已发送（message_id={sent_message_id}）"
-        return "表情包已发送"
 
     async def enqueue_incoming_attachments(
         self,

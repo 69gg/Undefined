@@ -505,7 +505,10 @@ async def main() -> None:
     finally:
         logger.info("[清理] 正在关闭机器人并释放资源...")
         if runtime_api_server is not None:
-            await runtime_api_server.stop()
+            try:
+                await runtime_api_server.stop()
+            except Exception:
+                logger.exception("[清理] RuntimeAPIServer stop 失败")
         if weixin_service is not None:
             try:
                 await weixin_service.stop()

@@ -53,6 +53,8 @@ def parse_delivery_address(
     """解析 ``qq:<id>``、``group:<id>`` 或 ``wechat:<id>``。"""
     if value is None:
         return None, None
+    if isinstance(value, DeliveryAddress):
+        return value, None
     if not isinstance(value, str):
         return None, f"{field_name} 必须是字符串"
     text = value.strip().lower()

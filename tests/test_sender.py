@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -8,8 +9,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from Undefined.context import RequestContext
+from Undefined.utils import io as async_io
 from Undefined.utils.message_targets import DeliveryAddress
-from Undefined.utils.sender import MAX_MESSAGE_LENGTH, MessageSender
+from Undefined.utils.sender import AddressBoundSender, MAX_MESSAGE_LENGTH, MessageSender
 
 
 @pytest.fixture
@@ -419,7 +421,7 @@ async def test_send_wechat_record_rejects_before_partial_text_send(
     tmp_path: Path,
 ) -> None:
     voice_path = tmp_path / "voice.silk"
-    voice_path.write_bytes(b"silk")
+    await async_io.write_bytes(voice_path, b"silk")
     service = SimpleNamespace(
         send_text=AsyncMock(return_value="client-1"),
         send_file=AsyncMock(return_value="client-2"),
@@ -440,17 +442,171 @@ async def test_send_wechat_record_rejects_before_partial_text_send(
 async def test_send_wechat_file_enforces_private_access_control(
     sender: MessageSender,
     tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     file_path = tmp_path / "report.txt"
-    file_path.write_text("report", encoding="utf-8")
+    await async_io.write_text(file_path, "report")
     service = SimpleNamespace(send_file=AsyncMock(return_value="client-1"))
     sender.set_weixin_service(service)
     cast(MagicMock, sender.config.is_private_allowed).return_value = False
+    cast(MagicMock, sender.config.access_control_enabled).return_value = True
+    cast(
+        MagicMock, sender.config.private_access_denied_reason
+    ).return_value = "blacklist"
 
-    with pytest.raises(PermissionError, match="access control"):
-        await sender.send_address_file(
-            DeliveryAddress("wechat", 12345),
-            str(file_path),
-        )
+    with caplog.at_level(logging.WARNING, logger="Undefined.utils.sender"):
+        with pytest.raises(
+            PermissionError,
+            match=r"reason=blacklist user_id=12345 enabled=True",
+        ):
+            await sender.send_address_file(
+                DeliveryAddress("wechat", 12345),
+                str(file_path),
+            )
 
     service.send_file.assert_not_awaited()
+    assert "已拦截微信文件发送" in caplog.text
+    assert "reason=blacklist" in caplog.text
+    assert "access enabled=True" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_send_wechat_message_logs_access_control_details(
+    sender: MessageSender,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    cast(MagicMock, sender.config.is_private_allowed).return_value = False
+    cast(MagicMock, sender.config.access_control_enabled).return_value = True
+    cast(
+        MagicMock, sender.config.private_access_denied_reason
+    ).return_value = "allowlist"
+
+    with (
+        caplog.at_level(logging.WARNING, logger="Undefined.utils.sender"),
+        pytest.raises(
+            PermissionError,
+            match=r"reason=allowlist user_id=12345 enabled=True",
+        ),
+    ):
+        await sender.send_address_message(
+            DeliveryAddress("wechat", 12345),
+            "blocked",
+        )
+
+    assert "已拦截微信消息发送" in caplog.text
+    assert "reason=allowlist" in caplog.text
+    assert "access enabled=True" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_send_wechat_media_skips_attachment_registry_without_history(
+    sender: MessageSender,
+    tmp_path: Path,
+) -> None:
+    image_path = tmp_path / "no-history.png"
+    await async_io.write_bytes(image_path, b"png")
+    registry = SimpleNamespace(register_local_file=AsyncMock())
+    sender.attachment_registry = registry
+    service = SimpleNamespace(
+        send_text=AsyncMock(return_value="client-text"),
+        send_file=AsyncMock(return_value="client-file"),
+    )
+    sender.set_weixin_service(service)
+
+    await sender.send_address_message(
+        DeliveryAddress("wechat", 12345),
+        f"[CQ:image,file={image_path.resolve().as_uri()}]",
+        auto_history=False,
+    )
+
+    service.send_file.assert_awaited_once()
+    registry.register_local_file.assert_not_awaited()
+    cast(AsyncMock, sender.history_manager.add_private_message).assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_send_wechat_media_skips_attachment_registry_when_send_fails(
+    sender: MessageSender,
+    tmp_path: Path,
+) -> None:
+    image_path = tmp_path / "failed.png"
+    await async_io.write_bytes(image_path, b"png")
+    registry = SimpleNamespace(register_local_file=AsyncMock())
+    sender.attachment_registry = registry
+    service = SimpleNamespace(
+        send_text=AsyncMock(return_value="client-text"),
+        send_file=AsyncMock(side_effect=RuntimeError("failed")),
+    )
+    sender.set_weixin_service(service)
+
+    with pytest.raises(RuntimeError, match="failed"):
+        await sender.send_address_message(
+            DeliveryAddress("wechat", 12345),
+            f"[CQ:image,file={image_path.resolve().as_uri()}]",
+        )
+
+    registry.register_local_file.assert_not_awaited()
+    cast(AsyncMock, sender.history_manager.add_private_message).assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_send_wechat_forward_registers_media_and_logs_unsupported_segments(
+    sender: MessageSender,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    image_path = tmp_path / "forward.png"
+    await async_io.write_bytes(image_path, b"png")
+    record = SimpleNamespace(
+        prompt_ref=lambda: {
+            "uid": "pic_forward",
+            "kind": "image",
+            "media_type": "image",
+            "display_name": image_path.name,
+        }
+    )
+    registry = SimpleNamespace(register_local_file=AsyncMock(return_value=record))
+    sender.attachment_registry = registry
+    service = SimpleNamespace(
+        send_text=AsyncMock(return_value="client-text"),
+        send_file=AsyncMock(return_value="client-file"),
+    )
+    sender.set_weixin_service(service)
+    bound_sender = AddressBoundSender(sender, DeliveryAddress("wechat", 12345))
+    nodes = [
+        {
+            "type": "node",
+            "data": {
+                "content": [
+                    {
+                        "type": "image",
+                        "data": {"file": image_path.resolve().as_uri()},
+                    },
+                    {"type": "at", "data": {"qq": "67890"}},
+                    {"type": "text", "data": {"text": "caption"}},
+                ]
+            },
+        }
+    ]
+
+    with caplog.at_level(logging.WARNING, logger="Undefined.utils.sender"):
+        await bound_sender.send_private_forward_message(
+            12345,
+            nodes,
+            history_message="[命令输出] 微信转发摘要",
+        )
+
+    service.send_file.assert_awaited_once()
+    service.send_text.assert_awaited_once_with(12345, "caption")
+    registry.register_local_file.assert_awaited_once()
+    history_mock = cast(AsyncMock, sender.history_manager.add_private_message)
+    history_mock.assert_awaited_once()
+    assert history_mock.await_args is not None
+    history_kwargs = history_mock.await_args.kwargs
+    assert history_kwargs["attachments"][0]["uid"] == "pic_forward"
+    assert "pic_forward" in history_kwargs["text_content"]
+    assert history_kwargs["transport"] == {
+        "channel": "wechat",
+        "address": "wechat:12345",
+    }
+    assert "type=at" in caplog.text

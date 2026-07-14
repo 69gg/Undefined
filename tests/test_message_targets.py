@@ -31,6 +31,14 @@ class TestDeliveryAddress:
         assert address is None
         assert error is not None
 
+    def test_existing_delivery_address_is_returned_unchanged(self) -> None:
+        existing = DeliveryAddress("wechat", 123)
+
+        address, error = parse_delivery_address(existing)
+
+        assert error is None
+        assert address is existing
+
     def test_current_wechat_address_wins_over_logical_private_context(self) -> None:
         address, error = resolve_delivery_address(
             {},

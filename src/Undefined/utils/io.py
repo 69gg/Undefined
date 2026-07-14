@@ -176,6 +176,11 @@ async def exists(file_path: Path | str) -> bool:
     return await asyncio.to_thread(Path(file_path).exists)
 
 
+async def chmod(file_path: Path | str, mode: int) -> None:
+    """异步修改文件权限。"""
+    await asyncio.to_thread(Path(file_path).chmod, mode)
+
+
 async def is_file(file_path: Path | str) -> bool:
     """异步检查路径是否为普通文件。"""
     return await asyncio.to_thread(Path(file_path).is_file)

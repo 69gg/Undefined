@@ -17,6 +17,7 @@
         polling: false,
         qrObjectUrl: "",
         qrRevision: 0,
+        dialogPreviousFocus: null,
     };
 
     class WeixinRequestError extends Error {
@@ -543,10 +544,13 @@
 
     function showDialog() {
         const backdrop = get("weixinDialogBackdrop");
-        if (!backdrop) return;
+        const dialog = get("weixinDialog");
+        if (!backdrop || !dialog) return;
+        weixinState.dialogPreviousFocus = document.activeElement;
         backdrop.hidden = false;
         backdrop.setAttribute("aria-hidden", "false");
         document.body.style.overflow = "hidden";
+        trapFocus(dialog);
     }
 
     function openBindingDialog(mode, account = null) {
@@ -595,11 +599,18 @@
             }
         }
         const backdrop = get("weixinDialogBackdrop");
+        const dialog = get("weixinDialog");
+        if (dialog) releaseFocus(dialog);
         if (backdrop) {
             backdrop.hidden = true;
             backdrop.setAttribute("aria-hidden", "true");
         }
         document.body.style.overflow = "";
+        const previousFocus = weixinState.dialogPreviousFocus;
+        weixinState.dialogPreviousFocus = null;
+        if (previousFocus && typeof previousFocus.focus === "function") {
+            previousFocus.focus();
+        }
     }
 
     function showConfirmation(payload) {

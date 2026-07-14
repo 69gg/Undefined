@@ -7,10 +7,6 @@ from Undefined.attachments import (
     scope_from_context,
 )
 from Undefined.skills.toolsets.messages.context_utils import mark_message_sent
-from Undefined.utils.message_targets import (
-    parse_delivery_address,
-    resolve_delivery_address,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +60,12 @@ def _format_send_success(user_id: int, message_id: Any) -> str:
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     """向指定用户发送私聊消息"""
     request_id = str(context.get("request_id", "-"))
-    target, target_error = resolve_delivery_address(args, context)
+    resolve_address = context.get("resolve_delivery_address")
+    parse_address = context.get("parse_delivery_address")
+    if not callable(resolve_address) or not callable(parse_address):
+        return "发送失败：投递地址解析服务未设置"
+
+    target, target_error = resolve_address(args, context)
     if target_error or target is None:
         return f"发送失败：{target_error or '无法确定目标私聊'}"
     if target.target_type != "private":
@@ -163,7 +164,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             return "发送失败：消息服务暂时不可用，请稍后重试"
 
     send_message_callback = context.get("send_message_callback")
-    current_address, _ = parse_delivery_address(context.get("address"))
+    current_address, _ = parse_address(context.get("address"))
     if send_message_callback and current_address == target:
         try:
             await send_message_callback(message, reply_to=reply_to_id)

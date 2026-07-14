@@ -29,7 +29,19 @@
                     "description": "可选。要引用回复的消息 ID (message_id)。设置后消息将以引用回复形式出现。可以使用任意已知的 message_id，包括当前消息 XML、历史消息、别人发的消息或 Bot 之前发出的消息。"
                 }
             },
-            "required": ["message"]
+            "required": ["message"],
+            "allOf": [
+                {
+                    "not": {
+                        "required": ["address", "target_type"]
+                    }
+                },
+                {
+                    "not": {
+                        "required": ["address", "target_id"]
+                    }
+                }
+            ]
         }
     }
 }

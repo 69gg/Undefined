@@ -88,25 +88,6 @@ class PrivateReplyMixin:
     ) -> None:
         """处理私聊消息入口，决定回复策略并进行安全检测"""
         logger.debug("[私聊回复] user=%s text_len=%s", user_id, len(text))
-        if user_id != self.config.superadmin_qq:
-            if await self.security.detect_injection(text, message_content):
-                logger.warning(f"[Security] 私聊注入攻击: user_id={user_id}")
-                await self.history_manager.modify_last_private_message(
-                    user_id, "<这句话检测到用户进行注入，已删除>"
-                )
-                resolved, error = parse_delivery_address(
-                    address or f"{channel}:{user_id}"
-                )
-                if error or resolved is None:
-                    raise ValueError(error or "私聊投递地址无效")
-                await self._handle_injection_response(
-                    user_id,
-                    text,
-                    is_private=True,
-                    address=resolved,
-                )
-                return
-
         resolved_address, address_error = parse_delivery_address(
             address or f"{channel}:{user_id}"
         )
@@ -117,6 +98,21 @@ class PrivateReplyMixin:
             or resolved_address.target_id != user_id
         ):
             raise ValueError("私聊投递地址与逻辑 QQ 身份不一致")
+
+        if user_id != self.config.superadmin_qq:
+            if await self.security.detect_injection(text, message_content):
+                logger.warning(f"[Security] 私聊注入攻击: user_id={user_id}")
+                await self.history_manager.modify_last_private_message(
+                    user_id, "<这句话检测到用户进行注入，已删除>"
+                )
+                await self._handle_injection_response(
+                    user_id,
+                    text,
+                    is_private=True,
+                    address=resolved_address,
+                )
+                return
+
         scope = batch_scope or (
             make_scope(user_id=user_id)
             if resolved_address.channel == "qq"

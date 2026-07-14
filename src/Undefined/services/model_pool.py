@@ -5,10 +5,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 from Undefined.config.models import ChatModelConfig
-from Undefined.utils.sender import MessageSender
 
 if TYPE_CHECKING:
     from Undefined.config import Config
@@ -19,10 +18,25 @@ _COMPARE_COMMAND_RE = re.compile(r"^/(?:compare|pk)(?:\s+(?P<prompt>.*))?$")
 _SELECT_COMMAND_RE = re.compile(r"^选\s*\d+\s*$")
 
 
+class PrivateMessageSender(Protocol):
+    """可向逻辑 QQ 私聊发送消息的结构化接口。"""
+
+    async def send_private_message(
+        self,
+        user_id: int,
+        message: str,
+    ) -> int | None: ...
+
+
 class ModelPoolService:
     """封装多模型池的私聊交互逻辑，与消息处理层解耦"""
 
-    def __init__(self, ai: Any, config: "Config", sender: MessageSender) -> None:
+    def __init__(
+        self,
+        ai: Any,
+        config: "Config",
+        sender: PrivateMessageSender,
+    ) -> None:
         self._ai = ai
         self._config = config
         self._sender = sender
@@ -40,7 +54,7 @@ class ModelPoolService:
         user_id: int,
         text: str,
         *,
-        sender: Any | None = None,
+        sender: PrivateMessageSender | None = None,
     ) -> bool:
         """处理私聊多模型指令，返回 True 表示消息已被消费"""
         if not self._config.model_pool_enabled:
@@ -70,7 +84,13 @@ class ModelPoolService:
 
         return False
 
-    async def _run_compare(self, user_id: int, prompt: str, *, sender: Any) -> None:
+    async def _run_compare(
+        self,
+        user_id: int,
+        prompt: str,
+        *,
+        sender: PrivateMessageSender,
+    ) -> None:
         if not prompt:
             await sender.send_private_message(user_id, "用法: /compare <问题>")
             return

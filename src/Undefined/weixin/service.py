@@ -254,10 +254,10 @@ class WeixinService:
                 return
             if self._closed:
                 raise RuntimeError("WeixinService 已关闭")
-            self._running = True
             if not self.weixin_config.enabled:
                 logger.info("[微信] iLink 接入未启用")
                 return
+            self._running = True
             for account in await self.store.list_accounts():
                 if account.enabled:
                     await self._start_account_locked(account)
@@ -279,7 +279,7 @@ class WeixinService:
         accounts = await self.store.list_accounts()
         return {
             "enabled": self.weixin_config.enabled,
-            "running": self._running,
+            "running": self.weixin_config.enabled and self._running,
             "accounts": [
                 account.to_public_dict(
                     connected=(runtime.connected if runtime else False),

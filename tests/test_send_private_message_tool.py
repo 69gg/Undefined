@@ -9,6 +9,10 @@ import pytest
 from Undefined.context import RequestContext
 from Undefined.skills.toolsets.messages.send_private_message.handler import execute
 from Undefined.utils.coerce import was_message_sent
+from Undefined.utils.message_targets import (
+    parse_delivery_address,
+    resolve_delivery_address,
+)
 from Undefined.utils.message_turn import mark_message_sent_this_turn
 
 
@@ -19,7 +23,12 @@ def _build_runtime_config() -> Any:
 
 
 def _tool_context(**values: Any) -> dict[str, Any]:
-    return {"mark_message_sent_this_turn": mark_message_sent_this_turn, **values}
+    return {
+        "mark_message_sent_this_turn": mark_message_sent_this_turn,
+        "parse_delivery_address": parse_delivery_address,
+        "resolve_delivery_address": resolve_delivery_address,
+        **values,
+    }
 
 
 @pytest.mark.asyncio

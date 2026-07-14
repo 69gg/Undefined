@@ -26,7 +26,7 @@ def _now_iso() -> str:
 
 async def _secure_file(path: Path) -> None:
     if os.name == "posix" and await io.exists(path):
-        await asyncio.to_thread(path.chmod, 0o600)
+        await io.chmod(path, 0o600)
 
 
 class WeixinStore:

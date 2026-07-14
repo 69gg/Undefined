@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+import asyncio
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
+from jsonschema import Draft202012Validator
 
 from Undefined.attachments import AttachmentRecord, AttachmentRegistry
 from Undefined.context import RequestContext
 from Undefined.skills.toolsets.messages.send_message.handler import execute
+from Undefined.utils import io as async_io
 from Undefined.utils.coerce import was_message_sent
 from Undefined.utils.message_turn import mark_message_sent_this_turn
 
@@ -23,6 +27,40 @@ def _build_runtime_config() -> Any:
 
 def _tool_context(**values: Any) -> dict[str, Any]:
     return {"mark_message_sent_this_turn": mark_message_sent_this_turn, **values}
+
+
+def test_send_message_schema_rejects_mixed_address_parameters() -> None:
+    config_text = asyncio.run(
+        async_io.read_text(
+            Path("src/Undefined/skills/toolsets/messages/send_message/config.json")
+        )
+    )
+    assert config_text is not None
+    parameters = json.loads(config_text)["function"]["parameters"]
+    validator = Draft202012Validator(parameters)
+
+    assert validator.is_valid({"message": "hello", "address": "wechat:123"})
+    assert validator.is_valid(
+        {
+            "message": "hello",
+            "target_type": "private",
+            "target_id": 123,
+        }
+    )
+    assert not validator.is_valid(
+        {
+            "message": "hello",
+            "address": "wechat:123",
+            "target_type": "private",
+        }
+    )
+    assert not validator.is_valid(
+        {
+            "message": "hello",
+            "address": "wechat:123",
+            "target_id": 123,
+        }
+    )
 
 
 @pytest.mark.asyncio

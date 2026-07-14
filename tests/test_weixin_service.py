@@ -126,11 +126,16 @@ class FakeInboundHandler:
         self.calls.append(kwargs)
 
 
-def _config(tmp_path: Path, *, superadmin_qq: int = 0) -> Config:
+def _config(
+    tmp_path: Path,
+    *,
+    superadmin_qq: int = 0,
+    enabled: bool = True,
+) -> Config:
     return Config.from_mapping(
         {
             "core": {"superadmin_qq": superadmin_qq},
-            "weixin": {"enabled": True, "state_dir": str(tmp_path)},
+            "weixin": {"enabled": enabled, "state_dir": str(tmp_path)},
         },
         strict=False,
     )
@@ -158,19 +163,20 @@ async def test_privileged_binding_requires_confirmation_before_network(
         _config(tmp_path, superadmin_qq=4242),
         login_manager=cast(QrLoginManager, manager),
     )
+    try:
+        with pytest.raises(WeixinConfirmationRequired) as raised:
+            await service.start_login(alias="admin", qq_id=4242)
+        assert manager.start_calls == 0
 
-    with pytest.raises(WeixinConfirmationRequired) as raised:
-        await service.start_login(alias="admin", qq_id=4242)
-    assert manager.start_calls == 0
-
-    result = await service.start_login(
-        alias="admin",
-        qq_id=4242,
-        confirmation_token=raised.value.token,
-    )
-    assert result.session_id == "session-1"
-    assert manager.start_calls == 1
-    await service.stop()
+        result = await service.start_login(
+            alias="admin",
+            qq_id=4242,
+            confirmation_token=raised.value.token,
+        )
+        assert result.session_id == "session-1"
+        assert manager.start_calls == 1
+    finally:
+        await service.stop()
 
 
 @pytest.mark.asyncio
@@ -194,14 +200,16 @@ async def test_account_runtime_sends_by_logical_qq(tmp_path: Path) -> None:
         login_manager=cast(QrLoginManager, FakeLoginManager()),
         client_factory=factory,
     )
-    await service.start()
-    await asyncio.sleep(0)
+    try:
+        await service.start()
+        await asyncio.sleep(0)
 
-    receipt = await service.send_text(10001, "hello")
+        receipt = await service.send_text(10001, "hello")
 
-    assert receipt == "client-message-1"
-    assert client.sent_text == [("peer-1", "hello")]
-    await service.stop()
+        assert receipt == "client-message-1"
+        assert client.sent_text == [("peer-1", "hello")]
+    finally:
+        await service.stop()
 
 
 @pytest.mark.asyncio
@@ -229,16 +237,17 @@ async def test_unknown_peer_is_quarantined_without_dispatch(tmp_path: Path) -> N
         context_token="ctx",
         items=(MessageItem(type=MessageItemType.TEXT, text="secret body"),),
     )
+    try:
+        await service._handle_inbound("primary", client, message)
 
-    await service._handle_inbound("primary", client, message)
-
-    assert handler.calls == []
-    pending = await store.list_pending_peers()
-    assert len(pending) == 1
-    assert pending[0].peer_id == "unknown-peer"
-    raw = (tmp_path / "bindings.json").read_text(encoding="utf-8")
-    assert "secret body" not in raw
-    await service.stop()
+        assert handler.calls == []
+        pending = await store.list_pending_peers()
+        assert len(pending) == 1
+        assert pending[0].peer_id == "unknown-peer"
+        raw = (tmp_path / "bindings.json").read_text(encoding="utf-8")
+        assert "secret body" not in raw
+    finally:
+        await service.stop()
 
 
 @pytest.mark.asyncio
@@ -252,23 +261,46 @@ async def test_remove_account_purges_sdk_runtime_state(tmp_path: Path) -> None:
         store=store,
         login_manager=cast(QrLoginManager, FakeLoginManager()),
     )
-    await service._state_store.set_cursor(account.credentials.account_id, "cursor-1")
-    await service._state_store.set_context_token(
-        account.credentials.account_id,
-        account.peer_id,
-        "context-token",
-    )
-
-    removed = await service.remove_account("primary")
-
-    assert removed is True
-    assert await store.get_account("primary") is None
-    assert await service._state_store.get_cursor(account.credentials.account_id) == ""
-    assert (
-        await service._state_store.get_context_token(
+    try:
+        await service._state_store.set_cursor(
+            account.credentials.account_id, "cursor-1"
+        )
+        await service._state_store.set_context_token(
             account.credentials.account_id,
             account.peer_id,
+            "context-token",
         )
-        == ""
+
+        removed = await service.remove_account("primary")
+
+        assert removed is True
+        assert await store.get_account("primary") is None
+        assert (
+            await service._state_store.get_cursor(account.credentials.account_id) == ""
+        )
+        assert (
+            await service._state_store.get_context_token(
+                account.credentials.account_id,
+                account.peer_id,
+            )
+            == ""
+        )
+    finally:
+        await service.stop()
+
+
+@pytest.mark.asyncio
+async def test_disabled_service_status_stays_stopped(tmp_path: Path) -> None:
+    service = WeixinService(
+        _config(tmp_path, enabled=False),
+        login_manager=cast(QrLoginManager, FakeLoginManager()),
     )
-    await service.stop()
+    try:
+        await service.start()
+
+        status = await service.status()
+
+        assert status["enabled"] is False
+        assert status["running"] is False
+    finally:
+        await service.stop()

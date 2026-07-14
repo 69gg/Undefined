@@ -23,7 +23,7 @@ Undefined 可以通过微信 ClawBot 的 iLink 接口接收和发送微信私聊
 | `wechat:12345678` | 绑定到该逻辑 QQ 的微信私聊 |
 | `group:87654321` | QQ 群聊 |
 
-`messages.send_message`、`messages.send_private_message` 和定时任务均支持 `address`。旧的 `target_type + target_id`、`user_id`、`group_id` 参数继续兼容，但无法表达微信物理通道，新增配置应优先使用规范地址。
+`messages.send_message`、`messages.send_private_message` 和定时任务均支持 `address`。旧的 `target_type + target_id`、`user_id`、`group_id` 参数继续兼容，但无法表达微信物理通道，新增配置应优先使用规范地址。`messages.send_message` 的 `address` 与 `target_type` / `target_id` 互斥；调度任务同时携带规范地址和旧目标时，也必须指向同一规范会话。
 
 ## 配置
 

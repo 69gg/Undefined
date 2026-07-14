@@ -236,8 +236,20 @@ class MessageSender:
             )
             return
         if not self.config.is_private_allowed(address.target_id):
+            enabled = self.config.access_control_enabled()
+            reason = (
+                self.config.private_access_denied_reason(address.target_id) or "unknown"
+            )
+            logger.warning(
+                "[访问控制] 已拦截微信文件发送: user=%s reason=%s (access enabled=%s)",
+                address.target_id,
+                reason,
+                enabled,
+            )
             raise PermissionError(
-                f"blocked by access control: type=private user_id={address.target_id}"
+                "blocked by access control: "
+                f"type=private reason={reason} user_id={address.target_id} "
+                f"enabled={enabled}"
             )
         service = self._require_weixin_service()
         await service.send_file(
@@ -297,8 +309,17 @@ class MessageSender:
         attachments: list[dict[str, str]] | None,
     ) -> int | None:
         if not self.config.is_private_allowed(user_id):
+            enabled = self.config.access_control_enabled()
+            reason = self.config.private_access_denied_reason(user_id) or "unknown"
+            logger.warning(
+                "[访问控制] 已拦截微信消息发送: user=%s reason=%s (access enabled=%s)",
+                user_id,
+                reason,
+                enabled,
+            )
             raise PermissionError(
-                f"blocked by access control: type=private user_id={user_id}"
+                "blocked by access control: "
+                f"type=private reason={reason} user_id={user_id} enabled={enabled}"
             )
         if reply_to is not None:
             raise ValueError("微信 iLink 暂不支持引用回复（reply_to）")
@@ -327,14 +348,6 @@ class MessageSender:
             if mark_sent:
                 mark_message_sent_this_turn()
 
-        history_attachments = _merge_attachment_refs(
-            attachments,
-            await self._register_local_segment_attachments(
-                "private",
-                user_id,
-                segments,
-            ),
-        )
         for segment_type, path in media_segments:
             await service.send_file(
                 user_id,
@@ -349,6 +362,14 @@ class MessageSender:
             raise ValueError("微信消息中没有可投递的文本或本地媒体")
 
         if auto_history:
+            history_attachments = _merge_attachment_refs(
+                attachments,
+                await self._register_local_segment_attachments(
+                    "private",
+                    user_id,
+                    segments,
+                ),
+            )
             history_content = history_message
             if history_content is None:
                 history_content = text
@@ -1215,11 +1236,23 @@ class AddressBoundSender:
             return
         await self._send_weixin_forward(messages)
         if auto_history:
+            history_attachments = (
+                await self._sender._register_local_segment_attachments(
+                    "private",
+                    user_id,
+                    _iter_segments_deep(messages),
+                )
+            )
+            history_content = _append_attachment_refs(
+                history_message,
+                history_attachments,
+            )
             await self._sender.history_manager.add_private_message(
                 user_id=user_id,
-                text_content=history_message,
+                text_content=history_content,
                 display_name="Bot",
                 user_name="Bot",
+                attachments=history_attachments,
                 transport={
                     "channel": "wechat",
                     "address": self._address.canonical,
@@ -1246,13 +1279,18 @@ class AddressBoundSender:
                 if not isinstance(segment, dict):
                     continue
                 segment_type = str(segment.get("type", "") or "").strip().lower()
+                if segment_type not in {"text", "image", "video", "file"}:
+                    logger.warning(
+                        "[微信转发] 丢弃不支持的消息段: address=%s type=%s",
+                        self._address.canonical,
+                        segment_type or "unknown",
+                    )
+                    continue
                 segment_data = segment.get("data")
                 if not isinstance(segment_data, dict):
                     continue
                 if segment_type == "text":
                     text_parts.append(str(segment_data.get("text", "") or ""))
-                    continue
-                if segment_type not in {"image", "video", "file"}:
                     continue
                 path = _local_path_from_segment_source(segment_data.get("file"))
                 if path is not None:

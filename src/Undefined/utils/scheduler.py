@@ -34,24 +34,32 @@ def _resolve_task_address(
     target_type: str,
 ) -> DeliveryAddress | None:
     address_text = str(address or "").strip()
+    explicit_address: DeliveryAddress | None = None
     if address_text:
-        resolved, error = parse_delivery_address(address_text)
-        if error or resolved is None:
+        explicit_address, error = parse_delivery_address(address_text)
+        if error or explicit_address is None:
             raise ValueError(error or "投递地址无效")
-        return resolved
-    if target_id is None:
-        return None
-    legacy_type = str(target_type or "group").strip().lower()
-    if legacy_type not in {"group", "private"}:
-        raise ValueError("target_type 只能是 group 或 private")
-    channel = "group" if legacy_type == "group" else "qq"
-    resolved, error = parse_delivery_address(f"{channel}:{target_id}")
-    if error or resolved is None:
-        raise ValueError(error or "投递目标无效")
-    return resolved
+
+    legacy_address: DeliveryAddress | None = None
+    if target_id is not None:
+        legacy_type = str(target_type or "group").strip().lower()
+        if legacy_type not in {"group", "private"}:
+            raise ValueError("target_type 只能是 group 或 private")
+        channel = "group" if legacy_type == "group" else "qq"
+        legacy_address, error = parse_delivery_address(f"{channel}:{target_id}")
+        if error or legacy_address is None:
+            raise ValueError(error or "投递目标无效")
+
+    if explicit_address is not None:
+        if legacy_address is not None and legacy_address != explicit_address:
+            raise ValueError("address 与旧目标参数指向不同会话")
+        return explicit_address
+    return legacy_address
 
 
-def _legacy_target_fields(address: DeliveryAddress) -> tuple[int, str]:
+def _legacy_target_fields(address: DeliveryAddress) -> tuple[int | None, str]:
+    if address.channel == "wechat":
+        return None, "private"
     return address.target_id, address.target_type
 
 
@@ -668,8 +676,10 @@ class TaskScheduler:
                     ext = os.path.splitext(path)[1].lower()
                     if ext in [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"]:
                         msg = f"[CQ:image,file={file_uri}]"
+                        media_kind = "image"
                     elif ext in [".mp3", ".wav", ".ogg", ".flac", ".m4a", ".aac"]:
                         msg = f"[CQ:record,file={file_uri}]"
+                        media_kind = "record"
                     else:
                         return
 
@@ -683,9 +693,11 @@ class TaskScheduler:
                         and delivery_address.channel == "wechat"
                         and delivery_address.target_id == tid
                     ):
-                        await self.sender.send_address_message(
+                        await self.sender.send_address_file(
                             delivery_address,
-                            msg,
+                            path,
+                            name=Path(path).name,
+                            kind=media_kind,
                             auto_history=False,
                         )
                     elif mtype == "private":

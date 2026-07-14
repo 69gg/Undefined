@@ -91,6 +91,8 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     if not target_type:
         target_type = "group"
     target_address = explicit_address or str(context.get("address") or "").strip()
+    if target_address:
+        target_id = None
 
     resolved_tool_name = tool_name
     resolved_tool_args = tool_args
