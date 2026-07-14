@@ -368,7 +368,7 @@ class MessageHistoryManager:
         role: str = "member",
         title: str = "",
         level: str = "",
-        message_id: int | None = None,
+        message_id: int | str | None = None,
         attachments: list[dict[str, str]] | None = None,
     ) -> None:
         """异步保存群消息到历史记录"""
@@ -426,9 +426,10 @@ class MessageHistoryManager:
         text_content: str,
         display_name: str = "",
         user_name: str = "",
-        message_id: int | None = None,
+        message_id: int | str | None = None,
         attachments: list[dict[str, str]] | None = None,
         webchat: dict[str, Any] | None = None,
+        transport: dict[str, Any] | None = None,
     ) -> None:
         """异步保存私聊消息到历史记录"""
         await self._ensure_initialized()
@@ -459,6 +460,8 @@ class MessageHistoryManager:
                 record["attachments"] = attachments
             if isinstance(webchat, dict):
                 record["webchat"] = webchat
+            if isinstance(transport, dict):
+                record["transport"] = dict(transport)
 
             self._private_message_history[user_id_str].append(record)
 

@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from Undefined.utils.message_targets import DeliveryAddress
+from Undefined.utils.sender import AddressBoundSender
+
 
 def build_pipeline_context(
     handler: Any,
@@ -12,13 +15,18 @@ def build_pipeline_context(
     target_type: str,
     text: str,
     message_content: list[dict[str, Any]] | None,
+    address: DeliveryAddress | None = None,
 ) -> dict[str, Any]:
+    sender = handler.sender
+    if address is not None and address.channel == "wechat":
+        sender = AddressBoundSender(handler.sender, address)
     return {
         "config": handler.config,
-        "sender": handler.sender,
+        "sender": sender,
         "onebot": handler.onebot,
         "target_id": target_id,
         "target_type": target_type,
+        "address": address,
         "text": text,
         "message_content": message_content,
         "extract_bilibili_ids": handler._extract_bilibili_ids,

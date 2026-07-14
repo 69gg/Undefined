@@ -35,16 +35,25 @@ class ModelPoolService:
             or _SELECT_COMMAND_RE.fullmatch(stripped)
         )
 
-    async def handle_private_message(self, user_id: int, text: str) -> bool:
+    async def handle_private_message(
+        self,
+        user_id: int,
+        text: str,
+        *,
+        sender: Any | None = None,
+    ) -> bool:
         """处理私聊多模型指令，返回 True 表示消息已被消费"""
         if not self._config.model_pool_enabled:
             return False
 
+        resolved_sender = sender or self._sender
         stripped = text.strip()
         compare_match = _COMPARE_COMMAND_RE.fullmatch(stripped)
         if compare_match:
             await self._run_compare(
-                user_id, (compare_match.group("prompt") or "").strip()
+                user_id,
+                (compare_match.group("prompt") or "").strip(),
+                sender=resolved_sender,
             )
             return True
 
@@ -54,28 +63,26 @@ class ModelPoolService:
             if selected:
                 selector.set_preference(0, user_id, "chat", selected)
                 await selector.save_preferences()
-                await self._sender.send_private_message(
+                await resolved_sender.send_private_message(
                     user_id, f"已切换到模型: {selected}"
                 )
                 return True
 
         return False
 
-    async def _run_compare(self, user_id: int, prompt: str) -> None:
+    async def _run_compare(self, user_id: int, prompt: str, *, sender: Any) -> None:
         if not prompt:
-            await self._sender.send_private_message(user_id, "用法: /compare <问题>")
+            await sender.send_private_message(user_id, "用法: /compare <问题>")
             return
 
         selector = self._ai.model_selector
         all_models = selector.get_all_chat_models(self._config.chat_model)
 
         if len(all_models) < 2:
-            await self._sender.send_private_message(
-                user_id, "模型池中只有一个模型，无法比较"
-            )
+            await sender.send_private_message(user_id, "模型池中只有一个模型，无法比较")
             return
 
-        await self._sender.send_private_message(
+        await sender.send_private_message(
             user_id, f"正在向 {len(all_models)} 个模型发送问题，请稍候..."
         )
 
@@ -105,7 +112,7 @@ class ModelPoolService:
             lines += [f"【{i}】{name}", content, ""]
         lines.append("回复「选X」可切换到该模型并继续对话")
 
-        await self._sender.send_private_message(user_id, "\n".join(lines))
+        await sender.send_private_message(user_id, "\n".join(lines))
         selector.set_pending_compare(0, user_id, [n for n, _ in results])
 
     def select_chat_config(

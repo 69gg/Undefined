@@ -222,3 +222,73 @@ async def test_task_scheduler_update_task_refreshes_job_args() -> None:
         None,
         "private",
     ]
+
+
+@pytest.mark.asyncio
+async def test_task_scheduler_routes_wechat_result_by_canonical_address(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "Undefined.utils.scheduler.collect_context_resources",
+        lambda values: {
+            key: values[key]
+            for key in (
+                "send_message_callback",
+                "get_recent_messages_callback",
+                "get_image_url_callback",
+                "get_forward_msg_callback",
+                "send_like_callback",
+                "sender",
+                "history_manager",
+                "onebot_client",
+            )
+        },
+    )
+    ai = SimpleNamespace(
+        ask=AsyncMock(return_value="微信提醒"),
+        memory_storage=SimpleNamespace(),
+        runtime_config=SimpleNamespace(),
+    )
+    sender = SimpleNamespace(
+        send_group_message=AsyncMock(),
+        send_private_message=AsyncMock(),
+        send_address_message=AsyncMock(),
+    )
+    onebot = SimpleNamespace(
+        send_like=AsyncMock(),
+        get_image=AsyncMock(return_value=None),
+        get_forward_msg=AsyncMock(return_value=[]),
+    )
+    scheduler = TaskScheduler(
+        ai,
+        sender,
+        onebot,
+        SimpleNamespace(),
+        task_storage=cast(Any, _DummyTaskStorage()),
+    )
+    scheduler.tasks["task_wechat"] = {
+        "task_id": "task_wechat",
+        "tool_name": SELF_CALL_TOOL_NAME,
+        "tool_args": {"prompt": "提醒我"},
+        "cron": "0 9 * * *",
+        "target_id": 12345,
+        "target_type": "private",
+        "address": "wechat:12345",
+    }
+
+    try:
+        await scheduler._execute_tool_wrapper(
+            "task_wechat",
+            SELF_CALL_TOOL_NAME,
+            {"prompt": "提醒我"},
+            12345,
+            "private",
+        )
+    finally:
+        scheduler.scheduler.shutdown(wait=False)
+
+    sender.send_address_message.assert_awaited_once()
+    address = sender.send_address_message.await_args.args[0]
+    assert address.canonical == "wechat:12345"
+    assert sender.send_address_message.await_args.args[1] == "微信提醒"
+    sender.send_private_message.assert_not_awaited()

@@ -6,7 +6,7 @@
 
 ## 设计要点
 
-- **作用域**：按 `(scope, sender_id)` 分桶。`scope` 群聊为 `group:<gid>`，私聊为 `private:<uid>`。
+- **作用域**：按 `(scope, sender_id)` 分桶。`scope` 群聊为 `group:<gid>`，QQ 私聊为 `private:<uid>`，微信私聊为 `private:wechat:<逻辑QQ号>`。QQ 与微信可以共享逻辑私聊历史，但不会合并到同一个物理回复批次。
 - **窗口策略**：
   - `extend`（默认）：每条新消息重置定时器，并以 `max_window_seconds` 作为硬顶。
   - `fixed`：定时器从首条算起；窗口期结束统一发车。

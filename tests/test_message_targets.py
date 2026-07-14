@@ -4,7 +4,65 @@ from __future__ import annotations
 
 from typing import Any
 
-from Undefined.utils.message_targets import parse_positive_int, resolve_message_target
+from Undefined.utils.message_targets import (
+    DeliveryAddress,
+    parse_delivery_address,
+    parse_positive_int,
+    resolve_delivery_address,
+    resolve_message_target,
+)
+
+
+class TestDeliveryAddress:
+    def test_parse_canonical_addresses(self) -> None:
+        for raw, expected in (
+            ("qq:123", DeliveryAddress("qq", 123)),
+            ("group:456", DeliveryAddress("group", 456)),
+            ("WECHAT:789", DeliveryAddress("wechat", 789)),
+        ):
+            address, error = parse_delivery_address(raw)
+            assert error is None
+            assert address == expected
+            assert address is not None
+            assert address.canonical == raw.lower()
+
+    def test_rejects_invalid_address(self) -> None:
+        address, error = parse_delivery_address("email:123")
+        assert address is None
+        assert error is not None
+
+    def test_current_wechat_address_wins_over_logical_private_context(self) -> None:
+        address, error = resolve_delivery_address(
+            {},
+            {
+                "request_type": "private",
+                "user_id": 123,
+                "address": "wechat:123",
+            },
+        )
+        assert error is None
+        assert address == DeliveryAddress("wechat", 123)
+
+    def test_explicit_address_overrides_current_address(self) -> None:
+        address, error = resolve_delivery_address(
+            {"address": "qq:123"},
+            {"request_type": "private", "user_id": 123, "address": "wechat:123"},
+        )
+        assert error is None
+        assert address == DeliveryAddress("qq", 123)
+
+    def test_rejects_conflicting_address_and_legacy_target(self) -> None:
+        address, error = resolve_delivery_address(
+            {
+                "address": "wechat:123",
+                "target_type": "private",
+                "target_id": 123,
+            },
+            {},
+        )
+        assert address is None
+        assert error is not None
+        assert "不同会话" in error
 
 
 class TestParsePositiveInt:

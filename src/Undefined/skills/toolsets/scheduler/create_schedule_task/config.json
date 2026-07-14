@@ -58,6 +58,10 @@
                 "max_executions": {
                     "type": "integer",
                     "description": "最大执行次数（可选）。设置为 1 表示执行一次后自动删除，设置为 N 表示执行 N 次后自动删除，不设置则无限执行。"
+                },
+                "address": {
+                    "type": "string",
+                    "description": "可选投递地址，格式为 qq:<QQ号>、group:<群号> 或 wechat:<逻辑QQ号>。默认继承当前会话的物理通道。"
                 }
             },
             "required": [

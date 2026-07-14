@@ -81,6 +81,8 @@ superadmin_bypass_allowlist = true
 
 因此，配置可统一约束“收消息”和“发消息”。
 
+微信 iLink 私聊按其绑定的逻辑 QQ 号参与 `allowed_private_ids` / `blocked_private_ids` 判定。绑定不会绕过名单；若逻辑 QQ 是 superadmin，则继续遵循本页两个 superadmin 绕过开关。未知微信来源会在访问控制和消息处理之前隔离，详见 [微信 iLink 接入](wechat-ilink.md)。
+
 ## 与 Naga 会话策略的关系
 
-全局 `[access]` 控制机器人整体能否收发消息。Naga 另有独立的会话策略（`[naga].mode` + 群/私聊名单），用于在 Naga 总闸打开后，按群/私聊决定是否启用 NagaAgent 提示词/工具与外部网关（`/naga`、绑定、回调投递）。模式名与本节相同（`off` / `blacklist` / `allowlist`），但 **Naga 的 allowlist 空名单为 fail closed（拒绝全部）**，与本节「空名单不限制」不同；详见 [configuration.md §4.27](configuration.md)。
+全局 `[access]` 控制机器人整体能否收发消息。Naga 另有独立的会话策略（`[naga].mode` + 群/私聊名单），用于在 Naga 总闸打开后，按群/私聊决定是否启用 NagaAgent 提示词/工具与外部网关（`/naga`、绑定、回调投递）。模式名与本节相同（`off` / `blacklist` / `allowlist`），但 **Naga 的 allowlist 空名单为 fail closed（拒绝全部）**，与本节「空名单不限制」不同；详见 [configuration.md §4.28](configuration.md)。

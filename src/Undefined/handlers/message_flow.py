@@ -49,6 +49,8 @@ from Undefined.utils.queue_intervals import build_model_queue_intervals
 from Undefined.utils.resources import resolve_resource_path
 from Undefined.utils.scheduler import TaskScheduler
 from Undefined.utils.sender import MessageSender
+from Undefined.utils.sender import AddressBoundSender
+from Undefined.utils.message_targets import DeliveryAddress
 
 logger = logging.getLogger(__name__)
 
@@ -737,6 +739,101 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
             trigger_message_id=trigger_message_id,
         )
 
+    async def handle_weixin_private_message(
+        self,
+        *,
+        qq_id: int,
+        text: str,
+        message_content: list[dict[str, Any]],
+        attachments: list[dict[str, str]],
+        sender_name: str,
+        message_id: str | None,
+        account_alias: str,
+    ) -> None:
+        """处理已完成绑定校验的微信私聊消息。"""
+        if not self.config.is_private_allowed(qq_id):
+            return
+        address = DeliveryAddress("wechat", qq_id)
+        route_sender = AddressBoundSender(self.sender, address)
+        parsed_content = append_attachment_text(text, attachments)
+        logger.info(
+            "[微信私聊] 逻辑QQ=%s 帐号=%s 内容=%s",
+            qq_id,
+            account_alias,
+            redact_string(text)[:100],
+        )
+        await self.history_manager.add_private_message(
+            user_id=qq_id,
+            text_content=parsed_content,
+            display_name=sender_name,
+            user_name=sender_name,
+            message_id=message_id,
+            attachments=attachments,
+            transport={
+                "channel": "wechat",
+                "address": address.canonical,
+                "account_alias": account_alias,
+            },
+        )
+        self._schedule_meme_ingest(
+            attachments=attachments,
+            chat_type="private",
+            chat_id=qq_id,
+            sender_id=qq_id,
+            message_id=None,
+            scope_key=build_attachment_scope(user_id=qq_id, request_type="private"),
+        )
+        if not self.config.should_process_private_message():
+            return
+
+        if (
+            getattr(self.config, "model_pool_enabled", False)
+            and _is_private_model_pool_control_text(text)
+        ) and await self.ai_coordinator.model_pool.handle_private_message(
+            qq_id,
+            text,
+            sender=route_sender,
+        ):
+            return
+
+        command = self.command_dispatcher.parse_command(text)
+        batch_scope = f"private:{address.canonical}"
+        if command:
+            await self._flush_command_buffer(scope=batch_scope, sender_id=qq_id)
+
+            async def send_private_callback(user_id: int, message: str) -> None:
+                if user_id == qq_id:
+                    await self.sender.send_address_message(address, message)
+                else:
+                    await self.sender.send_private_message(user_id, message)
+
+            await self.command_dispatcher.dispatch_private(
+                user_id=qq_id,
+                sender_id=qq_id,
+                command=command,
+                send_private_callback=send_private_callback,
+            )
+            return
+
+        await self._run_pipelines(
+            target_id=qq_id,
+            target_type="private",
+            text=text,
+            message_content=message_content,
+            address=address,
+        )
+        await self.ai_coordinator.handle_private_reply(
+            qq_id,
+            text,
+            message_content,
+            attachments=attachments,
+            sender_name=sender_name,
+            trigger_message_id=message_id,
+            channel="wechat",
+            address=address.canonical,
+            batch_scope=batch_scope,
+        )
+
     async def _handle_group_message(self, event: dict[str, Any]) -> None:
         """处理群聊消息事件。"""
         group_id: int = event.get("group_id", 0)
@@ -984,6 +1081,7 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
         target_type: Literal["group", "private"],
         text: str,
         message_content: list[dict[str, Any]],
+        address: DeliveryAddress | None = None,
     ) -> bool:
         """并行检测并处理所有命中的自动处理管线。"""
         if not getattr(self, "_pipelines_initialized", False):
@@ -994,6 +1092,7 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
             target_type=target_type,
             text=text,
             message_content=message_content,
+            address=address,
         )
         detections = await self.pipeline_registry.run(context)
         return bool(detections)

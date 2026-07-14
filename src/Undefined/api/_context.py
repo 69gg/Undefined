@@ -22,3 +22,4 @@ class RuntimeAPIContext:
     naga_store: Any = None
     message_batcher: Any = None
     pipeline_registry: Any = None
+    weixin_service: Any = None

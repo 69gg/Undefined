@@ -111,6 +111,9 @@ class BatchingMixin:
                 "trigger_message_id": last.trigger_message_id,
                 "message_ids": message_ids,
                 "batched_count": len(items),
+                "channel": first.channel,
+                "address": first.address,
+                "batch_scope": first.scope,
             }
             if first.batch_token is not None:
                 request_data["_message_batcher_token"] = first.batch_token

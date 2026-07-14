@@ -2,13 +2,18 @@
     "type": "function",
     "function": {
         "name": "send_message",
-        "description": "发送消息到群聊或私聊。默认发送到当前会话；也可通过 target_type+target_id 指定目标群号或用户QQ。会受到访问控制白名单限制。可以在回答过程中多次调用，用于发送中间结果、进展信息或最终答案。最后必须调用 end 工具结束对话。成功时工具结果会尽量返回新消息的 message_id，便于后续再次用 reply_to 引用任意已知 message_id 的消息，包括当前消息、历史消息、别人发的消息或 Bot 之前发出的消息。\n群聊中 @ 某人：在消息里写 [@QQ号]，例如 [@2608261902] 你好。注意方括号内直接跟QQ号，不要加花括号。用 \\[@...\\] 转义可避免触发@。",
+        "description": "发送消息。默认回复当前物理会话；可用 address 精确指定 qq:<QQ号>、group:<群号> 或 wechat:<逻辑QQ号>。旧 target_type+target_id 参数继续兼容并表示 QQ/QQ群。会受到逻辑 QQ/群访问控制。微信通道不支持 reply_to。可以在回答过程中多次调用，最后必须调用 end。\n群聊中 @ 某人：在消息里写 [@QQ号]，例如 [@2608261902] 你好。",
         "parameters": {
             "type": "object",
             "properties": {
                 "message": {
                     "type": "string",
                     "description": "要发送的消息内容。群聊中用 [@QQ号] 来 @ 用户，如 [@2608261902]。"
+                },
+                "address": {
+                    "type": "string",
+                    "pattern": "^(qq|group|wechat):[1-9][0-9]*$",
+                    "description": "可选。规范投递地址：qq:<QQ号>、group:<群号>、wechat:<逻辑QQ号>。不填时使用当前会话地址。不要与旧目标参数混用。"
                 },
                 "target_type": {
                     "type": "string",

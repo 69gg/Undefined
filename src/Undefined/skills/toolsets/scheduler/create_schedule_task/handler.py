@@ -20,6 +20,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     execution_mode = args.get("execution_mode", "serial")
     max_executions = args.get("max_executions")
     self_instruction = args.get("self_instruction")
+    explicit_address = str(args.get("address") or "").strip()
 
     # 验证参数
     if not cron_expression:
@@ -89,6 +90,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
     if not target_type:
         target_type = "group"
+    target_address = explicit_address or str(context.get("address") or "").strip()
 
     resolved_tool_name = tool_name
     resolved_tool_args = tool_args
@@ -107,6 +109,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         cron_expression=cron_expression,
         target_id=target_id,
         target_type=target_type,
+        target_address=target_address or None,
         task_name=task_name,
         max_executions=max_executions,
         tools=resolved_tools,

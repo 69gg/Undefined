@@ -19,6 +19,7 @@ from .models import (
     RerankModelConfig,
     SecurityModelConfig,
     VisionModelConfig,
+    WeixinConfig,
 )
 from .webui_settings import WebUISettings, load_webui_settings
 
@@ -39,6 +40,7 @@ __all__ = [
     "MessageBatcherConfig",
     "PromptSystemInfoConfig",
     "RenderCacheConfig",
+    "WeixinConfig",
     "get_config",
     "get_config_manager",
     "set_config",

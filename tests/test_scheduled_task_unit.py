@@ -33,6 +33,7 @@ def _sample_task_dict() -> dict[str, Any]:
         "cron": "0 9 * * *",
         "target_id": 12345,
         "target_type": "group",
+        "address": "group:12345",
         "task_name": "每日搜索",
         "max_executions": 10,
         "current_executions": 3,
@@ -54,6 +55,7 @@ class TestScheduledTaskRoundtrip:
         assert restored["task_id"] == "task-001"
         assert restored["cron"] == "0 9 * * *"
         assert restored["execution_mode"] == "parallel"
+        assert restored["address"] == "group:12345"
         assert len(restored["tools"]) == 2
 
     def test_tools_are_toolcall_instances(self) -> None:

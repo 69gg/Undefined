@@ -63,10 +63,16 @@ def escape_xml_text_preserving_attachment_tags(
     return "".join(parts)
 
 
-def _message_location(msg_type: str, chat_name: str) -> str:
+def _message_location(
+    msg_type: str,
+    chat_name: str,
+    transport: Mapping[str, Any] | None = None,
+) -> str:
     """Derive the human-readable location label from message type."""
     if msg_type == "group":
         return chat_name if chat_name.endswith("群") else f"{chat_name}群"
+    if transport and str(transport.get("channel", "")).strip() == "wechat":
+        return "微信私聊"
     return "私聊"
 
 
@@ -94,6 +100,8 @@ def format_message_xml(
     title = str(msg.get("title", "") or "")
     level = str(msg.get("level", "") or "")
     attachments = msg.get("attachments", [])
+    transport_raw = msg.get("transport")
+    transport = transport_raw if isinstance(transport_raw, Mapping) else None
 
     safe_sender = escape_xml_attr(sender_name)
     safe_sender_id = escape_xml_attr(sender_id)
@@ -103,7 +111,9 @@ def format_message_xml(
     safe_title = escape_xml_attr(title)
     safe_time = escape_xml_attr(timestamp)
     safe_text = escape_xml_text_preserving_attachment_tags(text, attachments)
-    safe_location = escape_xml_attr(_message_location(msg_type_val, chat_name))
+    safe_location = escape_xml_attr(
+        _message_location(msg_type_val, chat_name, transport)
+    )
 
     msg_id_attr = ""
     if message_id is not None:
@@ -127,9 +137,17 @@ def format_message_xml(
             f"</message>"
         )
 
+    transport_attrs = ""
+    if transport:
+        channel = str(transport.get("channel", "") or "").strip()
+        address = str(transport.get("address", "") or "").strip()
+        if channel:
+            transport_attrs += f' channel="{escape_xml_attr(channel)}"'
+        if address:
+            transport_attrs += f' address="{escape_xml_attr(address)}"'
     return (
         f'<message{msg_id_attr} sender="{safe_sender}" sender_id="{safe_sender_id}" '
-        f'location="{safe_location}" time="{safe_time}">\n'
+        f'{transport_attrs.lstrip()} location="{safe_location}" time="{safe_time}">\n'
         f"<content>{safe_text}</content>{attachment_xml}\n"
         f"</message>"
     )

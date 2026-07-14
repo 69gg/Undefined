@@ -321,6 +321,8 @@ HTML 和 Markdown 工具都支持显式长图版式：
 
 也可以在 WebUI 的“定时任务”页查看、创建、编辑和删除当前调度任务；WebUI 会通过已鉴权的 Management 代理访问 Runtime API，不会把 Runtime API 密钥暴露给浏览器前端。
 
+发送目标使用统一投递地址：QQ 私聊为 `qq:<QQ号>`，群聊为 `group:<群号>`，微信私聊为 `wechat:<逻辑QQ号>`。从当前会话创建任务时默认继承物理通道，因此微信中创建的提醒仍从微信返回；也可通过 `address` 显式指定。旧的 `target_type + target_id` 继续兼容。
+
 ### 执行模式
 
 | 模式 | 描述 | 配置字段 |

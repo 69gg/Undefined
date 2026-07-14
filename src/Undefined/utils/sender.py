@@ -15,10 +15,12 @@ from Undefined.utils.common import (
     process_at_mentions,
 )
 from Undefined.utils.logging import redact_string
+from Undefined.utils.message_targets import DeliveryAddress
+from Undefined.utils.message_turn import mark_message_sent_this_turn
 
 logger = logging.getLogger(__name__)
 
-# QQ 消息长度限制（保守估算）
+# OneBot 与微信 iLink 的单条文本长度限制（保守值）
 MAX_MESSAGE_LENGTH = 4000
 
 
@@ -130,6 +132,23 @@ def _get_file_size(file_path: str) -> int | None:
         return None
 
 
+def _split_text_chunks(text: str, limit: int = MAX_MESSAGE_LENGTH) -> list[str]:
+    """按长度分片，优先在换行后切分并保留原始文本。"""
+    if not text:
+        return []
+    chunks: list[str] = []
+    start = 0
+    while start < len(text):
+        end = min(start + limit, len(text))
+        if end < len(text):
+            newline = text.rfind("\n", start, end)
+            if newline >= start:
+                end = newline + 1
+        chunks.append(text[start:end])
+        start = end
+    return chunks
+
+
 class MessageSender:
     """消息发送器"""
 
@@ -146,6 +165,206 @@ class MessageSender:
         self.bot_qq = bot_qq
         self.config = config
         self.attachment_registry = attachment_registry
+        self._weixin_service: Any | None = None
+
+    def set_weixin_service(self, service: Any | None) -> None:
+        """注入可选的微信投递服务。"""
+        self._weixin_service = service
+
+    async def send_address_message(
+        self,
+        address: DeliveryAddress,
+        message: str,
+        auto_history: bool = True,
+        *,
+        mark_sent: bool = True,
+        reply_to: int | None = None,
+        preferred_temp_group_id: int | None = None,
+        history_message: str | None = None,
+        attachments: list[dict[str, str]] | None = None,
+    ) -> int | None:
+        """按规范地址投递消息，并保留原 QQ 方法的兼容语义。"""
+        if address.channel == "group":
+            return await self.send_group_message(
+                address.target_id,
+                message,
+                auto_history=auto_history,
+                mark_sent=mark_sent,
+                reply_to=reply_to,
+                history_message=history_message,
+                attachments=attachments,
+            )
+        if address.channel == "qq":
+            return await self.send_private_message(
+                address.target_id,
+                message,
+                auto_history=auto_history,
+                mark_sent=mark_sent,
+                reply_to=reply_to,
+                preferred_temp_group_id=preferred_temp_group_id,
+                history_message=history_message,
+                attachments=attachments,
+            )
+        return await self._send_weixin_message(
+            address.target_id,
+            message,
+            auto_history=auto_history,
+            mark_sent=mark_sent,
+            reply_to=reply_to,
+            history_message=history_message,
+            attachments=attachments,
+        )
+
+    async def send_address_file(
+        self,
+        address: DeliveryAddress,
+        file_path: str,
+        name: str | None = None,
+        *,
+        kind: str | None = None,
+        auto_history: bool = True,
+    ) -> None:
+        """按规范地址发送一个本地文件。"""
+        if address.channel == "group":
+            await self.send_group_file(
+                address.target_id, file_path, name=name, auto_history=auto_history
+            )
+            return
+        if address.channel == "qq":
+            await self.send_private_file(
+                address.target_id, file_path, name=name, auto_history=auto_history
+            )
+            return
+        if not self.config.is_private_allowed(address.target_id):
+            raise PermissionError(
+                f"blocked by access control: type=private user_id={address.target_id}"
+            )
+        service = self._require_weixin_service()
+        await service.send_file(
+            address.target_id,
+            file_path,
+            name=name,
+            kind=kind,
+        )
+        if not auto_history:
+            return
+        file_name = name or Path(file_path).name
+        file_size = _get_file_size(file_path)
+        history_attachments = await self.register_sent_file_attachment(
+            "private",
+            address.target_id,
+            file_path,
+            file_name,
+            kind=kind or "file",
+        )
+        history_content = _append_attachment_refs(
+            _build_file_history_message(file_name, file_size),
+            history_attachments,
+        )
+        await self.history_manager.add_private_message(
+            user_id=address.target_id,
+            text_content=history_content,
+            display_name="Bot",
+            user_name="Bot",
+            attachments=history_attachments,
+            transport={
+                "channel": "wechat",
+                "address": address.canonical,
+            },
+        )
+
+    async def set_address_typing(self, address: DeliveryAddress, typing: bool) -> None:
+        """仅微信支持的输入状态提示；其他通道无操作。"""
+        if address.channel != "wechat":
+            return
+        service = self._require_weixin_service()
+        await service.set_typing(address.target_id, typing)
+
+    def _require_weixin_service(self) -> Any:
+        if self._weixin_service is None:
+            raise RuntimeError("微信消息服务未启用")
+        return self._weixin_service
+
+    async def _send_weixin_message(
+        self,
+        user_id: int,
+        message: str,
+        *,
+        auto_history: bool,
+        mark_sent: bool,
+        reply_to: int | None,
+        history_message: str | None,
+        attachments: list[dict[str, str]] | None,
+    ) -> int | None:
+        if not self.config.is_private_allowed(user_id):
+            raise PermissionError(
+                f"blocked by access control: type=private user_id={user_id}"
+            )
+        if reply_to is not None:
+            raise ValueError("微信 iLink 暂不支持引用回复（reply_to）")
+        service = self._require_weixin_service()
+        segments = message_to_segments(message)
+        text = extract_text(segments, self.bot_qq).strip()
+        media_segments: list[tuple[str, Path]] = []
+        for segment in segments:
+            segment_type = str(segment.get("type", "") or "").strip().lower()
+            if segment_type not in {"image", "video", "file", "record"}:
+                continue
+            if segment_type == "record":
+                raise ValueError("微信 iLink 暂不支持发送语音")
+            data = segment.get("data")
+            if not isinstance(data, dict):
+                raise ValueError("微信媒体消息缺少有效参数")
+            path = _local_path_from_segment_source(data.get("file"))
+            if path is None:
+                raise ValueError("微信 iLink 当前只支持发送本地媒体文件")
+            media_segments.append((segment_type, path))
+
+        sent_any = False
+        for chunk in _split_text_chunks(text):
+            await service.send_text(user_id, chunk)
+            sent_any = True
+            if mark_sent:
+                mark_message_sent_this_turn()
+
+        history_attachments = _merge_attachment_refs(
+            attachments,
+            await self._register_local_segment_attachments(
+                "private",
+                user_id,
+                segments,
+            ),
+        )
+        for segment_type, path in media_segments:
+            await service.send_file(
+                user_id,
+                path,
+                name=path.name,
+                kind=("image" if segment_type == "image" else segment_type),
+            )
+            sent_any = True
+            if mark_sent:
+                mark_message_sent_this_turn()
+        if not sent_any and message.strip():
+            raise ValueError("微信消息中没有可投递的文本或本地媒体")
+
+        if auto_history:
+            history_content = history_message
+            if history_content is None:
+                history_content = text
+            history_content = _append_attachment_refs(
+                history_content,
+                history_attachments,
+            )
+            await self.history_manager.add_private_message(
+                user_id=user_id,
+                text_content=history_content,
+                display_name="Bot",
+                user_name="Bot",
+                attachments=history_attachments,
+                transport={"channel": "wechat", "address": f"wechat:{user_id}"},
+            )
+        return None
 
     async def register_sent_file_attachment(
         self,
@@ -908,3 +1127,146 @@ class MessageSender:
                 user_id,
                 file_name,
             )
+
+
+class AddressBoundSender:
+    """将当前逻辑私聊绑定到指定物理地址的轻量发送代理。"""
+
+    def __init__(self, sender: MessageSender, address: DeliveryAddress) -> None:
+        if address.target_type != "private":
+            raise ValueError("AddressBoundSender 仅支持私聊地址")
+        self._sender = sender
+        self._address = address
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._sender, name)
+
+    async def send_private_message(
+        self,
+        user_id: int,
+        message: str,
+        auto_history: bool = True,
+        *,
+        mark_sent: bool = True,
+        reply_to: int | None = None,
+        preferred_temp_group_id: int | None = None,
+        history_message: str | None = None,
+        attachments: list[dict[str, str]] | None = None,
+    ) -> int | None:
+        if int(user_id) != self._address.target_id:
+            return await self._sender.send_private_message(
+                user_id,
+                message,
+                auto_history=auto_history,
+                mark_sent=mark_sent,
+                reply_to=reply_to,
+                preferred_temp_group_id=preferred_temp_group_id,
+                history_message=history_message,
+                attachments=attachments,
+            )
+        return await self._sender.send_address_message(
+            self._address,
+            message,
+            auto_history=auto_history,
+            mark_sent=mark_sent,
+            reply_to=reply_to,
+            preferred_temp_group_id=preferred_temp_group_id,
+            history_message=history_message,
+            attachments=attachments,
+        )
+
+    async def send_private_file(
+        self,
+        user_id: int,
+        file_path: str,
+        name: str | None = None,
+        auto_history: bool = True,
+    ) -> None:
+        if int(user_id) != self._address.target_id:
+            await self._sender.send_private_file(
+                user_id,
+                file_path,
+                name=name,
+                auto_history=auto_history,
+            )
+            return
+        await self._sender.send_address_file(
+            self._address,
+            file_path,
+            name=name,
+            auto_history=auto_history,
+        )
+
+    async def send_private_forward_message(
+        self,
+        user_id: int,
+        messages: list[dict[str, Any]],
+        *,
+        history_message: str,
+        auto_history: bool = True,
+    ) -> None:
+        if int(user_id) != self._address.target_id or self._address.channel == "qq":
+            await self._sender.send_private_forward_message(
+                user_id,
+                messages,
+                history_message=history_message,
+                auto_history=auto_history,
+            )
+            return
+        await self._send_weixin_forward(messages)
+        if auto_history:
+            await self._sender.history_manager.add_private_message(
+                user_id=user_id,
+                text_content=history_message,
+                display_name="Bot",
+                user_name="Bot",
+                transport={
+                    "channel": "wechat",
+                    "address": self._address.canonical,
+                },
+            )
+
+    async def _send_weixin_forward(self, messages: list[dict[str, Any]]) -> None:
+        for node in messages:
+            data = node.get("data")
+            if not isinstance(data, dict):
+                continue
+            content = data.get("content")
+            if isinstance(content, str) and content.strip():
+                await self._sender.send_address_message(
+                    self._address,
+                    content,
+                    auto_history=False,
+                )
+                continue
+            if not isinstance(content, list):
+                continue
+            text_parts: list[str] = []
+            for segment in content:
+                if not isinstance(segment, dict):
+                    continue
+                segment_type = str(segment.get("type", "") or "").strip().lower()
+                segment_data = segment.get("data")
+                if not isinstance(segment_data, dict):
+                    continue
+                if segment_type == "text":
+                    text_parts.append(str(segment_data.get("text", "") or ""))
+                    continue
+                if segment_type not in {"image", "video", "file"}:
+                    continue
+                path = _local_path_from_segment_source(segment_data.get("file"))
+                if path is not None:
+                    await self._sender.send_address_file(
+                        self._address,
+                        str(path),
+                        name=path.name,
+                        kind=segment_type,
+                        auto_history=False,
+                    )
+            text = "".join(text_parts).strip()
+            if text:
+                await self._sender.send_address_message(
+                    self._address,
+                    text,
+                    auto_history=False,
+                )

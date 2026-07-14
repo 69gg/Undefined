@@ -7,6 +7,7 @@ import asyncio
 import logging
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from Undefined.attachments import (
@@ -20,6 +21,8 @@ from Undefined.context_resource_registry import collect_context_resources
 from Undefined.render import render_html_to_image, render_markdown_to_html
 from Undefined.services.message_batcher import BufferedMessage, make_scope
 from Undefined.utils.recent_messages import get_recent_messages_prefer_local
+from Undefined.utils.message_targets import DeliveryAddress, parse_delivery_address
+from Undefined.utils.sender import AddressBoundSender
 from Undefined.utils.xml import (
     escape_xml_attr,
     escape_xml_text_preserving_attachment_tags,
@@ -66,6 +69,7 @@ class PrivateReplyMixin:
             text: str,
             is_private: bool = False,
             sender_id: int | None = None,
+            address: DeliveryAddress | None = None,
         ) -> None: ...
         async def _send_image(self, tid: int, mtype: str, path: str) -> None: ...
 
@@ -77,7 +81,10 @@ class PrivateReplyMixin:
         attachments: list[dict[str, str]] | None = None,
         is_poke: bool = False,
         sender_name: str = "未知用户",
-        trigger_message_id: int | None = None,
+        trigger_message_id: int | str | None = None,
+        channel: str = "qq",
+        address: str | None = None,
+        batch_scope: str | None = None,
     ) -> None:
         """处理私聊消息入口，决定回复策略并进行安全检测"""
         logger.debug("[私聊回复] user=%s text_len=%s", user_id, len(text))
@@ -87,10 +94,34 @@ class PrivateReplyMixin:
                 await self.history_manager.modify_last_private_message(
                     user_id, "<这句话检测到用户进行注入，已删除>"
                 )
-                await self._handle_injection_response(user_id, text, is_private=True)
+                resolved, error = parse_delivery_address(
+                    address or f"{channel}:{user_id}"
+                )
+                if error or resolved is None:
+                    raise ValueError(error or "私聊投递地址无效")
+                await self._handle_injection_response(
+                    user_id,
+                    text,
+                    is_private=True,
+                    address=resolved,
+                )
                 return
 
-        scope = make_scope(user_id=user_id)
+        resolved_address, address_error = parse_delivery_address(
+            address or f"{channel}:{user_id}"
+        )
+        if address_error or resolved_address is None:
+            raise ValueError(address_error or "私聊投递地址无效")
+        if (
+            resolved_address.target_type != "private"
+            or resolved_address.target_id != user_id
+        ):
+            raise ValueError("私聊投递地址与逻辑 QQ 身份不一致")
+        scope = batch_scope or (
+            make_scope(user_id=user_id)
+            if resolved_address.channel == "qq"
+            else f"private:{resolved_address.canonical}"
+        )
         item = BufferedMessage(
             scope=scope,
             sender_id=user_id,
@@ -102,6 +133,8 @@ class PrivateReplyMixin:
             is_private=True,
             trigger_message_id=trigger_message_id,
             is_poke=is_poke,
+            channel=resolved_address.channel,
+            address=resolved_address.canonical,
         )
 
         if is_poke:
@@ -126,17 +159,27 @@ class PrivateReplyMixin:
             for item in request.get("message_ids", [])
             if str(item).strip()
         ]
-        batcher_scope: str | None = make_scope(user_id=user_id)
+        address, address_error = parse_delivery_address(
+            request.get("address") or f"qq:{user_id}"
+        )
+        if address_error or address is None:
+            raise ValueError(address_error or "私聊投递地址无效")
+        if address.target_type != "private" or address.target_id != user_id:
+            raise ValueError("私聊投递地址与逻辑 QQ 身份不一致")
+        channel = address.channel
+        batcher_scope = str(request.get("batch_scope") or make_scope(user_id=user_id))
 
         async with RequestContext(
             request_type="private",
             user_id=user_id,
             sender_id=user_id,
+            channel=channel,
+            address=address.canonical,
         ) as ctx:
 
             async def send_msg_cb(message: str, reply_to: int | None = None) -> None:
-                await self.sender.send_private_message(
-                    user_id, message, reply_to=reply_to
+                await self.sender.send_address_message(
+                    address, message, reply_to=reply_to
                 )
 
             async def get_recent_cb(
@@ -154,6 +197,33 @@ class PrivateReplyMixin:
                 )
 
             async def send_img_cb(tid: int, mtype: str, path: str) -> None:
+                if (
+                    address.channel == "wechat"
+                    and mtype == "private"
+                    and tid == user_id
+                ):
+                    suffix = Path(path).suffix.lower()
+                    if suffix in {
+                        ".jpg",
+                        ".jpeg",
+                        ".png",
+                        ".gif",
+                        ".bmp",
+                        ".webp",
+                    }:
+                        kind = "image"
+                    elif suffix in {".mp3", ".wav", ".ogg", ".flac", ".m4a", ".aac"}:
+                        kind = "voice"
+                    else:
+                        return
+                    await self.sender.send_address_file(
+                        address,
+                        path,
+                        name=Path(path).name,
+                        kind=kind,
+                        auto_history=False,
+                    )
+                    return
                 await self._send_image(tid, mtype, path)
 
             async def send_like_cb(uid: int, times: int = 1) -> None:
@@ -162,12 +232,27 @@ class PrivateReplyMixin:
             async def send_private_cb(
                 uid: int, msg: str, reply_to: int | None = None
             ) -> None:
-                await self.sender.send_private_message(uid, msg, reply_to=reply_to)
+                if uid == user_id:
+                    await self.sender.send_address_message(
+                        address,
+                        msg,
+                        reply_to=reply_to,
+                    )
+                else:
+                    await self.sender.send_private_message(
+                        uid,
+                        msg,
+                        reply_to=reply_to,
+                    )
 
             ai_client = self.ai
             memory_storage = self.ai.memory_storage
             runtime_config = self.ai.runtime_config
-            sender = self.sender
+            sender = (
+                AddressBoundSender(self.sender, address)
+                if address.channel == "wechat"
+                else self.sender
+            )
             history_manager = self.history_manager
             onebot_client = self.onebot
             scheduler = self.scheduler
@@ -184,6 +269,8 @@ class PrivateReplyMixin:
             for key, value in resources.items():
                 if value is not None:
                     ctx.set_resource(key, value)
+            ctx.set_resource("channel", channel)
+            ctx.set_resource("address", address.canonical)
             if trigger_message_id is not None:
                 ctx.set_resource("trigger_message_id", trigger_message_id)
             if message_ids:
@@ -207,7 +294,18 @@ class PrivateReplyMixin:
                 ):
                     batcher.register_inflight(batcher_scope, user_id, current_task, ctx)
                     registered_task = current_task
+                typing_started = False
                 try:
+                    if address.channel == "wechat":
+                        try:
+                            await self.sender.set_address_typing(address, True)
+                            typing_started = True
+                        except Exception:
+                            logger.debug(
+                                "[微信] 设置输入状态失败: address=%s",
+                                address.canonical,
+                                exc_info=True,
+                            )
                     result = await self.ai.ask(
                         full_question,
                         send_message_callback=send_msg_cb,
@@ -215,7 +313,7 @@ class PrivateReplyMixin:
                         get_image_url_callback=self.onebot.get_image,
                         get_forward_msg_callback=self.onebot.get_forward_msg,
                         send_like_callback=send_like_cb,
-                        sender=self.sender,
+                        sender=sender,
                         history_manager=self.history_manager,
                         onebot_client=self.onebot,
                         scheduler=self.scheduler,
@@ -232,9 +330,20 @@ class PrivateReplyMixin:
                                 request.get("batched_count", 1) or 1
                             )
                             > 1,
+                            "channel": channel,
+                            "address": address.canonical,
                         },
                     )
                 finally:
+                    if typing_started:
+                        try:
+                            await self.sender.set_address_typing(address, False)
+                        except Exception:
+                            logger.debug(
+                                "[微信] 取消输入状态失败: address=%s",
+                                address.canonical,
+                                exc_info=True,
+                            )
                     if (
                         batcher is not None
                         and batcher_scope is not None
@@ -254,10 +363,11 @@ class PrivateReplyMixin:
                         scope_key=scope_key,
                         strict=False,
                     )
-                    await self.sender.send_private_message(
-                        user_id,
+                    await self.sender.send_address_message(
+                        address,
                         rendered.delivery_text,
                         history_message=rendered.history_text,
+                        attachments=list(rendered.attachments),
                     )
                     await dispatch_pending_file_sends(
                         rendered,
@@ -265,6 +375,7 @@ class PrivateReplyMixin:
                         target_type="private",
                         target_id=user_id,
                         registry=self.ai.attachment_registry,
+                        address=address,
                     )
             except asyncio.CancelledError:
                 logger.info("[私聊回复] 任务被取消（投机抢占）: user=%s", user_id)
@@ -281,6 +392,8 @@ class PrivateReplyMixin:
         safe_name = escape_xml_attr(item.sender_name or "未知用户")
         safe_uid = escape_xml_attr(item.sender_id)
         safe_time = escape_xml_attr(time_str)
+        safe_channel = escape_xml_attr(item.channel)
+        safe_address = escape_xml_attr(item.address)
         safe_text = escape_xml_text_preserving_attachment_tags(
             item.text,
             item.attachments,
@@ -293,9 +406,14 @@ class PrivateReplyMixin:
         attachment_xml = (
             f"\n{attachment_refs_to_xml(item.attachments)}" if item.attachments else ""
         )
+        route_attrs = ""
+        location = "私聊"
+        if item.channel == "wechat":
+            route_attrs = f' channel="{safe_channel}" address="{safe_address}"'
+            location = "微信私聊"
         return (
             f'<message{message_id_attr} sender="{safe_name}" sender_id="{safe_uid}" '
-            f'location="私聊" time="{safe_time}">\n'
+            f'{route_attrs.lstrip()} location="{location}" time="{safe_time}">\n'
             f" <content>{safe_text}</content>{attachment_xml}\n"
             f" </message>"
         )

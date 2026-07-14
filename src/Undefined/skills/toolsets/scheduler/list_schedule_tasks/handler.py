@@ -31,6 +31,10 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         ).strip()
         max_exec = info.get("max_executions")
         current_exec = info.get("current_executions", 0)
+        address = str(info.get("address") or "").strip()
+        if not address and info.get("target_id"):
+            channel = "group" if info.get("target_type") == "group" else "qq"
+            address = f"{channel}:{info['target_id']}"
 
         exec_info = ""
         if max_exec is not None:
@@ -50,6 +54,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         lines.append(f"  名称: {name_display}")
         lines.append(f"  工具: {tool_display}")
         lines.append(f"  表达式: {cron}")
+        lines.append(f"  投递地址: {address or '未指定'}")
         lines.append(f"  参数: {args_str}")
         lines.append(f"  已执行: {exec_info}")
         lines.append("")

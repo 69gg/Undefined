@@ -7,6 +7,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from Undefined.context import RequestContext
+from Undefined.utils.message_targets import DeliveryAddress
 from Undefined.utils.sender import MAX_MESSAGE_LENGTH, MessageSender
 
 
@@ -366,3 +368,89 @@ async def test_send_private_message_chunked_reuses_successful_temp_session_group
     assert history_mock.await_count == 1
     assert history_mock.await_args is not None
     assert history_mock.await_args.kwargs["message_id"] == 223344
+
+
+@pytest.mark.asyncio
+async def test_send_wechat_message_routes_text_and_records_transport(
+    sender: MessageSender,
+) -> None:
+    service = SimpleNamespace(send_text=AsyncMock(return_value="client-1"))
+    sender.set_weixin_service(service)
+
+    async with RequestContext("private", user_id=12345, sender_id=12345) as ctx:
+        await sender.send_address_message(
+            DeliveryAddress("wechat", 12345),
+            "hello",
+        )
+        assert ctx.get_resource("message_sent_this_turn") is True
+
+    service.send_text.assert_awaited_once_with(12345, "hello")
+    history_mock = cast(AsyncMock, sender.history_manager.add_private_message)
+    assert history_mock.await_args is not None
+    assert history_mock.await_args.kwargs["transport"] == {
+        "channel": "wechat",
+        "address": "wechat:12345",
+    }
+
+
+@pytest.mark.asyncio
+async def test_send_wechat_message_splits_long_text_without_duplicate_history(
+    sender: MessageSender,
+) -> None:
+    service = SimpleNamespace(send_text=AsyncMock(return_value="client-1"))
+    sender.set_weixin_service(service)
+    message = f"{'a' * (MAX_MESSAGE_LENGTH - 5)}\n{'b' * 10}"
+
+    await sender.send_address_message(DeliveryAddress("wechat", 12345), message)
+
+    assert [call.args[1] for call in service.send_text.await_args_list] == [
+        f"{'a' * (MAX_MESSAGE_LENGTH - 5)}\n",
+        "b" * 10,
+    ]
+    history_mock = cast(AsyncMock, sender.history_manager.add_private_message)
+    history_mock.assert_awaited_once()
+    assert history_mock.await_args is not None
+    assert history_mock.await_args.kwargs["text_content"] == message
+
+
+@pytest.mark.asyncio
+async def test_send_wechat_record_rejects_before_partial_text_send(
+    sender: MessageSender,
+    tmp_path: Path,
+) -> None:
+    voice_path = tmp_path / "voice.silk"
+    voice_path.write_bytes(b"silk")
+    service = SimpleNamespace(
+        send_text=AsyncMock(return_value="client-1"),
+        send_file=AsyncMock(return_value="client-2"),
+    )
+    sender.set_weixin_service(service)
+
+    with pytest.raises(ValueError, match="不支持发送语音"):
+        await sender.send_address_message(
+            DeliveryAddress("wechat", 12345),
+            f"hello[CQ:record,file={voice_path.resolve().as_uri()}]",
+        )
+
+    service.send_text.assert_not_awaited()
+    service.send_file.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_send_wechat_file_enforces_private_access_control(
+    sender: MessageSender,
+    tmp_path: Path,
+) -> None:
+    file_path = tmp_path / "report.txt"
+    file_path.write_text("report", encoding="utf-8")
+    service = SimpleNamespace(send_file=AsyncMock(return_value="client-1"))
+    sender.set_weixin_service(service)
+    cast(MagicMock, sender.config.is_private_allowed).return_value = False
+
+    with pytest.raises(PermissionError, match="access control"):
+        await sender.send_address_file(
+            DeliveryAddress("wechat", 12345),
+            str(file_path),
+        )
+
+    service.send_file.assert_not_awaited()

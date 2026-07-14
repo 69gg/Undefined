@@ -6,6 +6,7 @@
 - 创建/更新/删除定时任务
 - 列出定时任务
 - 支持“调用未来的自己”：通过 `self_instruction` 让定时任务在触发时调用 AI 自身
+- 使用统一 `address` 投递目标：`qq:<QQ号>`、`group:<群号>`、`wechat:<逻辑QQ号>`；省略时继承当前会话物理通道
 
 目录结构：
 - 每个子目录对应一个工具（`config.json` + `handler.py`）
@@ -23,6 +24,7 @@
 ```json
 {
   "cron_expression": "0 9 * * *",
+  "address": "wechat:12345678",
   "self_instruction": "请总结昨天群里提到的待办，并提醒我今天优先处理前三项。"
 }
 ```

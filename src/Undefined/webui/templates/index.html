@@ -142,6 +142,9 @@
                 <li class="nav-item" data-tab="schedules" data-i18n="tabs.schedules" role="button" tabindex="0">
                     定时任务
                 </li>
+                <li class="nav-item" data-tab="weixin" data-i18n="tabs.weixin" role="button" tabindex="0">
+                    微信接入
+                </li>
                 <li class="nav-item" data-tab="chat" data-i18n="tabs.chat" role="button" tabindex="0">
                     智能对话
                 </li>
@@ -240,6 +243,7 @@
                             <button class="nav-item" data-tab="memory" data-i18n="tabs.memory">记忆检索</button>
                             <button class="nav-item" data-tab="memes" data-i18n="tabs.memes">表情包库</button>
                             <button class="nav-item" data-tab="schedules" data-i18n="tabs.schedules">定时任务</button>
+                            <button class="nav-item" data-tab="weixin" data-i18n="tabs.weixin">微信接入</button>
                             <button class="nav-item" data-tab="chat" data-i18n="tabs.chat">智能对话</button>
                             <button class="nav-item" data-tab="about" data-i18n="tabs.about">About</button>
                         </div>
@@ -761,6 +765,90 @@
                     </div>
                 </section>
 
+                <!-- Tab WeChat -->
+                <section id="tab-weixin" class="tab-content">
+                    <div class="header">
+                        <div>
+                            <h1 class="page-title" data-i18n="weixin.title">微信接入</h1>
+                            <p class="page-subtitle" data-i18n="weixin.subtitle">管理 iLink 帐号与逻辑 QQ 身份绑定。</p>
+                        </div>
+                        <div class="toolbar">
+                            <button id="btnWeixinRefresh" class="btn" type="button" data-i18n="weixin.refresh">刷新</button>
+                            <button id="btnWeixinBind" class="btn primary" type="button" data-i18n="weixin.bind">绑定帐号</button>
+                        </div>
+                    </div>
+
+                    <div id="weixinDisabledNotice" class="warning-banner weixin-notice" hidden>
+                        <span data-i18n="weixin.disabled">微信接入未启用。请先设置 weixin.enabled = true 并重启 Bot。</span>
+                    </div>
+
+                    <div class="weixin-status-band" aria-live="polite">
+                        <div class="weixin-status-item">
+                            <span data-i18n="weixin.runtime">运行状态</span>
+                            <strong id="weixinRuntimeStatus">--</strong>
+                        </div>
+                        <div class="weixin-status-item">
+                            <span data-i18n="weixin.accounts">绑定帐号</span>
+                            <strong id="weixinAccountCount">--</strong>
+                        </div>
+                        <div class="weixin-status-item">
+                            <span data-i18n="weixin.connected">在线帐号</span>
+                            <strong id="weixinConnectedCount">--</strong>
+                        </div>
+                        <div class="weixin-status-item">
+                            <span data-i18n="weixin.quarantined">隔离来源</span>
+                            <strong id="weixinPendingCount">--</strong>
+                        </div>
+                    </div>
+
+                    <div id="weixinPageStatus" class="status-msg" role="status"></div>
+
+                    <div class="weixin-section">
+                        <div class="weixin-section-heading">
+                            <div>
+                                <h2 data-i18n="weixin.account_list">帐号绑定</h2>
+                                <p data-i18n="weixin.account_scope">每个逻辑 QQ 号最多绑定一个微信帐号。</p>
+                            </div>
+                        </div>
+                        <div class="weixin-table-wrap">
+                            <table class="weixin-table">
+                                <thead>
+                                    <tr>
+                                        <th data-i18n="weixin.alias">别名</th>
+                                        <th data-i18n="weixin.identity">逻辑身份</th>
+                                        <th data-i18n="weixin.state">状态</th>
+                                        <th data-i18n="weixin.updated">更新时间</th>
+                                        <th class="weixin-actions-col" data-i18n="weixin.actions">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="weixinAccountsBody"></tbody>
+                            </table>
+                            <div id="weixinAccountsEmpty" class="empty-state" hidden data-i18n="weixin.empty">暂无微信帐号绑定。</div>
+                        </div>
+                    </div>
+
+                    <div class="weixin-secondary-grid">
+                        <div class="weixin-section">
+                            <div class="weixin-section-heading">
+                                <div>
+                                    <h2 data-i18n="weixin.pending_title">隔离来源</h2>
+                                    <p data-i18n="weixin.pending_scope">未匹配绑定身份的消息不会进入历史或 AI。</p>
+                                </div>
+                            </div>
+                            <div id="weixinPendingList" class="weixin-list"></div>
+                        </div>
+                        <div class="weixin-section">
+                            <div class="weixin-section-heading">
+                                <div>
+                                    <h2 data-i18n="weixin.audit_title">绑定审计</h2>
+                                    <p data-i18n="weixin.audit_scope">最近的登录、启停、改绑与解绑操作。</p>
+                                </div>
+                            </div>
+                            <div id="weixinAuditList" class="weixin-list"></div>
+                        </div>
+                    </div>
+                </section>
+
                 <!-- Tab Schedules -->
                 <section id="tab-schedules" class="tab-content">
                     <div class="header">
@@ -830,15 +918,9 @@
                                     <input id="scheduleMaxExecutions" type="number" min="1" step="1" class="form-control" />
                                 </div>
                                 <div class="form-group">
-                                    <label class="form-label" for="scheduleTargetType" data-i18n="schedules.target_type">目标类型</label>
-                                    <select id="scheduleTargetType" class="form-control">
-                                        <option value="group" data-i18n="schedules.target_group">群聊</option>
-                                        <option value="private" data-i18n="schedules.target_private">私聊</option>
-                                    </select>
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="scheduleTargetId" data-i18n="schedules.target_id">目标 ID</label>
-                                    <input id="scheduleTargetId" type="number" min="1" step="1" class="form-control" />
+                                    <label class="form-label" for="scheduleTargetAddress" data-i18n="schedules.target_address">投递地址</label>
+                                    <input id="scheduleTargetAddress" type="text" class="form-control" placeholder="wechat:12345678" />
+                                    <p class="form-hint" data-i18n="schedules.target_address_hint">支持 qq:&lt;QQ号&gt;、group:&lt;群号&gt; 或 wechat:&lt;逻辑QQ号&gt;。</p>
                                 </div>
                             </div>
 
@@ -1044,6 +1126,57 @@
         </main>
     </div>
 
+    <div id="weixinDialogBackdrop" class="weixin-dialog-backdrop" role="presentation" aria-hidden="true" hidden>
+        <section id="weixinDialog" class="weixin-dialog" role="dialog" aria-modal="true" aria-labelledby="weixinDialogTitle">
+            <div class="weixin-dialog-head">
+                <div>
+                    <span class="weixin-dialog-kicker" data-i18n="weixin.dialog_kicker">微信 iLink</span>
+                    <h2 id="weixinDialogTitle" data-i18n="weixin.dialog_bind">绑定帐号</h2>
+                </div>
+                <button id="btnWeixinDialogClose" class="btn ghost btn-sm" type="button" data-i18n="common.close">关闭</button>
+            </div>
+
+            <form id="weixinBindingForm" class="weixin-binding-form" autocomplete="off">
+                <div class="form-group">
+                    <label class="form-label" for="weixinAliasInput" data-i18n="weixin.alias">别名</label>
+                    <input id="weixinAliasInput" class="form-control" type="text" maxlength="64" required placeholder="primary" />
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="weixinQqInput" data-i18n="weixin.identity_qq">逻辑 QQ 号</label>
+                    <input id="weixinQqInput" class="form-control" type="number" min="1" step="1" required />
+                </div>
+                <div id="weixinConfirmationPanel" class="weixin-confirmation" hidden>
+                    <strong data-i18n="weixin.confirm_title">高权限身份确认</strong>
+                    <p id="weixinConfirmationText"></p>
+                </div>
+                <div id="weixinDialogStatus" class="status-msg" role="status"></div>
+                <div class="weixin-dialog-actions">
+                    <button id="btnWeixinBindingCancel" class="btn ghost" type="button" data-i18n="common.close">关闭</button>
+                    <button id="btnWeixinBindingSubmit" class="btn primary" type="submit" data-i18n="weixin.continue">继续</button>
+                </div>
+            </form>
+
+            <div id="weixinQrStep" class="weixin-qr-step" hidden>
+                <div class="weixin-qr-frame">
+                    <img id="weixinQrImage" alt="WeChat QR code" />
+                </div>
+                <strong id="weixinQrState" data-i18n="weixin.wait_scan">等待微信扫码</strong>
+                <p id="weixinQrMessage" class="muted-sm"></p>
+                <form id="weixinVerifyForm" class="weixin-verify-form" hidden>
+                    <label class="form-label" for="weixinVerifyInput" data-i18n="weixin.verify_code">验证码</label>
+                    <div class="runtime-inline">
+                        <input id="weixinVerifyInput" class="form-control" type="text" inputmode="numeric" pattern="[0-9]+" autocomplete="one-time-code" />
+                        <button class="btn" type="submit" data-i18n="weixin.submit">提交</button>
+                    </div>
+                </form>
+                <div class="weixin-dialog-actions">
+                    <button id="btnWeixinQrCancel" class="btn ghost" type="button" data-i18n="weixin.cancel_login">取消登录</button>
+                    <button id="btnWeixinQrRefresh" class="btn" type="button" data-i18n="weixin.refresh_qr">刷新二维码</button>
+                </div>
+            </div>
+        </section>
+    </div>
+
     <div id="updateDialogBackdrop" class="update-dialog-backdrop" role="presentation" aria-hidden="true" hidden>
         <section
             id="updateDialog"
@@ -1097,6 +1230,7 @@
     <script src="/static/js/runtime.js"></script>
     <script src="/static/js/memes.js"></script>
     <script src="/static/js/schedules.js"></script>
+    <script src="/static/js/weixin.js"></script>
     <script src="/static/js/config-form.js"></script>
     <script src="/static/js/log-view.js"></script>
     <script src="/static/js/main.js"></script>

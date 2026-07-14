@@ -1397,6 +1397,24 @@ autostart_bot = false
 # en: Check GitHub Releases for updates in the background whenever WebUI is opened.
 check_updates = true
 
+# zh: 微信 ClawBot/iLink 私聊接入。凭据与游标仅写入 state_dir，不写入本配置。
+# zh: 关闭时不会创建网络连接；二维码登录只能从管理界面显式发起。
+# en: WeChat ClawBot/iLink private-chat integration. Credentials and cursors are
+# en: stored under state_dir and never in this configuration file.
+[weixin]
+enabled = false
+state_dir = "data/weixin"
+long_poll_timeout_seconds = 35.0
+stale_token_pause_seconds = 3600.0
+retry_delay_seconds = 2.0
+failure_backoff_seconds = 30.0
+failures_before_backoff = 3
+media_max_size_mb = 100
+login_session_ttl_seconds = 300.0
+privileged_confirmation_ttl_seconds = 300.0
+pending_max_records = 100
+audit_max_records = 1000
+
 # zh: 主进程 Runtime API（供 WebUI/外部系统读取探针、记忆检索、AI Chat 使用）。
 # en: Runtime API in the main process (for WebUI/external integrations: probes, memory queries, AI chat).
 [api]

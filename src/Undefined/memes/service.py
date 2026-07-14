@@ -33,7 +33,7 @@ from Undefined.memes.models import (
 )
 from Undefined.memes.store import MemeStore
 from Undefined.memes.vector_store import MemeVectorStore
-from Undefined.utils.message_targets import resolve_message_target
+from Undefined.utils.message_targets import resolve_delivery_address
 from Undefined.utils.coerce import safe_int
 from Undefined.utils.paths import ensure_dir
 
@@ -627,11 +627,9 @@ class MemeService:
             "target_type": context.get("target_type"),
             "target_id": context.get("target_id"),
         }
-        target, target_error = resolve_message_target(tool_args, context)
+        target, target_error = resolve_delivery_address(tool_args, context)
         if target_error or target is None:
             return f"发送失败：{target_error or '无法确定目标会话'}"
-        target_type, target_id = target
-
         local_path = Path(record.blob_path)
         if not local_path.is_file():
             return f"发送失败：表情包文件不存在：{uid}"
@@ -645,22 +643,33 @@ class MemeService:
             else None
         )
 
-        if target_type == "group":
-            sent_message_id = await sender.send_group_message(
-                int(target_id),
-                cq_message,
-                history_message=history_message,
-                attachments=history_attachments,
-            )
-        else:
-            preferred_temp_group_id = safe_int(context.get("group_id")) or None
-            sent_message_id = await sender.send_private_message(
-                int(target_id),
+        preferred_temp_group_id = safe_int(context.get("group_id")) or None
+        send_address_message = getattr(sender, "send_address_message", None)
+        if callable(send_address_message):
+            sent_message_id = await send_address_message(
+                target,
                 cq_message,
                 preferred_temp_group_id=preferred_temp_group_id,
                 history_message=history_message,
                 attachments=history_attachments,
             )
+        elif target.channel == "group":
+            sent_message_id = await sender.send_group_message(
+                target.target_id,
+                cq_message,
+                history_message=history_message,
+                attachments=history_attachments,
+            )
+        elif target.channel == "qq":
+            sent_message_id = await sender.send_private_message(
+                target.target_id,
+                cq_message,
+                preferred_temp_group_id=preferred_temp_group_id,
+                history_message=history_message,
+                attachments=history_attachments,
+            )
+        else:
+            return "发送失败：当前 sender 不支持微信投递地址"
 
         now = _now_iso()
         updated_record = await self._store.increment_use(uid, now)

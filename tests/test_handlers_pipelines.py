@@ -10,6 +10,8 @@ import pytest
 import Undefined.handlers as handlers_module
 from Undefined.handlers import MessageHandler
 from Undefined.skills.pipelines import PipelineRegistry
+from Undefined.utils.message_targets import DeliveryAddress
+from Undefined.utils.sender import AddressBoundSender
 
 
 @pytest.mark.asyncio
@@ -143,6 +145,43 @@ async def test_pipelines_processes_all_matches() -> None:
         ["69gg/Undefined"],
         "private",
     )
+
+
+@pytest.mark.asyncio
+async def test_wechat_pipeline_receives_address_bound_sender() -> None:
+    handler: Any = MessageHandler.__new__(MessageHandler)
+    handler.sender = SimpleNamespace()
+    handler.onebot = SimpleNamespace()
+    handler.config = SimpleNamespace(
+        bilibili_auto_extract_enabled=False,
+        douyin_auto_extract_enabled=False,
+        arxiv_auto_extract_enabled=False,
+        github_auto_extract_enabled=True,
+        is_github_auto_extract_allowed_private=lambda _uid: True,
+    )
+    handler._extract_bilibili_ids = AsyncMock(return_value=[])
+    handler._extract_douyin_ids = MagicMock(return_value=[])
+    handler._extract_arxiv_ids = MagicMock(return_value=[])
+    handler._extract_github_repo_ids = MagicMock(return_value=["69gg/Undefined"])
+    handler._handle_bilibili_extract = AsyncMock()
+    handler._handle_douyin_extract = AsyncMock()
+    handler._handle_arxiv_extract = AsyncMock()
+    handler._handle_github_extract = AsyncMock()
+    handler.pipeline_registry = PipelineRegistry()
+    handler.pipeline_registry.load_items()
+
+    handled = await handler._run_pipelines(
+        target_id=20001,
+        target_type="private",
+        text="69gg/Undefined",
+        message_content=[],
+        address=DeliveryAddress("wechat", 20001),
+    )
+
+    assert handled is True
+    args = handler._handle_github_extract.await_args.args
+    assert args[:3] == (20001, ["69gg/Undefined"], "private")
+    assert isinstance(args[3], AddressBoundSender)
 
 
 @pytest.mark.asyncio

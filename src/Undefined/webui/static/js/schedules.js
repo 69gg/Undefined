@@ -166,6 +166,7 @@
                 task.cron,
                 task.tool_name,
                 task.self_instruction,
+                task.address,
                 task.target_id,
                 task.target_type,
             ]
@@ -194,9 +195,7 @@
                 const selected = taskId === scheduleState.selectedId;
                 const mode = modeOfTask(task);
                 const nextRun = formatDateTime(task.next_run_time);
-                const target = task.target_id
-                    ? `${task.target_type || "group"}:${task.target_id}`
-                    : t("schedules.no_target");
+                const target = taskAddress(task) || t("schedules.no_target");
                 return `<button class="schedule-list-item${selected ? " is-selected" : ""}" type="button" data-task-id="${escapeHtml(taskId)}">
                     <span class="schedule-list-main">
                         <span class="schedule-list-title">${escapeHtml(taskTitle(task))}</span>
@@ -245,11 +244,20 @@
         return checked ? checked.value : "single";
     }
 
+    function taskAddress(task) {
+        const explicit = String(task?.address || "").trim();
+        if (explicit) return explicit;
+        if (!task?.target_id) return "";
+        const channel = task.target_type === "group" ? "group" : "qq";
+        return `${channel}:${task.target_id}`;
+    }
+
     function emptyDraft() {
         return {
             task_id: "",
             task_name: "",
             cron: "0 9 * * *",
+            address: "",
             target_type: "group",
             target_id: null,
             max_executions: null,
@@ -272,7 +280,7 @@
         const fields = {
             scheduleTaskName: source.task_name || "",
             scheduleCron: source.cron || "0 9 * * *",
-            scheduleTargetId: source.target_id || "",
+            scheduleTargetAddress: taskAddress(source),
             scheduleMaxExecutions: source.max_executions || "",
             scheduleToolName:
                 source.tool_name === SELF_TOOL_NAME
@@ -284,8 +292,6 @@
             const el = get(id);
             if (el) el.value = String(value || "");
         });
-        const targetType = get("scheduleTargetType");
-        if (targetType) targetType.value = source.target_type || "group";
         const executionMode = get("scheduleExecutionMode");
         if (executionMode)
             executionMode.value = source.execution_mode || "serial";
@@ -357,11 +363,9 @@
             mode,
             task_name: String(get("scheduleTaskName")?.value || "").trim(),
             cron_expression: cron,
-            target_type: String(get("scheduleTargetType")?.value || "group"),
-            target_id: readPositiveInt(
-                "scheduleTargetId",
-                t("schedules.target_id"),
-            ),
+            address:
+                String(get("scheduleTargetAddress")?.value || "").trim() ||
+                null,
             max_executions: readPositiveInt(
                 "scheduleMaxExecutions",
                 t("schedules.max_executions"),
