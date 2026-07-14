@@ -1401,18 +1401,44 @@ check_updates = true
 # zh: 关闭时不会创建网络连接；二维码登录只能从管理界面显式发起。
 # en: WeChat ClawBot/iLink private-chat integration. Credentials and cursors are
 # en: stored under state_dir and never in this configuration file.
+# en: No network connection is created when disabled; QR-code login can only be
+# en: started explicitly from the management interface.
 [weixin]
+# zh: 是否启用微信 iLink 接入。关闭时不建立网络连接。
+# en: Enable the WeChat iLink integration. No network connection is made when disabled.
 enabled = false
+# zh: 敏感凭据、游标、绑定、隔离记录和审计记录的存储目录。
+# en: Directory for sensitive credentials, cursors, bindings, quarantined peers, and audit records.
 state_dir = "data/weixin"
+# zh: 单次消息长轮询的超时时间（秒）。
+# en: Timeout for each message long-poll request, in seconds.
 long_poll_timeout_seconds = 35.0
+# zh: 上游提示 token 失效后暂停重试的时间（秒）。
+# en: Pause before retrying after the upstream reports a stale token, in seconds.
 stale_token_pause_seconds = 3600.0
+# zh: 普通请求失败后的重试间隔（秒）。
+# en: Retry delay after an ordinary request failure, in seconds.
 retry_delay_seconds = 2.0
+# zh: 连续失败达到阈值后的退避时间（秒）。
+# en: Backoff duration after consecutive failures reach the threshold, in seconds.
 failure_backoff_seconds = 30.0
+# zh: 进入长退避的连续失败次数阈值。
+# en: Consecutive failure threshold for entering the longer backoff.
 failures_before_backoff = 3
+# zh: 单个入站或出站媒体文件的大小上限（MB）。
+# en: Maximum size of one inbound or outbound media file, in MB.
 media_max_size_mb = 100
+# zh: 二维码登录会话的有效期（秒）。
+# en: Lifetime of a QR-code login session, in seconds.
 login_session_ttl_seconds = 300.0
+# zh: 绑定管理员或超级管理员身份时，二次确认 token 的有效期（秒）。
+# en: Lifetime of a confirmation token when binding an admin or superadmin identity, in seconds.
 privileged_confirmation_ttl_seconds = 300.0
+# zh: 最多保留的未知来源隔离记录数。
+# en: Maximum number of quarantined unknown-peer records to retain.
 pending_max_records = 100
+# zh: 最多保留的帐号管理审计记录数。
+# en: Maximum number of account-management audit records to retain.
 audit_max_records = 1000
 
 # zh: 主进程 Runtime API（供 WebUI/外部系统读取探针、记忆检索、AI Chat 使用）。
