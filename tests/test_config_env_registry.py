@@ -55,6 +55,21 @@ def test_registry_has_tool_search_entries() -> None:
     )
 
 
+def test_registry_has_long_image_render_entries() -> None:
+    assert (
+        ENV_REGISTRY[("render", "browser_executable_path")]
+        == "RENDER_BROWSER_EXECUTABLE_PATH"
+    )
+    assert (
+        ENV_REGISTRY[("render", "long_image_default_width")]
+        == "RENDER_LONG_IMAGE_DEFAULT_WIDTH"
+    )
+    assert (
+        ENV_REGISTRY[("render", "long_image_default_padding")]
+        == "RENDER_LONG_IMAGE_DEFAULT_PADDING"
+    )
+
+
 def test_registry_uses_scoped_proxy_env_keys() -> None:
     assert "USE_PROXY" not in ENV_REGISTRY.values()
     assert ENV_REGISTRY[("search", "use_proxy")] == "SEARCH_USE_PROXY"

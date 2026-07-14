@@ -5,13 +5,14 @@ import logging
 import sys
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from playwright.async_api import async_playwright, Browser, Page, Playwright
+from typing import Any, Literal, TypeVar
 
 import markdown
+from playwright.async_api import Browser, Page, Playwright, Route, async_playwright
 
-from typing import Any, TypeVar
 
 from Undefined.config import get_config
+from Undefined.utils.io import find_executable, is_file, resolve_path
 from Undefined.utils.render_cache import compute_render_cache_key, get_render_cache
 
 logger = logging.getLogger(__name__)
@@ -59,6 +60,13 @@ _render_active_count = 0
 
 # 默认并发限制：Linux 默认 1，其它平台默认 2
 _DEFAULT_MAX_CONCURRENT = 1 if sys.platform == "linux" else 2
+_SYSTEM_CHROMIUM_COMMANDS = (
+    "google-chrome-stable",
+    "google-chrome",
+    "chromium",
+    "chromium-browser",
+    "microsoft-edge-stable",
+)
 _RenderResult = TypeVar("_RenderResult")
 
 
@@ -89,6 +97,40 @@ def _resolve_render_browser_max_concurrency() -> int:
     return configured_limit
 
 
+async def _resolve_configured_browser_executable() -> str | None:
+    """读取显式配置的浏览器路径；配置错误时不静默回退。"""
+    try:
+        runtime_config = get_config(strict=False)
+    except Exception:
+        logger.debug("[渲染] 读取浏览器路径配置失败", exc_info=True)
+        return None
+
+    configured = str(
+        getattr(runtime_config, "render_browser_executable_path", "") or ""
+    ).strip()
+    if not configured:
+        return None
+
+    path = await resolve_path(configured)
+    if not await is_file(path):
+        raise FileNotFoundError(f"配置的渲染浏览器不存在: {path}")
+    return str(path)
+
+
+async def _find_system_browser_executable() -> str | None:
+    """在 Playwright 自带 Chromium 缺失时查找已安装的系统浏览器。"""
+    for command in _SYSTEM_CHROMIUM_COMMANDS:
+        executable = await find_executable(command)
+        if executable:
+            return executable
+    return None
+
+
+def _is_missing_playwright_browser(error: BaseException) -> bool:
+    text = str(error)
+    return "Executable doesn't exist" in text or "playwright install" in text
+
+
 async def _get_browser() -> Browser:
     """获取或创建浏览器实例（懒加载单例）"""
     global _playwright, _browser
@@ -100,9 +142,32 @@ async def _get_browser() -> Browser:
         if _browser is not None:
             return _browser
 
+        configured_executable = await _resolve_configured_browser_executable()
         playwright = await async_playwright().start()
         try:
-            browser = await playwright.chromium.launch(headless=True)
+            if configured_executable is not None:
+                browser = await playwright.chromium.launch(
+                    headless=True,
+                    executable_path=configured_executable,
+                )
+            else:
+                try:
+                    browser = await playwright.chromium.launch(headless=True)
+                except Exception as exc:
+                    system_executable = await _find_system_browser_executable()
+                    if (
+                        not _is_missing_playwright_browser(exc)
+                        or system_executable is None
+                    ):
+                        raise
+                    logger.warning(
+                        "[render] Playwright Chromium 未安装，回退到系统浏览器: %s",
+                        system_executable,
+                    )
+                    browser = await playwright.chromium.launch(
+                        headless=True,
+                        executable_path=system_executable,
+                    )
         except Exception:
             await playwright.stop()
             raise
@@ -206,6 +271,8 @@ async def render_html_to_image(
     *,
     viewport_width: int = 1280,
     screenshot_selector: str | None = None,
+    screenshot_scale: Literal["css", "device"] = "device",
+    screenshot_style: str | None = None,
     timeout_ms: int = 60000,
     proxy: str | None = None,
 ) -> None:
@@ -217,12 +284,19 @@ async def render_html_to_image(
         output_path: 输出图片路径 (例如 'result.png')
         viewport_width: 视口宽度（像素），默认 1280
         screenshot_selector: 仅截图匹配的元素，默认截整页
+        screenshot_scale: 输出像素尺度，device 按 DPR 输出，css 按 CSS 像素输出
+        screenshot_style: 仅在截图期间注入的 CSS 样式
         timeout_ms: 截图超时时间（毫秒），默认 60000
-        proxy: 可选浏览器代理地址
+        proxy: 保留用于调用兼容和缓存隔离；离线上下文不会发出网络请求
     """
     cache = await get_render_cache()
     cache_key = compute_render_cache_key(
-        html_content, viewport_width, screenshot_selector, proxy
+        html_content,
+        viewport_width,
+        screenshot_selector,
+        proxy,
+        screenshot_scale,
+        screenshot_style,
     )
 
     if await cache.copy_to(cache_key, output_path):
@@ -234,12 +308,16 @@ async def render_html_to_image(
         if screenshot_selector:
             await page.locator(screenshot_selector).first.screenshot(
                 path=output_path,
+                scale=screenshot_scale,
+                style=screenshot_style,
                 timeout=timeout_ms,
             )
         else:
             await page.screenshot(
                 path=output_path,
                 full_page=True,
+                scale=screenshot_scale,
+                style=screenshot_style,
                 timeout=timeout_ms,
             )
 
@@ -264,7 +342,11 @@ async def render_html_with_page(
     timeout_ms: int = 60000,
     proxy: str | None = None,
 ) -> _RenderResult:
-    """在共享浏览器实例中打开 HTML 页面并交给调用方渲染。"""
+    """在共享浏览器实例中打开 HTML 页面并交给调用方渲染。
+
+    ``proxy`` 在移出 ``context_kwargs`` 后仍刻意保留，以兼容现有调用；上层
+    ``render_html_to_image`` 继续用它隔离缓存键，离线浏览器上下文不会使用它。
+    """
     browser = await _get_browser()
     semaphore = await _get_semaphore()
 
@@ -276,11 +358,12 @@ async def render_html_with_page(
         try:
             context_kwargs: dict[str, Any] = {
                 "device_scale_factor": 2,
+                "offline": True,
+                "service_workers": "block",
                 "viewport": {"width": viewport_width, "height": 800},
             }
-            if proxy:
-                context_kwargs["proxy"] = {"server": proxy}
             context = await browser.new_context(**context_kwargs)
+            await context.route("**/*", _abort_render_network_request)
             page = await context.new_page()
             page.set_default_timeout(timeout_ms)
             await page.set_content(html_content)
@@ -291,3 +374,8 @@ async def render_html_with_page(
                     await context.close()
             finally:
                 _render_active_count = max(0, _render_active_count - 1)
+
+
+async def _abort_render_network_request(route: Route) -> None:
+    """终止渲染上下文中的所有网络请求，避免 DNS 重绑定绕过。"""
+    await route.abort()

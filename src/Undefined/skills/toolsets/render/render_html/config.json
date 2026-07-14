@@ -2,13 +2,31 @@
     "type": "function",
     "function": {
         "name": "render_html",
-        "description": "将 HTML 内容渲染为图片。默认返回可嵌入回复的图片 UID（embed），也可直接发送到指定目标（send）。支持完整的 HTML 文档，包括内联 CSS 和样式。",
+        "description": "将 HTML 内容渲染为图片。默认返回可嵌入回复的图片 UID（embed），也可直接发送到指定目标（send）。支持完整 HTML、内联 CSS、脚本和 data:/blob: 资源；浏览器上下文不加载外部资源。需要窄幅、高度随内容延伸且无两侧外部留白时，使用 layout=long。",
         "parameters": {
             "type": "object",
             "properties": {
                 "html_content": {
                     "type": "string",
                     "description": "要渲染的 HTML 内容。必须是完整的 HTML 文档（包含 <!DOCTYPE html>、<html>、<head>、<body> 标签）。"
+                },
+                "layout": {
+                    "type": "string",
+                    "description": "版式：default 保持原始页面布局；long 输出单张长图，高度随内容自动延伸并去除 html/body 外边距",
+                    "enum": ["default", "long"],
+                    "default": "default"
+                },
+                "width": {
+                    "type": "integer",
+                    "description": "长图最终像素宽度，仅 layout=long 时可用；不传则使用 [render].long_image_default_width",
+                    "minimum": 320,
+                    "maximum": 2048
+                },
+                "padding": {
+                    "type": "integer",
+                    "description": "长图 body 内边距（像素），仅 layout=long 时可用；传 0 可做全幅设计，不传则使用 [render].long_image_default_padding",
+                    "minimum": 0,
+                    "maximum": 160
                 },
                 "delivery": {
                     "type": "string",

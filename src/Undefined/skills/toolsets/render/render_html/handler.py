@@ -5,6 +5,7 @@ import logging
 import uuid
 
 from Undefined.attachments import scope_from_context
+from Undefined.skills.toolsets.render.layout import resolve_render_layout
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,14 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     if delivery not in {"embed", "send"}:
         return f"delivery 无效：{delivery}。仅支持 embed 或 send"
 
+    layout_options, layout_error = resolve_render_layout(
+        args,
+        context,
+        content_kind="html",
+    )
+    if layout_error is not None or layout_options is None:
+        return layout_error or "渲染布局参数无效"
+
     if delivery == "send" and message_type and message_type not in ("group", "private"):
         return "消息类型必须是 group 或 private"
 
@@ -55,7 +64,11 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         if not render_html_to_image:
             return "错误：渲染函数 (render_html_to_image) 未在上下文中提供，请检查 AIClient 配置。"
 
-        await render_html_to_image(html_content, str(filepath))
+        await render_html_to_image(
+            html_content,
+            str(filepath),
+            **layout_options.render_kwargs(),
+        )
 
         # 注册到附件系统
         attachment_registry = context.get("attachment_registry")

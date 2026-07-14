@@ -1095,12 +1095,21 @@ request_retries = 0
 # zh: HTML/Markdown 图片渲染配置。
 # en: HTML/Markdown image rendering settings.
 [render]
-# zh: 是否让 crawl4ai、HTML/Markdown/LaTeX 渲染中的远程资源使用 [proxy] 代理地址。默认关闭。
-# en: Whether crawl4ai and remote resources in HTML/Markdown/LaTeX rendering use proxy addresses from [proxy]. Disabled by default.
+# zh: 是否让 crawl4ai 等网页抓取链路使用 [proxy] 代理地址。HTML/Markdown 浏览器渲染始终离线。默认关闭。
+# en: Whether crawl4ai and other web crawling paths use proxy addresses from [proxy]. HTML/Markdown browser rendering is always offline. Disabled by default.
 use_proxy = false
 # zh: 渲染浏览器最大同时开启数量。0 表示自动：Linux 默认 1，其它平台默认 2。
 # en: Max concurrent render browser pages. 0 = auto: Linux defaults to 1, other platforms default to 2.
 browser_max_concurrency = 0
+# zh: 可选的 Chrome/Chromium 可执行文件路径。留空时优先使用 Playwright 自带浏览器，缺失时再自动查找系统浏览器。
+# en: Optional Chrome/Chromium executable path. Empty prefers Playwright's bundled browser, then discovers an installed system browser if missing.
+browser_executable_path = ""
+# zh: render_html/render_markdown 的 long 布局未显式传 width 时使用的最终图片宽度（像素，320-2048）。
+# en: Final image width used by the long layout when width is omitted (pixels, 320-2048).
+long_image_default_width = 900
+# zh: long 布局未显式传 padding 时使用的内边距（像素，0-160）。
+# en: Content padding used by the long layout when padding is omitted (pixels, 0-160).
+long_image_default_padding = 28
 
 # zh: HTML 渲染结果缓存：基于 HTML 内容 hash 复用同一张图片，避免重复渲染。
 # en: HTML render result cache: reuse rendered images by content hash to skip re-rendering.

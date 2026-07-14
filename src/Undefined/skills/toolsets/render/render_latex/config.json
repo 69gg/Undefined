@@ -2,13 +2,13 @@
     "type": "function",
     "function": {
         "name": "render_latex",
-        "description": "将 LaTeX 数学公式渲染为图片或 PDF 文档，使用 MathJax（不依赖系统 TeX 安装）。支持 LaTeX 数学子集（amsmath、equation、align、matrix 等），但不支持自定义 TeX 包。返回可嵌入回复的附件 UID。",
+        "description": "将常见 LaTeX 数学公式通过本地 matplotlib mathtext 渲染为图片或 PDF 文档，不依赖系统 TeX 或外部网络。复杂 TeX 环境和自定义宏可能不受支持。返回可嵌入回复的附件 UID。",
         "parameters": {
             "type": "object",
             "properties": {
                 "content": {
                     "type": "string",
-                    "description": "要渲染的 LaTeX 数学内容。支持 $...$（行内）、$$...$$（块级）、\\[...\\]、\\(...\\) 及标准数学环境（\\begin{align}、\\begin{equation}、\\begin{matrix} 等）。如果不包含分隔符，会自动用 \\[ ... \\] 包装。\\begin{document}...\\end{document} 外层包装会自动去掉。"
+                    "description": "要渲染的 LaTeX 数学内容。支持 mathtext 常见数学语法及 $...$、$$...$$、\\[...\\]、\\(...\\) 分隔符。如果不包含分隔符，会自动用 \\[ ... \\] 包装；\\begin{document}...\\end{document} 外层包装会自动去掉。复杂 TeX 环境和自定义宏可能不受支持。"
                 },
                 "output_format": {
                     "type": "string",

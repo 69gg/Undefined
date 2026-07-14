@@ -32,6 +32,7 @@ _RESTART_REQUIRED_KEYS: set[str] = {
     "webui_port",
     "webui_password",
     "webui_autostart_bot",
+    "render_browser_executable_path",
     "api",
     "api.enabled",
     "api.host",
@@ -79,6 +80,8 @@ _RUNTIME_AI_MODEL_CONFIG_PREFIXES: tuple[str, ...] = (
     "tool_search_enabled",
     "tool_search_always_loaded",
     "tool_search_max_results",
+    "render_long_image_default_width",
+    "render_long_image_default_padding",
 )
 
 _AGENT_INTRO_KEYS: set[str] = {

@@ -23,6 +23,10 @@ from ..search import normalize_search_priority
 
 logger = logging.getLogger(__name__)
 
+_LONG_IMAGE_MIN_WIDTH: int = 320
+_LONG_IMAGE_MAX_WIDTH: int = 2048
+_LONG_IMAGE_MAX_PADDING: int = 160
+
 
 def load_network(
     data: dict[str, Any], *, config_path: Optional[Path] = None
@@ -127,8 +131,45 @@ def load_network(
             0,
         ),
     )
+    render_browser_executable_path = _coerce_str(
+        _get_value(
+            data,
+            ("render", "browser_executable_path"),
+            "RENDER_BROWSER_EXECUTABLE_PATH",
+        ),
+        "",
+    )
     render_use_proxy = _coerce_bool(
         _get_value(data, ("render", "use_proxy"), "RENDER_USE_PROXY"), False
+    )
+    render_long_image_default_width = min(
+        _LONG_IMAGE_MAX_WIDTH,
+        max(
+            _LONG_IMAGE_MIN_WIDTH,
+            _coerce_int(
+                _get_value(
+                    data,
+                    ("render", "long_image_default_width"),
+                    "RENDER_LONG_IMAGE_DEFAULT_WIDTH",
+                ),
+                900,
+            ),
+        ),
+    )
+    render_long_image_default_padding = min(
+        _LONG_IMAGE_MAX_PADDING,
+        max(
+            0,
+            _coerce_int(
+                _get_value(
+                    data,
+                    ("render", "long_image_default_padding"),
+                    "RENDER_LONG_IMAGE_DEFAULT_PADDING",
+                ),
+                28,
+            ),
+        ),
+        (render_long_image_default_width - 1) // 2,
     )
 
     api_xxapi_base_url = _normalize_base_url(
@@ -194,7 +235,10 @@ def load_network(
         "network_request_timeout": network_request_timeout,
         "network_request_retries": network_request_retries,
         "render_browser_max_concurrency": render_browser_max_concurrency,
+        "render_browser_executable_path": render_browser_executable_path,
         "render_use_proxy": render_use_proxy,
+        "render_long_image_default_width": render_long_image_default_width,
+        "render_long_image_default_padding": render_long_image_default_padding,
         "api_xxapi_base_url": api_xxapi_base_url,
         "api_xingzhige_base_url": api_xingzhige_base_url,
         "api_jkyai_base_url": api_jkyai_base_url,

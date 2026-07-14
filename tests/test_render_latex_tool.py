@@ -1,12 +1,11 @@
-"""测试 LaTeX 渲染工具（MathJax + Playwright 实现）"""
+"""测试本地 LaTeX 渲染工具。"""
 
 from __future__ import annotations
 
 import asyncio
 import pytest
-from typing import Any, cast
+from typing import Any
 
-# 这个测试需要 Playwright 浏览器运行时，所以标记为可选
 pytest_plugins = ("pytest_asyncio",)
 
 
@@ -60,8 +59,6 @@ async def test_render_simple_equation() -> None:
     args = {"content": "E = mc^2", "output_format": "png"}
 
     result = await execute(args, context)
-    if "渲染失败" in result and "Executable doesn't exist" in result:
-        pytest.skip("Playwright 浏览器未安装，跳过测试")
     assert result == '<attachment uid="test-uid-12345"/>'
     assert len(mock_registry.registered_items) == 1
     assert mock_registry.registered_items[0]["kind"] == "image"
@@ -84,8 +81,6 @@ async def test_render_with_delimiters() -> None:
     args = {"content": r"\[ \int_0^\infty e^{-x^2} dx = \frac{\sqrt{\pi}}{2} \]"}
 
     result = await execute(args, context)
-    if "渲染失败" in result and "Executable doesn't exist" in result:
-        pytest.skip("Playwright 浏览器未安装，跳过测试")
     assert result == '<attachment uid="test-uid-12345"/>'
     assert len(mock_registry.registered_items) == 1
 
@@ -105,8 +100,6 @@ async def test_render_pdf_output() -> None:
     args = {"content": r"\frac{a}{b} + \sqrt{c}", "output_format": "pdf"}
 
     result = await execute(args, context)
-    if "渲染失败" in result and "Executable doesn't exist" in result:
-        pytest.skip("Playwright 浏览器未安装，跳过测试")
     assert result == '<attachment uid="test-uid-12345"/>'
     assert len(mock_registry.registered_items) == 1
     assert mock_registry.registered_items[0]["kind"] == "file"
@@ -159,51 +152,42 @@ async def test_render_mathtext_runs_in_thread(monkeypatch: pytest.MonkeyPatch) -
 
 
 @pytest.mark.asyncio
-async def test_mathjax_fallback_uses_shared_render_page(
+async def test_complex_latex_does_not_fall_back_to_external_network(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import Undefined.render as render
     import Undefined.skills.toolsets.render.render_latex.handler as handler
 
     async def _fail_mathtext(_content: str, _output_format: str) -> tuple[bytes, str]:
         raise RuntimeError("force fallback")
 
-    class _FakeContainer:
-        async def screenshot(self, *, type: str) -> bytes:
-            assert type == "png"
-            return b"png-bytes"
-
-    class _FakePage:
-        async def wait_for_function(self, expression: str, *, timeout: int) -> None:
-            assert expression == "() => window._mjReady === true"
-            assert timeout == 30000
-
-        async def query_selector(self, selector: str) -> _FakeContainer | None:
-            assert selector == "#math-container"
-            return _FakeContainer()
-
-    calls: list[dict[str, Any]] = []
-
-    async def _fake_render_html_with_page(
-        html_content: str,
-        callback: Any,
-        **kwargs: Any,
-    ) -> tuple[bytes, str]:
-        calls.append({"html": html_content, "kwargs": kwargs})
-        return cast(tuple[bytes, str], await callback(_FakePage()))
-
     monkeypatch.setattr(handler, "_render_mathtext_to_bytes", _fail_mathtext)
-    monkeypatch.setattr(render, "render_html_with_page", _fake_render_html_with_page)
 
-    result = await handler._render_latex_to_bytes(
-        r"\begin{aligned}x&=1\\y&=2\end{aligned}",
-        "png",
-        proxy="http://127.0.0.1:7890",
+    with pytest.raises(RuntimeError, match="已禁用外部网络"):
+        await handler._render_latex_to_bytes(
+            r"\begin{aligned}x&=1\\y&=2\end{aligned}",
+            "png",
+        )
+
+
+@pytest.mark.asyncio
+async def test_execute_reports_unsupported_complex_latex() -> None:
+    from Undefined.skills.toolsets.render.render_latex.handler import execute
+
+    registry = MockAttachmentRegistry()
+    result = await execute(
+        {
+            "content": r"\begin{aligned}x&=1\\y&=2\end{aligned}",
+            "output_format": "png",
+        },
+        {
+            "attachment_registry": registry,
+            "request_type": "private",
+            "user_id": 42,
+        },
     )
 
-    assert result == (b"png-bytes", "image/png")
-    assert calls[0]["kwargs"]["proxy"] == "http://127.0.0.1:7890"
-    assert "math-container" in calls[0]["html"]
+    assert "已禁用外部网络" in result
+    assert registry.registered_items == []
 
 
 def test_strip_document_wrappers() -> None:
@@ -260,14 +244,3 @@ def test_prepare_content() -> None:
     assert r"\nu" in result_latex
     assert r"\nabla" in result_latex
     assert r"\neq" in result_latex
-
-
-def test_build_html_contains_mathjax_ready_flag() -> None:
-    """HTML 模板包含 MathJax pageReady 回调设置 _mjReady 标记"""
-    from Undefined.skills.toolsets.render.render_latex.handler import _build_html
-
-    html = _build_html(r"\[ x = 1 \]")
-    assert "window._mjReady = true" in html
-    assert "pageReady" in html
-    assert "tex-svg.js" in html
-    assert "math-container" in html

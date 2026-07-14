@@ -75,3 +75,15 @@ def test_tool_search_env_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
         "get_current_time",
     ]
     assert cfg.tool_search_max_results == 8
+
+
+def test_long_image_render_env_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RENDER_BROWSER_EXECUTABLE_PATH", "/opt/chrome/chrome")
+    monkeypatch.setenv("RENDER_LONG_IMAGE_DEFAULT_WIDTH", "1080")
+    monkeypatch.setenv("RENDER_LONG_IMAGE_DEFAULT_PADDING", "36")
+
+    cfg = Config.from_mapping({}, strict=False)
+
+    assert cfg.render_browser_executable_path == "/opt/chrome/chrome"
+    assert cfg.render_long_image_default_width == 1080
+    assert cfg.render_long_image_default_padding == 36

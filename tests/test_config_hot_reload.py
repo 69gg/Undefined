@@ -415,6 +415,34 @@ def test_apply_config_updates_hot_reloads_tool_search_config() -> None:
     assert ai_client.runtime_updates == [updated]
 
 
+def test_apply_config_updates_hot_reloads_long_image_defaults() -> None:
+    updated = cast(
+        Any,
+        SimpleNamespace(
+            render_long_image_default_width=1080,
+            render_long_image_default_padding=36,
+        ),
+    )
+    ai_client = _FakeAIClient()
+    context = HotReloadContext(
+        ai_client=cast(Any, ai_client),
+        queue_manager=cast(Any, _FakeQueueManager()),
+        config_manager=cast(Any, SimpleNamespace()),
+        security_service=cast(Any, _FakeSecurityService()),
+    )
+
+    apply_config_updates(
+        updated,
+        {
+            "render_long_image_default_width": (900, 1080),
+            "render_long_image_default_padding": (28, 36),
+        },
+        context,
+    )
+
+    assert ai_client.runtime_updates == [updated]
+
+
 def test_apply_config_updates_hot_reloads_attachment_config() -> None:
     updated = cast(
         Any,
