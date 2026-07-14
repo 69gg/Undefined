@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
+
+import pytest
 
 from Undefined.utils import io as async_io
 
@@ -11,14 +12,15 @@ from Undefined.utils import io as async_io
 WEIXIN_JS = Path("src/Undefined/webui/static/js/weixin.js")
 
 
-def _read_source() -> str:
-    source = asyncio.run(async_io.read_text(WEIXIN_JS))
+async def _read_source() -> str:
+    source = await async_io.read_text(WEIXIN_JS)
     assert source is not None
     return source
 
 
-def test_weixin_dialog_traps_and_restores_focus() -> None:
-    source = _read_source()
+@pytest.mark.asyncio
+async def test_weixin_dialog_traps_and_restores_focus() -> None:
+    source = await _read_source()
     show_dialog = source.split("function showDialog()", 1)[1].split(
         "function openBindingDialog", 1
     )[0]

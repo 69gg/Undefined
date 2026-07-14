@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -29,11 +28,10 @@ def _tool_context(**values: Any) -> dict[str, Any]:
     return {"mark_message_sent_this_turn": mark_message_sent_this_turn, **values}
 
 
-def test_send_message_schema_rejects_mixed_address_parameters() -> None:
-    config_text = asyncio.run(
-        async_io.read_text(
-            Path("src/Undefined/skills/toolsets/messages/send_message/config.json")
-        )
+@pytest.mark.asyncio
+async def test_send_message_schema_rejects_mixed_address_parameters() -> None:
+    config_text = await async_io.read_text(
+        Path("src/Undefined/skills/toolsets/messages/send_message/config.json")
     )
     assert config_text is not None
     parameters = json.loads(config_text)["function"]["parameters"]
