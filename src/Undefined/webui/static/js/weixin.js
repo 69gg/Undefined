@@ -441,24 +441,68 @@
         weixinState.qrObjectUrl = "";
     }
 
-    async function loadQrImage() {
-        if (!weixinState.sessionId) return;
-        const response = await api(
-            `${ENDPOINT}/login/${encodeURIComponent(weixinState.sessionId)}/qr.png?v=${weixinState.qrRevision}`,
-        );
-        if (!response.ok) {
-            const payload = await parseJsonSafe(response);
-            throw new WeixinRequestError(
-                requestMessage(response, payload),
-                response,
-                payload,
+    function clearQrImage() {
+        revokeQrObjectUrl();
+        get("weixinQrImage")?.removeAttribute("src");
+    }
+
+    function setQrFrameState(state) {
+        const normalizedState = ["ready", "error"].includes(state)
+            ? state
+            : "loading";
+        const frame = get("weixinQrFrame");
+        if (frame) {
+            frame.dataset.state = normalizedState;
+            frame.setAttribute(
+                "aria-busy",
+                normalizedState === "loading" ? "true" : "false",
             );
         }
-        const blob = await response.blob();
-        revokeQrObjectUrl();
-        weixinState.qrObjectUrl = URL.createObjectURL(blob);
-        const image = get("weixinQrImage");
-        if (image) image.src = weixinState.qrObjectUrl;
+        const text = get("weixinQrPlaceholderText");
+        if (text) {
+            const key =
+                normalizedState === "error"
+                    ? "weixin.qr_load_failed"
+                    : "weixin.qr_loading";
+            text.dataset.i18n = key;
+            text.textContent = t(key);
+        }
+    }
+
+    async function loadQrImage() {
+        const sessionId = weixinState.sessionId;
+        if (!sessionId) return;
+        clearQrImage();
+        setQrFrameState("loading");
+        try {
+            const response = await api(
+                `${ENDPOINT}/login/${encodeURIComponent(sessionId)}/qr.png?v=${weixinState.qrRevision}`,
+            );
+            if (!response.ok) {
+                const payload = await parseJsonSafe(response);
+                throw new WeixinRequestError(
+                    requestMessage(response, payload),
+                    response,
+                    payload,
+                );
+            }
+            const blob = await response.blob();
+            if (sessionId !== weixinState.sessionId) return;
+            const image = get("weixinQrImage");
+            if (!(image instanceof HTMLImageElement)) {
+                throw new Error(t("weixin.qr_load_failed"));
+            }
+            weixinState.qrObjectUrl = URL.createObjectURL(blob);
+            image.src = weixinState.qrObjectUrl;
+            await image.decode();
+            if (sessionId !== weixinState.sessionId) return;
+            setQrFrameState("ready");
+        } catch (error) {
+            if (sessionId !== weixinState.sessionId) return;
+            clearQrImage();
+            setQrFrameState("error");
+            throw error;
+        }
     }
 
     function setQrView(stateKey, message, verify = false) {
@@ -540,6 +584,8 @@
                       : "weixin.continue",
             ),
         );
+        const qrFrame = get("weixinQrFrame");
+        if (qrFrame) setQrFrameState(qrFrame.dataset.state || "loading");
     }
 
     function showDialog() {
@@ -559,7 +605,8 @@
         weixinState.confirmationToken = "";
         weixinState.sessionId = "";
         stopPolling();
-        revokeQrObjectUrl();
+        clearQrImage();
+        setQrFrameState("loading");
 
         const bindingForm = get("weixinBindingForm");
         const qrStep = get("weixinQrStep");
@@ -587,7 +634,7 @@
         const sessionId = weixinState.sessionId;
         weixinState.sessionId = "";
         stopPolling();
-        revokeQrObjectUrl();
+        clearQrImage();
         if (cancelLogin && sessionId) {
             try {
                 await requestJson(
@@ -676,6 +723,11 @@
             ) {
                 showConfirmation(error.payload);
                 setDialogStatus("");
+            } else if (weixinState.sessionId) {
+                setQrView(
+                    "weixin.qr_load_failed",
+                    error instanceof Error ? error.message : String(error),
+                );
             } else {
                 setDialogStatus(
                     error instanceof Error ? error.message : String(error),

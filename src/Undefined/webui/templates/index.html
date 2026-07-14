@@ -1159,7 +1159,11 @@
             </form>
 
             <div id="weixinQrStep" class="weixin-qr-step" hidden>
-                <div class="weixin-qr-frame">
+                <div id="weixinQrFrame" class="weixin-qr-frame" data-state="loading" aria-busy="true">
+                    <div class="weixin-qr-placeholder" role="status" aria-live="polite" aria-atomic="true">
+                        <span class="weixin-qr-spinner" aria-hidden="true"></span>
+                        <span id="weixinQrPlaceholderText" data-i18n="weixin.qr_loading">正在生成二维码</span>
+                    </div>
                     <img id="weixinQrImage" alt="WeChat QR code" />
                 </div>
                 <strong id="weixinQrState" data-i18n="weixin.wait_scan">等待微信扫码</strong>
