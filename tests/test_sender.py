@@ -7,9 +7,15 @@ from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from weixin_ilink_client import (
+    RefMessage,
+    TransportError,
+    UnsupportedCapabilityError,
+)
 
 from Undefined.context import RequestContext
 from Undefined.utils import io as async_io
+from Undefined.utils.message_reply import ReplyContext
 from Undefined.utils.message_targets import DeliveryAddress
 from Undefined.utils.sender import AddressBoundSender, MAX_MESSAGE_LENGTH, MessageSender
 
@@ -380,19 +386,224 @@ async def test_send_wechat_message_routes_text_and_records_transport(
     sender.set_weixin_service(service)
 
     async with RequestContext("private", user_id=12345, sender_id=12345) as ctx:
-        await sender.send_address_message(
+        sent_message_id = await sender.send_address_message(
             DeliveryAddress("wechat", 12345),
             "hello",
         )
         assert ctx.get_resource("message_sent_this_turn") is True
 
+    assert sent_message_id == "client-1"
     service.send_text.assert_awaited_once_with(12345, "hello")
     history_mock = cast(AsyncMock, sender.history_manager.add_private_message)
     assert history_mock.await_args is not None
+    assert history_mock.await_args.kwargs["message_id"] == "client-1"
     assert history_mock.await_args.kwargs["transport"] == {
         "channel": "wechat",
         "address": "wechat:12345",
+        "message_ids": ["client-1"],
     }
+
+
+@pytest.mark.asyncio
+async def test_send_wechat_native_reply_uses_same_route_history(
+    sender: MessageSender,
+) -> None:
+    quoted_attachment: dict[str, str] = {
+        "uid": "pic_secret",
+        "kind": "image",
+        "media_type": "image",
+        "display_name": "/srv/private/quoted.png",
+    }
+    record: dict[str, Any] = {
+        "message_id": "inbound-1",
+        "display_name": "微信用户",
+        "message": '旧消息 <attachment uid="pic_secret"/>',
+        "attachments": [quoted_attachment],
+        "transport": {
+            "channel": "wechat",
+            "address": "wechat:12345",
+        },
+    }
+    lookup = AsyncMock(return_value=record)
+    cast(Any, sender.history_manager).find_private_message_by_id = lookup
+    service = SimpleNamespace(send_text=AsyncMock(return_value="client-reply"))
+    sender.set_weixin_service(service)
+
+    sent_message_id = await sender.send_address_message(
+        DeliveryAddress("wechat", 12345),
+        "收到",
+        reply_to="inbound-1",
+    )
+
+    assert sent_message_id == "client-reply"
+    lookup.assert_awaited_once_with(
+        12345,
+        "inbound-1",
+        channel="wechat",
+        address="wechat:12345",
+    )
+    send_call = service.send_text.await_args
+    assert send_call is not None
+    assert send_call.args == (12345, "收到")
+    reference = send_call.kwargs["reference"]
+    assert reference == RefMessage.from_text(
+        "微信用户",
+        "旧消息\n[图片: quoted.png]",
+    )
+    assert "pic_secret" not in reference.message_item.text
+    assert "/srv/private" not in reference.message_item.text
+
+    history_mock = cast(AsyncMock, sender.history_manager.add_private_message)
+    assert history_mock.await_args is not None
+    history_kwargs = history_mock.await_args.kwargs
+    assert history_kwargs["reply_context"] == ReplyContext(
+        title="微信用户",
+        message_id="inbound-1",
+        text='旧消息 <attachment uid="pic_secret"/>',
+        attachments=(quoted_attachment,),
+    )
+    assert history_kwargs["transport"]["reply_to"] == "inbound-1"
+    assert history_kwargs["transport"]["reply_mode"] == "native"
+
+
+@pytest.mark.asyncio
+async def test_send_wechat_reply_rejects_target_outside_current_route(
+    sender: MessageSender,
+) -> None:
+    lookup = AsyncMock(return_value=None)
+    cast(Any, sender.history_manager).find_private_message_by_id = lookup
+    service = SimpleNamespace(send_text=AsyncMock(return_value="client-reply"))
+    sender.set_weixin_service(service)
+
+    with pytest.raises(ValueError, match="不在当前微信会话历史中"):
+        await sender.send_address_message(
+            DeliveryAddress("wechat", 12345),
+            "不会发送",
+            reply_to="other-route-message",
+        )
+
+    service.send_text.assert_not_awaited()
+    cast(AsyncMock, sender.history_manager.add_private_message).assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_send_wechat_reply_falls_back_only_after_explicit_rejection(
+    sender: MessageSender,
+) -> None:
+    cast(Any, sender.history_manager).find_private_message_by_id = AsyncMock(
+        return_value={
+            "message_id": "inbound-2",
+            "display_name": "微信用户",
+            "message": "旧消息",
+            "transport": {
+                "channel": "wechat",
+                "address": "wechat:12345",
+            },
+        }
+    )
+    service = SimpleNamespace(
+        send_text=AsyncMock(
+            side_effect=[
+                UnsupportedCapabilityError("reference rejected"),
+                "client-fallback",
+            ]
+        )
+    )
+    sender.set_weixin_service(service)
+
+    sent_message_id = await sender.send_address_message(
+        DeliveryAddress("wechat", 12345),
+        "降级正文",
+        reply_to="inbound-2",
+    )
+
+    assert sent_message_id == "client-fallback"
+    assert service.send_text.await_count == 2
+    first_call, fallback_call = service.send_text.await_args_list
+    assert isinstance(first_call.kwargs["reference"], RefMessage)
+    assert fallback_call.args == (
+        12345,
+        "> **引用 微信用户**\n> 旧消息\n\n降级正文",
+    )
+    assert fallback_call.kwargs == {}
+    history_mock = cast(AsyncMock, sender.history_manager.add_private_message)
+    assert history_mock.await_args is not None
+    assert history_mock.await_args.kwargs["transport"]["reply_mode"] == (
+        "markdown_fallback"
+    )
+
+
+@pytest.mark.asyncio
+async def test_send_wechat_reply_does_not_retry_ambiguous_transport_failure(
+    sender: MessageSender,
+) -> None:
+    cast(Any, sender.history_manager).find_private_message_by_id = AsyncMock(
+        return_value={
+            "message_id": "inbound-3",
+            "display_name": "微信用户",
+            "message": "旧消息",
+            "transport": {
+                "channel": "wechat",
+                "address": "wechat:12345",
+            },
+        }
+    )
+    service = SimpleNamespace(
+        send_text=AsyncMock(side_effect=TransportError("offline"))
+    )
+    sender.set_weixin_service(service)
+
+    with pytest.raises(TransportError, match="offline"):
+        await sender.send_address_message(
+            DeliveryAddress("wechat", 12345),
+            "不应重发",
+            reply_to="inbound-3",
+        )
+
+    assert service.send_text.await_count == 1
+    cast(AsyncMock, sender.history_manager.add_private_message).assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_send_wechat_media_only_reply_attaches_native_reference(
+    sender: MessageSender,
+    tmp_path: Path,
+) -> None:
+    image_path = tmp_path / "reply.png"
+    await async_io.write_bytes(image_path, b"png")
+    cast(Any, sender.history_manager).find_private_message_by_id = AsyncMock(
+        return_value={
+            "message_id": "inbound-4",
+            "display_name": "微信用户",
+            "message": "旧消息",
+            "transport": {
+                "channel": "wechat",
+                "address": "wechat:12345",
+            },
+        }
+    )
+    service = SimpleNamespace(
+        send_text=AsyncMock(return_value="client-text"),
+        send_file=AsyncMock(return_value="client-media"),
+    )
+    sender.set_weixin_service(service)
+
+    sent_message_id = await sender.send_address_message(
+        DeliveryAddress("wechat", 12345),
+        f"[CQ:image,file={image_path.resolve().as_uri()}]",
+        reply_to="inbound-4",
+        auto_history=False,
+    )
+
+    assert sent_message_id == "client-media"
+    service.send_text.assert_not_awaited()
+    send_call = service.send_file.await_args
+    assert send_call is not None
+    assert send_call.args == (12345, image_path.resolve())
+    assert send_call.kwargs["reference"] == RefMessage.from_text(
+        "微信用户",
+        "旧消息",
+    )
 
 
 @pytest.mark.asyncio

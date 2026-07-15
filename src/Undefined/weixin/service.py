@@ -25,6 +25,7 @@ from weixin_ilink_client import (
     QrLoginManager,
     QrLoginSession,
     QrPollResult,
+    RefMessage,
     SendReceipt,
     WeixinIlinkError,
 )
@@ -34,6 +35,7 @@ from Undefined.attachments.registry import AttachmentRegistry
 from Undefined.config import Config
 from Undefined.utils import io
 from Undefined.utils.logging import redact_string
+from Undefined.utils.message_reply import ReplyContext
 from Undefined.weixin.models import WeixinAccount, normalize_alias
 from Undefined.weixin.store import UndefinedIlinkStateStore, WeixinStore
 
@@ -77,6 +79,7 @@ class WeixinInboundHandler(Protocol):
         sender_name: str,
         message_id: str | None,
         account_alias: str,
+        reply_context: ReplyContext | None = None,
     ) -> None: ...
 
 
@@ -98,6 +101,7 @@ class WeixinClientProtocol(Protocol):
         context_token: str | None = None,
         run_id: str | None = None,
         reply_to: str | int | None = None,
+        reference: RefMessage | None = None,
     ) -> SendReceipt: ...
 
     async def send_media(
@@ -111,6 +115,7 @@ class WeixinClientProtocol(Protocol):
         context_token: str | None = None,
         run_id: str | None = None,
         reply_to: str | int | None = None,
+        reference: RefMessage | None = None,
     ) -> SendReceipt: ...
 
     async def download_media(self, item: MessageItem) -> DownloadedMedia: ...
@@ -291,8 +296,15 @@ class WeixinService:
             "active_login_sessions": len(self._logins),
             "capabilities": {
                 "inbound": ["text", "image", "file", "video", "voice"],
-                "outbound": ["text", "image", "file", "video", "typing"],
-                "unsupported": ["outbound_voice", "reply_to"],
+                "outbound": [
+                    "text",
+                    "image",
+                    "file",
+                    "video",
+                    "typing",
+                    "reply_to",
+                ],
+                "unsupported": ["outbound_voice"],
             },
         }
 
@@ -514,13 +526,13 @@ class WeixinService:
         text: str,
         *,
         reply_to: str | int | None = None,
+        reference: RefMessage | None = None,
     ) -> str:
         account, runtime = await self._resolve_runtime(qq_id)
-        receipt = await runtime.client.send_text(
-            account.peer_id,
-            text,
-            reply_to=reply_to,
-        )
+        send_kwargs: dict[str, Any] = {"reply_to": reply_to}
+        if reference is not None:
+            send_kwargs["reference"] = reference
+        receipt = await runtime.client.send_text(account.peer_id, text, **send_kwargs)
         return receipt.client_id
 
     async def send_file(
@@ -531,6 +543,7 @@ class WeixinService:
         name: str | None = None,
         kind: MediaKind | str | None = None,
         caption: str = "",
+        reference: RefMessage | None = None,
     ) -> str:
         path = Path(file_path).expanduser()
         resolved_name = (Path(name).name if name else "") or path.name
@@ -543,12 +556,16 @@ class WeixinService:
             )
         content = await io.read_bytes(path)
         account, runtime = await self._resolve_runtime(qq_id)
+        send_kwargs: dict[str, Any] = {}
+        if reference is not None:
+            send_kwargs["reference"] = reference
         receipt = await runtime.client.send_media(
             account.peer_id,
             content,
             kind=resolved_kind,
             file_name=resolved_name,
             caption=caption,
+            **send_kwargs,
         )
         return receipt.client_id
 
@@ -687,7 +704,16 @@ class WeixinService:
         text_parts: list[str] = []
         message_content: list[dict[str, Any]] = []
         attachments: list[dict[str, str]] = []
+        reply_context: ReplyContext | None = None
         for index, item in enumerate(message.items):
+            if reply_context is None and item.ref_msg is not None:
+                reply_context = await self._build_reply_context(
+                    account=account,
+                    client=client,
+                    message=message,
+                    index=index,
+                    reference=item.ref_msg,
+                )
             if item.type is MessageItemType.TEXT and item.text:
                 text_parts.append(item.text)
                 message_content.append({"type": "text", "data": {"text": item.text}})
@@ -703,7 +729,7 @@ class WeixinService:
                 ref = await self._register_inbound_media(
                     account=account,
                     message=message,
-                    index=index,
+                    index=str(index),
                     media=downloaded,
                 )
             except Exception:
@@ -733,14 +759,73 @@ class WeixinService:
             sender_name=f"微信用户{account.qq_id}",
             message_id=(message.message_id or message.client_id or None),
             account_alias=account.alias,
+            reply_context=reply_context,
         )
+
+    async def _build_reply_context(
+        self,
+        *,
+        account: WeixinAccount,
+        client: WeixinClientProtocol,
+        message: InboundMessage,
+        index: int,
+        reference: RefMessage,
+    ) -> ReplyContext | None:
+        item = reference.message_item
+        title = reference.title.strip() or "引用消息"
+        if item is None:
+            return ReplyContext(title=title)
+
+        text = self._reply_item_text(item)
+        attachments: list[dict[str, str]] = []
+        if item.media_kind is not None:
+            try:
+                downloaded = await client.download_media(item)
+                ref = await self._register_inbound_media(
+                    account=account,
+                    message=message,
+                    index=f"{index}:reply",
+                    media=downloaded,
+                )
+                if ref is not None:
+                    attachments.append(ref)
+            except Exception:
+                logger.warning(
+                    "[微信] 下载引用附件失败: alias=%s message=%s index=%s",
+                    account.alias,
+                    message.message_id or message.client_id,
+                    index,
+                    exc_info=True,
+                )
+        return ReplyContext(
+            title=title,
+            message_id=item.msg_id,
+            text=text,
+            attachments=tuple(attachments),
+        )
+
+    @staticmethod
+    def _reply_item_text(item: MessageItem) -> str:
+        if item.type is MessageItemType.TEXT:
+            return item.text.strip()
+        if item.type is MessageItemType.VOICE and item.voice_transcript:
+            return item.voice_transcript.strip()
+        labels = {
+            MessageItemType.IMAGE: "[图片]",
+            MessageItemType.VIDEO: "[视频]",
+            MessageItemType.FILE: (
+                f"[文件: {Path(item.file_name).name}]" if item.file_name else "[文件]"
+            ),
+            MessageItemType.VOICE: "[语音]",
+        }
+        return labels.get(item.type, "[消息]")
 
     async def _register_inbound_media(
         self,
         *,
         account: WeixinAccount,
         message: InboundMessage,
-        index: int,
+        index: str,
         media: DownloadedMedia,
     ) -> dict[str, str] | None:
         registry = self.attachment_registry

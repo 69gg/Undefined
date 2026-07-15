@@ -2,7 +2,7 @@
     "type": "function",
     "function": {
         "name": "send_message",
-        "description": "发送消息。默认回复当前物理会话；可用 address 精确指定 qq:<QQ号>、group:<群号> 或 wechat:<逻辑QQ号>。旧 target_type+target_id 参数继续兼容并表示 QQ/QQ群。会受到逻辑 QQ/群访问控制。微信通道不支持 reply_to；微信文本支持 Markdown，特殊符号和附件标签必须原样填写，不要写成 HTML/XML 实体。可以在回答过程中多次调用，最后必须调用 end。\n群聊中 @ 某人：在消息里写 [@QQ号]，例如 [@2608261902] 你好。",
+        "description": "发送消息。默认回复当前物理会话；可用 address 精确指定 qq:<QQ号>、group:<群号> 或 wechat:<逻辑QQ号>。旧 target_type+target_id 参数继续兼容并表示 QQ/QQ群。会受到逻辑 QQ/群访问控制。微信支持同一物理会话内的 reply_to 原生引用；上游明确拒绝时降级为 Markdown 引用。微信文本支持 Markdown，特殊符号和附件标签必须原样填写，不要写成 HTML/XML 实体。可以在回答过程中多次调用，最后必须调用 end。\n群聊中 @ 某人：在消息里写 [@QQ号]，例如 [@2608261902] 你好。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -25,8 +25,14 @@
                     "description": "可选。目标会话 ID：当 target_type=group 时为群号；target_type=private 时为用户 QQ 号。"
                 },
                 "reply_to": {
-                    "type": "integer",
-                    "description": "可选。要引用回复的消息 ID (message_id)。设置后消息将以引用回复形式出现。可以使用任意已知的 message_id，包括当前消息 XML、历史消息、别人发的消息或 Bot 之前发出的消息。"
+                    "oneOf": [
+                        {"type": "integer", "minimum": 1},
+                        {
+                            "type": "string",
+                            "pattern": "^\\S+$"
+                        }
+                    ],
+                    "description": "可选。要引用回复的消息 ID (message_id)。QQ/群聊使用正整数；微信可使用当前 wechat 地址历史中的数字或字符串 ID，不能跨 QQ/微信或跨帐号引用。"
                 }
             },
             "required": ["message"],

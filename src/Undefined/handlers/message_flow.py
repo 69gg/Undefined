@@ -51,6 +51,7 @@ from Undefined.utils.scheduler import TaskScheduler
 from Undefined.utils.sender import MessageSender
 from Undefined.utils.sender import AddressBoundSender
 from Undefined.utils.message_targets import DeliveryAddress
+from Undefined.utils.message_reply import ReplyContext
 
 logger = logging.getLogger(__name__)
 
@@ -749,6 +750,7 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
         sender_name: str,
         message_id: str | None,
         account_alias: str,
+        reply_context: ReplyContext | None = None,
     ) -> None:
         """处理已完成绑定校验的微信私聊消息。"""
         if not self.config.is_private_allowed(qq_id):
@@ -774,6 +776,7 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
                 "address": address.canonical,
                 "account_alias": account_alias,
             },
+            reply_context=reply_context,
         )
         self._schedule_meme_ingest(
             attachments=attachments,
@@ -832,6 +835,7 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
             channel="wechat",
             address=address.canonical,
             batch_scope=batch_scope,
+            reply_context=reply_context,
         )
 
     async def _handle_group_message(self, event: dict[str, Any]) -> None:

@@ -6,6 +6,8 @@ import os
 from datetime import datetime
 from typing import Any
 
+from Undefined.utils.message_reply import ReplyContext
+
 logger = logging.getLogger(__name__)
 
 # 历史记录文件路径
@@ -268,6 +270,12 @@ class MessageHistoryManager:
                             )
                         msg["attachments"] = normalized_attachments
 
+                    reply_context = ReplyContext.from_mapping(msg.get("reply_context"))
+                    if reply_context is None:
+                        msg.pop("reply_context", None)
+                    else:
+                        msg["reply_context"] = reply_context.to_dict()
+
                     normalized_history.append(msg)
 
                 if self._max_records > 0:
@@ -430,6 +438,7 @@ class MessageHistoryManager:
         attachments: list[dict[str, str]] | None = None,
         webchat: dict[str, Any] | None = None,
         transport: dict[str, Any] | None = None,
+        reply_context: ReplyContext | None = None,
     ) -> None:
         """异步保存私聊消息到历史记录"""
         await self._ensure_initialized()
@@ -462,6 +471,8 @@ class MessageHistoryManager:
                 record["webchat"] = webchat
             if isinstance(transport, dict):
                 record["transport"] = dict(transport)
+            if reply_context is not None and not reply_context.is_empty:
+                record["reply_context"] = reply_context.to_dict()
 
             self._private_message_history[user_id_str].append(record)
 
@@ -519,6 +530,38 @@ class MessageHistoryManager:
         if user_id_str not in self._private_message_history:
             return []
         return self._private_message_history[user_id_str][-count:] if count > 0 else []
+
+    async def find_private_message_by_id(
+        self,
+        user_id: int,
+        message_id: int | str,
+        *,
+        channel: str | None = None,
+        address: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Find a private record by transport-visible ID within an optional route."""
+
+        await self._ensure_initialized()
+        user_id_str = str(user_id)
+        expected_id = str(message_id).strip()
+        if not expected_id:
+            return None
+        async with self._get_private_lock(user_id_str):
+            history = self._private_message_history.get(user_id_str, [])
+            for record in reversed(history):
+                transport_raw = record.get("transport")
+                transport = transport_raw if isinstance(transport_raw, dict) else {}
+                if channel and str(transport.get("channel", "")) != channel:
+                    continue
+                if address and str(transport.get("address", "")) != address:
+                    continue
+                candidate_ids = {str(record.get("message_id", "") or "").strip()}
+                raw_ids = transport.get("message_ids")
+                if isinstance(raw_ids, list):
+                    candidate_ids.update(str(item).strip() for item in raw_ids)
+                if expected_id in candidate_ids:
+                    return dict(record)
+        return None
 
     def get_private_page(
         self,

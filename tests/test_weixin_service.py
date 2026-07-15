@@ -15,11 +15,14 @@ from weixin_ilink_client import (
     MessageItemType,
     QrLoginManager,
     QrLoginSession,
+    RefMessage,
     SendReceipt,
     WeixinCredentials,
 )
 
 from Undefined.config import Config
+from Undefined.attachments import AttachmentRegistry
+from Undefined.utils.message_reply import ReplyContext
 from Undefined.weixin.models import WeixinAccount
 from Undefined.weixin.service import (
     WeixinClientProtocol,
@@ -54,6 +57,7 @@ class FakeClient:
         self.started = False
         self.closed = False
         self.sent_text: list[tuple[str, str]] = []
+        self.sent_references: list[RefMessage | None] = []
 
     async def start(self) -> None:
         self.started = True
@@ -76,9 +80,11 @@ class FakeClient:
         context_token: str | None = None,
         run_id: str | None = None,
         reply_to: str | int | None = None,
+        reference: RefMessage | None = None,
     ) -> SendReceipt:
         del context_token, run_id, reply_to
         self.sent_text.append((peer_id, text))
+        self.sent_references.append(reference)
         return SendReceipt("client-message-1")
 
     async def send_media(
@@ -92,8 +98,19 @@ class FakeClient:
         context_token: str | None = None,
         run_id: str | None = None,
         reply_to: str | int | None = None,
+        reference: RefMessage | None = None,
     ) -> SendReceipt:
-        del peer_id, content, kind, file_name, caption, context_token, run_id, reply_to
+        del (
+            peer_id,
+            content,
+            kind,
+            file_name,
+            caption,
+            context_token,
+            run_id,
+            reply_to,
+            reference,
+        )
         return SendReceipt("client-media-1")
 
     async def download_media(self, item: MessageItem) -> DownloadedMedia:
@@ -204,10 +221,12 @@ async def test_account_runtime_sends_by_logical_qq(tmp_path: Path) -> None:
         await service.start()
         await asyncio.sleep(0)
 
-        receipt = await service.send_text(10001, "hello")
+        reference = RefMessage.from_text("微信用户", "quoted text")
+        receipt = await service.send_text(10001, "hello", reference=reference)
 
         assert receipt == "client-message-1"
         assert client.sent_text == [("peer-1", "hello")]
+        assert client.sent_references == [reference]
     finally:
         await service.stop()
 
@@ -246,6 +265,118 @@ async def test_unknown_peer_is_quarantined_without_dispatch(tmp_path: Path) -> N
         assert pending[0].peer_id == "unknown-peer"
         raw = (tmp_path / "bindings.json").read_text(encoding="utf-8")
         assert "secret body" not in raw
+    finally:
+        await service.stop()
+
+
+@pytest.mark.asyncio
+async def test_inbound_text_reference_is_dispatched_as_read_only_context(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path)
+    store = WeixinStore(config.weixin)
+    await store.save_account(_account())
+    handler = FakeInboundHandler()
+    service = WeixinService(
+        config,
+        store=store,
+        message_handler=handler,
+        login_manager=cast(QrLoginManager, FakeLoginManager()),
+    )
+    message = InboundMessage(
+        account_id="bot-account",
+        sequence=2,
+        message_id="current-message",
+        from_user_id="peer-1",
+        to_user_id="bot-account",
+        client_id="current-client",
+        created_at_ms=0,
+        session_id="s1",
+        context_token="ctx",
+        items=(
+            MessageItem(
+                type=MessageItemType.TEXT,
+                text="能看到引用吗？",
+                ref_msg=RefMessage(
+                    title="微信用户",
+                    message_item=MessageItem(
+                        type=MessageItemType.TEXT,
+                        msg_id="quoted-message",
+                        text="这是被引用的正文",
+                    ),
+                ),
+            ),
+        ),
+    )
+    try:
+        await service._handle_inbound("primary", FakeClient(), message)
+
+        assert len(handler.calls) == 1
+        call = handler.calls[0]
+        assert call["text"] == "能看到引用吗？"
+        assert call["message_id"] == "current-message"
+        reply_context = cast(ReplyContext, call["reply_context"])
+        assert reply_context.title == "微信用户"
+        assert reply_context.message_id == "quoted-message"
+        assert reply_context.text == "这是被引用的正文"
+        assert reply_context.attachments == ()
+    finally:
+        await service.stop()
+
+
+@pytest.mark.asyncio
+async def test_inbound_media_reference_registers_nested_attachment(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path)
+    store = WeixinStore(config.weixin)
+    await store.save_account(_account())
+    handler = FakeInboundHandler()
+    registry = AttachmentRegistry(
+        registry_path=tmp_path / "attachments.json",
+        cache_dir=tmp_path / "attachments",
+    )
+    service = WeixinService(
+        config,
+        store=store,
+        message_handler=handler,
+        attachment_registry=registry,
+        login_manager=cast(QrLoginManager, FakeLoginManager()),
+    )
+    message = InboundMessage(
+        account_id="bot-account",
+        sequence=3,
+        message_id="current-media-message",
+        from_user_id="peer-1",
+        to_user_id="bot-account",
+        client_id="current-media-client",
+        created_at_ms=0,
+        session_id="s1",
+        context_token="ctx",
+        items=(
+            MessageItem(
+                type=MessageItemType.TEXT,
+                text="这张图呢？",
+                ref_msg=RefMessage(
+                    title="微信用户",
+                    message_item=MessageItem(
+                        type=MessageItemType.IMAGE,
+                        msg_id="quoted-image",
+                    ),
+                ),
+            ),
+        ),
+    )
+    try:
+        await service._handle_inbound("primary", FakeClient(), message)
+
+        call = handler.calls[0]
+        assert call["attachments"] == []
+        reply_context = cast(ReplyContext, call["reply_context"])
+        assert reply_context.text == "[图片]"
+        assert len(reply_context.attachments) == 1
+        assert reply_context.attachments[0]["media_type"] == "image"
+        assert reply_context.attachments[0]["display_name"] == "image.png"
     finally:
         await service.stop()
 
@@ -302,5 +433,7 @@ async def test_disabled_service_status_stays_stopped(tmp_path: Path) -> None:
 
         assert status["enabled"] is False
         assert status["running"] is False
+        assert "reply_to" in status["capabilities"]["outbound"]
+        assert "reply_to" not in status["capabilities"]["unsupported"]
     finally:
         await service.stop()

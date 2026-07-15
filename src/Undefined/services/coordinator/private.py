@@ -22,10 +22,12 @@ from Undefined.render import render_html_to_image, render_markdown_to_html
 from Undefined.services.message_batcher import BufferedMessage, make_scope
 from Undefined.utils.recent_messages import get_recent_messages_prefer_local
 from Undefined.utils.message_targets import DeliveryAddress, parse_delivery_address
+from Undefined.utils.message_reply import ReplyContext
 from Undefined.utils.sender import AddressBoundSender
 from Undefined.utils.xml import (
     escape_xml_attr,
     escape_xml_text_preserving_attachment_tags,
+    format_reply_context_xml,
 )
 
 if TYPE_CHECKING:
@@ -85,6 +87,7 @@ class PrivateReplyMixin:
         channel: str = "qq",
         address: str | None = None,
         batch_scope: str | None = None,
+        reply_context: ReplyContext | None = None,
     ) -> None:
         """处理私聊消息入口，决定回复策略并进行安全检测"""
         logger.debug("[私聊回复] user=%s text_len=%s", user_id, len(text))
@@ -100,7 +103,10 @@ class PrivateReplyMixin:
             raise ValueError("私聊投递地址与逻辑 QQ 身份不一致")
 
         if user_id != self.config.superadmin_qq:
-            if await self.security.detect_injection(text, message_content):
+            security_text = text
+            if reply_context is not None and reply_context.text:
+                security_text = f"{reply_context.text}\n{text}".strip()
+            if await self.security.detect_injection(security_text, message_content):
                 logger.warning(f"[Security] 私聊注入攻击: user_id={user_id}")
                 await self.history_manager.modify_last_private_message(
                     user_id, "<这句话检测到用户进行注入，已删除>"
@@ -128,6 +134,7 @@ class PrivateReplyMixin:
             arrival_time=time.time(),
             is_private=True,
             trigger_message_id=trigger_message_id,
+            reply_context=reply_context,
             is_poke=is_poke,
             channel=resolved_address.channel,
             address=resolved_address.canonical,
@@ -173,7 +180,10 @@ class PrivateReplyMixin:
             address=address.canonical,
         ) as ctx:
 
-            async def send_msg_cb(message: str, reply_to: int | None = None) -> None:
+            async def send_msg_cb(
+                message: str,
+                reply_to: int | str | None = None,
+            ) -> None:
                 await self.sender.send_address_message(
                     address, message, reply_to=reply_to
                 )
@@ -226,7 +236,9 @@ class PrivateReplyMixin:
                 await self.onebot.send_like(uid, times)
 
             async def send_private_cb(
-                uid: int, msg: str, reply_to: int | None = None
+                uid: int,
+                msg: str,
+                reply_to: int | None = None,
             ) -> None:
                 if uid == user_id:
                     await self.sender.send_address_message(
@@ -402,6 +414,7 @@ class PrivateReplyMixin:
         attachment_xml = (
             f"\n{attachment_refs_to_xml(item.attachments)}" if item.attachments else ""
         )
+        reply_xml = format_reply_context_xml(item.reply_context)
         route_attrs = ""
         location = "私聊"
         if item.channel == "wechat":
@@ -410,6 +423,6 @@ class PrivateReplyMixin:
         return (
             f'<message{message_id_attr} sender="{safe_name}" sender_id="{safe_uid}" '
             f'{route_attrs.lstrip()} location="{location}" time="{safe_time}">\n'
-            f" <content>{safe_text}</content>{attachment_xml}\n"
+            f" <content>{safe_text}</content>{reply_xml}{attachment_xml}\n"
             f" </message>"
         )

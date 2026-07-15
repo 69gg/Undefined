@@ -4781,7 +4781,7 @@ requires-dist = [
     { name = "types-aiofiles", specifier = ">=25.1.0.20251011" },
     { name = "types-markdown", specifier = ">=3.10.0.20251106" },
     { name = "websockets", specifier = ">=12.0" },
-    { name = "weixin-ilink-client", specifier = ">=0.1.0,<0.2.0" },
+    { name = "weixin-ilink-client", specifier = ">=0.1.1,<0.2.0" },
 ]
 provides-extras = ["dev", "ci"]
 
@@ -5003,16 +5003,16 @@ wheels = [
 
 [[package]]
 name = "weixin-ilink-client"
-version = "0.1.0"
+version = "0.1.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cryptography" },
     { name = "httpx" },
     { name = "qrcode" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/90/9b/de023b5cd47610069aa834721683457d492b406cd2780f7eec301e248e85/weixin_ilink_client-0.1.0.tar.gz", hash = "sha256:91ca3651fcb34bf341388441fd4e6dfb515a3655e7e9e080735f38f887aaadee", size = 20226, upload-time = "2026-07-14T07:31:59.753Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d8/97/306e5f4574ac6a63d500ba7feb654465599f895fdaf3130094b32535dd72/weixin_ilink_client-0.1.1.tar.gz", hash = "sha256:ce998dde84f5434c2da47df2b759ecf984e3c7da3df80bf436087f777308f6c7", size = 20984, upload-time = "2026-07-15T13:47:47.98Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b4/00/2b33270d8fd7ffa05322d5a6eaffe83a8f297968676ad437d4a40b6f6943/weixin_ilink_client-0.1.0-py3-none-any.whl", hash = "sha256:b6391228c3f871ee839ef4e5e07c52df9497615a0f77a3133ed5dfcef2b31ce6", size = 26263, upload-time = "2026-07-14T07:31:58.785Z" },
+    { url = "https://files.pythonhosted.org/packages/e1/f3/a9417a462cb14999b6799e58b571599720880ae91efd9346db979a826061/weixin_ilink_client-0.1.1-py3-none-any.whl", hash = "sha256:2fa5c9939e1ca8a7992d5e15e414479f9ba241e322b0286f7494906a4095be3f", size = 27051, upload-time = "2026-07-15T13:47:47.15Z" },
 ]
 
 [[package]]

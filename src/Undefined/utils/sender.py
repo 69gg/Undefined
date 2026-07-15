@@ -5,6 +5,15 @@ from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import unquote, urlsplit
 
+from weixin_ilink_client import (
+    ApiError,
+    HttpError,
+    RefMessage,
+    SessionPausedError,
+    UnsupportedCapabilityError,
+)
+from weixin_ilink_client.constants import STALE_TOKEN_ERROR_CODE
+
 from Undefined.attachments import attachment_refs_to_text, build_attachment_scope
 from Undefined.config import Config
 from Undefined.onebot import OneBotClient
@@ -16,6 +25,11 @@ from Undefined.utils.common import (
 )
 from Undefined.utils.logging import redact_string
 from Undefined.utils.message_targets import DeliveryAddress
+from Undefined.utils.message_reply import (
+    ReplyContext,
+    build_safe_reply_preview,
+    format_markdown_reply,
+)
 from Undefined.utils.message_turn import mark_message_sent_this_turn
 
 logger = logging.getLogger(__name__)
@@ -25,6 +39,10 @@ MAX_MESSAGE_LENGTH = 4000
 _WEIXIN_MEDIA_SEGMENT_TYPES: frozenset[str] = frozenset(
     {"image", "video", "file", "record"}
 )
+
+
+class WeixinReplyTargetError(ValueError):
+    """Raised when a quoted target is outside the current WeChat route."""
 
 
 def _extract_message_id(result: object) -> int | None:
@@ -41,6 +59,36 @@ def _extract_message_id(result: object) -> int | None:
         return int(message_id) if message_id is not None else None
     except (TypeError, ValueError):
         return None
+
+
+def _coerce_qq_reply_id(value: int | str | None) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise ValueError("QQ 引用消息 ID 必须是正整数")
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("QQ 引用消息 ID 必须是正整数") from exc
+    if parsed <= 0:
+        raise ValueError("QQ 引用消息 ID 必须是正整数")
+    return parsed
+
+
+def _should_fallback_weixin_reference(exc: BaseException) -> bool:
+    if isinstance(exc, SessionPausedError):
+        return False
+    if isinstance(exc, UnsupportedCapabilityError):
+        return True
+    if isinstance(exc, ApiError):
+        return exc.code != STALE_TOKEN_ERROR_CODE
+    if isinstance(exc, HttpError):
+        return 400 <= exc.status_code < 500 and exc.status_code not in {
+            408,
+            425,
+            429,
+        }
+    return False
 
 
 def _format_size(size_bytes: int | None) -> str:
@@ -181,11 +229,11 @@ class MessageSender:
         auto_history: bool = True,
         *,
         mark_sent: bool = True,
-        reply_to: int | None = None,
+        reply_to: int | str | None = None,
         preferred_temp_group_id: int | None = None,
         history_message: str | None = None,
         attachments: list[dict[str, str]] | None = None,
-    ) -> int | None:
+    ) -> int | str | None:
         """按规范地址投递消息，并保留原 QQ 方法的兼容语义。"""
         if address.channel == "group":
             return await self.send_group_message(
@@ -193,7 +241,7 @@ class MessageSender:
                 message,
                 auto_history=auto_history,
                 mark_sent=mark_sent,
-                reply_to=reply_to,
+                reply_to=_coerce_qq_reply_id(reply_to),
                 history_message=history_message,
                 attachments=attachments,
             )
@@ -203,7 +251,7 @@ class MessageSender:
                 message,
                 auto_history=auto_history,
                 mark_sent=mark_sent,
-                reply_to=reply_to,
+                reply_to=_coerce_qq_reply_id(reply_to),
                 preferred_temp_group_id=preferred_temp_group_id,
                 history_message=history_message,
                 attachments=attachments,
@@ -307,10 +355,10 @@ class MessageSender:
         *,
         auto_history: bool,
         mark_sent: bool,
-        reply_to: int | None,
+        reply_to: int | str | None,
         history_message: str | None,
         attachments: list[dict[str, str]] | None,
-    ) -> int | None:
+    ) -> str | None:
         if not self.config.is_private_allowed(user_id):
             enabled = self.config.access_control_enabled()
             reason = self.config.private_access_denied_reason(user_id) or "unknown"
@@ -324,9 +372,19 @@ class MessageSender:
                 "blocked by access control: "
                 f"type=private reason={reason} user_id={user_id} enabled={enabled}"
             )
-        if reply_to is not None:
-            raise ValueError("微信 iLink 暂不支持引用回复（reply_to）")
         service = self._require_weixin_service()
+        reply_context: ReplyContext | None = None
+        reference: RefMessage | None = None
+        if reply_to is not None:
+            reply_context = await self._resolve_weixin_reply_context(
+                user_id,
+                reply_to,
+            )
+            preview = build_safe_reply_preview(
+                reply_context.text,
+                reply_context.attachments,
+            )
+            reference = RefMessage.from_text(reply_context.title, preview)
         segments = message_to_segments(message)
         text_segments: list[dict[str, Any]] = []
         media_segments: list[tuple[str, Path]] = []
@@ -346,23 +404,100 @@ class MessageSender:
             media_segments.append((segment_type, path))
         text = extract_text(text_segments, self.bot_qq).strip()
 
+        sent_ids: list[str] = []
         sent_any = False
-        for chunk in _split_text_chunks(text):
-            await service.send_text(user_id, chunk)
+
+        def record_sent(receipt: object) -> None:
+            nonlocal sent_any
             sent_any = True
+            receipt_id = str(receipt or "").strip()
+            if receipt_id:
+                sent_ids.append(receipt_id)
             if mark_sent:
                 mark_message_sent_this_turn()
 
-        for segment_type, path in media_segments:
-            await service.send_file(
-                user_id,
-                path,
-                name=path.name,
-                kind=("image" if segment_type == "image" else segment_type),
+        text_chunks = _split_text_chunks(text)
+        reply_mode = ""
+        if reference is not None and text_chunks:
+            try:
+                receipt = await service.send_text(
+                    user_id,
+                    text_chunks[0],
+                    reference=reference,
+                )
+            except Exception as exc:
+                if not _should_fallback_weixin_reference(exc):
+                    raise
+                logger.warning(
+                    "[微信引用] 原生引用被明确拒绝，降级为 Markdown: user=%s "
+                    "target=%s error=%s",
+                    user_id,
+                    reply_to,
+                    type(exc).__name__,
+                )
+                assert reply_context is not None
+                fallback_text = format_markdown_reply(reply_context, text)
+                for chunk in _split_text_chunks(fallback_text):
+                    record_sent(await service.send_text(user_id, chunk))
+                reply_mode = "markdown_fallback"
+            else:
+                record_sent(receipt)
+                for chunk in text_chunks[1:]:
+                    record_sent(await service.send_text(user_id, chunk))
+                reply_mode = "native"
+        else:
+            for chunk in text_chunks:
+                record_sent(await service.send_text(user_id, chunk))
+
+        media_start = 0
+        if reference is not None and not text_chunks and media_segments:
+            segment_type, path = media_segments[0]
+            kind = "image" if segment_type == "image" else segment_type
+            try:
+                receipt = await service.send_file(
+                    user_id,
+                    path,
+                    name=path.name,
+                    kind=kind,
+                    reference=reference,
+                )
+            except Exception as exc:
+                if not _should_fallback_weixin_reference(exc):
+                    raise
+                logger.warning(
+                    "[微信引用] 原生媒体引用被明确拒绝，降级为 Markdown: "
+                    "user=%s target=%s error=%s",
+                    user_id,
+                    reply_to,
+                    type(exc).__name__,
+                )
+                assert reply_context is not None
+                fallback_text = format_markdown_reply(reply_context, "")
+                for chunk in _split_text_chunks(fallback_text):
+                    record_sent(await service.send_text(user_id, chunk))
+                record_sent(
+                    await service.send_file(
+                        user_id,
+                        path,
+                        name=path.name,
+                        kind=kind,
+                    )
+                )
+                reply_mode = "markdown_fallback"
+            else:
+                record_sent(receipt)
+                reply_mode = "native"
+            media_start = 1
+
+        for segment_type, path in media_segments[media_start:]:
+            record_sent(
+                await service.send_file(
+                    user_id,
+                    path,
+                    name=path.name,
+                    kind=("image" if segment_type == "image" else segment_type),
+                )
             )
-            sent_any = True
-            if mark_sent:
-                mark_message_sent_this_turn()
         if not sent_any and message.strip():
             raise ValueError("微信消息中没有可投递的文本或本地媒体")
 
@@ -382,15 +517,61 @@ class MessageSender:
                 history_content,
                 history_attachments,
             )
+            transport: dict[str, Any] = {
+                "channel": "wechat",
+                "address": f"wechat:{user_id}",
+            }
+            if sent_ids:
+                transport["message_ids"] = list(sent_ids)
+            if reply_to is not None:
+                transport["reply_to"] = str(reply_to)
+                transport["reply_mode"] = reply_mode
             await self.history_manager.add_private_message(
                 user_id=user_id,
                 text_content=history_content,
                 display_name="Bot",
                 user_name="Bot",
+                message_id=(sent_ids[0] if sent_ids else None),
                 attachments=history_attachments,
-                transport={"channel": "wechat", "address": f"wechat:{user_id}"},
+                transport=transport,
+                reply_context=reply_context,
             )
-        return None
+        return sent_ids[0] if sent_ids else None
+
+    async def _resolve_weixin_reply_context(
+        self,
+        user_id: int,
+        reply_to: int | str,
+    ) -> ReplyContext:
+        address = f"wechat:{user_id}"
+        record = await self.history_manager.find_private_message_by_id(
+            user_id,
+            reply_to,
+            channel="wechat",
+            address=address,
+        )
+        if record is None:
+            raise WeixinReplyTargetError(
+                f"微信引用目标 {reply_to} 不在当前微信会话历史中"
+            )
+        raw_attachments = record.get("attachments")
+        attachments: list[dict[str, str]] = []
+        if isinstance(raw_attachments, list):
+            for item in raw_attachments:
+                if not isinstance(item, dict):
+                    continue
+                uid = str(item.get("uid", "") or "").strip()
+                if not uid:
+                    continue
+                attachments.append(
+                    {str(key): str(value) for key, value in item.items()}
+                )
+        return ReplyContext(
+            title=str(record.get("display_name", "") or "消息").strip() or "消息",
+            message_id=str(reply_to),
+            text=str(record.get("message", "") or ""),
+            attachments=tuple(attachments),
+        )
 
     async def register_sent_file_attachment(
         self,
@@ -1174,18 +1355,18 @@ class AddressBoundSender:
         auto_history: bool = True,
         *,
         mark_sent: bool = True,
-        reply_to: int | None = None,
+        reply_to: int | str | None = None,
         preferred_temp_group_id: int | None = None,
         history_message: str | None = None,
         attachments: list[dict[str, str]] | None = None,
-    ) -> int | None:
+    ) -> int | str | None:
         if int(user_id) != self._address.target_id:
             return await self._sender.send_private_message(
                 user_id,
                 message,
                 auto_history=auto_history,
                 mark_sent=mark_sent,
-                reply_to=reply_to,
+                reply_to=_coerce_qq_reply_id(reply_to),
                 preferred_temp_group_id=preferred_temp_group_id,
                 history_message=history_message,
                 attachments=attachments,

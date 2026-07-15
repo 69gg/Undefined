@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import cast
 
+from Undefined.utils.message_reply import ReplyContext
 from Undefined.utils.xml import (
     escape_xml_attr,
     escape_xml_text,
@@ -180,3 +181,46 @@ class TestAttachmentTagPreservation:
 
         assert '<content>看 <attachment uid="pic_demo"/></content>' in result
         assert '<attachment uid="pic_demo" type="image"' in result
+
+    def test_format_message_xml_renders_read_only_reply_context(self) -> None:
+        result = format_message_xml(
+            {
+                "type": "private",
+                "display_name": "微信用户",
+                "user_id": "10001",
+                "chat_id": "10001",
+                "timestamp": "2026-07-15 20:00:00",
+                "message_id": "current-message",
+                "message": "当前正文",
+                "transport": {
+                    "channel": "wechat",
+                    "address": "wechat:10001",
+                },
+                "reply_context": ReplyContext(
+                    title='旧用户 & "昵称"',
+                    message_id="quoted-message",
+                    text='旧正文 <attachment uid="pic_quote"/> & 后续',
+                    attachments=(
+                        {
+                            "uid": "pic_quote",
+                            "kind": "image",
+                            "media_type": "image",
+                            "display_name": "quoted.png",
+                        },
+                    ),
+                ),
+            }
+        )
+
+        assert '<message message_id="current-message"' in result
+        assert "<content>当前正文</content>" in result
+        assert (
+            '<reply_context readonly="true" '
+            'title="旧用户 &amp; &quot;昵称&quot;" '
+            'message_id="quoted-message">'
+        ) in result
+        assert (
+            '<content>旧正文 <attachment uid="pic_quote"/> &amp; 后续</content>'
+            in result
+        )
+        assert '<attachment uid="pic_quote" type="image"' in result

@@ -106,6 +106,56 @@ async def test_load_history_preserves_attachment_semantic_metadata(
 
 
 @pytest.mark.asyncio
+async def test_load_private_history_normalizes_reply_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_read_json(
+        _path: str,
+        use_lock: bool = False,
+    ) -> list[dict[str, object]]:
+        assert use_lock is False
+        return [
+            {
+                "user_id": "40001",
+                "message": "当前消息",
+                "reply_context": {
+                    "title": " 微信用户 ",
+                    "message_id": 12345,
+                    "message": " 旧消息 ",
+                    "attachments": [
+                        {
+                            "uid": "pic_quote",
+                            "kind": "image",
+                            "media_type": "image",
+                            "display_name": "quoted.png",
+                        },
+                        {"kind": "file"},
+                    ],
+                },
+            }
+        ]
+
+    monkeypatch.setattr("Undefined.utils.io.read_json", fake_read_json)
+    manager = MessageHistoryManager.__new__(MessageHistoryManager)
+
+    history = await manager._load_history_from_file("data/history/private_40001.json")
+
+    assert history[0]["reply_context"] == {
+        "title": "微信用户",
+        "message_id": "12345",
+        "message": "旧消息",
+        "attachments": [
+            {
+                "uid": "pic_quote",
+                "kind": "image",
+                "media_type": "image",
+                "display_name": "quoted.png",
+            }
+        ],
+    }
+
+
+@pytest.mark.asyncio
 async def test_recent_messages_lazily_backfills_meme_attachments(
     tmp_path: Path,
 ) -> None:

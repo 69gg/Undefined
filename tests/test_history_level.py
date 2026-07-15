@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from Undefined.utils.history import MessageHistoryManager
+from Undefined.utils.message_reply import ReplyContext
 
 
 @pytest.mark.asyncio
@@ -127,6 +128,91 @@ async def test_add_private_message_stores_webchat_metadata(
     record = manager._private_message_history["42"][0]
     assert record["message"] == ""
     assert record["webchat"] == webchat
+
+
+@pytest.mark.asyncio
+async def test_private_history_persists_reply_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = MessageHistoryManager.__new__(MessageHistoryManager)
+    manager._private_message_history = {}
+    manager._max_records = 10000
+    manager._initialized = asyncio.Event()
+    manager._initialized.set()
+    manager._private_locks = {}
+
+    async def fake_save(_data: object, _path: str) -> None:
+        return None
+
+    monkeypatch.setattr(manager, "_save_history_to_file", fake_save)
+    reply_context = ReplyContext(
+        title="微信用户",
+        message_id="quoted-1",
+        text="被引用的消息",
+    )
+
+    await manager.add_private_message(
+        user_id=12345,
+        text_content="当前消息",
+        message_id="current-1",
+        transport={"channel": "wechat", "address": "wechat:12345"},
+        reply_context=reply_context,
+    )
+    await manager.flush_pending_saves()
+
+    record = manager._private_message_history["12345"][0]
+    assert record["reply_context"] == reply_context.to_dict()
+
+
+@pytest.mark.asyncio
+async def test_find_private_message_by_id_enforces_transport_route() -> None:
+    manager = MessageHistoryManager.__new__(MessageHistoryManager)
+    manager._private_message_history = {
+        "12345": [
+            {
+                "message_id": "same-id",
+                "message": "QQ 消息",
+                "transport": {"channel": "qq", "address": "qq:12345"},
+            },
+            {
+                "message_id": "same-id",
+                "message": "另一个微信地址",
+                "transport": {
+                    "channel": "wechat",
+                    "address": "wechat:54321",
+                },
+            },
+            {
+                "message_id": "first-client-id",
+                "message": "当前微信地址",
+                "transport": {
+                    "channel": "wechat",
+                    "address": "wechat:12345",
+                    "message_ids": ["first-client-id", "second-client-id"],
+                },
+            },
+        ]
+    }
+    manager._initialized = asyncio.Event()
+    manager._initialized.set()
+    manager._private_locks = {}
+
+    found = await manager.find_private_message_by_id(
+        12345,
+        "second-client-id",
+        channel="wechat",
+        address="wechat:12345",
+    )
+    wrong_route = await manager.find_private_message_by_id(
+        12345,
+        "same-id",
+        channel="wechat",
+        address="wechat:12345",
+    )
+
+    assert found is not None
+    assert found["message"] == "当前微信地址"
+    assert wrong_route is None
 
 
 @pytest.mark.asyncio

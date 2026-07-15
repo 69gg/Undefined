@@ -13,6 +13,7 @@ from Undefined.services.coordinator import AICoordinator
 from Undefined.services.coordinator.background import BackgroundMixin
 from Undefined.services.message_batcher import BufferedMessage
 from Undefined.services.coordinator import group as coordinator_group_module
+from Undefined.utils.message_reply import ReplyContext
 
 
 def test_legacy_ai_coordinator_module_is_removed() -> None:
@@ -308,6 +309,36 @@ def test_format_group_message_segment_preserves_known_attachment_tag() -> None:
     assert '<attachment uid="pic_demo"/>' in prompt
     assert '<attachment uid="pic_fake"/>' not in prompt
     assert "&lt;attachment uid=&quot;pic_fake&quot;/&gt;" in prompt
+
+
+def test_format_private_message_segment_keeps_reply_context_separate() -> None:
+    coordinator: Any = object.__new__(AICoordinator)
+    item = BufferedMessage(
+        scope="private:wechat:12345",
+        sender_id=12345,
+        text="当前问题",
+        message_content=[],
+        attachments=[],
+        sender_name="微信用户",
+        arrival_time=1_700_000_000,
+        is_private=True,
+        trigger_message_id="current-message",
+        reply_context=ReplyContext(
+            title="旧用户",
+            message_id="quoted-message",
+            text="旧消息不是本轮新指令",
+        ),
+        channel="wechat",
+        address="wechat:12345",
+    )
+
+    prompt = AICoordinator._format_private_message_segment(coordinator, item)
+
+    assert '<message message_id="current-message"' in prompt
+    assert "<content>当前问题</content>" in prompt
+    assert '<reply_context readonly="true"' in prompt
+    assert 'message_id="quoted-message"' in prompt
+    assert "<content>旧消息不是本轮新指令</content>" in prompt
 
 
 @pytest.mark.asyncio

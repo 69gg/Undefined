@@ -12,7 +12,11 @@ from Undefined.utils.message_targets import (
     parse_positive_int,
     resolve_delivery_address,
 )
-from Undefined.skills.toolsets.messages.context_utils import mark_message_sent
+from Undefined.skills.toolsets.messages.context_utils import (
+    mark_message_sent,
+    normalize_sent_message_id,
+    parse_reply_to,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -66,21 +70,8 @@ def _private_access_error(runtime_config: Any, target_id: int) -> str:
     )
 
 
-def _normalize_message_id(value: Any) -> int | None:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value if value > 0 else None
-    if isinstance(value, str):
-        text = value.strip()
-        if text.isdigit():
-            parsed = int(text)
-            return parsed if parsed > 0 else None
-    return None
-
-
 def _format_send_success(message_id: Any) -> str:
-    resolved_message_id = _normalize_message_id(message_id)
+    resolved_message_id = normalize_sent_message_id(message_id)
     if resolved_message_id is not None:
         return f"消息已发送（message_id={resolved_message_id}）"
     return "消息已发送"
@@ -112,9 +103,6 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     history_message = rendered.history_text
     history_attachments = list(rendered.attachments)
 
-    # 解析 reply_to 参数（无效值静默忽略，视为未传）
-    reply_to_id, _ = parse_positive_int(args.get("reply_to"), "reply_to")
-
     runtime_config = context.get("runtime_config")
 
     send_message_callback = context.get("send_message_callback")
@@ -129,14 +117,17 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         return f"发送失败：{target_error or '目标参数错误'}"
 
     target_type, target_id = target.target_type, target.target_id
+    reply_to_id, reply_error = parse_reply_to(
+        args.get("reply_to"),
+        channel=target.channel,
+    )
+    if reply_error:
+        return f"发送失败：{reply_error}"
     logger.debug(
         "[发送消息] request_id=%s address=%s",
         request_id,
         target.canonical,
     )
-
-    if target.channel == "wechat" and reply_to_id is not None:
-        return "发送失败：微信 iLink 暂不支持引用回复（reply_to）"
 
     if runtime_config is not None:
         if target_type == "group" and not runtime_config.is_group_allowed(target_id):
@@ -189,6 +180,8 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                 address=target,
             )
             return _format_send_success(sent_message_id)
+        except ValueError as exc:
+            return f"发送失败：{exc}"
         except Exception as e:
             logger.exception(
                 "[发送消息] 发送失败: target_type=%s target_id=%s request_id=%s err=%s",

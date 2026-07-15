@@ -25,7 +25,7 @@ class PrivateMessageSender(Protocol):
         self,
         user_id: int,
         message: str,
-    ) -> int | None: ...
+    ) -> int | str | None: ...
 
 
 class ModelPoolService:

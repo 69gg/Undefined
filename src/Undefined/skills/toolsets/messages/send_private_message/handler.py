@@ -6,21 +6,13 @@ from Undefined.attachments import (
     render_message_with_pic_placeholders,
     scope_from_context,
 )
-from Undefined.skills.toolsets.messages.context_utils import mark_message_sent
+from Undefined.skills.toolsets.messages.context_utils import (
+    mark_message_sent,
+    normalize_sent_message_id,
+    parse_reply_to,
+)
 
 logger = logging.getLogger(__name__)
-
-
-def _parse_positive_int(value: Any, field_name: str) -> tuple[int | None, str | None]:
-    if value is None:
-        return None, None
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return None, f"{field_name} 必须是整数"
-    if parsed <= 0:
-        return None, f"{field_name} 必须是正整数"
-    return parsed, None
 
 
 def _private_access_error(runtime_config: Any, user_id: int) -> str:
@@ -37,21 +29,8 @@ def _private_access_error(runtime_config: Any, user_id: int) -> str:
     )
 
 
-def _normalize_message_id(value: Any) -> int | None:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value if value > 0 else None
-    if isinstance(value, str):
-        text = value.strip()
-        if text.isdigit():
-            parsed = int(text)
-            return parsed if parsed > 0 else None
-    return None
-
-
 def _format_send_success(user_id: int, message_id: Any) -> str:
-    resolved_message_id = _normalize_message_id(message_id)
+    resolved_message_id = normalize_sent_message_id(message_id)
     if resolved_message_id is not None:
         return f"私聊消息已发送给用户 {user_id}（message_id={resolved_message_id}）"
     return f"私聊消息已发送给用户 {user_id}"
@@ -73,13 +52,15 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     user_id = target.target_id
     message = str(args.get("message", ""))
 
-    # 解析 reply_to 参数（无效值静默忽略，视为未传）
-    reply_to_id, _ = _parse_positive_int(args.get("reply_to"), "reply_to")
+    reply_to_id, reply_error = parse_reply_to(
+        args.get("reply_to"),
+        channel=target.channel,
+    )
 
     if not message:
         return "消息内容不能为空"
-    if target.channel == "wechat" and reply_to_id is not None:
-        return "发送失败：微信 iLink 暂不支持引用回复（reply_to）"
+    if reply_error:
+        return f"发送失败：{reply_error}"
 
     attachment_registry = context.get("attachment_registry")
     scope_key = scope_from_context(context)
@@ -140,6 +121,8 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                 address=target,
             )
             return _format_send_success(user_id, sent_message_id)
+        except ValueError as exc:
+            return f"发送失败：{exc}"
         except Exception as e:
             logger.exception(
                 "[私聊发送] sender 发送失败: user=%s request_id=%s err=%s",

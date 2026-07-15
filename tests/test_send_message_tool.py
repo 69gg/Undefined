@@ -49,6 +49,20 @@ async def test_send_message_schema_rejects_mixed_address_parameters() -> None:
     assert validator.is_valid(
         {
             "message": "hello",
+            "address": "wechat:123",
+            "reply_to": "wechat-message+/=1",
+        }
+    )
+    assert not validator.is_valid(
+        {
+            "message": "hello",
+            "address": "wechat:123",
+            "reply_to": "invalid message id",
+        }
+    )
+    assert validator.is_valid(
+        {
+            "message": "hello",
             "target_type": "private",
             "target_id": 123,
         }
@@ -67,6 +81,39 @@ async def test_send_message_schema_rejects_mixed_address_parameters() -> None:
             "target_id": 123,
         }
     )
+
+
+@pytest.mark.asyncio
+async def test_send_message_wechat_passes_string_reply_id_to_address_sender() -> None:
+    sender = SimpleNamespace(
+        send_address_message=AsyncMock(return_value="client-message-1"),
+    )
+    context: dict[str, Any] = _tool_context(
+        request_type="private",
+        user_id=12345,
+        sender_id=12345,
+        channel="wechat",
+        address="wechat:12345",
+        request_id="req-wechat-reply",
+        runtime_config=_build_runtime_config(),
+        sender=sender,
+    )
+
+    result = await execute(
+        {
+            "message": "微信引用回复",
+            "reply_to": "wechat-message+/=1",
+        },
+        context,
+    )
+
+    assert result == "消息已发送（message_id=client-message-1）"
+    sender.send_address_message.assert_awaited_once()
+    send_call = sender.send_address_message.await_args
+    assert send_call is not None
+    assert send_call.args[0].canonical == "wechat:12345"
+    assert send_call.args[1] == "微信引用回复"
+    assert send_call.kwargs["reply_to"] == "wechat-message+/=1"
 
 
 @pytest.mark.asyncio

@@ -8,6 +8,8 @@ from typing import Any, Callable, Sequence, Mapping
 
 from xml.sax.saxutils import escape
 
+from Undefined.utils.message_reply import ReplyContext
+
 
 _INLINE_PRESERVED_TAG_RE = re.compile(
     r"<(?P<tag>attachment|forward)\s+uid=(?P<quote>[\"'])(?P<uid>[^\"']+)(?P=quote)\s*/?>",
@@ -111,6 +113,7 @@ def format_message_xml(
     safe_title = escape_xml_attr(title)
     safe_time = escape_xml_attr(timestamp)
     safe_text = escape_xml_text_preserving_attachment_tags(text, attachments)
+    reply_xml = format_reply_context_xml(msg.get("reply_context"))
     safe_location = escape_xml_attr(
         _message_location(msg_type_val, chat_name, transport)
     )
@@ -133,7 +136,7 @@ def format_message_xml(
             f'<message{msg_id_attr} sender="{safe_sender}" sender_id="{safe_sender_id}" '
             f'group_id="{safe_chat_id}" group_name="{safe_chat_name}" location="{safe_location}" '
             f'role="{safe_role}" title="{safe_title}"{level_attr} time="{safe_time}">\n'
-            f"<content>{safe_text}</content>{attachment_xml}\n"
+            f"<content>{safe_text}</content>{reply_xml}{attachment_xml}\n"
             f"</message>"
         )
 
@@ -148,8 +151,39 @@ def format_message_xml(
     return (
         f'<message{msg_id_attr} sender="{safe_sender}" sender_id="{safe_sender_id}" '
         f'{transport_attrs.lstrip()} location="{safe_location}" time="{safe_time}">\n'
-        f"<content>{safe_text}</content>{attachment_xml}\n"
+        f"<content>{safe_text}</content>{reply_xml}{attachment_xml}\n"
         f"</message>"
+    )
+
+
+def format_reply_context_xml(value: object, *, indent: str = " ") -> str:
+    """Format optional quoted-message metadata as read-only nested XML."""
+
+    context = (
+        value if isinstance(value, ReplyContext) else ReplyContext.from_mapping(value)
+    )
+    if context is None or context.is_empty:
+        return ""
+    attrs = ['readonly="true"']
+    if context.title:
+        attrs.append(f'title="{escape_xml_attr(context.title)}"')
+    if context.message_id:
+        attrs.append(f'message_id="{escape_xml_attr(context.message_id)}"')
+    safe_text = escape_xml_text_preserving_attachment_tags(
+        context.text,
+        context.attachments,
+    )
+    attachment_xml = ""
+    if context.attachments:
+        from Undefined.attachments import attachment_refs_to_xml
+
+        attachment_xml = (
+            f"\n{attachment_refs_to_xml(context.attachments, indent=indent + ' ')}"
+        )
+    return (
+        f"\n{indent}<reply_context {' '.join(attrs)}>\n"
+        f"{indent} <content>{safe_text}</content>{attachment_xml}\n"
+        f"{indent}</reply_context>"
     )
 
 

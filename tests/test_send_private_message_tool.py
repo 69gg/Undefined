@@ -7,6 +7,7 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
+from jsonschema import Draft202012Validator
 
 from Undefined.context import RequestContext
 from Undefined.skills.toolsets.messages.send_private_message.handler import execute
@@ -41,12 +42,29 @@ async def test_send_private_message_schema_describes_wechat_text_format() -> Non
     )
     assert config_text is not None
     function = json.loads(config_text)["function"]
+    parameters = function["parameters"]
+    validator = Draft202012Validator(parameters)
 
     assert "微信文本支持 Markdown" in function["description"]
     assert "特殊符号和附件标签必须原样填写" in function["description"]
     assert (
         "<、>、& 等特殊符号须原样填写"
         in function["parameters"]["properties"]["message"]["description"]
+    )
+    assert "同一物理会话内的 reply_to 原生引用" in function["description"]
+    assert validator.is_valid(
+        {
+            "message": "hello",
+            "address": "wechat:12345",
+            "reply_to": "wechat-message+/=1",
+        }
+    )
+    assert not validator.is_valid(
+        {
+            "message": "hello",
+            "address": "wechat:12345",
+            "reply_to": "invalid message id",
+        }
     )
 
 
@@ -73,6 +91,37 @@ async def test_send_private_message_callback_passes_reply_to() -> None:
         12345, "hello direct private", reply_to=88888
     )
     assert context["message_sent_this_turn"] is True
+
+
+@pytest.mark.asyncio
+async def test_send_private_message_wechat_passes_string_reply_id() -> None:
+    sender = SimpleNamespace(
+        send_address_message=AsyncMock(return_value="client-message-1"),
+    )
+    context: dict[str, Any] = _tool_context(
+        user_id=12345,
+        channel="wechat",
+        address="wechat:12345",
+        request_id="req-private-wechat-reply",
+        runtime_config=_build_runtime_config(),
+        sender=sender,
+    )
+
+    result = await execute(
+        {
+            "message": "微信引用回复",
+            "reply_to": "wechat-message+/=1",
+        },
+        context,
+    )
+
+    assert result == "私聊消息已发送给用户 12345（message_id=client-message-1）"
+    sender.send_address_message.assert_awaited_once()
+    send_call = sender.send_address_message.await_args
+    assert send_call is not None
+    assert send_call.args[0].canonical == "wechat:12345"
+    assert send_call.args[1] == "微信引用回复"
+    assert send_call.kwargs["reply_to"] == "wechat-message+/=1"
 
 
 @pytest.mark.asyncio
