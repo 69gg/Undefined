@@ -3,6 +3,8 @@ from pathlib import Path
 
 import pytest
 
+from Undefined.utils import io as async_io
+
 
 PROMPT_PATHS = [
     Path("res/prompts/undefined.xml"),
@@ -140,6 +142,28 @@ def test_system_prompts_describe_webui_markdown_and_html_output(path: Path) -> N
         "复杂 HTML、包含 JS/CSS 的页面、可运行示例或较长代码必须放入 fenced code block",
         "所有代码块都必须标明语言或类型",
         "完整 HTML 页面优先使用 ```html 代码框输出",
+    ]
+    for snippet in required_snippets:
+        assert snippet in text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", PROMPT_PATHS)
+async def test_system_prompts_describe_wechat_markdown_and_literal_symbols(
+    path: Path,
+) -> None:
+    text = await async_io.read_text(path)
+    assert text is not None
+
+    required_snippets = [
+        "微信 Markdown 与特殊符号原样输出",
+        'channel="wechat"',
+        "微信 iLink 私聊支持 Markdown 渲染",
+        "直接在消息文本中使用标准 Markdown",
+        "特殊符号必须按用户应看到的原样",
+        "禁止手动替换成 `&lt;`、`&gt;`、`&amp;`、`&quot;`",
+        '附件标签必须原样写成 `<attachment uid="pic_xxx"/>`',
+        "否则会作为普通文字显示",
     ]
     for snippet in required_snippets:
         assert snippet in text

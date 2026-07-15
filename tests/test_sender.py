@@ -519,9 +519,38 @@ async def test_send_wechat_media_skips_attachment_registry_without_history(
         auto_history=False,
     )
 
+    service.send_text.assert_not_awaited()
     service.send_file.assert_awaited_once()
     registry.register_local_file.assert_not_awaited()
     cast(AsyncMock, sender.history_manager.add_private_message).assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_send_wechat_media_omits_local_path_from_text(
+    sender: MessageSender,
+    tmp_path: Path,
+) -> None:
+    image_path = tmp_path / "captioned.png"
+    await async_io.write_bytes(image_path, b"png")
+    service = SimpleNamespace(
+        send_text=AsyncMock(return_value="client-text"),
+        send_file=AsyncMock(return_value="client-file"),
+    )
+    sender.set_weixin_service(service)
+
+    await sender.send_address_message(
+        DeliveryAddress("wechat", 12345),
+        f"图片说明\n[CQ:image,file={image_path.resolve().as_uri()}]",
+        auto_history=False,
+    )
+
+    service.send_text.assert_awaited_once_with(12345, "图片说明")
+    service.send_file.assert_awaited_once_with(
+        12345,
+        image_path.resolve(),
+        name="captioned.png",
+        kind="image",
+    )
 
 
 @pytest.mark.asyncio

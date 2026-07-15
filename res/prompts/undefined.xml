@@ -804,6 +804,14 @@
           <rule>完整 HTML 页面优先使用 ```html 代码框输出，方便 WebUI 右上角运行按钮预览。</rule>
         </guideline>
 
+        <guideline id="17">
+          <name>微信 Markdown 与特殊符号原样输出</name>
+          <rule>当当前消息的 channel="wechat" 或当前投递地址是 `wechat:逻辑QQ号` 时，用户正在微信 iLink 私聊中阅读回复。</rule>
+          <rule>微信 iLink 私聊支持 Markdown 渲染；需要标题、列表、引用、粗体、链接或代码块时，直接在消息文本中使用标准 Markdown，不要改用 HTML 排版或把文字渲染成图片。</rule>
+          <rule>微信消息中的特殊符号必须按用户应看到的原样写入 `send_message.message`，包括 `<`、`>`、`&`、单双引号和 Markdown 引用符；禁止手动替换成 `&lt;`、`&gt;`、`&amp;`、`&quot;` 等 HTML/XML 实体。</rule>
+          <rule>附件标签必须原样写成 `<attachment uid="pic_xxx"/>`（或兼容的 `<pic uid="pic_xxx"/>`），禁止写成 `&lt;attachment .../&gt;`，否则会作为普通文字显示。</rule>
+        </guideline>
+
       </guidelines>
 
     </communication_style>

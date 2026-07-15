@@ -34,8 +34,16 @@ async def test_send_message_schema_rejects_mixed_address_parameters() -> None:
         Path("src/Undefined/skills/toolsets/messages/send_message/config.json")
     )
     assert config_text is not None
-    parameters = json.loads(config_text)["function"]["parameters"]
+    function = json.loads(config_text)["function"]
+    parameters = function["parameters"]
     validator = Draft202012Validator(parameters)
+
+    assert "微信文本支持 Markdown" in function["description"]
+    assert "特殊符号和附件标签必须原样填写" in function["description"]
+    assert (
+        "<、>、& 等特殊符号须原样填写"
+        in parameters["properties"]["message"]["description"]
+    )
 
     assert validator.is_valid({"message": "hello", "address": "wechat:123"})
     assert validator.is_valid(

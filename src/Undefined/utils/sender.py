@@ -22,6 +22,9 @@ logger = logging.getLogger(__name__)
 
 # OneBot 与微信 iLink 的单条文本长度限制（保守值）
 MAX_MESSAGE_LENGTH = 4000
+_WEIXIN_MEDIA_SEGMENT_TYPES: frozenset[str] = frozenset(
+    {"image", "video", "file", "record"}
+)
 
 
 def _extract_message_id(result: object) -> int | None:
@@ -325,11 +328,12 @@ class MessageSender:
             raise ValueError("微信 iLink 暂不支持引用回复（reply_to）")
         service = self._require_weixin_service()
         segments = message_to_segments(message)
-        text = extract_text(segments, self.bot_qq).strip()
+        text_segments: list[dict[str, Any]] = []
         media_segments: list[tuple[str, Path]] = []
         for segment in segments:
             segment_type = str(segment.get("type", "") or "").strip().lower()
-            if segment_type not in {"image", "video", "file", "record"}:
+            if segment_type not in _WEIXIN_MEDIA_SEGMENT_TYPES:
+                text_segments.append(segment)
                 continue
             if segment_type == "record":
                 raise ValueError("微信 iLink 暂不支持发送语音")
@@ -340,6 +344,7 @@ class MessageSender:
             if path is None:
                 raise ValueError("微信 iLink 当前只支持发送本地媒体文件")
             media_segments.append((segment_type, path))
+        text = extract_text(text_segments, self.bot_qq).strip()
 
         sent_any = False
         for chunk in _split_text_chunks(text):

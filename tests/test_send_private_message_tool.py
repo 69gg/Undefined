@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
@@ -8,6 +10,7 @@ import pytest
 
 from Undefined.context import RequestContext
 from Undefined.skills.toolsets.messages.send_private_message.handler import execute
+from Undefined.utils import io as async_io
 from Undefined.utils.coerce import was_message_sent
 from Undefined.utils.message_targets import (
     parse_delivery_address,
@@ -29,6 +32,22 @@ def _tool_context(**values: Any) -> dict[str, Any]:
         "resolve_delivery_address": resolve_delivery_address,
         **values,
     }
+
+
+@pytest.mark.asyncio
+async def test_send_private_message_schema_describes_wechat_text_format() -> None:
+    config_text = await async_io.read_text(
+        Path("src/Undefined/skills/toolsets/messages/send_private_message/config.json")
+    )
+    assert config_text is not None
+    function = json.loads(config_text)["function"]
+
+    assert "微信文本支持 Markdown" in function["description"]
+    assert "特殊符号和附件标签必须原样填写" in function["description"]
+    assert (
+        "<、>、& 等特殊符号须原样填写"
+        in function["parameters"]["properties"]["message"]["description"]
+    )
 
 
 @pytest.mark.asyncio
