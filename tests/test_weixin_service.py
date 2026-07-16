@@ -4,6 +4,7 @@ import asyncio
 import time
 from pathlib import Path
 from typing import Any, cast
+from unittest.mock import AsyncMock
 
 import pytest
 from weixin_ilink_client import (
@@ -15,6 +16,8 @@ from weixin_ilink_client import (
     MessageItemType,
     QrLoginManager,
     QrLoginSession,
+    QrPollResult,
+    QrStatus,
     RefMessage,
     SendReceipt,
     WeixinCredentials,
@@ -35,18 +38,40 @@ from Undefined.weixin.store import UndefinedIlinkStateStore, WeixinStore
 class FakeLoginManager:
     def __init__(self) -> None:
         self.start_calls = 0
+        self.poll_calls = 0
+        self.refresh_calls = 0
         self.closed = False
+        self.poll_result = QrPollResult(QrStatus.WAIT, "waiting")
 
     async def start(self, *, local_tokens: tuple[str, ...] = ()) -> QrLoginSession:
         del local_tokens
         self.start_calls += 1
         return QrLoginSession(
-            session_id="session-1",
-            qrcode="wire-code",
-            qrcode_url="https://qr.example.test/value",
+            session_id=f"session-{self.start_calls}",
+            qrcode=f"wire-code-{self.start_calls}",
+            qrcode_url=f"https://qr.example.test/value-{self.start_calls}",
             created_at=time.time(),
             current_base_url="https://ilink.example.test",
         )
+
+    async def poll(self, session: QrLoginSession) -> QrPollResult:
+        del session
+        self.poll_calls += 1
+        return self.poll_result
+
+    async def refresh(
+        self,
+        session: QrLoginSession,
+        *,
+        local_tokens: tuple[str, ...] = (),
+    ) -> QrLoginSession:
+        del local_tokens
+        self.refresh_calls += 1
+        session.qrcode = f"refreshed-wire-code-{self.refresh_calls}"
+        session.qrcode_url = f"https://qr.example.test/refreshed-{self.refresh_calls}"
+        session.created_at = time.time()
+        session.refresh_count += 1
+        return session
 
     async def aclose(self) -> None:
         self.closed = True
@@ -58,6 +83,7 @@ class FakeClient:
         self.closed = False
         self.sent_text: list[tuple[str, str]] = []
         self.sent_references: list[RefMessage | None] = []
+        self.run_started = asyncio.Event()
 
     async def start(self) -> None:
         self.started = True
@@ -69,6 +95,7 @@ class FakeClient:
         stop_event: asyncio.Event | None = None,
     ) -> None:
         del handler
+        self.run_started.set()
         if stop_event is not None:
             await stop_event.wait()
 
@@ -227,6 +254,128 @@ async def test_account_runtime_sends_by_logical_qq(tmp_path: Path) -> None:
         assert receipt == "client-message-1"
         assert client.sent_text == [("peer-1", "hello")]
         assert client.sent_references == [reference]
+    finally:
+        await service.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_stage", ["start", "run"])
+async def test_account_runtime_restarts_after_unhandled_failure(
+    tmp_path: Path,
+    failure_stage: str,
+) -> None:
+    config = _config(tmp_path)
+    config.weixin.retry_delay_seconds = 0.01
+    config.weixin.failure_backoff_seconds = 0.01
+    store = WeixinStore(config.weixin)
+    await store.save_account(_account())
+    failed_client = FakeClient()
+    if failure_stage == "start":
+        failed_client.start = AsyncMock(  # type: ignore[method-assign]
+            side_effect=RuntimeError("temporary start failure")
+        )
+    else:
+        failed_client.run = AsyncMock(  # type: ignore[method-assign]
+            side_effect=RuntimeError("inbound callback failure")
+        )
+    replacement_client = FakeClient()
+    clients = [failed_client, replacement_client]
+
+    def factory(
+        account: WeixinAccount,
+        state: UndefinedIlinkStateStore,
+        options: ClientOptions,
+    ) -> WeixinClientProtocol:
+        del account, state, options
+        return clients.pop(0)
+
+    service = WeixinService(
+        config,
+        store=store,
+        login_manager=cast(QrLoginManager, FakeLoginManager()),
+        client_factory=factory,
+    )
+    try:
+        await service.start()
+        await asyncio.wait_for(replacement_client.run_started.wait(), timeout=1.0)
+
+        status = await service.status()
+
+        assert status["accounts"][0]["connected"] is True
+        assert failed_client.closed is True
+        assert clients == []
+    finally:
+        await service.stop()
+
+
+@pytest.mark.asyncio
+async def test_expired_login_session_remains_refreshable(tmp_path: Path) -> None:
+    manager = FakeLoginManager()
+    manager.poll_result = QrPollResult(QrStatus.EXPIRED, "QR code expired")
+    service = WeixinService(
+        _config(tmp_path),
+        login_manager=cast(QrLoginManager, manager),
+    )
+    try:
+        started = await service.start_login(alias="primary", qq_id=10001)
+
+        polled = await service.poll_login(started.session_id)
+        refreshed = await service.refresh_login(started.session_id)
+
+        assert polled.status == "expired"
+        assert refreshed.session_id == started.session_id
+        assert refreshed.qrcode_payload == "https://qr.example.test/refreshed-1"
+        assert manager.refresh_calls == 1
+    finally:
+        await service.stop()
+
+
+@pytest.mark.asyncio
+async def test_locally_expired_login_reports_expired_without_upstream_poll(
+    tmp_path: Path,
+) -> None:
+    manager = FakeLoginManager()
+    config = _config(tmp_path)
+    service = WeixinService(
+        config,
+        login_manager=cast(QrLoginManager, manager),
+    )
+    try:
+        started = await service.start_login(alias="primary", qq_id=10001)
+        service._logins[started.session_id].session.created_at = (
+            time.time() - config.weixin.login_session_ttl_seconds - 1
+        )
+
+        polled = await service.poll_login(started.session_id)
+        refreshed = await service.refresh_login(started.session_id)
+
+        assert polled.status == "expired"
+        assert refreshed.session_id == started.session_id
+        assert manager.poll_calls == 0
+        assert manager.refresh_calls == 1
+    finally:
+        await service.stop()
+
+
+@pytest.mark.asyncio
+async def test_new_login_replaces_stale_expired_session(tmp_path: Path) -> None:
+    manager = FakeLoginManager()
+    config = _config(tmp_path)
+    service = WeixinService(
+        config,
+        login_manager=cast(QrLoginManager, manager),
+    )
+    try:
+        stale = await service.start_login(alias="primary", qq_id=10001)
+        service._logins[stale.session_id].session.created_at = (
+            time.time() - config.weixin.login_session_ttl_seconds - 1
+        )
+
+        replacement = await service.start_login(alias="primary", qq_id=10001)
+
+        assert replacement.session_id == "session-2"
+        assert stale.session_id not in service._logins
+        assert manager.start_calls == 2
     finally:
         await service.stop()
 

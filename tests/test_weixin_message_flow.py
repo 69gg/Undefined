@@ -162,6 +162,7 @@ async def test_weixin_bot_reply_is_restored_from_same_time_candidates() -> None:
     assert temporal_lookup.await_args is not None
     lookup_kwargs = temporal_lookup.await_args.kwargs
     assert lookup_kwargs["current_message_id"] == "2000"
+    assert lookup_kwargs["current_received_at_ms"] == 20_000
     assert lookup_kwargs["reference_age_ms"] == 7_500
     assert lookup_kwargs["channel"] == "wechat"
     assert lookup_kwargs["address"] == "wechat:1708213363"

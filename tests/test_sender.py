@@ -788,6 +788,52 @@ async def test_send_wechat_media_omits_local_path_from_text(
 
 
 @pytest.mark.asyncio
+async def test_send_wechat_mixed_segments_preserves_original_order(
+    sender: MessageSender,
+    tmp_path: Path,
+) -> None:
+    image_path = tmp_path / "ordered.png"
+    file_path = tmp_path / "ordered.txt"
+    await async_io.write_bytes(image_path, b"png")
+    await async_io.write_text(file_path, "file")
+    events: list[tuple[str, str]] = []
+
+    async def send_text(user_id: int, text: str, **kwargs: Any) -> str:
+        del user_id, kwargs
+        events.append(("text", text))
+        return f"text-{len(events)}"
+
+    async def send_file(
+        user_id: int,
+        path: Path,
+        **kwargs: Any,
+    ) -> str:
+        del user_id, kwargs
+        events.append(("file", path.name))
+        return f"file-{len(events)}"
+
+    sender.set_weixin_service(SimpleNamespace(send_text=send_text, send_file=send_file))
+    message = (
+        f"A[CQ:image,file={image_path.resolve().as_uri()}]"
+        f"B[CQ:file,file={file_path.resolve().as_uri()}]C"
+    )
+
+    await sender.send_address_message(
+        DeliveryAddress("wechat", 12345),
+        message,
+        auto_history=False,
+    )
+
+    assert events == [
+        ("text", "A"),
+        ("file", "ordered.png"),
+        ("text", "B"),
+        ("file", "ordered.txt"),
+        ("text", "C"),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_send_wechat_media_skips_attachment_registry_when_send_fails(
     sender: MessageSender,
     tmp_path: Path,

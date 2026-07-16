@@ -758,7 +758,11 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
             return
         address = DeliveryAddress("wechat", qq_id)
         route_sender = AddressBoundSender(self.sender, address)
-        received_at_ms = time.time_ns() // 1_000_000
+        received_at_ms = (
+            created_at_ms
+            if created_at_ms is not None and created_at_ms > 0
+            else time.time_ns() // 1_000_000
+        )
         reply_context = await self._restore_weixin_reply_context(
             qq_id=qq_id,
             address=address,

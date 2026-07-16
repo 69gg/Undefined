@@ -201,6 +201,44 @@ def _split_text_chunks(text: str, limit: int = MAX_MESSAGE_LENGTH) -> list[str]:
     return chunks
 
 
+def _prepare_weixin_delivery_units(
+    segments: list[dict[str, Any]],
+    bot_qq: int,
+) -> tuple[list[tuple[str, str | Path]], str]:
+    """Validate all media and preserve the original text/media segment order."""
+
+    units: list[tuple[str, str | Path]] = []
+    pending_text: list[dict[str, Any]] = []
+    all_text: list[dict[str, Any]] = []
+
+    def flush_text() -> None:
+        if not pending_text:
+            return
+        text = extract_text(pending_text, bot_qq)
+        pending_text.clear()
+        if text:
+            units.append(("text", text))
+
+    for segment in segments:
+        segment_type = str(segment.get("type", "") or "").strip().lower()
+        if segment_type not in _WEIXIN_MEDIA_SEGMENT_TYPES:
+            pending_text.append(segment)
+            all_text.append(segment)
+            continue
+        if segment_type == "record":
+            raise ValueError("微信 iLink 暂不支持发送语音")
+        data = segment.get("data")
+        if not isinstance(data, dict):
+            raise ValueError("微信媒体消息缺少有效参数")
+        path = _local_path_from_segment_source(data.get("file"))
+        if path is None:
+            raise ValueError("微信 iLink 当前只支持发送本地媒体文件")
+        flush_text()
+        units.append((segment_type, path))
+    flush_text()
+    return units, extract_text(all_text, bot_qq)
+
+
 class MessageSender:
     """消息发送器"""
 
@@ -392,23 +430,7 @@ class MessageSender:
             )
             reference = RefMessage.from_text(reply_context.title, preview)
         segments = message_to_segments(message)
-        text_segments: list[dict[str, Any]] = []
-        media_segments: list[tuple[str, Path]] = []
-        for segment in segments:
-            segment_type = str(segment.get("type", "") or "").strip().lower()
-            if segment_type not in _WEIXIN_MEDIA_SEGMENT_TYPES:
-                text_segments.append(segment)
-                continue
-            if segment_type == "record":
-                raise ValueError("微信 iLink 暂不支持发送语音")
-            data = segment.get("data")
-            if not isinstance(data, dict):
-                raise ValueError("微信媒体消息缺少有效参数")
-            path = _local_path_from_segment_source(data.get("file"))
-            if path is None:
-                raise ValueError("微信 iLink 当前只支持发送本地媒体文件")
-            media_segments.append((segment_type, path))
-        text = extract_text(text_segments, self.bot_qq).strip()
+        delivery_units, text = _prepare_weixin_delivery_units(segments, self.bot_qq)
 
         sent_ids: list[str] = []
         sent_any = False
@@ -425,88 +447,94 @@ class MessageSender:
             if mark_sent:
                 mark_message_sent_this_turn()
 
-        text_chunks = _split_text_chunks(text)
         reply_mode = ""
-        if reference is not None and text_chunks:
-            try:
-                receipt = await service.send_text(
-                    user_id,
-                    text_chunks[0],
-                    reference=reference,
-                )
-            except Exception as exc:
-                if not _should_fallback_weixin_reference(exc):
-                    raise
-                logger.warning(
-                    "[微信引用] 原生引用被明确拒绝，降级为 Markdown: user=%s "
-                    "target=%s error=%s",
-                    user_id,
-                    reply_to,
-                    type(exc).__name__,
-                )
-                assert reply_context is not None
-                fallback_text = format_markdown_reply(reply_context, text)
-                for chunk in _split_text_chunks(fallback_text):
-                    record_sent(await service.send_text(user_id, chunk))
-                reply_mode = "markdown_fallback"
-            else:
-                record_sent(receipt)
-                for chunk in text_chunks[1:]:
-                    record_sent(await service.send_text(user_id, chunk))
-                reply_mode = "native"
-        else:
-            for chunk in text_chunks:
-                record_sent(await service.send_text(user_id, chunk))
+        reference_pending = reference is not None
+        for unit_type, payload in delivery_units:
+            if unit_type == "text":
+                assert isinstance(payload, str)
+                text_chunks = _split_text_chunks(payload)
+                if reference_pending:
+                    assert reference is not None
+                    try:
+                        receipt = await service.send_text(
+                            user_id,
+                            text_chunks[0],
+                            reference=reference,
+                        )
+                    except Exception as exc:
+                        if not _should_fallback_weixin_reference(exc):
+                            raise
+                        logger.warning(
+                            "[微信引用] 原生引用被明确拒绝，降级为 Markdown: "
+                            "user=%s target=%s error=%s",
+                            user_id,
+                            reply_to,
+                            type(exc).__name__,
+                        )
+                        assert reply_context is not None
+                        fallback_text = format_markdown_reply(reply_context, payload)
+                        for chunk in _split_text_chunks(fallback_text):
+                            record_sent(await service.send_text(user_id, chunk))
+                        reply_mode = "markdown_fallback"
+                    else:
+                        record_sent(receipt)
+                        for chunk in text_chunks[1:]:
+                            record_sent(await service.send_text(user_id, chunk))
+                        reply_mode = "native"
+                    reference_pending = False
+                else:
+                    for chunk in text_chunks:
+                        record_sent(await service.send_text(user_id, chunk))
+                continue
 
-        media_start = 0
-        if reference is not None and not text_chunks and media_segments:
-            segment_type, path = media_segments[0]
-            kind = "image" if segment_type == "image" else segment_type
-            try:
-                receipt = await service.send_file(
-                    user_id,
-                    path,
-                    name=path.name,
-                    kind=kind,
-                    reference=reference,
-                )
-            except Exception as exc:
-                if not _should_fallback_weixin_reference(exc):
-                    raise
-                logger.warning(
-                    "[微信引用] 原生媒体引用被明确拒绝，降级为 Markdown: "
-                    "user=%s target=%s error=%s",
-                    user_id,
-                    reply_to,
-                    type(exc).__name__,
-                )
-                assert reply_context is not None
-                fallback_text = format_markdown_reply(reply_context, "")
-                for chunk in _split_text_chunks(fallback_text):
-                    record_sent(await service.send_text(user_id, chunk))
+            assert isinstance(payload, Path)
+            kind = "image" if unit_type == "image" else unit_type
+            if reference_pending:
+                assert reference is not None
+                try:
+                    receipt = await service.send_file(
+                        user_id,
+                        payload,
+                        name=payload.name,
+                        kind=kind,
+                        reference=reference,
+                    )
+                except Exception as exc:
+                    if not _should_fallback_weixin_reference(exc):
+                        raise
+                    logger.warning(
+                        "[微信引用] 原生媒体引用被明确拒绝，降级为 Markdown: "
+                        "user=%s target=%s error=%s",
+                        user_id,
+                        reply_to,
+                        type(exc).__name__,
+                    )
+                    assert reply_context is not None
+                    fallback_text = format_markdown_reply(reply_context, "")
+                    for chunk in _split_text_chunks(fallback_text):
+                        record_sent(await service.send_text(user_id, chunk))
+                    record_sent(
+                        await service.send_file(
+                            user_id,
+                            payload,
+                            name=payload.name,
+                            kind=kind,
+                        )
+                    )
+                    reply_mode = "markdown_fallback"
+                else:
+                    record_sent(receipt)
+                    reply_mode = "native"
+                reference_pending = False
+            else:
                 record_sent(
                     await service.send_file(
                         user_id,
-                        path,
-                        name=path.name,
+                        payload,
+                        name=payload.name,
                         kind=kind,
                     )
                 )
-                reply_mode = "markdown_fallback"
-            else:
-                record_sent(receipt)
-                reply_mode = "native"
-            media_start = 1
-
-        for segment_type, path in media_segments[media_start:]:
-            record_sent(
-                await service.send_file(
-                    user_id,
-                    path,
-                    name=path.name,
-                    kind=("image" if segment_type == "image" else segment_type),
-                )
-            )
         if not sent_any and message.strip():
             raise ValueError("微信消息中没有可投递的文本或本地媒体")
 

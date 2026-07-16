@@ -175,6 +175,7 @@ class _PendingLogin:
     alias: str
     qq_id: int
     session: QrLoginSession
+    expired: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -322,6 +323,7 @@ class WeixinService:
         async with self._login_lock:
             normalized_alias = self._normalize_alias(alias)
             self._validate_qq_id(qq_id)
+            self._prune_expired_logins()
             if await self.store.get_account(normalized_alias) is not None:
                 raise WeixinConflictError(f"帐号别名 {normalized_alias} 已存在")
             conflict = await self.store.get_by_qq(qq_id)
@@ -375,12 +377,21 @@ class WeixinService:
     ) -> LoginPollView:
         async with self._login_lock:
             pending = self._get_login(session_id)
+            if self._login_expired(pending):
+                pending.expired = True
+                return LoginPollView(
+                    session_id=session_id,
+                    status="expired",
+                    message="二维码已过期，请刷新",
+                )
             try:
                 result = await self._login_manager.poll(pending.session)
             except WeixinIlinkError as exc:
                 raise WeixinUpstreamError(self._safe_upstream_error(exc)) from exc
             if result.credentials is None:
-                if result.status.value in {"expired", "binded_redirect"}:
+                if result.status.value == "expired":
+                    pending.expired = True
+                elif result.status.value == "binded_redirect":
                     self._logins.pop(session_id, None)
                 return LoginPollView(
                     session_id=session_id,
@@ -407,6 +418,7 @@ class WeixinService:
                 )
             except WeixinIlinkError as exc:
                 raise WeixinUpstreamError(self._safe_upstream_error(exc)) from exc
+            pending.expired = False
             return LoginStartResult(
                 session_id=session_id,
                 qrcode_payload=pending.session.qrcode_url,
@@ -631,35 +643,82 @@ class WeixinService:
         client: WeixinClientProtocol,
         stop_event: asyncio.Event,
     ) -> None:
-        runtime: _AccountRuntime | None = None
-        try:
-            await client.start()
+        current_client = client
+        failures = 0
+        while not stop_event.is_set():
             runtime = self._runtimes.get(account.alias)
-            if runtime is not None:
+            if runtime is None or runtime.stop_event is not stop_event:
+                return
+            runtime.client = current_client
+            try:
+                await current_client.start()
                 runtime.connected = True
                 runtime.last_error = ""
-            await client.run(
-                lambda message: self._handle_inbound(account.alias, client, message),
-                stop_event=stop_event,
-            )
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            safe_error = redact_string(str(exc))[:500]
-            runtime = self._runtimes.get(account.alias)
-            if runtime is not None:
-                runtime.last_error = safe_error
-            logger.exception("[微信] 帐号运行失败: alias=%s", account.alias)
-        finally:
-            runtime = self._runtimes.get(account.alias)
-            if runtime is not None:
-                runtime.connected = False
-            try:
-                await client.aclose()
-            except Exception:
-                logger.debug(
-                    "[微信] 关闭帐号客户端失败: alias=%s", account.alias, exc_info=True
+                await current_client.run(
+                    lambda message: self._handle_inbound(
+                        account.alias,
+                        current_client,
+                        message,
+                    ),
+                    stop_event=stop_event,
                 )
+                if stop_event.is_set():
+                    return
+                runtime.last_error = "微信帐号长轮询意外结束"
+                logger.warning("[微信] 帐号长轮询意外结束: alias=%s", account.alias)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                safe_error = redact_string(str(exc))[:500]
+                runtime = self._runtimes.get(account.alias)
+                if runtime is not None and runtime.stop_event is stop_event:
+                    runtime.last_error = safe_error
+                logger.exception("[微信] 帐号运行失败: alias=%s", account.alias)
+            finally:
+                runtime = self._runtimes.get(account.alias)
+                if (
+                    runtime is not None
+                    and runtime.stop_event is stop_event
+                    and runtime.client is current_client
+                ):
+                    runtime.connected = False
+                try:
+                    await current_client.aclose()
+                except Exception:
+                    logger.debug(
+                        "[微信] 关闭帐号客户端失败: alias=%s",
+                        account.alias,
+                        exc_info=True,
+                    )
+
+            if stop_event.is_set():
+                return
+            failures += 1
+            threshold = max(1, self.weixin_config.failures_before_backoff)
+            delay = (
+                self.weixin_config.failure_backoff_seconds
+                if failures >= threshold
+                else self.weixin_config.retry_delay_seconds
+            )
+            if failures >= threshold:
+                failures = 0
+            logger.info(
+                "[微信] 将重启帐号连接: alias=%s delay=%.1fs",
+                account.alias,
+                delay,
+            )
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=max(0.0, delay))
+                return
+            except TimeoutError:
+                pass
+            if stop_event.is_set():
+                return
+            current_client = self._client_factory(
+                account,
+                self._state_store,
+                self._client_options(),
+            )
 
     async def _stop_account_locked(self, alias: str) -> None:
         runtime = self._runtimes.pop(alias, None)
@@ -929,6 +988,29 @@ class WeixinService:
         if pending is None:
             raise WeixinNotFoundError("二维码登录会话不存在或已过期")
         return pending
+
+    def _login_expired(
+        self,
+        pending: _PendingLogin,
+        *,
+        now: float | None = None,
+    ) -> bool:
+        current_time = time.time() if now is None else now
+        return pending.expired or (
+            current_time - pending.session.created_at
+            >= self.weixin_config.login_session_ttl_seconds
+        )
+
+    def _prune_expired_logins(self, *, now: float | None = None) -> int:
+        current_time = time.time() if now is None else now
+        expired_ids = [
+            session_id
+            for session_id, pending in self._logins.items()
+            if self._login_expired(pending, now=current_time)
+        ]
+        for session_id in expired_ids:
+            self._logins.pop(session_id, None)
+        return len(expired_ids)
 
     def _ensure_available(self) -> None:
         if not self.weixin_config.enabled:
