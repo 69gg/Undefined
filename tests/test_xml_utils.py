@@ -4,13 +4,16 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from typing import cast
+from xml.etree import ElementTree
 
 from Undefined.utils.message_reply import ReplyContext
 from Undefined.utils.xml import (
+    decode_xml_content_text,
     escape_xml_attr,
     escape_xml_text,
     escape_xml_text_preserving_attachment_tags,
     format_message_xml,
+    wrap_xml_cdata,
 )
 
 
@@ -109,6 +112,27 @@ class TestEscapeXmlAttr:
         assert escape_xml_attr(0) == "0"
 
 
+class TestXmlCdata:
+    def test_round_trips_literal_special_characters(self) -> None:
+        text = '比较 1 < 2 & 3 > 2，属性 "原样"'
+
+        wrapped = wrap_xml_cdata(text)
+
+        assert wrapped == '<![CDATA[比较 1 < 2 & 3 > 2，属性 "原样"]]>'
+        assert decode_xml_content_text(wrapped) == text
+
+    def test_safely_splits_cdata_terminator(self) -> None:
+        text = "前半段 ]]> 后半段"
+
+        wrapped = wrap_xml_cdata(text)
+
+        assert wrapped == "<![CDATA[前半段 ]]]]><![CDATA[> 后半段]]>"
+        assert decode_xml_content_text(wrapped) == text
+
+    def test_decodes_legacy_xml_entities_once(self) -> None:
+        assert decode_xml_content_text("&amp;lt;tag&amp;gt;") == "&lt;tag&gt;"
+
+
 class TestAttachmentTagPreservation:
     def test_preserves_known_attachment_tag(self) -> None:
         result = escape_xml_text_preserving_attachment_tags(
@@ -191,7 +215,7 @@ class TestAttachmentTagPreservation:
                 "chat_id": "10001",
                 "timestamp": "2026-07-15 20:00:00",
                 "message_id": "current-message",
-                "message": "当前正文",
+                "message": "当前正文：1 < 2 & 3 > 2",
                 "transport": {
                     "channel": "wechat",
                     "address": "wechat:10001",
@@ -213,7 +237,7 @@ class TestAttachmentTagPreservation:
         )
 
         assert '<message message_id="current-message"' in result
-        assert "<content>当前正文</content>" in result
+        assert "<content><![CDATA[当前正文：1 < 2 & 3 > 2]]></content>" in result
         assert (
             '<reply_context readonly="true" '
             'title="旧用户 &amp; &quot;昵称&quot;" '
@@ -224,3 +248,5 @@ class TestAttachmentTagPreservation:
             in result
         )
         assert '<attachment uid="pic_quote" type="image"' in result
+        root = ElementTree.fromstring(result)
+        assert root.findtext("content") == "当前正文：1 < 2 & 3 > 2"

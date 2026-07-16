@@ -9,7 +9,11 @@ import re
 from Undefined.context import RequestContext
 from Undefined.ai.prompts.current_input import drop_current_input_batch_if_duplicated
 from Undefined.utils.coerce import coerce_truthy, is_truthy, safe_int, was_message_sent
-from Undefined.utils.xml import format_message_xml
+from Undefined.utils.xml import (
+    XML_CONTENT_BODY_PATTERN,
+    decode_xml_content_text,
+    format_message_xml,
+)
 
 from Undefined.end_summary_storage import (
     EndSummaryLocation,
@@ -21,7 +25,8 @@ from Undefined.end_summary_storage import (
 logger = logging.getLogger(__name__)
 
 _MESSAGE_TAG_RE = re.compile(
-    r"<message\b(?P<attrs>[^>]*)>\s*<content>(?P<content>.*?)</content>.*?</message>",
+    rf"<message\b(?P<attrs>[^>]*)>\s*"
+    rf"<content>(?P<content>{XML_CONTENT_BODY_PATTERN})</content>.*?</message>",
     re.DOTALL | re.IGNORECASE,
 )
 _MESSAGE_ATTR_RE = re.compile(r'(?P<name>[\w:-]+)="(?P<value>[^"]*)"')
@@ -144,14 +149,17 @@ def _extract_current_input_batch_from_question(question: str, *, max_len: int) -
     matches = list(_MESSAGE_TAG_RE.finditer(text))
     if matches:
         if len(matches) == 1:
-            return _clip_text(html.unescape(matches[0].group("content")), max_len)
+            return _clip_text(
+                decode_xml_content_text(matches[0].group("content")),
+                max_len,
+            )
 
         content_max_len = max(32, max_len // max(len(matches), 1))
         lines = [
             _format_source_message_line(
                 index,
                 _parse_message_attrs(match.group("attrs")),
-                html.unescape(match.group("content")),
+                decode_xml_content_text(match.group("content")),
                 content_max_len=content_max_len,
             )
             for index, match in enumerate(matches, start=1)

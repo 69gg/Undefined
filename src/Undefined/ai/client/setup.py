@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import html
 import logging
 import re
 from collections.abc import Collection
@@ -43,6 +42,7 @@ from Undefined.skills.anthropic_skills import AnthropicSkillRegistry
 from Undefined.skills.tools import ToolRegistry
 from Undefined.token_usage_storage import TokenUsageStorage
 from Undefined.utils.logging import redact_string
+from Undefined.utils.xml import XML_CONTENT_BODY_PATTERN, decode_xml_content_text
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +59,7 @@ MISSING_TOOL_CALL_RETRY_HINT = (
 
 
 _CONTENT_TAG_PATTERN = re.compile(
-    r"<content>(.*?)</content>",
+    rf"<content>({XML_CONTENT_BODY_PATTERN})</content>",
     re.DOTALL | re.IGNORECASE,
 )
 
@@ -973,7 +973,7 @@ class ClientSetupMixin:
     def _extract_message_excerpt(self, question: str) -> str:
         matched = _CONTENT_TAG_PATTERN.search(question)
         if matched:
-            content = html.unescape(matched.group(1))
+            content = decode_xml_content_text(matched.group(1))
         else:
             content = question
         cleaned = " ".join(content.split()).strip()

@@ -47,8 +47,14 @@ async def test_send_private_message_schema_describes_wechat_text_format() -> Non
 
     assert "微信文本支持 Markdown" in function["description"]
     assert "特殊符号和附件标签必须原样填写" in function["description"]
+    assert "message 参数是 JSON 字符串而不是 XML/HTML" in function["description"]
+    assert "错误的 &it;" in function["description"]
     assert (
-        "<、>、& 等特殊符号须原样填写"
+        "message 是 JSON 字符串，不需要 XML/HTML 转义"
+        in function["parameters"]["properties"]["message"]["description"]
+    )
+    assert (
+        "发送前检查并消除 &lt;"
         in function["parameters"]["properties"]["message"]["description"]
     )
     assert "同一物理会话内的 reply_to 原生引用" in function["description"]

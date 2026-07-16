@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import html
 import re
-from typing import Any, Callable, Sequence, Mapping
+from typing import Any, Callable, Final, Mapping, Sequence
 
 from xml.sax.saxutils import escape
 
@@ -15,6 +15,32 @@ _INLINE_PRESERVED_TAG_RE = re.compile(
     r"<(?P<tag>attachment|forward)\s+uid=(?P<quote>[\"'])(?P<uid>[^\"']+)(?P=quote)\s*/?>",
     re.IGNORECASE,
 )
+_CDATA_SECTION_RE = re.compile(r"<!\[CDATA\[(.*?)\]\]>", re.DOTALL)
+XML_CONTENT_BODY_PATTERN: Final[str] = r"(?:(?:<!\[CDATA\[.*?\]\]>)+|.*?)"
+
+
+def wrap_xml_cdata(value: object) -> str:
+    """Wrap literal text in one or more safe XML CDATA sections."""
+
+    text = "" if value is None else str(value)
+    return f"<![CDATA[{text.replace(']]>', ']]]]><![CDATA[>')}]]>"
+
+
+def decode_xml_content_text(value: object) -> str:
+    """Decode content emitted by this module from CDATA or XML entities."""
+
+    text = "" if value is None else str(value)
+    parts: list[str] = []
+    position = 0
+    for match in _CDATA_SECTION_RE.finditer(text):
+        if match.start() != position:
+            parts.clear()
+            break
+        parts.append(match.group(1))
+        position = match.end()
+    if parts and position == len(text):
+        return "".join(parts)
+    return html.unescape(text)
 
 
 def escape_xml_text(value: str) -> str:
@@ -112,7 +138,14 @@ def format_message_xml(
     safe_role = escape_xml_attr(role)
     safe_title = escape_xml_attr(title)
     safe_time = escape_xml_attr(timestamp)
-    safe_text = escape_xml_text_preserving_attachment_tags(text, attachments)
+    use_cdata = bool(
+        transport and str(transport.get("channel", "") or "").strip() == "wechat"
+    )
+    safe_text = (
+        wrap_xml_cdata(text)
+        if use_cdata
+        else escape_xml_text_preserving_attachment_tags(text, attachments)
+    )
     reply_xml = format_reply_context_xml(msg.get("reply_context"))
     safe_location = escape_xml_attr(
         _message_location(msg_type_val, chat_name, transport)

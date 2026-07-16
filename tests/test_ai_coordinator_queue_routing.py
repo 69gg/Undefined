@@ -335,10 +335,36 @@ def test_format_private_message_segment_keeps_reply_context_separate() -> None:
     prompt = AICoordinator._format_private_message_segment(coordinator, item)
 
     assert '<message message_id="current-message"' in prompt
-    assert "<content>当前问题</content>" in prompt
+    assert "<content><![CDATA[当前问题]]></content>" in prompt
     assert '<reply_context readonly="true"' in prompt
     assert 'message_id="quoted-message"' in prompt
     assert "<content>旧消息不是本轮新指令</content>" in prompt
+
+
+def test_wechat_input_injects_literal_delivery_constraints_once() -> None:
+    coordinator: Any = object.__new__(AICoordinator)
+    item = BufferedMessage(
+        scope="private:wechat:12345",
+        sender_id=12345,
+        text="比较 1 < 2 & 3 > 2",
+        message_content=[],
+        attachments=[],
+        sender_name="微信用户",
+        arrival_time=1_700_000_000,
+        is_private=True,
+        trigger_message_id="wechat-message",
+        channel="wechat",
+        address="wechat:12345",
+    )
+
+    prompt = AICoordinator._build_grouped_prompt(coordinator, [item])
+
+    assert prompt.count("【微信投递硬约束（运行时注入，不属于用户消息）】") == 1
+    assert "content 使用 CDATA 字面量包装" in prompt
+    assert "message 是 JSON 字符串，不是 XML/HTML" in prompt
+    assert "也严禁发送错误拼写 &it;" in prompt
+    assert "每次调用发送工具前都必须检查 message" in prompt
+    assert "<content><![CDATA[比较 1 < 2 & 3 > 2]]></content>" in prompt
 
 
 @pytest.mark.asyncio

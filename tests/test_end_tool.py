@@ -204,6 +204,32 @@ async def test_end_enriches_historian_reference_context() -> None:
 
 
 @pytest.mark.asyncio
+async def test_end_historian_source_decodes_wechat_cdata() -> None:
+    cognitive_service = _FakeCognitiveService()
+    context: dict[str, Any] = {
+        "request_id": "req-historian-wechat-cdata",
+        "request_type": "private",
+        "user_id": "12345",
+        "sender_id": "12345",
+        "cognitive_service": cognitive_service,
+        "current_question": (
+            '<message message_id="wechat-1" sender="微信用户" sender_id="12345" '
+            'channel="wechat" address="wechat:12345" location="微信私聊">'
+            "<content><![CDATA[比较 1 < 2 & 3 > 2，保留 ]]]]><![CDATA[> 字符]]>"
+            "</content></message>"
+        ),
+    }
+
+    result = await execute(
+        {"observations": ["QQ号12345通过微信讨论特殊字符"], "force": True},
+        context,
+    )
+
+    assert result == "对话已结束"
+    assert context["historian_source_message"] == ("比较 1 < 2 & 3 > 2，保留 ]]> 字符")
+
+
+@pytest.mark.asyncio
 async def test_end_historian_source_message_includes_batched_messages() -> None:
     cognitive_service = _FakeCognitiveService()
     context: dict[str, Any] = {

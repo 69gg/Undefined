@@ -3,6 +3,7 @@ from typing import Any, cast
 from Undefined.ai.prompts.cognitive import build_cognitive_per_message_queries
 from Undefined.ai.prompts.cognitive import drop_current_message_if_duplicated
 from Undefined.ai.prompts import PromptBuilder
+from Undefined.ai.prompts.current_input import build_current_input_query_text
 
 
 class _FakeEndSummaryStorage:
@@ -16,6 +17,17 @@ def _make_builder() -> PromptBuilder:
         memory_storage=None,
         end_summary_storage=cast(Any, _FakeEndSummaryStorage()),
     )
+
+
+def test_current_input_query_decodes_wechat_cdata_content() -> None:
+    question = """<message sender="微信用户" sender_id="10001" channel="wechat" address="wechat:10001">
+<content><![CDATA[比较 1 < 2 & 3 > 2，保留 ]]]]><![CDATA[> 和 </content>、</message> 字符]]></content>
+</message>"""
+
+    query, extracted = build_current_input_query_text(question)
+
+    assert extracted is True
+    assert query == "比较 1 < 2 & 3 > 2，保留 ]]> 和 </content>、</message> 字符"
 
 
 def test_build_cognitive_query_uses_current_frame_raw_content() -> None:

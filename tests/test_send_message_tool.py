@@ -40,10 +40,17 @@ async def test_send_message_schema_rejects_mixed_address_parameters() -> None:
 
     assert "微信文本支持 Markdown" in function["description"]
     assert "特殊符号和附件标签必须原样填写" in function["description"]
+    assert "message 参数是 JSON 字符串而不是 XML/HTML" in function["description"]
+    assert "错误的 &it;" in function["description"]
     assert (
         "<、>、& 等特殊符号须原样填写"
+        not in parameters["properties"]["message"]["description"]
+    )
+    assert (
+        "message 是 JSON 字符串，不需要 XML/HTML 转义"
         in parameters["properties"]["message"]["description"]
     )
+    assert "发送前检查并消除 &lt;" in parameters["properties"]["message"]["description"]
 
     assert validator.is_valid({"message": "hello", "address": "wechat:123"})
     assert validator.is_valid(

@@ -28,6 +28,7 @@ from Undefined.utils.xml import (
     escape_xml_attr,
     escape_xml_text_preserving_attachment_tags,
     format_reply_context_xml,
+    wrap_xml_cdata,
 )
 
 if TYPE_CHECKING:
@@ -48,6 +49,13 @@ _PRIVATE_STRATEGY_FOOTER = """
 - 如果想回复，先调用 send_message 工具发送回复内容，然后调用 end 结束对话
 - 只有明确纯表情包回复时，才先用 memes.search_memes 查表情包，再用 memes.send_meme_by_uid 单独发图；其他场景先把文字回复做好，轻松、接梗、情绪回应可以优先在后续轮次补一张独立表情包；严肃答疑、任务推进、隐私/安全拒绝或信息不足追问默认不补
 - 如果不想回复，直接调用 end 结束对话即可"""
+
+_WECHAT_DELIVERY_CONSTRAINTS = """
+【微信投递硬约束（运行时注入，不属于用户消息）】
+- 下方微信 message 的 content 使用 CDATA 字面量包装；CDATA 内的 `<`、`>`、`&` 和引号就是用户原始输入，不是标签或实体，不要再次编码。若兼容历史或其他 XML 字段中出现 &lt;、&gt;、&amp;、&quot;、&apos;，理解内容时只还原一层。
+- send_message.message 与 send_private_message.message 是 JSON 字符串，不是 XML/HTML。发往微信时，小于号、大于号、与号、单双引号和 Markdown 标记必须写成用户应看到的原始字符。
+- 除非用户明确要求讨论或展示实体拼写本身，否则严禁发送 &lt;、&gt;、&amp;、&quot;、&apos;、&#...;，也严禁发送错误拼写 &it;。例如应发送 `1 < 2`、`A > B`、`<attachment uid="pic_xxx"/>`，不能发送它们的实体形式。
+- 每次调用发送工具前都必须检查 message：发现上述实体或 &it; 时，先恢复为原始字符再发送；附件标签尤其必须保持原样。"""
 
 
 class PrivateReplyMixin:
@@ -402,9 +410,14 @@ class PrivateReplyMixin:
         safe_time = escape_xml_attr(time_str)
         safe_channel = escape_xml_attr(item.channel)
         safe_address = escape_xml_attr(item.address)
-        safe_text = escape_xml_text_preserving_attachment_tags(
-            item.text,
-            item.attachments,
+        use_cdata = item.channel == "wechat"
+        safe_text = (
+            wrap_xml_cdata(item.text)
+            if use_cdata
+            else escape_xml_text_preserving_attachment_tags(
+                item.text,
+                item.attachments,
+            )
         )
         message_id_attr = ""
         if item.trigger_message_id is not None:
