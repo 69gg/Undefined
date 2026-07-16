@@ -427,7 +427,10 @@ class PrivateReplyMixin:
         attachment_xml = (
             f"\n{attachment_refs_to_xml(item.attachments)}" if item.attachments else ""
         )
-        reply_xml = format_reply_context_xml(item.reply_context)
+        reply_xml = format_reply_context_xml(
+            item.reply_context,
+            use_cdata=use_cdata,
+        )
         route_attrs = ""
         location = "私聊"
         if item.channel == "wechat":

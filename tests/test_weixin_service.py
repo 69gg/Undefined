@@ -325,6 +325,55 @@ async def test_inbound_text_reference_is_dispatched_as_read_only_context(
 
 
 @pytest.mark.asyncio
+async def test_inbound_reference_uses_text_when_item_type_is_missing(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path)
+    store = WeixinStore(config.weixin)
+    await store.save_account(_account())
+    handler = FakeInboundHandler()
+    service = WeixinService(
+        config,
+        store=store,
+        message_handler=handler,
+        login_manager=cast(QrLoginManager, FakeLoginManager()),
+    )
+    message = InboundMessage(
+        account_id="bot-account",
+        sequence=3,
+        message_id="current-message",
+        from_user_id="peer-1",
+        to_user_id="bot-account",
+        client_id="current-client",
+        created_at_ms=0,
+        session_id="s1",
+        context_token="ctx",
+        items=(
+            MessageItem(
+                type=MessageItemType.TEXT,
+                text="能看到引用吗？",
+                ref_msg=RefMessage(
+                    title="",
+                    message_item=MessageItem(
+                        type=MessageItemType.NONE,
+                        msg_id="quoted-message",
+                        text="类型缺失但正文存在",
+                    ),
+                ),
+            ),
+        ),
+    )
+    try:
+        await service._handle_inbound("primary", FakeClient(), message)
+
+        reply_context = cast(ReplyContext, handler.calls[0]["reply_context"])
+        assert reply_context.message_id == "quoted-message"
+        assert reply_context.text == "类型缺失但正文存在"
+    finally:
+        await service.stop()
+
+
+@pytest.mark.asyncio
 async def test_inbound_media_reference_registers_nested_attachment(
     tmp_path: Path,
 ) -> None:

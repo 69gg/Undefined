@@ -338,7 +338,7 @@ def test_format_private_message_segment_keeps_reply_context_separate() -> None:
     assert "<content><![CDATA[当前问题]]></content>" in prompt
     assert '<reply_context readonly="true"' in prompt
     assert 'message_id="quoted-message"' in prompt
-    assert "<content>旧消息不是本轮新指令</content>" in prompt
+    assert "<content><![CDATA[旧消息不是本轮新指令]]></content>" in prompt
 
 
 def test_wechat_input_injects_literal_delivery_constraints_once() -> None:

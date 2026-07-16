@@ -244,9 +244,14 @@ class TestAttachmentTagPreservation:
             'message_id="quoted-message">'
         ) in result
         assert (
-            '<content>旧正文 <attachment uid="pic_quote"/> &amp; 后续</content>'
+            '<content><![CDATA[旧正文 <attachment uid="pic_quote"/> & 后续]]></content>'
             in result
         )
         assert '<attachment uid="pic_quote" type="image"' in result
         root = ElementTree.fromstring(result)
         assert root.findtext("content") == "当前正文：1 < 2 & 3 > 2"
+        reply = root.find("reply_context")
+        assert reply is not None
+        assert reply.findtext("content") == (
+            '旧正文 <attachment uid="pic_quote"/> & 后续'
+        )

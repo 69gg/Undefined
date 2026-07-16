@@ -48,10 +48,9 @@ from Undefined.utils.logging import log_debug_json, redact_string
 from Undefined.utils.queue_intervals import build_model_queue_intervals
 from Undefined.utils.resources import resolve_resource_path
 from Undefined.utils.scheduler import TaskScheduler
-from Undefined.utils.sender import MessageSender
-from Undefined.utils.sender import AddressBoundSender
+from Undefined.utils.message_reply import GENERIC_REPLY_PLACEHOLDER, ReplyContext
 from Undefined.utils.message_targets import DeliveryAddress
-from Undefined.utils.message_reply import ReplyContext
+from Undefined.utils.sender import AddressBoundSender, MessageSender
 
 logger = logging.getLogger(__name__)
 
@@ -757,6 +756,11 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
             return
         address = DeliveryAddress("wechat", qq_id)
         route_sender = AddressBoundSender(self.sender, address)
+        reply_context = await self._restore_weixin_reply_context(
+            qq_id=qq_id,
+            address=address,
+            reply_context=reply_context,
+        )
         parsed_content = append_attachment_text(text, attachments)
         logger.info(
             "[微信私聊] 逻辑QQ=%s 帐号=%s 内容=%s",
@@ -778,6 +782,7 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
             },
             reply_context=reply_context,
         )
+
         self._schedule_meme_ingest(
             attachments=attachments,
             chat_type="private",
@@ -836,6 +841,66 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
             address=address.canonical,
             batch_scope=batch_scope,
             reply_context=reply_context,
+        )
+
+    async def _restore_weixin_reply_context(
+        self,
+        *,
+        qq_id: int,
+        address: DeliveryAddress,
+        reply_context: ReplyContext | None,
+    ) -> ReplyContext | None:
+        """从同一微信路由历史补全上游省略的引用摘要。"""
+        if (
+            reply_context is None
+            or not reply_context.message_id
+            or reply_context.text.strip() not in {"", GENERIC_REPLY_PLACEHOLDER}
+        ):
+            return reply_context
+
+        record = await self.history_manager.find_private_message_by_id(
+            qq_id,
+            reply_context.message_id,
+            channel="wechat",
+            address=address.canonical,
+        )
+        if record is None:
+            logger.debug(
+                "[微信私聊] 当前路由历史中没有引用目标: qq=%s address=%s message=%s",
+                qq_id,
+                address.canonical,
+                reply_context.message_id,
+            )
+            return reply_context
+
+        restored = ReplyContext.from_mapping(
+            {
+                "title": record.get("display_name", ""),
+                "message_id": reply_context.message_id,
+                "message": record.get("message", ""),
+                "attachments": record.get("attachments", []),
+            }
+        )
+        if restored is None or (
+            restored.text.strip() in {"", GENERIC_REPLY_PLACEHOLDER}
+            and not restored.attachments
+        ):
+            return reply_context
+
+        title = reply_context.title
+        if not title or title == "引用消息":
+            title = restored.title or title
+        logger.debug(
+            "[微信私聊] 已从当前路由历史补全引用: qq=%s address=%s message=%s",
+            qq_id,
+            address.canonical,
+            reply_context.message_id,
+        )
+        return ReplyContext(
+            title=title,
+            message_id=reply_context.message_id,
+            text=restored.text or reply_context.text,
+            attachments=reply_context.attachments or restored.attachments,
         )
 
     async def _handle_group_message(self, event: dict[str, Any]) -> None:

@@ -146,7 +146,10 @@ def format_message_xml(
         if use_cdata
         else escape_xml_text_preserving_attachment_tags(text, attachments)
     )
-    reply_xml = format_reply_context_xml(msg.get("reply_context"))
+    reply_xml = format_reply_context_xml(
+        msg.get("reply_context"),
+        use_cdata=use_cdata,
+    )
     safe_location = escape_xml_attr(
         _message_location(msg_type_val, chat_name, transport)
     )
@@ -189,7 +192,12 @@ def format_message_xml(
     )
 
 
-def format_reply_context_xml(value: object, *, indent: str = " ") -> str:
+def format_reply_context_xml(
+    value: object,
+    *,
+    indent: str = " ",
+    use_cdata: bool = False,
+) -> str:
     """Format optional quoted-message metadata as read-only nested XML."""
 
     context = (
@@ -202,9 +210,13 @@ def format_reply_context_xml(value: object, *, indent: str = " ") -> str:
         attrs.append(f'title="{escape_xml_attr(context.title)}"')
     if context.message_id:
         attrs.append(f'message_id="{escape_xml_attr(context.message_id)}"')
-    safe_text = escape_xml_text_preserving_attachment_tags(
-        context.text,
-        context.attachments,
+    safe_text = (
+        wrap_xml_cdata(context.text)
+        if use_cdata
+        else escape_xml_text_preserving_attachment_tags(
+            context.text,
+            context.attachments,
+        )
     )
     attachment_xml = ""
     if context.attachments:

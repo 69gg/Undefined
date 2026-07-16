@@ -6,7 +6,7 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 
 _INLINE_ATTACHMENT_RE = re.compile(
@@ -27,6 +27,7 @@ _MEDIA_LABELS: dict[str, str] = {
     "record": "语音",
     "audio": "音频",
 }
+GENERIC_REPLY_PLACEHOLDER: Final[str] = "[消息]"
 
 
 def _normalize_attachment(item: object) -> dict[str, str] | None:
@@ -119,7 +120,7 @@ def build_safe_reply_preview(
         media_parts.append(f"[{label}: {name}]" if name else f"[{label}]")
 
     parts = [part for part in (cleaned, " ".join(media_parts)) if part]
-    return "\n".join(parts) or "[消息]"
+    return "\n".join(parts) or GENERIC_REPLY_PLACEHOLDER
 
 
 def format_markdown_reply(context: ReplyContext, body: str) -> str:
@@ -134,6 +135,7 @@ def format_markdown_reply(context: ReplyContext, body: str) -> str:
 
 
 __all__ = [
+    "GENERIC_REPLY_PLACEHOLDER",
     "ReplyContext",
     "build_safe_reply_preview",
     "format_markdown_reply",

@@ -35,7 +35,7 @@ from Undefined.attachments.registry import AttachmentRegistry
 from Undefined.config import Config
 from Undefined.utils import io
 from Undefined.utils.logging import redact_string
-from Undefined.utils.message_reply import ReplyContext
+from Undefined.utils.message_reply import GENERIC_REPLY_PLACEHOLDER, ReplyContext
 from Undefined.weixin.models import WeixinAccount, normalize_alias
 from Undefined.weixin.store import UndefinedIlinkStateStore, WeixinStore
 
@@ -806,8 +806,9 @@ class WeixinService:
 
     @staticmethod
     def _reply_item_text(item: MessageItem) -> str:
-        if item.type is MessageItemType.TEXT:
-            return item.text.strip()
+        text = item.text.strip()
+        if text:
+            return text
         if item.type is MessageItemType.VOICE and item.voice_transcript:
             return item.voice_transcript.strip()
         labels = {
@@ -818,7 +819,7 @@ class WeixinService:
             ),
             MessageItemType.VOICE: "[语音]",
         }
-        return labels.get(item.type, "[消息]")
+        return labels.get(item.type, GENERIC_REPLY_PLACEHOLDER)
 
     async def _register_inbound_media(
         self,
