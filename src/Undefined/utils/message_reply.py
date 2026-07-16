@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final
 
@@ -59,6 +59,8 @@ class ReplyContext:
     message_id: str = ""
     text: str = ""
     attachments: tuple[dict[str, str], ...] = ()
+    # 仅用于当前入站引用恢复，不写入持久化历史或模型提示词。
+    source_age_ms: int | None = field(default=None, compare=False, repr=False)
 
     @property
     def is_empty(self) -> bool:

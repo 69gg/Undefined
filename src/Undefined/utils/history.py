@@ -4,14 +4,18 @@ import asyncio
 import logging
 import os
 from datetime import datetime
-from typing import Any
+from typing import Any, Final
 
+from Undefined.utils.coerce import safe_int
 from Undefined.utils.message_reply import ReplyContext
 
 logger = logging.getLogger(__name__)
 
 # 历史记录文件路径
 HISTORY_DIR = os.path.join("data", "history")
+_HISTORY_TIMESTAMP_FORMAT: Final[str] = "%Y-%m-%d %H:%M:%S"
+# 旧记录只有秒级时间，数字 msg_id 插值也可能有几十秒偏差。
+_REFERENCE_MATCH_TOLERANCE_MS: Final[int] = 90_000
 
 
 def _extract_id_from_history_filename(path: str, prefix: str) -> str:
@@ -19,6 +23,77 @@ def _extract_id_from_history_filename(path: str, prefix: str) -> str:
     if filename.startswith(prefix) and filename.endswith(".json"):
         return filename[len(prefix) : -5]
     return ""
+
+
+def _record_transport(record: dict[str, Any]) -> dict[str, Any]:
+    raw = record.get("transport")
+    return raw if isinstance(raw, dict) else {}
+
+
+def _record_matches_route(
+    record: dict[str, Any],
+    *,
+    channel: str | None,
+    address: str | None,
+) -> bool:
+    transport = _record_transport(record)
+    if channel and str(transport.get("channel", "")) != channel:
+        return False
+    return not address or str(transport.get("address", "")) == address
+
+
+def _record_local_timestamp_ms(record: dict[str, Any]) -> tuple[int, bool] | None:
+    sent_at_ms = safe_int(_record_transport(record).get("sent_at_ms"))
+    if sent_at_ms is not None and sent_at_ms > 0:
+        return sent_at_ms, True
+    timestamp = str(record.get("timestamp", "") or "").strip()
+    if not timestamp:
+        return None
+    try:
+        parsed = datetime.strptime(timestamp, _HISTORY_TIMESTAMP_FORMAT)
+    except ValueError:
+        return None
+    return int(parsed.timestamp() * 1000), False
+
+
+def _interpolate_reference_timestamp_ms(
+    history: list[dict[str, Any]],
+    reference_message_id: int,
+    *,
+    current_message_id: int,
+    current_received_at_ms: int,
+    channel: str | None,
+    address: str | None,
+) -> int | None:
+    anchors: dict[int, int] = {current_message_id: current_received_at_ms}
+    for record in history:
+        if not _record_matches_route(record, channel=channel, address=address):
+            continue
+        message_id = safe_int(record.get("message_id"))
+        timestamp = _record_local_timestamp_ms(record)
+        if message_id is None or message_id <= 0 or timestamp is None:
+            continue
+        anchors[message_id] = timestamp[0]
+
+    lower = max(
+        (item for item in anchors if item <= reference_message_id), default=None
+    )
+    upper = min(
+        (item for item in anchors if item >= reference_message_id), default=None
+    )
+    if lower is None or upper is None:
+        return None
+    if lower == upper:
+        return anchors[lower]
+    lower_timestamp = anchors[lower]
+    upper_timestamp = anchors[upper]
+    if upper_timestamp < lower_timestamp:
+        return None
+    return lower_timestamp + (
+        (reference_message_id - lower)
+        * (upper_timestamp - lower_timestamp)
+        // (upper - lower)
+    )
 
 
 class MessageHistoryManager:
@@ -562,6 +637,74 @@ class MessageHistoryManager:
                 if expected_id in candidate_ids:
                     return dict(record)
         return None
+
+    async def find_private_bot_messages_for_reference(
+        self,
+        user_id: int,
+        reference_message_id: int | str,
+        *,
+        current_message_id: int | str | None,
+        current_received_at_ms: int,
+        reference_age_ms: int | None = None,
+        channel: str | None = None,
+        address: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """按同路由发送时间恢复无法用服务端 ID 直接关联的机器人消息。"""
+
+        await self._ensure_initialized()
+        user_id_str = str(user_id)
+        reference_id = safe_int(reference_message_id)
+        if reference_id is None or reference_id <= 0:
+            return []
+        async with self._get_private_lock(user_id_str):
+            history = self._private_message_history.get(user_id_str, [])
+            estimated_at_ms: int | None = None
+            if reference_age_ms is not None and reference_age_ms > 0:
+                estimated_at_ms = current_received_at_ms - reference_age_ms
+            else:
+                current_id = safe_int(current_message_id)
+                if current_id is not None and current_id > reference_id:
+                    estimated_at_ms = _interpolate_reference_timestamp_ms(
+                        history,
+                        reference_id,
+                        current_message_id=current_id,
+                        current_received_at_ms=current_received_at_ms,
+                        channel=channel,
+                        address=address,
+                    )
+            if estimated_at_ms is None:
+                return []
+
+            candidates: list[tuple[int, bool, dict[str, Any]]] = []
+            for record in history:
+                transport = _record_transport(record)
+                direction = str(transport.get("direction", "") or "")
+                if direction and direction != "outbound":
+                    continue
+                if not direction and str(record.get("display_name", "") or "") != "Bot":
+                    continue
+                if not _record_matches_route(
+                    record,
+                    channel=channel,
+                    address=address,
+                ):
+                    continue
+                timestamp = _record_local_timestamp_ms(record)
+                if timestamp is not None:
+                    candidates.append((timestamp[0], timestamp[1], record))
+            if not candidates:
+                return []
+
+            nearest = min(candidates, key=lambda item: abs(item[0] - estimated_at_ms))
+            if abs(nearest[0] - estimated_at_ms) > _REFERENCE_MATCH_TOLERANCE_MS:
+                return []
+            if nearest[1]:
+                return [dict(nearest[2])]
+            return [
+                dict(record)
+                for timestamp_ms, precise, record in candidates
+                if not precise and timestamp_ms == nearest[0]
+            ]
 
     def get_private_page(
         self,

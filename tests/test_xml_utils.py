@@ -132,6 +132,11 @@ class TestXmlCdata:
     def test_decodes_legacy_xml_entities_once(self) -> None:
         assert decode_xml_content_text("&amp;lt;tag&amp;gt;") == "&lt;tag&gt;"
 
+    def test_keeps_literal_entity_spellings_inside_cdata(self) -> None:
+        text = "用户原样输入 &lt;tag&gt; &amp; &#62;"
+
+        assert decode_xml_content_text(wrap_xml_cdata(text)) == text
+
 
 class TestAttachmentTagPreservation:
     def test_preserves_known_attachment_tag(self) -> None:
@@ -215,7 +220,7 @@ class TestAttachmentTagPreservation:
                 "chat_id": "10001",
                 "timestamp": "2026-07-15 20:00:00",
                 "message_id": "current-message",
-                "message": "当前正文：1 < 2 & 3 > 2",
+                "message": "当前正文：1 < 2 & 3 > 2；字面 &lt;tag&gt; &amp;",
                 "transport": {
                     "channel": "wechat",
                     "address": "wechat:10001",
@@ -223,7 +228,10 @@ class TestAttachmentTagPreservation:
                 "reply_context": ReplyContext(
                     title='旧用户 & "昵称"',
                     message_id="quoted-message",
-                    text='旧正文 <attachment uid="pic_quote"/> & 后续',
+                    text=(
+                        '旧正文 <attachment uid="pic_quote"/> & 后续；'
+                        "字面 &lt;quoted&gt; &amp;"
+                    ),
                     attachments=(
                         {
                             "uid": "pic_quote",
@@ -237,21 +245,26 @@ class TestAttachmentTagPreservation:
         )
 
         assert '<message message_id="current-message"' in result
-        assert "<content><![CDATA[当前正文：1 < 2 & 3 > 2]]></content>" in result
+        assert (
+            "<content><![CDATA[当前正文：1 < 2 & 3 > 2；"
+            "字面 &lt;tag&gt; &amp;]]></content>"
+        ) in result
         assert (
             '<reply_context readonly="true" '
             'title="旧用户 &amp; &quot;昵称&quot;" '
             'message_id="quoted-message">'
         ) in result
         assert (
-            '<content><![CDATA[旧正文 <attachment uid="pic_quote"/> & 后续]]></content>'
-            in result
+            '<content><![CDATA[旧正文 <attachment uid="pic_quote"/> & 后续；'
+            "字面 &lt;quoted&gt; &amp;]]></content>" in result
         )
         assert '<attachment uid="pic_quote" type="image"' in result
         root = ElementTree.fromstring(result)
-        assert root.findtext("content") == "当前正文：1 < 2 & 3 > 2"
+        assert root.findtext("content") == (
+            "当前正文：1 < 2 & 3 > 2；字面 &lt;tag&gt; &amp;"
+        )
         reply = root.find("reply_context")
         assert reply is not None
         assert reply.findtext("content") == (
-            '旧正文 <attachment uid="pic_quote"/> & 后续'
+            '旧正文 <attachment uid="pic_quote"/> & 后续；字面 &lt;quoted&gt; &amp;'
         )

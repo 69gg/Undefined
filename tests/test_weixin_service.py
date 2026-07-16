@@ -270,6 +270,53 @@ async def test_unknown_peer_is_quarantined_without_dispatch(tmp_path: Path) -> N
 
 
 @pytest.mark.asyncio
+async def test_inbound_sdk_text_is_dispatched_without_entity_transforms(
+    tmp_path: Path,
+) -> None:
+    literal_text = '原始 <tag> & "引号"；字面实体 &lt;tag&gt; &amp;'
+    config = _config(tmp_path)
+    store = WeixinStore(config.weixin)
+    await store.save_account(_account())
+    handler = FakeInboundHandler()
+    service = WeixinService(
+        config,
+        store=store,
+        message_handler=handler,
+        login_manager=cast(QrLoginManager, FakeLoginManager()),
+    )
+    message = InboundMessage.from_mapping(
+        "bot-account",
+        {
+            "seq": 2,
+            "message_id": "literal-message",
+            "from_user_id": "peer-1",
+            "to_user_id": "bot-account",
+            "client_id": "literal-client",
+            "create_time_ms": 123_456,
+            "session_id": "s1",
+            "context_token": "ctx",
+            "item_list": [
+                {
+                    "type": int(MessageItemType.TEXT),
+                    "text_item": {"text": literal_text},
+                }
+            ],
+        },
+    )
+    try:
+        await service._handle_inbound("primary", FakeClient(), message)
+
+        assert len(handler.calls) == 1
+        call = handler.calls[0]
+        assert call["text"] == literal_text
+        assert call["message_content"] == [
+            {"type": "text", "data": {"text": literal_text}}
+        ]
+    finally:
+        await service.stop()
+
+
+@pytest.mark.asyncio
 async def test_inbound_text_reference_is_dispatched_as_read_only_context(
     tmp_path: Path,
 ) -> None:
@@ -345,7 +392,7 @@ async def test_inbound_reference_uses_text_when_item_type_is_missing(
         from_user_id="peer-1",
         to_user_id="bot-account",
         client_id="current-client",
-        created_at_ms=0,
+        created_at_ms=20_000,
         session_id="s1",
         context_token="ctx",
         items=(
@@ -354,10 +401,13 @@ async def test_inbound_reference_uses_text_when_item_type_is_missing(
                 text="能看到引用吗？",
                 ref_msg=RefMessage(
                     title="",
-                    message_item=MessageItem(
-                        type=MessageItemType.NONE,
-                        msg_id="quoted-message",
-                        text="类型缺失但正文存在",
+                    message_item=MessageItem.from_mapping(
+                        {
+                            "type": 0,
+                            "msg_id": "quoted-message",
+                            "create_time_ms": 12_500,
+                            "text_item": {"text": "类型缺失但正文存在"},
+                        }
                     ),
                 ),
             ),
@@ -369,6 +419,7 @@ async def test_inbound_reference_uses_text_when_item_type_is_missing(
         reply_context = cast(ReplyContext, handler.calls[0]["reply_context"])
         assert reply_context.message_id == "quoted-message"
         assert reply_context.text == "类型缺失但正文存在"
+        assert reply_context.source_age_ms == 7_500
     finally:
         await service.stop()
 

@@ -2,6 +2,7 @@
 
 import logging
 from pathlib import Path
+import time
 from typing import Any, Literal
 from urllib.parse import unquote, urlsplit
 
@@ -303,12 +304,13 @@ class MessageSender:
                 f"enabled={enabled}"
             )
         service = self._require_weixin_service()
-        await service.send_file(
+        sent_message_id = await service.send_file(
             address.target_id,
             file_path,
             name=name,
             kind=kind,
         )
+        sent_at_ms = time.time_ns() // 1_000_000
         if not auto_history:
             return
         file_name = name or Path(file_path).name
@@ -330,9 +332,13 @@ class MessageSender:
             display_name="Bot",
             user_name="Bot",
             attachments=history_attachments,
+            message_id=sent_message_id,
             transport={
                 "channel": "wechat",
                 "address": address.canonical,
+                "direction": "outbound",
+                "message_ids": [sent_message_id],
+                "sent_at_ms": sent_at_ms,
             },
         )
 
@@ -406,10 +412,13 @@ class MessageSender:
 
         sent_ids: list[str] = []
         sent_any = False
+        first_sent_at_ms: int | None = None
 
         def record_sent(receipt: object) -> None:
-            nonlocal sent_any
+            nonlocal first_sent_at_ms, sent_any
             sent_any = True
+            if first_sent_at_ms is None:
+                first_sent_at_ms = time.time_ns() // 1_000_000
             receipt_id = str(receipt or "").strip()
             if receipt_id:
                 sent_ids.append(receipt_id)
@@ -520,7 +529,10 @@ class MessageSender:
             transport: dict[str, Any] = {
                 "channel": "wechat",
                 "address": f"wechat:{user_id}",
+                "direction": "outbound",
             }
+            if first_sent_at_ms is not None:
+                transport["sent_at_ms"] = first_sent_at_ms
             if sent_ids:
                 transport["message_ids"] = list(sent_ids)
             if reply_to is not None:
@@ -1421,6 +1433,7 @@ class AddressBoundSender:
             )
             return
         await self._send_weixin_forward(messages)
+        sent_at_ms = time.time_ns() // 1_000_000
         if auto_history:
             history_attachments = (
                 await self._sender._register_local_segment_attachments(
@@ -1442,6 +1455,8 @@ class AddressBoundSender:
                 transport={
                     "channel": "wechat",
                     "address": self._address.canonical,
+                    "direction": "outbound",
+                    "sent_at_ms": sent_at_ms,
                 },
             )
 

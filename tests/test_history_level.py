@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -213,6 +214,196 @@ async def test_find_private_message_by_id_enforces_transport_route() -> None:
     assert found is not None
     assert found["message"] == "当前微信地址"
     assert wrong_route is None
+
+
+@pytest.mark.asyncio
+async def test_find_private_bot_reference_candidates_uses_same_route_time() -> None:
+    base_ms = int(datetime(2026, 1, 1).timestamp() * 1000)
+    manager = MessageHistoryManager.__new__(MessageHistoryManager)
+    manager._private_message_history = {
+        "12345": [
+            {
+                "message_id": "1000",
+                "display_name": "微信用户",
+                "timestamp": "2026-01-01 00:00:00",
+                "message": "前一条用户消息",
+                "transport": {
+                    "channel": "wechat",
+                    "address": "wechat:12345",
+                },
+            },
+            {
+                "message_id": "client-1",
+                "display_name": "Bot",
+                "timestamp": "2026-01-01 00:05:00",
+                "message": "同轮第一段",
+                "transport": {
+                    "channel": "wechat",
+                    "address": "wechat:12345",
+                },
+            },
+            {
+                "message_id": "client-2",
+                "display_name": "Bot",
+                "timestamp": "2026-01-01 00:05:00",
+                "message": "同轮第二段",
+                "transport": {
+                    "channel": "wechat",
+                    "address": "wechat:12345",
+                },
+            },
+            {
+                "message_id": "wrong-route",
+                "display_name": "Bot",
+                "timestamp": "2026-01-01 00:05:00",
+                "message": "其他微信路由",
+                "transport": {
+                    "channel": "wechat",
+                    "address": "wechat:54321",
+                },
+            },
+        ]
+    }
+    manager._initialized = asyncio.Event()
+    manager._initialized.set()
+    manager._private_locks = {}
+
+    candidates = await manager.find_private_bot_messages_for_reference(
+        12345,
+        "1300",
+        current_message_id="2000",
+        current_received_at_ms=base_ms + 1_000_000,
+        channel="wechat",
+        address="wechat:12345",
+    )
+
+    assert [record["message"] for record in candidates] == [
+        "同轮第一段",
+        "同轮第二段",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_find_private_bot_reference_matches_observed_ilink_ids() -> None:
+    current_received_at_ms = int(datetime(2026, 7, 16, 10, 59, 44).timestamp() * 1000)
+    manager = MessageHistoryManager.__new__(MessageHistoryManager)
+    manager._private_message_history = {
+        "1708213363": [
+            {
+                "message_id": "7483344235396508552",
+                "display_name": "微信用户1708213363",
+                "timestamp": "2026-07-16 10:18:30",
+                "message": "给出这条的结构原文",
+                "transport": {
+                    "channel": "wechat",
+                    "address": "wechat:1708213363",
+                },
+            },
+            {
+                "message_id": "weixin-ilink-client-first",
+                "display_name": "Bot",
+                "timestamp": "2026-07-16 10:23:09",
+                "message": "这条本身的结构原文",
+                "transport": {
+                    "channel": "wechat",
+                    "address": "wechat:1708213363",
+                },
+            },
+            {
+                "message_id": "weixin-ilink-client-second",
+                "display_name": "Bot",
+                "timestamp": "2026-07-16 10:23:09",
+                "message": "要点",
+                "transport": {
+                    "channel": "wechat",
+                    "address": "wechat:1708213363",
+                },
+            },
+            {
+                "message_id": "weixin-ilink-client-correction",
+                "display_name": "Bot",
+                "timestamp": "2026-07-16 10:23:54",
+                "message": "纠正后的结构",
+                "transport": {
+                    "channel": "wechat",
+                    "address": "wechat:1708213363",
+                },
+            },
+        ]
+    }
+    manager._initialized = asyncio.Event()
+    manager._initialized.set()
+    manager._private_locks = {}
+
+    candidates = await manager.find_private_bot_messages_for_reference(
+        1708213363,
+        "7483345452327907208",
+        current_message_id="7483354652101537160",
+        current_received_at_ms=current_received_at_ms,
+        channel="wechat",
+        address="wechat:1708213363",
+    )
+
+    assert [record["message"] for record in candidates] == [
+        "这条本身的结构原文",
+        "要点",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_find_private_bot_reference_prefers_precise_sent_timestamp() -> None:
+    base_ms = int(datetime(2026, 1, 1).timestamp() * 1000)
+    manager = MessageHistoryManager.__new__(MessageHistoryManager)
+    manager._private_message_history = {
+        "12345": [
+            {
+                "message_id": "client-1",
+                "display_name": "Bot",
+                "message": "第一条",
+                "transport": {
+                    "channel": "wechat",
+                    "address": "wechat:12345",
+                    "sent_at_ms": base_ms + 300_100,
+                },
+            },
+            {
+                "message_id": "client-2",
+                "display_name": "Bot",
+                "message": "第二条",
+                "transport": {
+                    "channel": "wechat",
+                    "address": "wechat:12345",
+                    "sent_at_ms": base_ms + 300_900,
+                },
+            },
+        ]
+    }
+    manager._initialized = asyncio.Event()
+    manager._initialized.set()
+    manager._private_locks = {}
+
+    candidates = await manager.find_private_bot_messages_for_reference(
+        12345,
+        "1300",
+        current_message_id="current-message-id",
+        current_received_at_ms=base_ms + 1_000_000,
+        reference_age_ms=699_100,
+        channel="wechat",
+        address="wechat:12345",
+    )
+
+    assert [record["message"] for record in candidates] == ["第二条"]
+
+    non_numeric = await manager.find_private_bot_messages_for_reference(
+        12345,
+        "unknown-server-id",
+        current_message_id="current-message-id",
+        current_received_at_ms=base_ms + 1_000_000,
+        reference_age_ms=699_100,
+        channel="wechat",
+        address="wechat:12345",
+    )
+    assert non_numeric == []
 
 
 @pytest.mark.asyncio

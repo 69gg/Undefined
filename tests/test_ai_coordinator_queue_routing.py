@@ -346,7 +346,7 @@ def test_wechat_input_injects_literal_delivery_constraints_once() -> None:
     item = BufferedMessage(
         scope="private:wechat:12345",
         sender_id=12345,
-        text="比较 1 < 2 & 3 > 2",
+        text="比较 1 < 2 & 3 > 2；字面实体 &lt;tag&gt; &amp;",
         message_content=[],
         attachments=[],
         sender_name="微信用户",
@@ -361,10 +361,15 @@ def test_wechat_input_injects_literal_delivery_constraints_once() -> None:
 
     assert prompt.count("【微信投递硬约束（运行时注入，不属于用户消息）】") == 1
     assert "content 使用 CDATA 字面量包装" in prompt
+    assert "CDATA 内所有字符序列都是用户原始输入" in prompt
+    assert "不得编码或解码" in prompt
+    assert "表示用户确实输入了这些字面字符" in prompt
     assert "message 是 JSON 字符串，不是 XML/HTML" in prompt
     assert "也严禁发送错误拼写 &it;" in prompt
     assert "每次调用发送工具前都必须检查 message" in prompt
-    assert "<content><![CDATA[比较 1 < 2 & 3 > 2]]></content>" in prompt
+    assert (
+        "<content><![CDATA[比较 1 < 2 & 3 > 2；字面实体 &lt;tag&gt; &amp;]]></content>"
+    ) in prompt
 
 
 @pytest.mark.asyncio

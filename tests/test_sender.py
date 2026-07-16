@@ -397,11 +397,11 @@ async def test_send_wechat_message_routes_text_and_records_transport(
     history_mock = cast(AsyncMock, sender.history_manager.add_private_message)
     assert history_mock.await_args is not None
     assert history_mock.await_args.kwargs["message_id"] == "client-1"
-    assert history_mock.await_args.kwargs["transport"] == {
-        "channel": "wechat",
-        "address": "wechat:12345",
-        "message_ids": ["client-1"],
-    }
+    transport = history_mock.await_args.kwargs["transport"]
+    assert transport["channel"] == "wechat"
+    assert transport["address"] == "wechat:12345"
+    assert transport["message_ids"] == ["client-1"]
+    assert isinstance(transport["sent_at_ms"], int)
 
 
 @pytest.mark.asyncio
@@ -650,6 +650,29 @@ async def test_send_wechat_record_rejects_before_partial_text_send(
 
 
 @pytest.mark.asyncio
+async def test_send_wechat_file_records_client_id_and_send_time(
+    sender: MessageSender,
+    tmp_path: Path,
+) -> None:
+    file_path = tmp_path / "report.txt"
+    await async_io.write_text(file_path, "report")
+    service = SimpleNamespace(send_file=AsyncMock(return_value="client-file"))
+    sender.set_weixin_service(service)
+
+    await sender.send_address_file(
+        DeliveryAddress("wechat", 12345),
+        str(file_path),
+    )
+
+    history_mock = cast(AsyncMock, sender.history_manager.add_private_message)
+    assert history_mock.await_args is not None
+    history_kwargs = history_mock.await_args.kwargs
+    assert history_kwargs["message_id"] == "client-file"
+    assert history_kwargs["transport"]["message_ids"] == ["client-file"]
+    assert isinstance(history_kwargs["transport"]["sent_at_ms"], int)
+
+
+@pytest.mark.asyncio
 async def test_send_wechat_file_enforces_private_access_control(
     sender: MessageSender,
     tmp_path: Path,
@@ -845,8 +868,7 @@ async def test_send_wechat_forward_registers_media_and_logs_unsupported_segments
     history_kwargs = history_mock.await_args.kwargs
     assert history_kwargs["attachments"][0]["uid"] == "pic_forward"
     assert "pic_forward" in history_kwargs["text_content"]
-    assert history_kwargs["transport"] == {
-        "channel": "wechat",
-        "address": "wechat:12345",
-    }
+    assert history_kwargs["transport"]["channel"] == "wechat"
+    assert history_kwargs["transport"]["address"] == "wechat:12345"
+    assert isinstance(history_kwargs["transport"]["sent_at_ms"], int)
     assert "type=at" in caplog.text

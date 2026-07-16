@@ -12,6 +12,7 @@ from Undefined.utils.message_targets import (
     parse_delivery_address,
     resolve_delivery_address,
 )
+from Undefined.utils.xml import format_message_xml
 
 
 @pytest.mark.asyncio
@@ -42,3 +43,4 @@ async def test_tool_manager_injects_delivery_address_callables() -> None:
     assert result == "ok"
     assert captured_context["parse_delivery_address"] is parse_delivery_address
     assert captured_context["resolve_delivery_address"] is resolve_delivery_address
+    assert captured_context["format_message_xml"] is format_message_xml

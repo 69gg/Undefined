@@ -34,6 +34,7 @@ from Undefined import __version__
 from Undefined.attachments.registry import AttachmentRegistry
 from Undefined.config import Config
 from Undefined.utils import io
+from Undefined.utils.coerce import safe_int
 from Undefined.utils.logging import redact_string
 from Undefined.utils.message_reply import GENERIC_REPLY_PLACEHOLDER, ReplyContext
 from Undefined.weixin.models import WeixinAccount, normalize_alias
@@ -79,6 +80,7 @@ class WeixinInboundHandler(Protocol):
         sender_name: str,
         message_id: str | None,
         account_alias: str,
+        created_at_ms: int | None = None,
         reply_context: ReplyContext | None = None,
     ) -> None: ...
 
@@ -759,6 +761,7 @@ class WeixinService:
             sender_name=f"微信用户{account.qq_id}",
             message_id=(message.message_id or message.client_id or None),
             account_alias=account.alias,
+            created_at_ms=(message.created_at_ms or None),
             reply_context=reply_context,
         )
 
@@ -802,7 +805,21 @@ class WeixinService:
             message_id=item.msg_id,
             text=text,
             attachments=tuple(attachments),
+            source_age_ms=self._reply_item_age_ms(message, item),
         )
+
+    @staticmethod
+    def _reply_item_age_ms(message: InboundMessage, item: MessageItem) -> int | None:
+        current_created_at_ms = message.created_at_ms
+        referenced_created_at_ms = safe_int(item.raw.get("create_time_ms"))
+        if (
+            current_created_at_ms <= 0
+            or referenced_created_at_ms is None
+            or referenced_created_at_ms <= 0
+            or referenced_created_at_ms > current_created_at_ms
+        ):
+            return None
+        return current_created_at_ms - referenced_created_at_ms
 
     @staticmethod
     def _reply_item_text(item: MessageItem) -> str:

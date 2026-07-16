@@ -215,7 +215,8 @@ async def test_end_historian_source_decodes_wechat_cdata() -> None:
         "current_question": (
             '<message message_id="wechat-1" sender="微信用户" sender_id="12345" '
             'channel="wechat" address="wechat:12345" location="微信私聊">'
-            "<content><![CDATA[比较 1 < 2 & 3 > 2，保留 ]]]]><![CDATA[> 字符]]>"
+            "<content><![CDATA[比较 1 < 2 & 3 > 2，字面 &lt;tag&gt; &amp;，"
+            "保留 ]]]]><![CDATA[> 字符]]>"
             "</content></message>"
         ),
     }
@@ -226,7 +227,9 @@ async def test_end_historian_source_decodes_wechat_cdata() -> None:
     )
 
     assert result == "对话已结束"
-    assert context["historian_source_message"] == ("比较 1 < 2 & 3 > 2，保留 ]]> 字符")
+    assert context["historian_source_message"] == (
+        "比较 1 < 2 & 3 > 2，字面 &lt;tag&gt; &amp;，保留 ]]> 字符"
+    )
 
 
 @pytest.mark.asyncio

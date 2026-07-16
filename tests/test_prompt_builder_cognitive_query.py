@@ -21,13 +21,16 @@ def _make_builder() -> PromptBuilder:
 
 def test_current_input_query_decodes_wechat_cdata_content() -> None:
     question = """<message sender="微信用户" sender_id="10001" channel="wechat" address="wechat:10001">
-<content><![CDATA[比较 1 < 2 & 3 > 2，保留 ]]]]><![CDATA[> 和 </content>、</message> 字符]]></content>
+<content><![CDATA[比较 1 < 2 & 3 > 2，字面 &lt;tag&gt; &amp;，保留 ]]]]><![CDATA[> 和 </content>、</message> 字符]]></content>
 </message>"""
 
     query, extracted = build_current_input_query_text(question)
 
     assert extracted is True
-    assert query == "比较 1 < 2 & 3 > 2，保留 ]]> 和 </content>、</message> 字符"
+    assert query == (
+        "比较 1 < 2 & 3 > 2，字面 &lt;tag&gt; &amp;，"
+        "保留 ]]> 和 </content>、</message> 字符"
+    )
 
 
 def test_build_cognitive_query_uses_current_frame_raw_content() -> None:
