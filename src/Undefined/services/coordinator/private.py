@@ -30,6 +30,7 @@ from Undefined.utils.xml import (
     format_reply_context_xml,
     wrap_xml_cdata,
 )
+from Undefined.weixin.audio import VOICE_SOURCE_SUFFIXES
 
 if TYPE_CHECKING:
     from Undefined.config import Config
@@ -55,7 +56,8 @@ _WECHAT_DELIVERY_CONSTRAINTS = """
 - 下方微信 message 的 content 使用 CDATA 字面量包装；CDATA 内所有字符序列都是用户原始输入，不是标签或实体，不得编码或解码。即使出现 `&lt;`、`&gt;`、`&amp;` 等拼写，也表示用户确实输入了这些字面字符；只有未使用 CDATA 的兼容历史 XML 元素文本才按 XML 语义还原一层。
 - send_message.message 与 send_private_message.message 是 JSON 字符串，不是 XML/HTML。发往微信时，小于号、大于号、与号、单双引号和 Markdown 标记必须写成用户应看到的原始字符。
 - 除非用户明确要求讨论或展示实体拼写本身，否则严禁发送 &lt;、&gt;、&amp;、&quot;、&apos;、&#...;，也严禁发送错误拼写 &it;。例如应发送 `1 < 2`、`A > B`、`<attachment uid="pic_xxx"/>`，不能发送它们的实体形式。
-- 每次调用发送工具前都必须检查 message：发现上述实体或 &it; 时，先恢复为原始字符再发送；附件标签尤其必须保持原样。"""
+- 每次调用发送工具前都必须检查 message：发现上述实体或 &it; 时，先恢复为原始字符再发送；附件标签尤其必须保持原样。
+- 普通 `<attachment uid="..."/>` 始终按原始文件发送；仅当用户明确要求“作为语音消息发送”时，才调用 messages.send_voice，并传入真实存在的音频附件 UID。"""
 
 
 class PrivateReplyMixin:
@@ -226,7 +228,7 @@ class PrivateReplyMixin:
                         ".webp",
                     }:
                         kind = "image"
-                    elif suffix in {".mp3", ".wav", ".ogg", ".flac", ".m4a", ".aac"}:
+                    elif suffix in VOICE_SOURCE_SUFFIXES:
                         kind = "voice"
                     else:
                         return

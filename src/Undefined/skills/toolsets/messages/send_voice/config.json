@@ -1,0 +1,24 @@
+{
+    "type": "function",
+    "function": {
+        "name": "send_voice",
+        "description": "将当前会话可访问的音频附件 UID 显式作为语音发送。仅当用户明确要求语音消息时使用；普通 <attachment uid=\"...\"/> 始终作为原始文件发送。QQ/QQ群使用 CQ record，微信使用原生 iLink 语音。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "uid": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^file_[A-Za-z0-9_-]+$",
+                    "description": "已存在且属于当前会话的音频附件 UID，例如 file_ab12cd34。不得填写本地路径或臆造 UID。"
+                },
+                "address": {
+                    "type": "string",
+                    "pattern": "^(qq|group|wechat):[1-9][0-9]*$",
+                    "description": "可选。规范投递地址；不填时使用当前物理会话。"
+                }
+            },
+            "required": ["uid"]
+        }
+    }
+}

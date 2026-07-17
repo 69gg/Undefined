@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import nturl2path
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -17,7 +18,13 @@ from Undefined.context import RequestContext
 from Undefined.utils import io as async_io
 from Undefined.utils.message_reply import ReplyContext
 from Undefined.utils.message_targets import DeliveryAddress
-from Undefined.utils.sender import AddressBoundSender, MAX_MESSAGE_LENGTH, MessageSender
+from Undefined.utils.sender import (
+    AddressBoundSender,
+    MAX_MESSAGE_LENGTH,
+    MessageSender,
+    _file_uri_path_text,
+)
+from Undefined.weixin.audio import PreparedWeixinVoice
 
 
 @pytest.fixture
@@ -35,6 +42,22 @@ def sender() -> MessageSender:
     config.private_access_denied_reason.return_value = None
 
     return MessageSender(onebot, history_manager, bot_qq=10000, config=config)
+
+
+def test_file_uri_path_text_supports_windows_drive_and_unc(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "Undefined.utils.sender.url2pathname",
+        nturl2path.url2pathname,
+    )
+
+    assert _file_uri_path_text("file:///C:/Users/Test%20User/voice.wav") == (
+        r"C:\Users\Test User\voice.wav"
+    )
+    assert _file_uri_path_text("file://server/share/report.zip") == (
+        r"\\server\share\report.zip"
+    )
 
 
 @pytest.mark.asyncio
@@ -585,6 +608,7 @@ async def test_send_wechat_media_only_reply_attaches_native_reference(
     service = SimpleNamespace(
         send_text=AsyncMock(return_value="client-text"),
         send_file=AsyncMock(return_value="client-media"),
+        validate_media_files=AsyncMock(),
     )
     sender.set_weixin_service(service)
 
@@ -627,26 +651,80 @@ async def test_send_wechat_message_splits_long_text_without_duplicate_history(
 
 
 @pytest.mark.asyncio
-async def test_send_wechat_record_rejects_before_partial_text_send(
+@pytest.mark.parametrize("segment_type", ["record", "audio"])
+async def test_send_wechat_audio_preflights_and_sends_native_voice(
     sender: MessageSender,
     tmp_path: Path,
+    segment_type: str,
 ) -> None:
-    voice_path = tmp_path / "voice.silk"
-    await async_io.write_bytes(voice_path, b"silk")
+    voice_path = tmp_path / "voice.wav"
+    await async_io.write_bytes(voice_path, b"wav")
+    prepared = PreparedWeixinVoice(
+        content=b"\x02#!SILK_V3voice",
+        duration_ms=200,
+    )
+    events: list[str] = []
+
+    async def validate_media_files(_paths: list[Path]) -> None:
+        events.append("validate")
+
+    async def prepare_voice(_path: Path) -> PreparedWeixinVoice:
+        events.append("prepare")
+        return prepared
+
+    async def send_text(_user_id: int, _text: str, **_kwargs: Any) -> str:
+        events.append("text")
+        return "client-text"
+
+    async def send_prepared_voice(
+        _user_id: int,
+        value: PreparedWeixinVoice,
+        **_kwargs: Any,
+    ) -> str:
+        assert value is prepared
+        events.append("voice")
+        return "client-voice"
+
     service = SimpleNamespace(
-        send_text=AsyncMock(return_value="client-1"),
-        send_file=AsyncMock(return_value="client-2"),
+        validate_media_files=validate_media_files,
+        prepare_voice=prepare_voice,
+        send_text=send_text,
+        send_prepared_voice=send_prepared_voice,
     )
     sender.set_weixin_service(service)
 
-    with pytest.raises(ValueError, match="不支持发送语音"):
+    await sender.send_address_message(
+        DeliveryAddress("wechat", 12345),
+        f"hello[CQ:{segment_type},file={voice_path.resolve().as_uri()}]",
+        auto_history=False,
+    )
+
+    assert events == ["validate", "prepare", "text", "voice"]
+
+
+@pytest.mark.asyncio
+async def test_send_wechat_media_preflight_failure_sends_nothing(
+    sender: MessageSender,
+    tmp_path: Path,
+) -> None:
+    file_path = tmp_path / "oversized.bin"
+    await async_io.write_bytes(file_path, b"file")
+    service = SimpleNamespace(
+        validate_media_files=AsyncMock(side_effect=ValueError("too large")),
+        send_text=AsyncMock(return_value="client-text"),
+        send_file=AsyncMock(return_value="client-file"),
+    )
+    sender.set_weixin_service(service)
+
+    with pytest.raises(ValueError, match="too large"):
         await sender.send_address_message(
             DeliveryAddress("wechat", 12345),
-            f"hello[CQ:record,file={voice_path.resolve().as_uri()}]",
+            f"before[CQ:file,file={file_path.resolve().as_uri()}]",
         )
 
     service.send_text.assert_not_awaited()
     service.send_file.assert_not_awaited()
+    cast(AsyncMock, sender.history_manager.add_private_message).assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -744,6 +822,7 @@ async def test_send_wechat_media_skips_attachment_registry_without_history(
     service = SimpleNamespace(
         send_text=AsyncMock(return_value="client-text"),
         send_file=AsyncMock(return_value="client-file"),
+        validate_media_files=AsyncMock(),
     )
     sender.set_weixin_service(service)
 
@@ -769,6 +848,7 @@ async def test_send_wechat_media_omits_local_path_from_text(
     service = SimpleNamespace(
         send_text=AsyncMock(return_value="client-text"),
         send_file=AsyncMock(return_value="client-file"),
+        validate_media_files=AsyncMock(),
     )
     sender.set_weixin_service(service)
 
@@ -812,7 +892,13 @@ async def test_send_wechat_mixed_segments_preserves_original_order(
         events.append(("file", path.name))
         return f"file-{len(events)}"
 
-    sender.set_weixin_service(SimpleNamespace(send_text=send_text, send_file=send_file))
+    sender.set_weixin_service(
+        SimpleNamespace(
+            send_text=send_text,
+            send_file=send_file,
+            validate_media_files=AsyncMock(),
+        )
+    )
     message = (
         f"A[CQ:image,file={image_path.resolve().as_uri()}]"
         f"B[CQ:file,file={file_path.resolve().as_uri()}]C"
@@ -845,6 +931,7 @@ async def test_send_wechat_media_skips_attachment_registry_when_send_fails(
     service = SimpleNamespace(
         send_text=AsyncMock(return_value="client-text"),
         send_file=AsyncMock(side_effect=RuntimeError("failed")),
+        validate_media_files=AsyncMock(),
     )
     sender.set_weixin_service(service)
 
@@ -856,6 +943,49 @@ async def test_send_wechat_media_skips_attachment_registry_when_send_fails(
 
     registry.register_local_file.assert_not_awaited()
     cast(AsyncMock, sender.history_manager.add_private_message).assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_send_wechat_file_segment_registers_history_attachment(
+    sender: MessageSender,
+    tmp_path: Path,
+) -> None:
+    file_path = tmp_path / "result.zip"
+    await async_io.write_bytes(file_path, b"zip")
+    record = SimpleNamespace(
+        prompt_ref=lambda: {
+            "uid": "file_result",
+            "kind": "file",
+            "media_type": "file",
+            "display_name": file_path.name,
+        }
+    )
+    sender.attachment_registry = SimpleNamespace(
+        register_local_file=AsyncMock(return_value=record)
+    )
+    service = SimpleNamespace(
+        send_file=AsyncMock(return_value="client-file"),
+        validate_media_files=AsyncMock(),
+    )
+    sender.set_weixin_service(service)
+
+    await sender.send_address_message(
+        DeliveryAddress("wechat", 12345),
+        f"[CQ:file,file={file_path.resolve().as_uri()}]",
+    )
+
+    sender.attachment_registry.register_local_file.assert_awaited_once_with(
+        "private:12345",
+        str(file_path.resolve()),
+        kind="file",
+        display_name="result.zip",
+        source_kind="sent_file",
+        source_ref=file_path.resolve().as_uri(),
+    )
+    history_mock = cast(AsyncMock, sender.history_manager.add_private_message)
+    assert history_mock.await_args is not None
+    assert history_mock.await_args.kwargs["attachments"][0]["uid"] == "file_result"
+    assert "uid=file_result" in history_mock.await_args.kwargs["text_content"]
 
 
 @pytest.mark.asyncio
@@ -876,9 +1006,20 @@ async def test_send_wechat_forward_registers_media_and_logs_unsupported_segments
     )
     registry = SimpleNamespace(register_local_file=AsyncMock(return_value=record))
     sender.attachment_registry = registry
+    events: list[tuple[str, str]] = []
+
+    async def send_text(_user_id: int, text: str, **_kwargs: Any) -> str:
+        events.append(("text", text))
+        return "client-text"
+
+    async def send_file(_user_id: int, path: str | Path, **_kwargs: Any) -> str:
+        events.append(("file", Path(path).name))
+        return "client-file"
+
     service = SimpleNamespace(
-        send_text=AsyncMock(return_value="client-text"),
-        send_file=AsyncMock(return_value="client-file"),
+        send_text=send_text,
+        send_file=send_file,
+        validate_media_files=AsyncMock(),
     )
     sender.set_weixin_service(service)
     bound_sender = AddressBoundSender(sender, DeliveryAddress("wechat", 12345))
@@ -887,12 +1028,13 @@ async def test_send_wechat_forward_registers_media_and_logs_unsupported_segments
             "type": "node",
             "data": {
                 "content": [
+                    {"type": "text", "data": {"text": "A"}},
                     {
                         "type": "image",
                         "data": {"file": image_path.resolve().as_uri()},
                     },
                     {"type": "at", "data": {"qq": "67890"}},
-                    {"type": "text", "data": {"text": "caption"}},
+                    {"type": "text", "data": {"text": "B"}},
                 ]
             },
         }
@@ -905,8 +1047,11 @@ async def test_send_wechat_forward_registers_media_and_logs_unsupported_segments
             history_message="[命令输出] 微信转发摘要",
         )
 
-    service.send_file.assert_awaited_once()
-    service.send_text.assert_awaited_once_with(12345, "caption")
+    assert events == [
+        ("text", "A"),
+        ("file", "forward.png"),
+        ("text", "B"),
+    ]
     registry.register_local_file.assert_awaited_once()
     history_mock = cast(AsyncMock, sender.history_manager.add_private_message)
     history_mock.assert_awaited_once()

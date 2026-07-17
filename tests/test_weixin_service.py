@@ -26,11 +26,14 @@ from weixin_ilink_client import (
 from Undefined.config import Config
 from Undefined.attachments import AttachmentRegistry
 from Undefined.utils.message_reply import ReplyContext
+from Undefined.utils import io as async_io
+from Undefined.weixin.audio import PreparedWeixinVoice
 from Undefined.weixin.models import WeixinAccount
 from Undefined.weixin.service import (
     WeixinClientProtocol,
     WeixinConfirmationRequired,
     WeixinService,
+    WeixinServiceError,
 )
 from Undefined.weixin.store import UndefinedIlinkStateStore, WeixinStore
 
@@ -83,6 +86,7 @@ class FakeClient:
         self.closed = False
         self.sent_text: list[tuple[str, str]] = []
         self.sent_references: list[RefMessage | None] = []
+        self.sent_voices: list[tuple[str, bytes, int, int, int]] = []
         self.run_started = asyncio.Event()
 
     async def start(self) -> None:
@@ -139,6 +143,26 @@ class FakeClient:
             reference,
         )
         return SendReceipt("client-media-1")
+
+    async def send_voice(
+        self,
+        peer_id: str,
+        content: bytes,
+        *,
+        duration_ms: int,
+        sample_rate: int = 24_000,
+        bits_per_sample: int = 16,
+        context_token: str | None = None,
+        run_id: str | None = None,
+        reply_to: str | int | None = None,
+        reference: RefMessage | None = None,
+    ) -> SendReceipt:
+        del context_token, run_id, reply_to
+        self.sent_voices.append(
+            (peer_id, content, duration_ms, sample_rate, bits_per_sample)
+        )
+        self.sent_references.append(reference)
+        return SendReceipt("client-voice-1")
 
     async def download_media(self, item: MessageItem) -> DownloadedMedia:
         del item
@@ -250,10 +274,38 @@ async def test_account_runtime_sends_by_logical_qq(tmp_path: Path) -> None:
 
         reference = RefMessage.from_text("微信用户", "quoted text")
         receipt = await service.send_text(10001, "hello", reference=reference)
+        voice = PreparedWeixinVoice(
+            content=b"\x02#!SILK_V3voice",
+            duration_ms=250,
+        )
+        voice_receipt = await service.send_prepared_voice(
+            10001,
+            voice,
+            reference=reference,
+        )
 
         assert receipt == "client-message-1"
+        assert voice_receipt == "client-voice-1"
         assert client.sent_text == [("peer-1", "hello")]
-        assert client.sent_references == [reference]
+        assert client.sent_voices == [("peer-1", voice.content, 250, 24_000, 16)]
+        assert client.sent_references == [reference, reference]
+    finally:
+        await service.stop()
+
+
+@pytest.mark.asyncio
+async def test_validate_media_files_rejects_oversized_file(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    config.weixin.media_max_size_mb = 1
+    media_path = tmp_path / "large.bin"
+    await async_io.write_bytes(media_path, b"x" * (1024 * 1024 + 1))
+    service = WeixinService(
+        config,
+        login_manager=cast(QrLoginManager, FakeLoginManager()),
+    )
+    try:
+        with pytest.raises(WeixinServiceError, match="超过大小限制"):
+            await service.validate_media_files((media_path,))
     finally:
         await service.stop()
 

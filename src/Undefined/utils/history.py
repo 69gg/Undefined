@@ -43,9 +43,13 @@ def _record_matches_route(
 
 
 def _record_local_timestamp_ms(record: dict[str, Any]) -> tuple[int, bool] | None:
-    sent_at_ms = safe_int(_record_transport(record).get("sent_at_ms"))
+    transport = _record_transport(record)
+    sent_at_ms = safe_int(transport.get("sent_at_ms"))
     if sent_at_ms is not None and sent_at_ms > 0:
         return sent_at_ms, True
+    created_at_ms = safe_int(transport.get("created_at_ms"))
+    if created_at_ms is not None and created_at_ms > 0:
+        return created_at_ms, True
     timestamp = str(record.get("timestamp", "") or "").strip()
     if not timestamp:
         return None

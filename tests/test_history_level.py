@@ -6,8 +6,37 @@ from pathlib import Path
 
 import pytest
 
-from Undefined.utils.history import MessageHistoryManager
+from Undefined.utils.history import (
+    MessageHistoryManager,
+    _interpolate_reference_timestamp_ms,
+    _record_local_timestamp_ms,
+)
 from Undefined.utils.message_reply import ReplyContext
+
+
+def test_wechat_history_timestamp_prefers_upstream_created_at() -> None:
+    record = {
+        "message_id": "1000",
+        "timestamp": "2026-01-01 00:30:00",
+        "transport": {
+            "channel": "wechat",
+            "address": "wechat:12345",
+            "created_at_ms": 100_000,
+        },
+    }
+
+    assert _record_local_timestamp_ms(record) == (100_000, True)
+    assert (
+        _interpolate_reference_timestamp_ms(
+            [record],
+            1500,
+            current_message_id=2000,
+            current_received_at_ms=200_000,
+            channel="wechat",
+            address="wechat:12345",
+        )
+        == 150_000
+    )
 
 
 @pytest.mark.asyncio

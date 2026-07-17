@@ -1,10 +1,12 @@
 """消息发送管理"""
 
 import logging
+from dataclasses import dataclass, replace
 from pathlib import Path
 import time
 from typing import Any, Literal
-from urllib.parse import unquote, urlsplit
+from urllib.parse import urlsplit
+from urllib.request import url2pathname
 
 from weixin_ilink_client import (
     ApiError,
@@ -32,14 +34,23 @@ from Undefined.utils.message_reply import (
     format_markdown_reply,
 )
 from Undefined.utils.message_turn import mark_message_sent_this_turn
+from Undefined.weixin.audio import PreparedWeixinVoice
 
 logger = logging.getLogger(__name__)
 
 # OneBot 与微信 iLink 的单条文本长度限制（保守值）
 MAX_MESSAGE_LENGTH = 4000
 _WEIXIN_MEDIA_SEGMENT_TYPES: frozenset[str] = frozenset(
-    {"image", "video", "file", "record"}
+    {"image", "video", "file", "record", "audio"}
 )
+
+
+@dataclass(frozen=True, slots=True)
+class _WeixinDeliveryUnit:
+    kind: str
+    text: str = ""
+    path: Path | None = None
+    voice: PreparedWeixinVoice | None = None
 
 
 class WeixinReplyTargetError(ValueError):
@@ -158,6 +169,15 @@ def _iter_segments_deep(value: object) -> list[dict[str, Any]]:
     return segments
 
 
+def _file_uri_path_text(raw_source: str) -> str:
+    parsed = urlsplit(raw_source)
+    netloc = parsed.netloc.strip()
+    uri_path = parsed.path
+    if netloc and netloc.lower() != "localhost":
+        uri_path = f"//{netloc}{uri_path}"
+    return url2pathname(uri_path)
+
+
 def _local_path_from_segment_source(source: Any) -> Path | None:
     raw_source = str(source or "").strip()
     if not raw_source:
@@ -166,8 +186,7 @@ def _local_path_from_segment_source(source: Any) -> Path | None:
     if lowered.startswith(("http://", "https://", "base64://")):
         return None
     if lowered.startswith("file://"):
-        parsed = urlsplit(raw_source)
-        path = Path(unquote(parsed.path)).expanduser()
+        path = Path(_file_uri_path_text(raw_source)).expanduser()
     else:
         path = Path(raw_source).expanduser()
     if not path.is_absolute():
@@ -204,10 +223,10 @@ def _split_text_chunks(text: str, limit: int = MAX_MESSAGE_LENGTH) -> list[str]:
 def _prepare_weixin_delivery_units(
     segments: list[dict[str, Any]],
     bot_qq: int,
-) -> tuple[list[tuple[str, str | Path]], str]:
+) -> tuple[list[_WeixinDeliveryUnit], str]:
     """Validate all media and preserve the original text/media segment order."""
 
-    units: list[tuple[str, str | Path]] = []
+    units: list[_WeixinDeliveryUnit] = []
     pending_text: list[dict[str, Any]] = []
     all_text: list[dict[str, Any]] = []
 
@@ -217,7 +236,7 @@ def _prepare_weixin_delivery_units(
         text = extract_text(pending_text, bot_qq)
         pending_text.clear()
         if text:
-            units.append(("text", text))
+            units.append(_WeixinDeliveryUnit(kind="text", text=text))
 
     for segment in segments:
         segment_type = str(segment.get("type", "") or "").strip().lower()
@@ -225,8 +244,6 @@ def _prepare_weixin_delivery_units(
             pending_text.append(segment)
             all_text.append(segment)
             continue
-        if segment_type == "record":
-            raise ValueError("微信 iLink 暂不支持发送语音")
         data = segment.get("data")
         if not isinstance(data, dict):
             raise ValueError("微信媒体消息缺少有效参数")
@@ -234,9 +251,29 @@ def _prepare_weixin_delivery_units(
         if path is None:
             raise ValueError("微信 iLink 当前只支持发送本地媒体文件")
         flush_text()
-        units.append((segment_type, path))
+        kind = "voice" if segment_type in {"record", "audio"} else segment_type
+        units.append(_WeixinDeliveryUnit(kind=kind, path=path))
     flush_text()
     return units, extract_text(all_text, bot_qq)
+
+
+async def _preflight_weixin_delivery_units(
+    service: Any,
+    units: list[_WeixinDeliveryUnit],
+) -> list[_WeixinDeliveryUnit]:
+    media_paths = [unit.path for unit in units if unit.path is not None]
+    if media_paths:
+        await service.validate_media_files(media_paths)
+    prepared: list[_WeixinDeliveryUnit] = []
+    for unit in units:
+        if unit.kind != "voice":
+            prepared.append(unit)
+            continue
+        if unit.path is None:
+            raise ValueError("微信语音消息缺少本地文件")
+        voice = await service.prepare_voice(unit.path)
+        prepared.append(replace(unit, voice=voice))
+    return prepared
 
 
 class MessageSender:
@@ -315,6 +352,15 @@ class MessageSender:
         auto_history: bool = True,
     ) -> None:
         """按规范地址发送一个本地文件。"""
+        normalized_kind = str(kind or "").strip().lower()
+        if normalized_kind in {"voice", "record", "audio"}:
+            await self.send_address_voice(
+                address,
+                file_path,
+                name=name,
+                auto_history=auto_history,
+            )
+            return
         if address.channel == "group":
             await self.send_group_file(
                 address.target_id, file_path, name=name, auto_history=auto_history
@@ -380,6 +426,118 @@ class MessageSender:
             },
         )
 
+    async def send_address_voice(
+        self,
+        address: DeliveryAddress,
+        file_path: str,
+        name: str | None = None,
+        *,
+        auto_history: bool = True,
+    ) -> int | str | None:
+        """按规范地址将本地音频显式作为语音发送。"""
+
+        path = Path(file_path).expanduser().resolve()
+        file_uri = path.as_uri()
+        if address.channel == "group":
+            return await self.send_group_message(
+                address.target_id,
+                f"[CQ:record,file={file_uri}]",
+                auto_history=auto_history,
+            )
+        if address.channel == "qq":
+            return await self.send_private_message(
+                address.target_id,
+                f"[CQ:record,file={file_uri}]",
+                auto_history=auto_history,
+            )
+        if not self.config.is_private_allowed(address.target_id):
+            enabled = self.config.access_control_enabled()
+            reason = (
+                self.config.private_access_denied_reason(address.target_id) or "unknown"
+            )
+            logger.warning(
+                "[访问控制] 已拦截微信语音发送: user=%s reason=%s (access enabled=%s)",
+                address.target_id,
+                reason,
+                enabled,
+            )
+            raise PermissionError(
+                "blocked by access control: "
+                f"type=private reason={reason} user_id={address.target_id} "
+                f"enabled={enabled}"
+            )
+
+        service = self._require_weixin_service()
+        prepared = await service.prepare_voice(path)
+        return await self._send_weixin_prepared_voice(
+            address,
+            path,
+            prepared,
+            name=name,
+            auto_history=auto_history,
+        )
+
+    async def _send_weixin_prepared_voice(
+        self,
+        address: DeliveryAddress,
+        path: Path,
+        prepared: PreparedWeixinVoice,
+        *,
+        name: str | None,
+        auto_history: bool,
+    ) -> str:
+        """发送已预检语音，供混合消息保持全量预检语义。"""
+
+        if not self.config.is_private_allowed(address.target_id):
+            enabled = self.config.access_control_enabled()
+            reason = (
+                self.config.private_access_denied_reason(address.target_id) or "unknown"
+            )
+            raise PermissionError(
+                "blocked by access control: "
+                f"type=private reason={reason} user_id={address.target_id} "
+                f"enabled={enabled}"
+            )
+        service = self._require_weixin_service()
+        sent_message_id = str(
+            await service.send_prepared_voice(
+                address.target_id,
+                prepared,
+            )
+        ).strip()
+        if not auto_history:
+            return sent_message_id
+        sent_at_ms = time.time_ns() // 1_000_000
+        file_name = name or path.name
+        file_size = _get_file_size(str(path))
+        history_attachments = await self.register_sent_file_attachment(
+            "private",
+            address.target_id,
+            str(path),
+            file_name,
+            kind="record",
+        )
+        history_content = _append_attachment_refs(
+            f"[语音] {file_name} ({_format_size(file_size)})",
+            history_attachments,
+        )
+        await self.history_manager.add_private_message(
+            user_id=address.target_id,
+            text_content=history_content,
+            display_name="Bot",
+            user_name="Bot",
+            attachments=history_attachments,
+            message_id=sent_message_id,
+            transport={
+                "channel": "wechat",
+                "address": address.canonical,
+                "direction": "outbound",
+                "message_ids": [sent_message_id],
+                "sent_at_ms": sent_at_ms,
+            },
+        )
+        return sent_message_id
+
     async def set_address_typing(self, address: DeliveryAddress, typing: bool) -> None:
         """仅微信支持的输入状态提示；其他通道无操作。"""
         if address.channel != "wechat":
@@ -431,6 +589,10 @@ class MessageSender:
             reference = RefMessage.from_text(reply_context.title, preview)
         segments = message_to_segments(message)
         delivery_units, text = _prepare_weixin_delivery_units(segments, self.bot_qq)
+        delivery_units = await _preflight_weixin_delivery_units(
+            service,
+            delivery_units,
+        )
 
         sent_ids: list[str] = []
         sent_any = False
@@ -447,12 +609,41 @@ class MessageSender:
             if mark_sent:
                 mark_message_sent_this_turn()
 
+        async def send_media_unit(
+            unit: _WeixinDeliveryUnit,
+            *,
+            item_reference: RefMessage | None = None,
+        ) -> object:
+            if unit.path is None:
+                raise ValueError("微信媒体消息缺少本地文件")
+            if unit.kind == "voice":
+                if unit.voice is None:
+                    raise ValueError("微信语音尚未完成发送前编码")
+                voice_kwargs: dict[str, Any] = {}
+                if item_reference is not None:
+                    voice_kwargs["reference"] = item_reference
+                return await service.send_prepared_voice(
+                    user_id,
+                    unit.voice,
+                    **voice_kwargs,
+                )
+            media_kwargs: dict[str, Any] = {
+                "name": unit.path.name,
+                "kind": unit.kind,
+            }
+            if item_reference is not None:
+                media_kwargs["reference"] = item_reference
+            return await service.send_file(
+                user_id,
+                unit.path,
+                **media_kwargs,
+            )
+
         reply_mode = ""
         reference_pending = reference is not None
-        for unit_type, payload in delivery_units:
-            if unit_type == "text":
-                assert isinstance(payload, str)
-                text_chunks = _split_text_chunks(payload)
+        for unit in delivery_units:
+            if unit.kind == "text":
+                text_chunks = _split_text_chunks(unit.text)
                 if reference_pending:
                     assert reference is not None
                     try:
@@ -472,7 +663,10 @@ class MessageSender:
                             type(exc).__name__,
                         )
                         assert reply_context is not None
-                        fallback_text = format_markdown_reply(reply_context, payload)
+                        fallback_text = format_markdown_reply(
+                            reply_context,
+                            unit.text,
+                        )
                         for chunk in _split_text_chunks(fallback_text):
                             record_sent(await service.send_text(user_id, chunk))
                         reply_mode = "markdown_fallback"
@@ -487,17 +681,12 @@ class MessageSender:
                         record_sent(await service.send_text(user_id, chunk))
                 continue
 
-            assert isinstance(payload, Path)
-            kind = "image" if unit_type == "image" else unit_type
             if reference_pending:
                 assert reference is not None
                 try:
-                    receipt = await service.send_file(
-                        user_id,
-                        payload,
-                        name=payload.name,
-                        kind=kind,
-                        reference=reference,
+                    receipt = await send_media_unit(
+                        unit,
+                        item_reference=reference,
                     )
                 except Exception as exc:
                     if not _should_fallback_weixin_reference(exc):
@@ -513,28 +702,14 @@ class MessageSender:
                     fallback_text = format_markdown_reply(reply_context, "")
                     for chunk in _split_text_chunks(fallback_text):
                         record_sent(await service.send_text(user_id, chunk))
-                    record_sent(
-                        await service.send_file(
-                            user_id,
-                            payload,
-                            name=payload.name,
-                            kind=kind,
-                        )
-                    )
+                    record_sent(await send_media_unit(unit))
                     reply_mode = "markdown_fallback"
                 else:
                     record_sent(receipt)
                     reply_mode = "native"
                 reference_pending = False
             else:
-                record_sent(
-                    await service.send_file(
-                        user_id,
-                        payload,
-                        name=payload.name,
-                        kind=kind,
-                    )
-                )
+                record_sent(await send_media_unit(unit))
         if not sent_any and message.strip():
             raise ValueError("微信消息中没有可投递的文本或本地媒体")
 
@@ -667,6 +842,8 @@ class MessageSender:
             "image": "image",
             "video": "video",
             "record": "record",
+            "audio": "record",
+            "file": "file",
         }
         attachments: list[dict[str, str]] = []
         seen_paths: set[str] = set()
@@ -1489,6 +1666,29 @@ class AddressBoundSender:
             )
 
     async def _send_weixin_forward(self, messages: list[dict[str, Any]]) -> None:
+        service = self._sender._require_weixin_service()
+        media_units: list[tuple[str, Path]] = []
+        for segment in _iter_segments_deep(messages):
+            segment_type = str(segment.get("type", "") or "").strip().lower()
+            if segment_type not in {"image", "video", "file", "record", "audio"}:
+                continue
+            segment_data = segment.get("data")
+            if not isinstance(segment_data, dict):
+                raise ValueError("微信转发媒体消息缺少有效参数")
+            path = _local_path_from_segment_source(segment_data.get("file"))
+            if path is None:
+                raise ValueError("微信 iLink 当前只支持发送本地媒体文件")
+            kind = "voice" if segment_type in {"record", "audio"} else segment_type
+            media_units.append((kind, path))
+
+        if media_units:
+            await service.validate_media_files([path for _kind, path in media_units])
+        prepared_voices: dict[str, PreparedWeixinVoice] = {}
+        for kind, path in media_units:
+            path_key = str(path)
+            if kind == "voice" and path_key not in prepared_voices:
+                prepared_voices[path_key] = await service.prepare_voice(path)
+
         for node in messages:
             data = node.get("data")
             if not isinstance(data, dict):
@@ -1504,11 +1704,29 @@ class AddressBoundSender:
             if not isinstance(content, list):
                 continue
             text_parts: list[str] = []
+
+            async def flush_text() -> None:
+                text = "".join(text_parts)
+                text_parts.clear()
+                if text.strip():
+                    await self._sender.send_address_message(
+                        self._address,
+                        text,
+                        auto_history=False,
+                    )
+
             for segment in content:
                 if not isinstance(segment, dict):
                     continue
                 segment_type = str(segment.get("type", "") or "").strip().lower()
-                if segment_type not in {"text", "image", "video", "file"}:
+                if segment_type not in {
+                    "text",
+                    "image",
+                    "video",
+                    "file",
+                    "record",
+                    "audio",
+                }:
                     logger.warning(
                         "[微信转发] 丢弃不支持的消息段: address=%s type=%s",
                         self._address.canonical,
@@ -1521,19 +1739,23 @@ class AddressBoundSender:
                 if segment_type == "text":
                     text_parts.append(str(segment_data.get("text", "") or ""))
                     continue
+                await flush_text()
                 path = _local_path_from_segment_source(segment_data.get("file"))
                 if path is not None:
-                    await self._sender.send_address_file(
-                        self._address,
-                        str(path),
-                        name=path.name,
-                        kind=segment_type,
-                        auto_history=False,
-                    )
-            text = "".join(text_parts).strip()
-            if text:
-                await self._sender.send_address_message(
-                    self._address,
-                    text,
-                    auto_history=False,
-                )
+                    if segment_type in {"record", "audio"}:
+                        await self._sender._send_weixin_prepared_voice(
+                            self._address,
+                            path,
+                            prepared_voices[str(path)],
+                            name=path.name,
+                            auto_history=False,
+                        )
+                    else:
+                        await self._sender.send_address_file(
+                            self._address,
+                            str(path),
+                            name=path.name,
+                            kind=segment_type,
+                            auto_history=False,
+                        )
+            await flush_text()

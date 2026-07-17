@@ -21,6 +21,7 @@ from Undefined.utils.message_targets import DeliveryAddress, parse_delivery_addr
 from Undefined.utils.recent_messages import get_recent_messages_prefer_local
 from Undefined.utils.sender import AddressBoundSender
 from Undefined.utils import io
+from Undefined.weixin.audio import VOICE_SOURCE_SUFFIXES
 
 logger = logging.getLogger(__name__)
 
@@ -677,7 +678,7 @@ class TaskScheduler:
                     if ext in [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"]:
                         msg = f"[CQ:image,file={file_uri}]"
                         media_kind = "image"
-                    elif ext in [".mp3", ".wav", ".ogg", ".flac", ".m4a", ".aac"]:
+                    elif ext in VOICE_SOURCE_SUFFIXES:
                         msg = f"[CQ:record,file={file_uri}]"
                         media_kind = "record"
                     else:

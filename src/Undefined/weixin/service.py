@@ -7,7 +7,7 @@ import logging
 import mimetypes
 import secrets
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -37,6 +37,13 @@ from Undefined.utils import io
 from Undefined.utils.coerce import safe_int
 from Undefined.utils.logging import redact_string
 from Undefined.utils.message_reply import GENERIC_REPLY_PLACEHOLDER, ReplyContext
+from Undefined.weixin.audio import (
+    PreparedWeixinVoice,
+    VOICE_BITS_PER_SAMPLE,
+    VOICE_SAMPLE_RATE,
+    WeixinVoiceConversionError,
+    prepare_weixin_voice,
+)
 from Undefined.weixin.models import WeixinAccount, normalize_alias
 from Undefined.weixin.store import UndefinedIlinkStateStore, WeixinStore
 
@@ -114,6 +121,20 @@ class WeixinClientProtocol(Protocol):
         kind: MediaKind,
         file_name: str,
         caption: str = "",
+        context_token: str | None = None,
+        run_id: str | None = None,
+        reply_to: str | int | None = None,
+        reference: RefMessage | None = None,
+    ) -> SendReceipt: ...
+
+    async def send_voice(
+        self,
+        peer_id: str,
+        content: bytes,
+        *,
+        duration_ms: int,
+        sample_rate: int = VOICE_SAMPLE_RATE,
+        bits_per_sample: int = VOICE_BITS_PER_SAMPLE,
         context_token: str | None = None,
         run_id: str | None = None,
         reply_to: str | int | None = None,
@@ -562,12 +583,13 @@ class WeixinService:
         path = Path(file_path).expanduser()
         resolved_name = (Path(name).name if name else "") or path.name
         resolved_kind = self._resolve_media_kind(kind, resolved_name)
-        max_bytes = self.weixin_config.media_max_size_mb * 1024 * 1024
-        size = await io.get_file_size(path)
-        if size > max_bytes:
-            raise WeixinServiceError(
-                f"微信媒体超过大小限制: {size} > {max_bytes} bytes"
+        if resolved_kind is MediaKind.VOICE:
+            return await self.send_voice(
+                qq_id,
+                path,
+                reference=reference,
             )
+        await self.validate_media_files((path,))
         content = await io.read_bytes(path)
         account, runtime = await self._resolve_runtime(qq_id)
         send_kwargs: dict[str, Any] = {}
@@ -579,6 +601,79 @@ class WeixinService:
             kind=resolved_kind,
             file_name=resolved_name,
             caption=caption,
+            **send_kwargs,
+        )
+        return receipt.client_id
+
+    async def validate_media_files(
+        self,
+        paths: Sequence[str | Path],
+    ) -> None:
+        """在任何消息段发出前校验全部本地媒体。"""
+
+        maximum_bytes = self.weixin_config.media_max_size_mb * 1024 * 1024
+        for value in paths:
+            path = await io.resolve_path(value)
+            if not await io.is_file(path):
+                raise WeixinServiceError("微信媒体文件不存在")
+            size = await io.get_file_size(path)
+            if size <= 0:
+                raise WeixinServiceError("微信媒体文件为空")
+            if size > maximum_bytes:
+                raise WeixinServiceError(
+                    f"微信媒体超过大小限制: {size} > {maximum_bytes} bytes"
+                )
+
+    async def prepare_voice(
+        self,
+        file_path: str | Path,
+    ) -> PreparedWeixinVoice:
+        """在发送前完成音频校验、归一化和 Tencent SILK 编码。"""
+
+        maximum_bytes = self.weixin_config.media_max_size_mb * 1024 * 1024
+        try:
+            return await prepare_weixin_voice(
+                file_path,
+                maximum_bytes=maximum_bytes,
+            )
+        except WeixinVoiceConversionError as exc:
+            raise WeixinServiceError(str(exc)) from exc
+
+    async def send_voice(
+        self,
+        qq_id: int,
+        file_path: str | Path,
+        *,
+        reference: RefMessage | None = None,
+    ) -> str:
+        """预处理并发送一个本地音频文件。"""
+
+        prepared = await self.prepare_voice(file_path)
+        return await self.send_prepared_voice(
+            qq_id,
+            prepared,
+            reference=reference,
+        )
+
+    async def send_prepared_voice(
+        self,
+        qq_id: int,
+        prepared: PreparedWeixinVoice,
+        *,
+        reference: RefMessage | None = None,
+    ) -> str:
+        """发送已经完成全量预检的 Tencent SILK。"""
+
+        account, runtime = await self._resolve_runtime(qq_id)
+        send_kwargs: dict[str, Any] = {}
+        if reference is not None:
+            send_kwargs["reference"] = reference
+        receipt = await runtime.client.send_voice(
+            account.peer_id,
+            prepared.content,
+            duration_ms=prepared.duration_ms,
+            sample_rate=prepared.sample_rate,
+            bits_per_sample=prepared.bits_per_sample,
             **send_kwargs,
         )
         return receipt.client_id
@@ -1055,6 +1150,4 @@ class WeixinService:
                 resolved = MediaKind.VIDEO
             else:
                 resolved = MediaKind.FILE
-        if resolved is MediaKind.VOICE:
-            raise WeixinServiceError("微信 iLink 暂不支持发送语音")
         return resolved

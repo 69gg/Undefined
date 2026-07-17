@@ -126,7 +126,7 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
         )
 
     # 上传
-    onebot_client = context.get("onebot_client")
+    sender = context.get("sender")
     target_type: str = context.get("target_type", "")
     target_id: int = context.get("target_id", 0)
     runtime_config = context.get("runtime_config") or context.get("config")
@@ -143,16 +143,20 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
 
     if access_error is not None:
         upload_status = access_error
-    elif onebot_client and target_type and target_id:
+    elif sender and target_type and target_id:
         try:
             abs_path = str(archive_path.resolve())
             if target_type == "group":
-                await onebot_client.upload_group_file(
-                    target_id, abs_path, archive_path.name
+                await sender.send_group_file(
+                    target_id,
+                    abs_path,
+                    name=archive_path.name,
                 )
             else:
-                await onebot_client.upload_private_file(
-                    target_id, abs_path, archive_path.name
+                await sender.send_private_file(
+                    target_id,
+                    abs_path,
+                    name=archive_path.name,
                 )
             upload_status = "上传成功"
 
@@ -160,9 +164,9 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
             if summary:
                 msg = f"📦 代码交付完成\n\n{summary}\n\n文件: {archive_path.name} ({archive_size / 1024:.1f}KB)"
                 if target_type == "group":
-                    await onebot_client.send_group_message(target_id, msg)
+                    await sender.send_group_message(target_id, msg)
                 else:
-                    await onebot_client.send_private_message(target_id, msg)
+                    await sender.send_private_message(target_id, msg)
         except Exception as exc:
             logger.exception("上传文件失败")
             upload_status = f"上传失败: {exc}"

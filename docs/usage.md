@@ -193,6 +193,7 @@ HTML 和 Markdown 工具都支持显式长图版式：
 |---|---|
 | `messages.send_message` | 向当前会话发送消息 |
 | `messages.send_private_message` | 向指定用户发送私聊消息 |
+| `messages.send_voice` | 将当前会话的音频附件 UID 显式作为 QQ/微信语音发送；普通附件仍按文件发送 |
 | `messages.get_recent_messages` | 获取最近若干条历史消息 |
 | `messages.get_messages_by_time` | 按时间范围检索历史消息 |
 | `messages.react_message_emoji` | 对指定消息添加表情回应 |
