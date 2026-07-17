@@ -12,7 +12,7 @@ from Undefined.skills.commands.stats.handler import execute
 class _DummyDispatcher:
     def __init__(self) -> None:
         self.group_calls: list[tuple[int, int, list[str]]] = []
-        self.private_calls: list[tuple[int, int, list[str], bool, bool]] = []
+        self.private_calls: list[tuple[int, int, list[str], bool, bool, bool]] = []
 
     async def _handle_stats(
         self, group_id: int, sender_id: int, args: list[str]
@@ -25,6 +25,7 @@ class _DummyDispatcher:
         sender_id: int,
         args: list[str],
         send_message: Any = None,
+        send_forward: Any = None,
         *,
         is_webui_session: bool = False,
     ) -> None:
@@ -34,6 +35,7 @@ class _DummyDispatcher:
                 sender_id,
                 list(args),
                 callable(send_message),
+                callable(send_forward),
                 is_webui_session,
             )
         )
@@ -42,6 +44,15 @@ class _DummyDispatcher:
 class _DummyPrivateSender:
     async def send_private_message(self, _user_id: int, _message: str) -> None:
         return None
+
+    async def send_private_forward_message(
+        self,
+        _user_id: int,
+        _messages: list[dict[str, Any]],
+        *,
+        history_message: str,
+    ) -> None:
+        del history_message
 
 
 def _build_context(
@@ -109,6 +120,23 @@ async def test_stats_handler_routes_private_scope_with_webui_flag() -> None:
             90001,
             ["30d", "--ai"],
             True,
+            False,
             True,
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_stats_handler_passes_private_forward_sender() -> None:
+    dispatcher = _DummyDispatcher()
+    context = _build_context(
+        dispatcher=dispatcher,
+        scope="private",
+        group_id=0,
+        sender_id=90001,
+        user_id=42,
+    )
+
+    await execute(["7d"], context)
+
+    assert dispatcher.private_calls == [(42, 90001, ["7d"], True, True, False)]

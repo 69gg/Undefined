@@ -606,6 +606,10 @@ class WeixinConfig:
     failure_backoff_seconds: float = 30.0
     failures_before_backoff: int = 3
     media_max_size_mb: int = 100
+    media_upload_attempts: int = 3
+    media_upload_concurrency: int = 3
+    multi_item_messages_enabled: bool = True
+    multi_item_max_items: int = 10
     login_session_ttl_seconds: float = 300.0
     privileged_confirmation_ttl_seconds: float = 300.0
     pending_max_records: int = 100

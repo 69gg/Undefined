@@ -1011,6 +1011,10 @@ Prompt caching 补充：
 | `failure_backoff_seconds` | `30.0` | 连续失败后的退避时间 |
 | `failures_before_backoff` | `3` | 进入长退避的连续失败阈值 |
 | `media_max_size_mb` | `100` | 单个媒体大小上限 |
+| `media_upload_attempts` | `3` | 媒体上传遇到临时网络或服务端错误时的最大尝试次数，范围 1..10 |
+| `media_upload_concurrency` | `3` | 单条多项目消息并发上传媒体的上限，范围 1..8 |
+| `multi_item_messages_enabled` | `true` | 优先用 iLink 多项目消息模拟微信合并转发 |
+| `multi_item_max_items` | `10` | 单次多项目消息的项目上限，范围 1..20；超出时保持顺序分批 |
 | `login_session_ttl_seconds` | `300.0` | 二维码登录会话有效期 |
 | `privileged_confirmation_ttl_seconds` | `300.0` | 管理员身份二次确认有效期 |
 | `pending_max_records` | `100` | 未知来源隔离记录上限 |
@@ -1020,6 +1024,7 @@ Prompt caching 补充：
 - 修改本节后需重启 Bot 主进程；二维码登录只能从已鉴权管理页或 Runtime API 显式发起。
 - 每个微信帐号绑定一个逻辑 QQ 身份，共享私聊权限、历史、认知记忆和模型偏好；物理回复地址为 `wechat:<逻辑QQ号>`。
 - `messages.send_voice` 可将音频附件显式发送为原生语音；WAV 等源音频由 FFmpeg 归一化并编码为 Tencent SILK，因此部署机需在 `PATH` 中提供 `ffmpeg`。普通附件标签不会自动改成语音。
+- iLink 没有 QQ 合并转发卡片的协议合同。默认开启的多项目模式会把转发节点按原顺序放入一个或多个 `sendmessage.item_list` 请求；上游明确拒绝该结构时自动回退逐段发送，超时等结果不确定的失败不会重发，以免重复消息。可通过 `multi_item_messages_enabled=false` 强制使用逐段模式。
 - 未匹配来源在进入命令、历史和 AI 前隔离，隔离记录不保存正文。
 - `state_dir` 中包含登录凭据，不应提交到版本库或通过静态文件服务暴露。
 

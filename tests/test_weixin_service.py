@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, cast
 from unittest.mock import AsyncMock
@@ -14,6 +15,8 @@ from weixin_ilink_client import (
     MediaKind,
     MessageItem,
     MessageItemType,
+    OutboundMessageItem,
+    OutboundTextItem,
     QrLoginManager,
     QrLoginSession,
     QrPollResult,
@@ -87,6 +90,7 @@ class FakeClient:
         self.sent_text: list[tuple[str, str]] = []
         self.sent_references: list[RefMessage | None] = []
         self.sent_voices: list[tuple[str, bytes, int, int, int]] = []
+        self.sent_items: list[tuple[str, tuple[OutboundMessageItem, ...]]] = []
         self.run_started = asyncio.Event()
 
     async def start(self) -> None:
@@ -163,6 +167,18 @@ class FakeClient:
         )
         self.sent_references.append(reference)
         return SendReceipt("client-voice-1")
+
+    async def send_items(
+        self,
+        peer_id: str,
+        items: Sequence[OutboundMessageItem],
+        *,
+        context_token: str | None = None,
+        run_id: str | None = None,
+    ) -> SendReceipt:
+        del context_token, run_id
+        self.sent_items.append((peer_id, tuple(items)))
+        return SendReceipt("client-items-1")
 
     async def download_media(self, item: MessageItem) -> DownloadedMedia:
         del item
@@ -283,12 +299,16 @@ async def test_account_runtime_sends_by_logical_qq(tmp_path: Path) -> None:
             voice,
             reference=reference,
         )
+        items = (OutboundTextItem("报告"),)
+        items_receipt = await service.send_items(10001, items)
 
         assert receipt == "client-message-1"
         assert voice_receipt == "client-voice-1"
+        assert items_receipt == "client-items-1"
         assert client.sent_text == [("peer-1", "hello")]
         assert client.sent_voices == [("peer-1", voice.content, 250, 24_000, 16)]
         assert client.sent_references == [reference, reference]
+        assert client.sent_items == [("peer-1", items)]
     finally:
         await service.stop()
 
@@ -737,6 +757,7 @@ async def test_disabled_service_status_stays_stopped(tmp_path: Path) -> None:
         assert "reply_to" in status["capabilities"]["outbound"]
         assert "reply_to" not in status["capabilities"]["unsupported"]
         assert "voice" in status["capabilities"]["outbound"]
+        assert "multi_item" in status["capabilities"]["outbound"]
         assert "outbound_voice" not in status["capabilities"]["unsupported"]
     finally:
         await service.stop()

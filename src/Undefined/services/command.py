@@ -5,7 +5,7 @@ import re
 import time
 from uuid import uuid4
 from datetime import datetime
-from typing import Any, Awaitable, Callable, Optional
+from typing import Any, Awaitable, Callable, Optional, cast
 from pathlib import Path
 
 from Undefined.config import Config
@@ -17,6 +17,7 @@ from Undefined.onebot import (
     parse_message_time,
 )
 from Undefined.utils.sender import MessageSender
+from Undefined.utils import io
 from Undefined.services.commands.context import CommandContext
 from Undefined.services.commands.registry import (
     CommandRateLimit,
@@ -82,9 +83,11 @@ class _PrivateCommandSenderProxy:
         self,
         user_id: int,
         send_private_message: Callable[[int, str], Awaitable[Any]],
+        send_private_forward_message: Callable[..., Awaitable[None]] | None = None,
     ) -> None:
         self._user_id = user_id
         self._send_private_message = send_private_message
+        self._send_private_forward_message = send_private_forward_message
 
     async def send_group_message(
         self,
@@ -105,6 +108,24 @@ class _PrivateCommandSenderProxy:
     ) -> None:
         _ = user_id, auto_history, mark_sent
         await self._send_private_message(self._user_id, message)
+
+    async def send_private_forward_message(
+        self,
+        user_id: int,
+        messages: list[dict[str, Any]],
+        *,
+        history_message: str,
+        auto_history: bool = True,
+    ) -> None:
+        _ = user_id
+        if self._send_private_forward_message is None:
+            raise RuntimeError("当前私聊命令通道不支持合并转发")
+        await self._send_private_forward_message(
+            self._user_id,
+            messages,
+            history_message=history_message,
+            auto_history=auto_history,
+        )
 
 
 class CommandDispatcher:
@@ -149,6 +170,7 @@ class CommandDispatcher:
         # 存储 stats 分析结果，用于队列回调
         self._stats_analysis_results: dict[str, str] = {}
         self._stats_analysis_events: dict[str, asyncio.Event] = {}
+        self._stats_render_lock = asyncio.Lock()
 
         # 加载所有命令实现 (独立插件形式存放在 skills/commands 目录下)
         commands_dir = Path(__file__).parent.parent / "skills" / "commands"
@@ -259,7 +281,6 @@ class CommandDispatcher:
         self, group_id: int, sender_id: int, args: list[str]
     ) -> None:
         """处理 /stats 命令，生成 token 使用统计图表（可选 AI 分析）"""
-        # 1. 基础环境与参数检查
         if not _MATPLOTLIB_AVAILABLE:
             await self.sender.send_group_message(
                 group_id, "❌ 缺少必要的库，无法生成图表。请安装 matplotlib。"
@@ -267,9 +288,8 @@ class CommandDispatcher:
             return
 
         days, enable_ai_analysis = self._parse_stats_options(args)
-
+        img_dir: Path | None = None
         try:
-            # 2. 获取并验证数据
             summary = await self._token_usage_storage.get_summary(days=days)
             if summary["total_calls"] == 0:
                 await self.sender.send_group_message(
@@ -277,16 +297,9 @@ class CommandDispatcher:
                 )
                 return
 
-            # 3. 生成图表文件
-            from Undefined.utils.paths import RENDER_CACHE_DIR, ensure_dir
+            img_dir = await self._create_stats_render_dir()
+            await self._generate_stats_charts(summary, img_dir, days)
 
-            img_dir = ensure_dir(RENDER_CACHE_DIR)
-            await self._generate_line_chart(summary, img_dir, days)
-            await self._generate_bar_chart(summary, img_dir)
-            await self._generate_pie_chart(summary, img_dir)
-            await self._generate_stats_table(summary, img_dir)
-
-            # 4. 按参数投递 AI 分析请求到队列（默认关闭）
             ai_analysis = ""
             if enable_ai_analysis:
                 ai_analysis = await self._run_stats_ai_analysis(
@@ -297,8 +310,7 @@ class CommandDispatcher:
                     days=days,
                 )
 
-            # 5. 构建并发送合并转发消息（包含 AI 分析）
-            forward_messages = self._build_stats_forward_nodes(
+            forward_messages = await self._build_stats_forward_nodes(
                 summary, img_dir, days, ai_analysis
             )
             await self._send_group_forward_message(
@@ -311,10 +323,6 @@ class CommandDispatcher:
                 ),
             )
 
-            from Undefined.utils.cache import cleanup_cache_dir
-
-            cleanup_cache_dir(RENDER_CACHE_DIR)
-
         except Exception as e:
             error_id = uuid4().hex[:8]
             logger.exception(
@@ -324,6 +332,9 @@ class CommandDispatcher:
                 group_id,
                 f"❌ 生成统计图表失败，请稍后重试（错误码: {error_id}）",
             )
+        finally:
+            if img_dir is not None:
+                await io.delete_tree(img_dir)
 
     async def _send_group_forward_message(
         self,
@@ -374,6 +385,7 @@ class CommandDispatcher:
         sender_id: int,
         args: list[str],
         send_message: Callable[[str], Awaitable[None]] | None = None,
+        send_forward: Callable[..., Awaitable[None]] | None = None,
         *,
         is_webui_session: bool = False,
     ) -> None:
@@ -386,6 +398,7 @@ class CommandDispatcher:
                 await self.sender.send_private_message(user_id, message)
 
         days, enable_ai_analysis = self._parse_stats_options(args)
+        img_dir: Path | None = None
         try:
             summary = await self._token_usage_storage.get_summary(days=days)
             if summary["total_calls"] == 0:
@@ -411,19 +424,43 @@ class CommandDispatcher:
                 await _send_private(message)
                 return
 
-            from Undefined.utils.paths import RENDER_CACHE_DIR, ensure_dir
-            from Undefined.utils.cache import cleanup_cache_dir
+            img_dir = await self._create_stats_render_dir()
+            await self._generate_stats_charts(summary, img_dir, days)
 
-            img_dir = ensure_dir(RENDER_CACHE_DIR)
-            await self._generate_line_chart(summary, img_dir, days)
-            await self._generate_bar_chart(summary, img_dir)
-            await self._generate_pie_chart(summary, img_dir)
-            await self._generate_stats_table(summary, img_dir)
+            if send_forward is not None:
+                nodes = await self._build_stats_forward_nodes(
+                    summary,
+                    img_dir,
+                    days,
+                    ai_analysis,
+                )
+                try:
+                    await send_forward(
+                        user_id,
+                        nodes,
+                        history_message=self._build_stats_history_message(
+                            summary,
+                            days,
+                            ai_analysis,
+                        ),
+                    )
+                except Exception as exc:
+                    logger.exception(
+                        "[Stats] 私聊图表投递失败，回退文本摘要: user=%s err=%s",
+                        user_id,
+                        exc,
+                    )
+                    fallback = self._build_stats_summary_text(summary)
+                    if ai_analysis:
+                        fallback += f"\n\n🤖 AI 智能分析\n{ai_analysis}"
+                    fallback += "\n\n⚠️ 图表发送失败，已保留统计摘要。"
+                    await _send_private(fallback)
+                return
 
             await _send_private(f"📊 最近 {days} 天的 Token 使用统计：")
             for img_name in ["line_chart", "bar_chart", "pie_chart", "table"]:
                 img_path = img_dir / f"stats_{img_name}.png"
-                if img_path.exists():
+                if await io.is_file(img_path):
                     message = await self._build_private_stats_image_message(
                         img_path,
                         inline_base64=is_webui_session,
@@ -433,8 +470,6 @@ class CommandDispatcher:
             await _send_private(self._build_stats_summary_text(summary))
             if ai_analysis:
                 await _send_private(f"🤖 AI 智能分析\n{ai_analysis}")
-
-            cleanup_cache_dir(RENDER_CACHE_DIR)
         except Exception as e:
             error_id = uuid4().hex[:8]
             logger.exception(
@@ -446,6 +481,9 @@ class CommandDispatcher:
             await _send_private(
                 f"❌ 生成统计图表失败，请稍后重试（错误码: {error_id}）"
             )
+        finally:
+            if img_dir is not None:
+                await io.delete_tree(img_dir)
 
     async def _build_private_stats_image_message(
         self,
@@ -458,9 +496,8 @@ class CommandDispatcher:
             return f"[CQ:image,file={file_uri}]"
 
         try:
-            encoded = await asyncio.to_thread(
-                lambda: base64.b64encode(image_path.read_bytes()).decode("ascii")
-            )
+            content = await io.read_bytes(image_path)
+            encoded = base64.b64encode(content).decode("ascii")
         except Exception as exc:
             logger.warning(
                 "[Stats] 图像 base64 编码失败，回退文件路径: path=%s err=%s",
@@ -705,7 +742,38 @@ class CommandDispatcher:
         self._stats_analysis_results[request_id] = analysis
         event.set()
 
-    def _build_stats_forward_nodes(
+    async def _create_stats_render_dir(self) -> Path:
+        from Undefined.utils.paths import RENDER_CACHE_DIR
+
+        base_dir = await io.ensure_dir(RENDER_CACHE_DIR)
+        return await io.ensure_dir(base_dir / f"stats_{uuid4().hex}")
+
+    async def _generate_stats_charts(
+        self,
+        summary: dict[str, Any],
+        img_dir: Path,
+        days: int,
+    ) -> None:
+        async with self._stats_render_lock:
+            await asyncio.to_thread(
+                self._generate_stats_charts_sync,
+                summary,
+                img_dir,
+                days,
+            )
+
+    def _generate_stats_charts_sync(
+        self,
+        summary: dict[str, Any],
+        img_dir: Path,
+        days: int,
+    ) -> None:
+        self._generate_line_chart(summary, img_dir, days)
+        self._generate_bar_chart(summary, img_dir)
+        self._generate_pie_chart(summary, img_dir)
+        self._generate_stats_table(summary, img_dir)
+
+    async def _build_stats_forward_nodes(
         self,
         summary: dict[str, Any],
         img_dir: Path,
@@ -730,7 +798,7 @@ class CommandDispatcher:
         # 添加所有生成的图片
         for img_name in ["line_chart", "bar_chart", "pie_chart", "table"]:
             img_path = img_dir / f"stats_{img_name}.png"
-            if img_path.exists():
+            if await io.is_file(img_path):
                 add_node(f"[CQ:image,file={img_path.absolute().as_uri()}]")
 
         # 添加文本摘要
@@ -742,7 +810,7 @@ class CommandDispatcher:
 
         return nodes
 
-    async def _generate_line_chart(
+    def _generate_line_chart(
         self, summary: dict[str, Any], img_dir: Path, days: int
     ) -> None:
         """生成折线图：时间趋势"""
@@ -800,7 +868,7 @@ class CommandDispatcher:
         plt.savefig(filepath, dpi=150, bbox_inches="tight")
         plt.close(fig)
 
-    async def _generate_bar_chart(self, summary: dict[str, Any], img_dir: Path) -> None:
+    def _generate_bar_chart(self, summary: dict[str, Any], img_dir: Path) -> None:
         """生成柱状图：模型对比"""
         models = summary["models"]
         if not models:
@@ -876,7 +944,7 @@ class CommandDispatcher:
         plt.savefig(filepath, dpi=150, bbox_inches="tight")
         plt.close(fig)
 
-    async def _generate_pie_chart(self, summary: dict[str, Any], img_dir: Path) -> None:
+    def _generate_pie_chart(self, summary: dict[str, Any], img_dir: Path) -> None:
         """生成饼图：输入/输出比例"""
         prompt_tokens = summary["prompt_tokens"]
         completion_tokens = summary["completion_tokens"]
@@ -924,9 +992,7 @@ class CommandDispatcher:
         plt.savefig(filepath, dpi=150, bbox_inches="tight")
         plt.close(fig)
 
-    async def _generate_stats_table(
-        self, summary: dict[str, Any], img_dir: Path
-    ) -> None:
+    def _generate_stats_table(self, summary: dict[str, Any], img_dir: Path) -> None:
         """生成统计表格"""
         models = summary["models"]
         if not models:
@@ -999,6 +1065,7 @@ class CommandDispatcher:
             command=command,
             user_id=None,
             send_private_callback=None,
+            command_sender=None,
         )
 
     async def dispatch_private(
@@ -1008,6 +1075,7 @@ class CommandDispatcher:
         command: dict[str, Any],
         send_private_callback: Callable[[int, str], Awaitable[None]] | None = None,
         is_webui_session: bool = False,
+        command_sender: Any | None = None,
     ) -> None:
         await self._dispatch_internal(
             scope="private",
@@ -1017,6 +1085,7 @@ class CommandDispatcher:
             user_id=user_id,
             send_private_callback=send_private_callback,
             is_webui_session=is_webui_session,
+            command_sender=command_sender,
         )
 
     async def _dispatch_internal(
@@ -1029,6 +1098,7 @@ class CommandDispatcher:
         user_id: int | None,
         send_private_callback: Callable[[int, str], Awaitable[None]] | None,
         is_webui_session: bool = False,
+        command_sender: Any | None = None,
     ) -> None:
         """统一分发入口：支持群聊与私聊。"""
         start_time = time.perf_counter()
@@ -1169,12 +1239,28 @@ class CommandDispatcher:
 
         logger.debug("[命令] 速率限制通过: cmd=/%s sender=%s", meta.name, sender_id)
 
-        command_sender: Any
         if scope == "private":
+            route_sender = command_sender or self.sender
+            route_private = getattr(route_sender, "send_private_message", None)
+            if send_private_callback is not None:
+                private_delivery: Callable[[int, str], Awaitable[Any]] = (
+                    send_private_callback
+                )
+            else:
+                if not callable(route_private):
+                    raise TypeError("私聊命令发送器缺少 send_private_message")
+                private_delivery = cast(
+                    Callable[[int, str], Awaitable[Any]], route_private
+                )
+            send_private_forward = (
+                getattr(route_sender, "send_private_forward_message", None)
+                if command_sender is not None or send_private_callback is None
+                else None
+            )
             command_sender = _PrivateCommandSenderProxy(
                 int(user_id or 0),
-                send_private_callback
-                or (lambda uid, msg: self.sender.send_private_message(uid, msg)),
+                private_delivery,
+                (send_private_forward if callable(send_private_forward) else None),
             )
         else:
             command_sender = self.sender

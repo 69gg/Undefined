@@ -9,7 +9,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from weixin_ilink_client import (
+    ApiError,
+    HttpError,
+    OutboundMediaItem,
+    OutboundTextItem,
     RefMessage,
+    RequestTimeoutError,
     TransportError,
     UnsupportedCapabilityError,
 )
@@ -1071,7 +1076,7 @@ async def test_send_wechat_forward_registers_media_and_logs_unsupported_segments
         )
 
     assert events == [
-        ("text", "A"),
+        ("text", "**转发消息**\nA"),
         ("file", "forward.png"),
         ("text", "B"),
     ]
@@ -1086,3 +1091,135 @@ async def test_send_wechat_forward_registers_media_and_logs_unsupported_segments
     assert history_kwargs["transport"]["address"] == "wechat:12345"
     assert isinstance(history_kwargs["transport"]["sent_at_ms"], int)
     assert "type=at" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_send_wechat_forward_uses_ordered_multi_item_message(
+    sender: MessageSender,
+    tmp_path: Path,
+) -> None:
+    image_path = tmp_path / "forward.png"
+    await async_io.write_bytes(image_path, b"png")
+    weixin_config = cast(Any, sender.config.weixin)
+    weixin_config.multi_item_messages_enabled = True
+    weixin_config.multi_item_max_items = 10
+    weixin_config.media_max_size_mb = 100
+    service = SimpleNamespace(
+        send_items=AsyncMock(return_value="bundle-1"),
+        validate_media_files=AsyncMock(),
+    )
+    sender.set_weixin_service(service)
+    bound_sender = AddressBoundSender(sender, DeliveryAddress("wechat", 12345))
+
+    await bound_sender.send_private_forward_message(
+        12345,
+        [
+            {
+                "type": "node",
+                "data": {
+                    "name": "Bot",
+                    "content": [
+                        {"type": "text", "data": {"text": "A"}},
+                        {
+                            "type": "image",
+                            "data": {"file": image_path.resolve().as_uri()},
+                        },
+                        {"type": "text", "data": {"text": "B"}},
+                    ],
+                },
+            }
+        ],
+        history_message="微信转发摘要",
+        auto_history=False,
+    )
+
+    service.send_items.assert_awaited_once()
+    send_call = service.send_items.await_args
+    assert send_call is not None
+    assert send_call.args[0] == 12345
+    items = send_call.args[1]
+    assert len(items) == 3
+    assert isinstance(items[0], OutboundTextItem)
+    assert items[0].text == "**Bot**\nA"
+    assert isinstance(items[1], OutboundMediaItem)
+    assert items[1].content == b"png"
+    assert isinstance(items[2], OutboundTextItem)
+    assert items[2].text == "B"
+
+
+@pytest.mark.asyncio
+async def test_send_wechat_forward_falls_back_after_definitive_bundle_rejection(
+    sender: MessageSender,
+) -> None:
+    weixin_config = cast(Any, sender.config.weixin)
+    weixin_config.multi_item_messages_enabled = True
+    weixin_config.multi_item_max_items = 10
+    weixin_config.media_max_size_mb = 100
+    service = SimpleNamespace(
+        send_items=AsyncMock(side_effect=ApiError(40001, "sendmessage")),
+        send_text=AsyncMock(return_value="text-1"),
+    )
+    sender.set_weixin_service(service)
+    bound_sender = AddressBoundSender(sender, DeliveryAddress("wechat", 12345))
+
+    await bound_sender.send_private_forward_message(
+        12345,
+        [{"type": "node", "data": {"name": "Bot", "content": "报告"}}],
+        history_message="微信转发摘要",
+        auto_history=False,
+    )
+
+    service.send_items.assert_awaited_once()
+    service.send_text.assert_awaited_once_with(12345, "**Bot**\n报告")
+
+
+@pytest.mark.asyncio
+async def test_send_wechat_forward_does_not_duplicate_ambiguous_bundle_timeout(
+    sender: MessageSender,
+) -> None:
+    weixin_config = cast(Any, sender.config.weixin)
+    weixin_config.multi_item_messages_enabled = True
+    weixin_config.multi_item_max_items = 10
+    weixin_config.media_max_size_mb = 100
+    service = SimpleNamespace(
+        send_items=AsyncMock(side_effect=RequestTimeoutError("sendmessage timed out")),
+        send_text=AsyncMock(return_value="text-1"),
+    )
+    sender.set_weixin_service(service)
+    bound_sender = AddressBoundSender(sender, DeliveryAddress("wechat", 12345))
+
+    with pytest.raises(RequestTimeoutError):
+        await bound_sender.send_private_forward_message(
+            12345,
+            [{"type": "node", "data": {"name": "Bot", "content": "报告"}}],
+            history_message="微信转发摘要",
+            auto_history=False,
+        )
+
+    service.send_text.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_send_wechat_forward_does_not_fallback_after_rate_limit(
+    sender: MessageSender,
+) -> None:
+    weixin_config = cast(Any, sender.config.weixin)
+    weixin_config.multi_item_messages_enabled = True
+    weixin_config.multi_item_max_items = 10
+    weixin_config.media_max_size_mb = 100
+    service = SimpleNamespace(
+        send_items=AsyncMock(side_effect=HttpError(429, "sendmessage")),
+        send_text=AsyncMock(return_value="text-1"),
+    )
+    sender.set_weixin_service(service)
+    bound_sender = AddressBoundSender(sender, DeliveryAddress("wechat", 12345))
+
+    with pytest.raises(HttpError):
+        await bound_sender.send_private_forward_message(
+            12345,
+            [{"type": "node", "data": {"name": "Bot", "content": "报告"}}],
+            history_message="微信转发摘要",
+            auto_history=False,
+        )
+
+    service.send_text.assert_not_awaited()

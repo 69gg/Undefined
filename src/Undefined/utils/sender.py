@@ -11,6 +11,10 @@ from urllib.request import url2pathname
 from weixin_ilink_client import (
     ApiError,
     HttpError,
+    MediaKind,
+    OutboundMediaItem,
+    OutboundMessageItem,
+    OutboundTextItem,
     RefMessage,
     SessionPausedError,
     UnsupportedCapabilityError,
@@ -1639,7 +1643,7 @@ class AddressBoundSender:
                 auto_history=auto_history,
             )
             return
-        await self._send_weixin_forward(messages)
+        sent_message_ids = await self._send_weixin_forward(messages)
         sent_at_ms = time.time_ns() // 1_000_000
         if auto_history:
             history_attachments = (
@@ -1653,69 +1657,101 @@ class AddressBoundSender:
                 history_message,
                 history_attachments,
             )
+            transport: dict[str, Any] = {
+                "channel": "wechat",
+                "address": self._address.canonical,
+                "direction": "outbound",
+                "sent_at_ms": sent_at_ms,
+            }
+            if sent_message_ids:
+                transport["message_ids"] = sent_message_ids
             await self._sender.history_manager.add_private_message(
                 user_id=user_id,
                 text_content=history_content,
                 display_name="Bot",
                 user_name="Bot",
+                message_id=(sent_message_ids[0] if sent_message_ids else None),
                 attachments=history_attachments,
-                transport={
-                    "channel": "wechat",
-                    "address": self._address.canonical,
-                    "direction": "outbound",
-                    "sent_at_ms": sent_at_ms,
-                },
+                transport=transport,
             )
 
-    async def _send_weixin_forward(self, messages: list[dict[str, Any]]) -> None:
+    async def _send_weixin_forward(
+        self,
+        messages: list[dict[str, Any]],
+    ) -> list[str]:
         service = self._sender._require_weixin_service()
-        media_units: list[tuple[str, Path]] = []
-        for segment in _iter_segments_deep(messages):
-            segment_type = str(segment.get("type", "") or "").strip().lower()
-            if segment_type not in {"image", "video", "file", "record", "audio"}:
-                continue
-            segment_data = segment.get("data")
-            if not isinstance(segment_data, dict):
-                raise ValueError("微信转发媒体消息缺少有效参数")
-            path = await _local_path_from_segment_source(segment_data.get("file"))
-            if path is None:
-                raise ValueError("微信 iLink 当前只支持发送本地媒体文件")
-            kind = "voice" if segment_type in {"record", "audio"} else segment_type
-            media_units.append((kind, path))
-
-        if media_units:
-            await service.validate_media_files([path for _kind, path in media_units])
+        units = await self._build_weixin_forward_units(messages)
+        media_paths = [unit.path for unit in units if unit.path is not None]
+        if media_paths:
+            await service.validate_media_files(media_paths)
         prepared_voices: dict[str, PreparedWeixinVoice] = {}
-        for kind, path in media_units:
-            path_key = str(path)
-            if kind == "voice" and path_key not in prepared_voices:
-                prepared_voices[path_key] = await service.prepare_voice(path)
+        prepared_units: list[_WeixinDeliveryUnit] = []
+        for unit in units:
+            if unit.kind != "voice" or unit.path is None:
+                prepared_units.append(unit)
+                continue
+            path_key = str(unit.path)
+            prepared = prepared_voices.get(path_key)
+            if prepared is None:
+                prepared = await service.prepare_voice(unit.path)
+                prepared_voices[path_key] = prepared
+            prepared_units.append(replace(unit, voice=prepared))
 
+        weixin_config = getattr(self._sender.config, "weixin", None)
+        multi_item_enabled = (
+            getattr(weixin_config, "multi_item_messages_enabled", False) is True
+        )
+        if multi_item_enabled and callable(getattr(service, "send_items", None)):
+            max_items = max(
+                1,
+                int(getattr(weixin_config, "multi_item_max_items", 10) or 10),
+            )
+            maximum_bytes = (
+                max(
+                    1,
+                    int(getattr(weixin_config, "media_max_size_mb", 100) or 100),
+                )
+                * 1024
+                * 1024
+            )
+            return await self._send_weixin_multi_item_units(
+                prepared_units,
+                max_items=max_items,
+                maximum_bytes=maximum_bytes,
+            )
+        return await self._send_weixin_forward_units(prepared_units)
+
+    async def _build_weixin_forward_units(
+        self,
+        messages: list[dict[str, Any]],
+    ) -> list[_WeixinDeliveryUnit]:
+        units: list[_WeixinDeliveryUnit] = []
+        emitted_nodes = 0
         for node in messages:
             data = node.get("data")
             if not isinstance(data, dict):
                 continue
             content = data.get("content")
-            if isinstance(content, str) and content.strip():
-                await self._sender.send_address_message(
-                    self._address,
-                    content,
-                    auto_history=False,
-                )
+            if not isinstance(content, (str, list)):
                 continue
-            if not isinstance(content, list):
+            title = str(data.get("name") or data.get("uin") or "转发消息").strip()
+            prefix = "\n---\n" if emitted_nodes else ""
+            header = f"{prefix}**{title or '转发消息'}**\n"
+            if isinstance(content, str):
+                if not content.strip():
+                    continue
+                units.append(_WeixinDeliveryUnit(kind="text", text=header + content))
+                emitted_nodes += 1
                 continue
-            text_parts: list[str] = []
+            node_units: list[_WeixinDeliveryUnit] = []
+            text_parts: list[str] = [header]
+            has_content = False
 
-            async def flush_text() -> None:
+            def flush_text() -> None:
                 text = "".join(text_parts)
                 text_parts.clear()
                 if text.strip():
-                    await self._sender.send_address_message(
-                        self._address,
-                        text,
-                        auto_history=False,
-                    )
+                    node_units.append(_WeixinDeliveryUnit(kind="text", text=text))
 
             for segment in content:
                 if not isinstance(segment, dict):
@@ -1739,25 +1775,169 @@ class AddressBoundSender:
                 if not isinstance(segment_data, dict):
                     continue
                 if segment_type == "text":
-                    text_parts.append(str(segment_data.get("text", "") or ""))
+                    segment_text = str(segment_data.get("text", "") or "")
+                    if segment_text:
+                        text_parts.append(segment_text)
+                        has_content = True
                     continue
-                await flush_text()
+                flush_text()
                 path = await _local_path_from_segment_source(segment_data.get("file"))
-                if path is not None:
-                    if segment_type in {"record", "audio"}:
-                        await self._sender._send_weixin_prepared_voice(
-                            self._address,
-                            path,
-                            prepared_voices[str(path)],
-                            name=path.name,
-                            auto_history=False,
-                        )
-                    else:
-                        await self._sender.send_address_file(
-                            self._address,
-                            str(path),
-                            name=path.name,
-                            kind=segment_type,
-                            auto_history=False,
-                        )
-            await flush_text()
+                if path is None:
+                    raise ValueError("微信 iLink 当前只支持发送本地媒体文件")
+                kind = "voice" if segment_type in {"record", "audio"} else segment_type
+                node_units.append(_WeixinDeliveryUnit(kind=kind, path=path))
+                has_content = True
+            flush_text()
+            if not has_content:
+                continue
+            units.extend(node_units)
+            emitted_nodes += 1
+        return units
+
+    async def _send_weixin_multi_item_units(
+        self,
+        units: list[_WeixinDeliveryUnit],
+        *,
+        max_items: int,
+        maximum_bytes: int,
+    ) -> list[str]:
+        service = self._sender._require_weixin_service()
+        expanded_units: list[_WeixinDeliveryUnit] = []
+        for unit in units:
+            if unit.kind != "text":
+                expanded_units.append(unit)
+                continue
+            expanded_units.extend(
+                _WeixinDeliveryUnit(kind="text", text=chunk)
+                for chunk in _split_text_chunks(unit.text)
+            )
+        batches: list[list[_WeixinDeliveryUnit]] = []
+        current: list[_WeixinDeliveryUnit] = []
+        current_bytes = 0
+        for unit in expanded_units:
+            unit_bytes = await self._weixin_unit_size(unit)
+            if current and (
+                len(current) >= max_items or current_bytes + unit_bytes > maximum_bytes
+            ):
+                batches.append(current)
+                current = []
+                current_bytes = 0
+            current.append(unit)
+            current_bytes += unit_bytes
+        if current:
+            batches.append(current)
+
+        receipts: list[str] = []
+        sequential_fallback = False
+        for batch in batches:
+            if sequential_fallback:
+                receipts.extend(await self._send_weixin_forward_units(batch))
+                continue
+            items = await self._weixin_outbound_items(batch)
+            try:
+                receipt = str(
+                    await service.send_items(self._address.target_id, items) or ""
+                ).strip()
+            except Exception as exc:
+                if not self._is_definitive_multi_item_rejection(exc):
+                    raise
+                logger.warning(
+                    "[微信转发] 多项消息被上游明确拒绝，回退顺序发送: "
+                    "address=%s error=%s",
+                    self._address.canonical,
+                    type(exc).__name__,
+                )
+                sequential_fallback = True
+                receipts.extend(await self._send_weixin_forward_units(batch))
+            else:
+                if receipt:
+                    receipts.append(receipt)
+        return receipts
+
+    async def _weixin_outbound_items(
+        self,
+        units: list[_WeixinDeliveryUnit],
+    ) -> list[OutboundMessageItem]:
+        items: list[OutboundMessageItem] = []
+        for unit in units:
+            if unit.kind == "text":
+                items.append(OutboundTextItem(unit.text))
+                continue
+            if unit.path is None:
+                raise ValueError("微信转发媒体消息缺少本地文件")
+            if unit.kind == "voice":
+                if unit.voice is None:
+                    raise ValueError("微信转发语音尚未完成发送前编码")
+                items.append(
+                    OutboundMediaItem(
+                        MediaKind.VOICE,
+                        unit.voice.content,
+                        unit.path.name,
+                        duration_ms=unit.voice.duration_ms,
+                        sample_rate=unit.voice.sample_rate,
+                        bits_per_sample=unit.voice.bits_per_sample,
+                    )
+                )
+                continue
+            items.append(
+                OutboundMediaItem(
+                    MediaKind(unit.kind),
+                    await io.read_bytes(unit.path),
+                    unit.path.name,
+                )
+            )
+        return items
+
+    async def _weixin_unit_size(self, unit: _WeixinDeliveryUnit) -> int:
+        if unit.kind == "text":
+            return 0
+        if unit.kind == "voice" and unit.voice is not None:
+            return len(unit.voice.content)
+        if unit.path is None:
+            raise ValueError("微信转发媒体消息缺少本地文件")
+        return await io.get_file_size(unit.path)
+
+    async def _send_weixin_forward_units(
+        self,
+        units: list[_WeixinDeliveryUnit],
+    ) -> list[str]:
+        receipts: list[str] = []
+        for unit in units:
+            if unit.kind == "text":
+                for chunk in _split_text_chunks(unit.text):
+                    receipt = await self._sender.send_address_message(
+                        self._address,
+                        chunk,
+                        auto_history=False,
+                    )
+                    receipt_text = str(receipt or "").strip()
+                    if receipt_text:
+                        receipts.append(receipt_text)
+                continue
+            if unit.path is None:
+                raise ValueError("微信转发媒体消息缺少本地文件")
+            if unit.kind == "voice":
+                if unit.voice is None:
+                    raise ValueError("微信转发语音尚未完成发送前编码")
+                receipt = await self._sender._send_weixin_prepared_voice(
+                    self._address,
+                    unit.path,
+                    unit.voice,
+                    name=unit.path.name,
+                    auto_history=False,
+                )
+                if receipt:
+                    receipts.append(receipt)
+                continue
+            await self._sender.send_address_file(
+                self._address,
+                str(unit.path),
+                name=unit.path.name,
+                kind=unit.kind,
+                auto_history=False,
+            )
+        return receipts
+
+    @staticmethod
+    def _is_definitive_multi_item_rejection(exc: Exception) -> bool:
+        return _should_fallback_weixin_reference(exc)

@@ -833,6 +833,7 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
                 sender_id=qq_id,
                 command=command,
                 send_private_callback=send_private_callback,
+                command_sender=route_sender,
             )
             return
 

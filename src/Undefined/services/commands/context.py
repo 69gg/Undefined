@@ -7,7 +7,6 @@ from Undefined.config import Config
 from Undefined.faq import FAQStorage
 from Undefined.onebot import OneBotClient
 from Undefined.services.security import SecurityService
-from Undefined.utils.sender import MessageSender
 
 if TYPE_CHECKING:
     from Undefined.services.commands.registry import CommandRegistry
@@ -20,7 +19,7 @@ class CommandContext:
     group_id: int
     sender_id: int
     config: Config
-    sender: MessageSender
+    sender: Any
     ai: Any
     faq_storage: FAQStorage
     onebot: OneBotClient

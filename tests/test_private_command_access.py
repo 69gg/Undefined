@@ -30,6 +30,18 @@ class _DummySender:
         )
 
 
+class _RouteSender:
+    def __init__(self) -> None:
+        self.messages: list[tuple[int, str]] = []
+
+    async def send_private_message(
+        self,
+        user_id: int,
+        message: str,
+    ) -> None:
+        self.messages.append((user_id, message))
+
+
 def _write_command(
     base_dir: Path,
     name: str,
@@ -131,3 +143,25 @@ async def test_private_command_executes_when_opened(tmp_path: Path) -> None:
 
     assert sender.private_messages
     assert sender.private_messages[-1][1] == "OK"
+
+
+@pytest.mark.asyncio
+async def test_private_command_uses_explicit_route_sender(tmp_path: Path) -> None:
+    commands_dir = tmp_path / "commands"
+    _write_command(commands_dir, "routecmd", allow_in_private=True)
+    registry = CommandRegistry(commands_dir)
+    registry.load_commands()
+
+    sender = _DummySender()
+    route_sender = _RouteSender()
+    dispatcher = _build_dispatcher_with_registry(registry=registry, sender=sender)
+
+    await dispatcher.dispatch_private(
+        user_id=123,
+        sender_id=123,
+        command={"name": "routecmd", "args": []},
+        command_sender=route_sender,
+    )
+
+    assert route_sender.messages == [(123, "OK")]
+    assert sender.private_messages == []

@@ -365,6 +365,18 @@ def _parse_weixin_config(data: dict[str, Any]) -> WeixinConfig:
             1, _coerce_int(section.get("failures_before_backoff"), 3)
         ),
         media_max_size_mb=max(1, _coerce_int(section.get("media_max_size_mb"), 100)),
+        media_upload_attempts=max(
+            1, min(10, _coerce_int(section.get("media_upload_attempts"), 3))
+        ),
+        media_upload_concurrency=max(
+            1, min(8, _coerce_int(section.get("media_upload_concurrency"), 3))
+        ),
+        multi_item_messages_enabled=_coerce_bool(
+            section.get("multi_item_messages_enabled"), True
+        ),
+        multi_item_max_items=max(
+            1, min(20, _coerce_int(section.get("multi_item_max_items"), 10))
+        ),
         login_session_ttl_seconds=max(
             30.0, _coerce_float(section.get("login_session_ttl_seconds"), 300.0)
         ),

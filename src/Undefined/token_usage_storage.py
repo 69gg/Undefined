@@ -10,6 +10,8 @@ import logging
 import os
 import re
 import shutil
+import time
+from collections.abc import Iterator
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -136,6 +138,67 @@ class TokenUsage:
             call_type=call_type,
             success=success,
         )
+
+
+def _iter_usage_records(path: Path) -> Iterator[TokenUsage]:
+    """逐行解析一个 JSONL 或 JSONL.GZ 文件，避免整文件驻留内存。"""
+
+    if not path.exists():
+        return
+    invalid_lines = 0
+    first_error: tuple[int, str, str] | None = None
+    total_lines = 0
+    try:
+        if path.suffix == ".gz":
+            f_handle = gzip.open(path, "rt", encoding="utf-8")
+        else:
+            f_handle = open(path, "r", encoding="utf-8")
+        with f_handle as handle:
+            for line_no, raw_line in enumerate(handle, start=1):
+                line = raw_line.strip()
+                if not line:
+                    continue
+                total_lines += 1
+                try:
+                    data = json.loads(line)
+                    if not isinstance(data, dict):
+                        raise TypeError("record is not a JSON object")
+                    yield TokenUsage.from_dict(data)
+                except Exception as exc:
+                    invalid_lines += 1
+                    if first_error is None:
+                        first_error = (line_no, type(exc).__name__, line[:240])
+    except OSError:
+        logger.warning("[Token统计] 读取归档失败: %s", path)
+    if invalid_lines:
+        err_line = first_error[0] if first_error else -1
+        err_type = first_error[1] if first_error else "unknown"
+        err_preview = first_error[2] if first_error else ""
+        logger.warning(
+            "[Token统计] 解析记录失败: path=%s invalid_lines=%s "
+            "first_error_line=%s first_error_type=%s preview=%s",
+            path,
+            invalid_lines,
+            err_line,
+            err_type,
+            err_preview,
+        )
+    logger.debug(
+        "[Token统计] 读取完成: path=%s lines=%s invalid=%s",
+        path,
+        total_lines,
+        invalid_lines,
+    )
+
+
+def _usage_timestamp(value: str) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is not None:
+        return parsed.astimezone().replace(tzinfo=None)
+    return parsed
 
 
 class TokenUsageStorage:
@@ -520,63 +583,12 @@ class TokenUsageStorage:
         records: list[TokenUsage] = []
         try:
 
-            def read_records_from_path(path: Path) -> list[TokenUsage]:
-                batch: list[TokenUsage] = []
-                if not path.exists():
-                    return batch
-                invalid_lines = 0
-                first_error: tuple[int, str, str] | None = None
-                total_lines = 0
-                try:
-                    if path.suffix == ".gz":
-                        f_handle = gzip.open(path, "rt", encoding="utf-8")
-                    else:
-                        f_handle = open(path, "r", encoding="utf-8")
-                    with f_handle as f:
-                        for line_no, raw_line in enumerate(f, start=1):
-                            line = raw_line.strip()
-                            if not line:
-                                continue
-                            total_lines += 1
-                            try:
-                                data = json.loads(line)
-                                if not isinstance(data, dict):
-                                    raise TypeError("record is not a JSON object")
-                                batch.append(TokenUsage.from_dict(data))
-                            except Exception as exc:
-                                invalid_lines += 1
-                                if first_error is None:
-                                    preview = line[:240]
-                                    first_error = (line_no, type(exc).__name__, preview)
-                except OSError:
-                    logger.warning(f"[Token统计] 读取归档失败: {path}")
-                if invalid_lines:
-                    err_line = first_error[0] if first_error else -1
-                    err_type = first_error[1] if first_error else "unknown"
-                    err_preview = first_error[2] if first_error else ""
-                    logger.warning(
-                        "[Token统计] 解析记录失败: path=%s invalid_lines=%s first_error_line=%s first_error_type=%s preview=%s",
-                        path,
-                        invalid_lines,
-                        err_line,
-                        err_type,
-                        err_preview,
-                    )
-                logger.debug(
-                    "[Token统计] 读取完成: path=%s lines=%s records=%s invalid=%s",
-                    path,
-                    total_lines,
-                    len(batch),
-                    invalid_lines,
-                )
-                return batch
-
             def sync_read() -> list[TokenUsage]:
                 batch: list[TokenUsage] = []
                 archives = self._list_archives()
                 for archive in archives:
-                    batch.extend(read_records_from_path(archive))
-                batch.extend(read_records_from_path(self.file_path))
+                    batch.extend(_iter_usage_records(archive))
+                batch.extend(_iter_usage_records(self.file_path))
                 logger.info(
                     "[Token统计] 汇总读取完成: archives=%s total_records=%s",
                     len(archives),
@@ -668,78 +680,108 @@ class TokenUsageStorage:
         返回:
             汇总统计字典
         """
+        return await asyncio.to_thread(self._get_summary_sync, days)
+
+    def _get_summary_sync(self, days: int) -> dict[str, Any]:
+        started_at = time.perf_counter()
         end_date = datetime.now()
         start_date = end_date - timedelta(days=days)
+        archives = self._list_archives()
+        candidates: list[Path] = []
+        skipped_archives = 0
+        for archive in archives:
+            upper_bound = self._archive_upper_bound(archive)
+            if upper_bound is not None and upper_bound < start_date:
+                skipped_archives += 1
+                continue
+            candidates.append(archive)
+        candidates.append(self.file_path)
 
-        records = await self.get_records_by_date_range(start_date, end_date)
-
-        if not records:
-            return {
-                "total_calls": 0,
-                "total_tokens": 0,
-                "prompt_tokens": 0,
-                "completion_tokens": 0,
-                "avg_duration": 0.0,
-                "models": {},
-                "call_types": {},
-                "daily_stats": {},
-            }
-
-        total_calls = len(records)
-        total_tokens = sum(r.total_tokens for r in records)
-        prompt_tokens = sum(r.prompt_tokens for r in records)
-        completion_tokens = sum(r.completion_tokens for r in records)
-        avg_duration = sum(r.duration_seconds for r in records) / total_calls
-
-        # 按模型统计
+        total_calls = 0
+        total_tokens = 0
+        prompt_tokens = 0
+        completion_tokens = 0
+        total_duration = 0.0
         models: dict[str, dict[str, Any]] = {}
-        for record in records:
-            model = record.model_name
-            if model not in models:
-                models[model] = {
-                    "calls": 0,
-                    "tokens": 0,
-                    "prompt_tokens": 0,
-                    "completion_tokens": 0,
-                }
-            models[model]["calls"] += 1
-            models[model]["tokens"] += record.total_tokens
-            models[model]["prompt_tokens"] += record.prompt_tokens
-            models[model]["completion_tokens"] += record.completion_tokens
-
-        # 按调用类型统计
         call_types: dict[str, int] = {}
-        for record in records:
-            call_type = record.call_type
-            call_types[call_type] = call_types.get(call_type, 0) + 1
-
-        # 按日期统计
         daily_stats: dict[str, dict[str, Any]] = {}
-        for record in records:
-            try:
-                record_time = datetime.fromisoformat(record.timestamp)
-                date_str = record_time.strftime("%Y-%m-%d")
-                if date_str not in daily_stats:
-                    daily_stats[date_str] = {
+        scanned_records = 0
+
+        for path in candidates:
+            for record in _iter_usage_records(path):
+                scanned_records += 1
+                record_time = _usage_timestamp(record.timestamp)
+                if record_time is None or not start_date <= record_time <= end_date:
+                    continue
+                total_calls += 1
+                total_tokens += record.total_tokens
+                prompt_tokens += record.prompt_tokens
+                completion_tokens += record.completion_tokens
+                total_duration += record.duration_seconds
+
+                model_stats = models.setdefault(
+                    record.model_name,
+                    {
                         "calls": 0,
                         "tokens": 0,
                         "prompt_tokens": 0,
                         "completion_tokens": 0,
-                    }
-                daily_stats[date_str]["calls"] += 1
-                daily_stats[date_str]["tokens"] += record.total_tokens
-                daily_stats[date_str]["prompt_tokens"] += record.prompt_tokens
-                daily_stats[date_str]["completion_tokens"] += record.completion_tokens
-            except ValueError:
-                continue
+                    },
+                )
+                model_stats["calls"] += 1
+                model_stats["tokens"] += record.total_tokens
+                model_stats["prompt_tokens"] += record.prompt_tokens
+                model_stats["completion_tokens"] += record.completion_tokens
+                call_types[record.call_type] = call_types.get(record.call_type, 0) + 1
 
+                date_stats = daily_stats.setdefault(
+                    record_time.strftime("%Y-%m-%d"),
+                    {
+                        "calls": 0,
+                        "tokens": 0,
+                        "prompt_tokens": 0,
+                        "completion_tokens": 0,
+                    },
+                )
+                date_stats["calls"] += 1
+                date_stats["tokens"] += record.total_tokens
+                date_stats["prompt_tokens"] += record.prompt_tokens
+                date_stats["completion_tokens"] += record.completion_tokens
+
+        logger.info(
+            "[Token统计] 流式汇总完成: days=%s archives=%s skipped=%s "
+            "scanned_files=%s scanned_records=%s matched_records=%s elapsed=%.3fs",
+            days,
+            len(archives),
+            skipped_archives,
+            len(candidates),
+            scanned_records,
+            total_calls,
+            time.perf_counter() - started_at,
+        )
         return {
             "total_calls": total_calls,
             "total_tokens": total_tokens,
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,
-            "avg_duration": avg_duration,
+            "avg_duration": total_duration / total_calls if total_calls else 0.0,
             "models": models,
             "call_types": call_types,
             "daily_stats": daily_stats,
         }
+
+    def _archive_upper_bound(self, path: Path) -> datetime | None:
+        prefix = re.escape(self._archive_prefix())
+        match = re.match(
+            rf"^{prefix}\.(?P<created>\d{{8}}-\d{{6}})(?:-\d+)?"
+            rf"(?:-merged\.(?P<merged>\d{{8}}-\d{{6}})(?:-\d+)?)?"
+            rf"\.jsonl\.gz$",
+            path.name,
+        )
+        if match is None:
+            return None
+        time_key = match.group("merged") or match.group("created")
+        try:
+            return datetime.strptime(time_key, "%Y%m%d-%H%M%S")
+        except ValueError:
+            return None

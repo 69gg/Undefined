@@ -1428,6 +1428,18 @@ failures_before_backoff = 3
 # zh: 单个入站或出站媒体文件的大小上限（MB）。
 # en: Maximum size of one inbound or outbound media file, in MB.
 media_max_size_mb = 100
+# zh: 单个媒体上传请求遇到临时网络或服务端错误时的最大尝试次数（1-10）。
+# en: Maximum attempts for one media upload after transient network or server failures (1-10).
+media_upload_attempts = 3
+# zh: 单条多项目消息并发上传媒体的上限（1-8）。
+# en: Maximum concurrent media uploads for one multi-item message (1-8).
+media_upload_concurrency = 3
+# zh: 是否优先用 iLink 多项目消息模拟微信合并转发；上游明确拒绝时自动回退为逐段发送。
+# en: Prefer iLink multi-item messages for WeChat forward emulation; fall back to sequential sends on explicit rejection.
+multi_item_messages_enabled = true
+# zh: 单次 iLink 多项目消息最多包含的项目数（1-20）；超出时保持顺序分批。
+# en: Maximum items in one iLink multi-item message (1-20); larger forwards are split in order.
+multi_item_max_items = 10
 # zh: 二维码登录会话的有效期（秒）。
 # en: Lifetime of a QR-code login session, in seconds.
 login_session_ttl_seconds = 300.0

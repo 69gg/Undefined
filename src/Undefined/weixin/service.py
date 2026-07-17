@@ -22,6 +22,7 @@ from weixin_ilink_client import (
     MediaKind,
     MessageItem,
     MessageItemType,
+    OutboundMessageItem,
     QrLoginManager,
     QrLoginSession,
     QrPollResult,
@@ -139,6 +140,15 @@ class WeixinClientProtocol(Protocol):
         run_id: str | None = None,
         reply_to: str | int | None = None,
         reference: RefMessage | None = None,
+    ) -> SendReceipt: ...
+
+    async def send_items(
+        self,
+        peer_id: str,
+        items: Sequence[OutboundMessageItem],
+        *,
+        context_token: str | None = None,
+        run_id: str | None = None,
     ) -> SendReceipt: ...
 
     async def download_media(self, item: MessageItem) -> DownloadedMedia: ...
@@ -274,6 +284,8 @@ class WeixinService:
             failure_backoff_seconds=cfg.failure_backoff_seconds,
             failures_before_backoff=cfg.failures_before_backoff,
             media_max_bytes=cfg.media_max_size_mb * 1024 * 1024,
+            media_upload_attempts=cfg.media_upload_attempts,
+            media_upload_concurrency=cfg.media_upload_concurrency,
         )
 
     async def start(self) -> None:
@@ -326,6 +338,7 @@ class WeixinService:
                     "file",
                     "video",
                     "voice",
+                    "multi_item",
                     "typing",
                     "reply_to",
                 ],
@@ -604,6 +617,17 @@ class WeixinService:
             caption=caption,
             **send_kwargs,
         )
+        return receipt.client_id
+
+    async def send_items(
+        self,
+        qq_id: int,
+        items: Sequence[OutboundMessageItem],
+    ) -> str:
+        """将有序消息项作为一个 iLink Bot 消息发送。"""
+
+        account, runtime = await self._resolve_runtime(qq_id)
+        receipt = await runtime.client.send_items(account.peer_id, items)
         return receipt.client_id
 
     async def validate_media_files(
