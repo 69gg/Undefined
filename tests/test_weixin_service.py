@@ -736,5 +736,7 @@ async def test_disabled_service_status_stays_stopped(tmp_path: Path) -> None:
         assert status["running"] is False
         assert "reply_to" in status["capabilities"]["outbound"]
         assert "reply_to" not in status["capabilities"]["unsupported"]
+        assert "voice" in status["capabilities"]["outbound"]
+        assert "outbound_voice" not in status["capabilities"]["unsupported"]
     finally:
         await service.stop()

@@ -78,7 +78,7 @@ class GroupReplyMixin:
         async def _dispatch_grouped_request(
             self, items: list[BufferedMessage]
         ) -> None: ...
-        async def _send_image(self, tid: int, mtype: str, path: str) -> None: ...
+        async def _send_media(self, tid: int, mtype: str, path: str) -> None: ...
 
     async def handle_auto_reply(
         self,
@@ -215,7 +215,7 @@ class GroupReplyMixin:
                 await self.sender.send_private_message(uid, msg, reply_to=reply_to)
 
             async def send_img_cb(tid: int, mtype: str, path: str) -> None:
-                await self._send_image(tid, mtype, path)
+                await self._send_media(tid, mtype, path)
 
             async def send_like_cb(uid: int, times: int = 1) -> None:
                 await self.onebot.send_like(uid, times)

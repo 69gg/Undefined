@@ -65,7 +65,7 @@ class AICoordinator(
     def batcher(self) -> MessageBatcher | None:
         return self._batcher
 
-    async def _send_image(self, tid: int, mtype: str, path: str) -> None:
+    async def _send_media(self, tid: int, mtype: str, path: str) -> None:
         """发送图片或语音消息到群聊或私聊"""
         import os
 

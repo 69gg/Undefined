@@ -23,6 +23,8 @@ from Undefined.utils.sender import (
     MAX_MESSAGE_LENGTH,
     MessageSender,
     _file_uri_path_text,
+    _get_file_size,
+    _local_path_from_segment_source,
 )
 from Undefined.weixin.audio import PreparedWeixinVoice
 
@@ -58,6 +60,27 @@ def test_file_uri_path_text_supports_windows_drive_and_unc(
     assert _file_uri_path_text("file://server/share/report.zip") == (
         r"\\server\share\report.zip"
     )
+
+
+@pytest.mark.asyncio
+async def test_local_media_metadata_uses_async_io(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "voice.wav"
+    resolved = AsyncMock(return_value=source)
+    is_file = AsyncMock(return_value=True)
+    get_file_size = AsyncMock(return_value=321)
+    monkeypatch.setattr(async_io, "resolve_path", resolved)
+    monkeypatch.setattr(async_io, "is_file", is_file)
+    monkeypatch.setattr(async_io, "get_file_size", get_file_size)
+
+    assert await _local_path_from_segment_source(source) == source
+    assert await _get_file_size(source) == 321
+
+    resolved.assert_awaited_once_with(source)
+    is_file.assert_awaited_once_with(source)
+    get_file_size.assert_awaited_once_with(source)
 
 
 @pytest.mark.asyncio

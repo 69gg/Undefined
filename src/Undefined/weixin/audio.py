@@ -33,6 +33,7 @@ VOICE_SOURCE_SUFFIXES: Final[frozenset[str]] = frozenset(
 )
 _PCM_BYTES_PER_SAMPLE: Final[int] = VOICE_BITS_PER_SAMPLE // 8
 _READ_CHUNK_BYTES: Final[int] = 64 * 1024
+_FFMPEG_CONVERSION_TIMEOUT_SECONDS: Final[float] = 120.0
 
 
 class WeixinVoiceConversionError(ValueError):
@@ -140,13 +141,14 @@ async def _normalize_audio_to_pcm(path: Path, *, maximum_bytes: int) -> bytes:
     chunks: list[bytes] = []
     size = 0
     try:
-        while chunk := await stdout.read(_READ_CHUNK_BYTES):
-            size += len(chunk)
-            if size > maximum_bytes:
-                raise WeixinVoiceConversionError("转换后的 PCM 音频超过大小限制")
-            chunks.append(chunk)
-        return_code = await process.wait()
-        error_output = await stderr_task
+        async with asyncio.timeout(_FFMPEG_CONVERSION_TIMEOUT_SECONDS):
+            while chunk := await stdout.read(_READ_CHUNK_BYTES):
+                size += len(chunk)
+                if size > maximum_bytes:
+                    raise WeixinVoiceConversionError("转换后的 PCM 音频超过大小限制")
+                chunks.append(chunk)
+            return_code = await process.wait()
+            error_output = await stderr_task
     except BaseException:
         if process.returncode is None:
             process.kill()

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -67,3 +68,70 @@ async def test_prepare_weixin_voice_rejects_oversized_source(
 
     with pytest.raises(WeixinVoiceConversionError, match="超过大小限制"):
         await audio.prepare_weixin_voice(source, maximum_bytes=4)
+
+
+@pytest.mark.asyncio
+async def test_normalize_audio_timeout_cleans_up_ffmpeg(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class BlockingReader:
+        def __init__(self) -> None:
+            self.cancelled = False
+
+        async def read(self, _size: int = -1) -> bytes:
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                self.cancelled = True
+                raise
+            return b""
+
+    class FakeProcess:
+        def __init__(self) -> None:
+            self.stdout = BlockingReader()
+            self.stderr = BlockingReader()
+            self.returncode: int | None = None
+            self.killed = False
+            self.wait_calls = 0
+
+        def kill(self) -> None:
+            self.killed = True
+
+        async def wait(self) -> int:
+            self.wait_calls += 1
+            if self.killed:
+                self.returncode = -9
+                return self.returncode
+            await asyncio.Event().wait()
+            return 0
+
+    process = FakeProcess()
+
+    async def fake_create_subprocess_exec(
+        *_args: object,
+        **_kwargs: object,
+    ) -> FakeProcess:
+        return process
+
+    monkeypatch.setattr(
+        async_io,
+        "find_executable",
+        AsyncMock(return_value="/usr/bin/ffmpeg"),
+    )
+    monkeypatch.setattr(
+        asyncio,
+        "create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+    monkeypatch.setattr(audio, "_FFMPEG_CONVERSION_TIMEOUT_SECONDS", 0.01)
+
+    with pytest.raises(TimeoutError):
+        await audio._normalize_audio_to_pcm(
+            tmp_path / "voice.wav",
+            maximum_bytes=1024,
+        )
+
+    assert process.killed is True
+    assert process.wait_calls == 1
+    assert process.stderr.cancelled is True

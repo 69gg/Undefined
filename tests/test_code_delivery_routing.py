@@ -17,8 +17,8 @@ from Undefined.utils.sender import AddressBoundSender, MessageSender
 async def test_code_delivery_uses_current_wechat_route(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     task_dir = tmp_path / "task"
-    workspace.mkdir()
-    task_dir.mkdir()
+    await async_io.ensure_dir(workspace)
+    await async_io.ensure_dir(task_dir)
     await async_io.write_text(workspace / "result.txt", "done")
 
     onebot = MagicMock()

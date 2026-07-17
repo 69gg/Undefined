@@ -20,6 +20,7 @@ from weixin_ilink_client.constants import STALE_TOKEN_ERROR_CODE
 from Undefined.attachments import attachment_refs_to_text, build_attachment_scope
 from Undefined.config import Config
 from Undefined.onebot import OneBotClient
+from Undefined.utils import io
 from Undefined.utils.history import MessageHistoryManager
 from Undefined.utils.common import (
     message_to_segments,
@@ -178,7 +179,7 @@ def _file_uri_path_text(raw_source: str) -> str:
     return url2pathname(uri_path)
 
 
-def _local_path_from_segment_source(source: Any) -> Path | None:
+async def _local_path_from_segment_source(source: Any) -> Path | None:
     raw_source = str(source or "").strip()
     if not raw_source:
         return None
@@ -186,19 +187,16 @@ def _local_path_from_segment_source(source: Any) -> Path | None:
     if lowered.startswith(("http://", "https://", "base64://")):
         return None
     if lowered.startswith("file://"):
-        path = Path(_file_uri_path_text(raw_source)).expanduser()
+        path = Path(_file_uri_path_text(raw_source))
     else:
-        path = Path(raw_source).expanduser()
-    if not path.is_absolute():
-        path = (Path.cwd() / path).resolve()
-    else:
-        path = path.resolve()
-    return path if path.is_file() else None
+        path = Path(raw_source)
+    path = await io.resolve_path(path)
+    return path if await io.is_file(path) else None
 
 
-def _get_file_size(file_path: str) -> int | None:
+async def _get_file_size(file_path: str | Path) -> int | None:
     try:
-        return Path(file_path).stat().st_size
+        return await io.get_file_size(file_path)
     except OSError:
         return None
 
@@ -220,7 +218,7 @@ def _split_text_chunks(text: str, limit: int = MAX_MESSAGE_LENGTH) -> list[str]:
     return chunks
 
 
-def _prepare_weixin_delivery_units(
+async def _prepare_weixin_delivery_units(
     segments: list[dict[str, Any]],
     bot_qq: int,
 ) -> tuple[list[_WeixinDeliveryUnit], str]:
@@ -247,7 +245,7 @@ def _prepare_weixin_delivery_units(
         data = segment.get("data")
         if not isinstance(data, dict):
             raise ValueError("微信媒体消息缺少有效参数")
-        path = _local_path_from_segment_source(data.get("file"))
+        path = await _local_path_from_segment_source(data.get("file"))
         if path is None:
             raise ValueError("微信 iLink 当前只支持发送本地媒体文件")
         flush_text()
@@ -398,7 +396,7 @@ class MessageSender:
         if not auto_history:
             return
         file_name = name or Path(file_path).name
-        file_size = _get_file_size(file_path)
+        file_size = await _get_file_size(file_path)
         history_attachments = await self.register_sent_file_attachment(
             "private",
             address.target_id,
@@ -436,7 +434,7 @@ class MessageSender:
     ) -> int | str | None:
         """按规范地址将本地音频显式作为语音发送。"""
 
-        path = Path(file_path).expanduser().resolve()
+        path = await io.resolve_path(file_path)
         file_uri = path.as_uri()
         if address.channel == "group":
             return await self.send_group_message(
@@ -509,7 +507,7 @@ class MessageSender:
             return sent_message_id
         sent_at_ms = time.time_ns() // 1_000_000
         file_name = name or path.name
-        file_size = _get_file_size(str(path))
+        file_size = await _get_file_size(path)
         history_attachments = await self.register_sent_file_attachment(
             "private",
             address.target_id,
@@ -588,7 +586,10 @@ class MessageSender:
             )
             reference = RefMessage.from_text(reply_context.title, preview)
         segments = message_to_segments(message)
-        delivery_units, text = _prepare_weixin_delivery_units(segments, self.bot_qq)
+        delivery_units, text = await _prepare_weixin_delivery_units(
+            segments,
+            self.bot_qq,
+        )
         delivery_units = await _preflight_weixin_delivery_units(
             service,
             delivery_units,
@@ -814,13 +815,14 @@ class MessageSender:
 
         file_name = name or Path(file_path).name
         try:
+            resolved_path = await io.resolve_path(file_path)
             record = await registry.register_local_file(
                 scope_key,
                 file_path,
                 kind=kind,
                 display_name=file_name,
                 source_kind=source_kind,
-                source_ref=source_ref or str(Path(file_path).resolve()),
+                source_ref=source_ref or str(resolved_path),
             )
             return [record.prompt_ref()]
         except Exception:
@@ -855,7 +857,7 @@ class MessageSender:
             data = segment.get("data")
             if not isinstance(data, dict):
                 continue
-            path = _local_path_from_segment_source(data.get("file"))
+            path = await _local_path_from_segment_source(data.get("file"))
             if path is None:
                 continue
             path_text = str(path)
@@ -1473,7 +1475,7 @@ class MessageSender:
         if not auto_history:
             return
 
-        file_size = _get_file_size(file_path)
+        file_size = await _get_file_size(file_path)
         history_content = _build_file_history_message(file_name, file_size)
         attachments = await self.register_sent_file_attachment(
             "group",
@@ -1528,7 +1530,7 @@ class MessageSender:
         if not auto_history:
             return
 
-        file_size = _get_file_size(file_path)
+        file_size = await _get_file_size(file_path)
         history_content = _build_file_history_message(file_name, file_size)
         attachments = await self.register_sent_file_attachment(
             "private",
@@ -1675,7 +1677,7 @@ class AddressBoundSender:
             segment_data = segment.get("data")
             if not isinstance(segment_data, dict):
                 raise ValueError("微信转发媒体消息缺少有效参数")
-            path = _local_path_from_segment_source(segment_data.get("file"))
+            path = await _local_path_from_segment_source(segment_data.get("file"))
             if path is None:
                 raise ValueError("微信 iLink 当前只支持发送本地媒体文件")
             kind = "voice" if segment_type in {"record", "audio"} else segment_type
@@ -1740,7 +1742,7 @@ class AddressBoundSender:
                     text_parts.append(str(segment_data.get("text", "") or ""))
                     continue
                 await flush_text()
-                path = _local_path_from_segment_source(segment_data.get("file"))
+                path = await _local_path_from_segment_source(segment_data.get("file"))
                 if path is not None:
                     if segment_type in {"record", "audio"}:
                         await self._sender._send_weixin_prepared_voice(

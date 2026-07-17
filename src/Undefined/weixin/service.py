@@ -325,10 +325,11 @@ class WeixinService:
                     "image",
                     "file",
                     "video",
+                    "voice",
                     "typing",
                     "reply_to",
                 ],
-                "unsupported": ["outbound_voice"],
+                "unsupported": [],
             },
         }
 

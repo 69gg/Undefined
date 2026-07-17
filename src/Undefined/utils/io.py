@@ -176,6 +176,13 @@ async def exists(file_path: Path | str) -> bool:
     return await asyncio.to_thread(Path(file_path).exists)
 
 
+async def ensure_dir(directory: Path | str) -> Path:
+    """异步确保目录存在并返回其路径。"""
+    path = Path(directory)
+    await asyncio.to_thread(path.mkdir, parents=True, exist_ok=True)
+    return path
+
+
 async def chmod(file_path: Path | str, mode: int) -> None:
     """异步修改文件权限。"""
     await asyncio.to_thread(Path(file_path).chmod, mode)

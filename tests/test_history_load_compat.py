@@ -137,6 +137,7 @@ async def test_load_private_history_normalizes_reply_context(
 
     monkeypatch.setattr("Undefined.utils.io.read_json", fake_read_json)
     manager = MessageHistoryManager.__new__(MessageHistoryManager)
+    manager._max_records = 10_000
 
     history = await manager._load_history_from_file("data/history/private_40001.json")
 
