@@ -1,16 +1,67 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Awaitable, Protocol
 
 from Undefined.config import Config
 from Undefined.faq import FAQStorage
 from Undefined.onebot import OneBotClient
 from Undefined.services.security import SecurityService
-from Undefined.utils.sender import MessageSender
 
 if TYPE_CHECKING:
     from Undefined.services.commands.registry import CommandRegistry
+
+
+class PrivateMessageCallback(Protocol):
+    def __call__(self, user_id: int, message: str) -> Awaitable[Any]: ...
+
+
+class PrivateForwardCallback(Protocol):
+    def __call__(
+        self,
+        user_id: int,
+        messages: list[dict[str, Any]],
+        *,
+        history_message: str,
+        auto_history: bool = True,
+    ) -> Awaitable[None]: ...
+
+
+class CommandSender(Protocol):
+    async def send_group_message(
+        self,
+        group_id: int,
+        message: str,
+        auto_history: bool = True,
+        history_prefix: str = "",
+        *,
+        mark_sent: bool = True,
+        reply_to: int | None = None,
+        history_message: str | None = None,
+        attachments: list[dict[str, str]] | None = None,
+    ) -> int | None: ...
+
+    async def send_private_message(
+        self,
+        user_id: int,
+        message: str,
+        auto_history: bool = True,
+        *,
+        mark_sent: bool = True,
+        reply_to: int | None = None,
+        preferred_temp_group_id: int | None = None,
+        history_message: str | None = None,
+        attachments: list[dict[str, str]] | None = None,
+    ) -> int | str | None: ...
+
+    async def send_private_forward_message(
+        self,
+        user_id: int,
+        messages: list[dict[str, Any]],
+        *,
+        history_message: str,
+        auto_history: bool = True,
+    ) -> None: ...
 
 
 @dataclass
@@ -20,7 +71,7 @@ class CommandContext:
     group_id: int
     sender_id: int
     config: Config
-    sender: MessageSender
+    sender: CommandSender
     ai: Any
     faq_storage: FAQStorage
     onebot: OneBotClient

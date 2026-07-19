@@ -8,8 +8,8 @@
 .landing-hero {
   padding: 0 60px 60px;
   display: grid;
-  grid-template-columns: 1.4fr 0.8fr;
-  gap: 40px;
+  grid-template-columns: minmax(0, 1.75fr) minmax(360px, 0.55fr);
+  gap: 32px;
   align-items: start;
 }
 

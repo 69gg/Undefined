@@ -9,6 +9,8 @@ import enum
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
+from Undefined.utils.message_reply import ReplyContext
+
 
 @dataclass
 class BatchDispatchToken:
@@ -36,7 +38,10 @@ class BufferedMessage:
     sender_name: str
     arrival_time: float
     is_private: bool
-    trigger_message_id: int | None = None
+    trigger_message_id: int | str | None = None
+    reply_context: ReplyContext | None = None
+    channel: str = "qq"
+    address: str = ""
     is_poke: bool = False
     is_at_bot: bool = False
     is_fake_at: bool = False

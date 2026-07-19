@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import re
 
+from Undefined.utils.xml import XML_CONTENT_BODY_PATTERN
+
 CURRENT_MESSAGE_RE = re.compile(
-    r"<message\b(?P<attrs>[^>]*)>.*?<content>(?P<content>.*?)</content>.*?</message>",
+    rf"<message\b(?P<attrs>[^>]*)>.*?"
+    rf"<content>(?P<content>{XML_CONTENT_BODY_PATTERN})</content>.*?</message>",
     re.DOTALL | re.IGNORECASE,
 )
 XML_ATTR_RE = re.compile(r'(?P<key>[a-zA-Z_][a-zA-Z0-9_-]*)="(?P<value>[^"]*)"')

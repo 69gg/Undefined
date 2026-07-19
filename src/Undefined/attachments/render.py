@@ -221,6 +221,7 @@ async def dispatch_pending_file_sends(
     target_type: str,
     target_id: int,
     registry: AttachmentRegistry | None = None,
+    address: Any | None = None,
 ) -> None:
     """Send pending file attachments collected by *render_message_with_attachments*.
 
@@ -258,7 +259,15 @@ async def dispatch_pending_file_sends(
             )
             continue
         try:
-            if target_type == "group":
+            send_address_file = getattr(sender, "send_address_file", None)
+            if address is not None and callable(send_address_file):
+                await send_address_file(
+                    address,
+                    send_record.local_path,
+                    name=send_record.display_name or None,
+                    auto_history=False,
+                )
+            elif target_type == "group":
                 await sender.send_group_file(
                     target_id,
                     send_record.local_path,

@@ -2,7 +2,7 @@
     "type": "function",
     "function": {
         "name": "send_private_message",
-        "description": "发送私聊消息给指定用户。可在群聊或私聊会话中使用；若未提供 user_id，默认使用当前会话用户。会受到访问控制白名单限制。最后必须调用 end 工具结束对话。成功时工具结果会尽量返回新消息的 message_id，便于后续再次用 reply_to 引用任意已知 message_id 的消息，包括当前消息、历史消息、别人发的消息或 Bot 之前发出的消息。",
+        "description": "发送私聊消息。默认使用当前物理私聊；可用 address 指定 qq:<QQ号> 或 wechat:<逻辑QQ号>。旧 user_id 参数继续兼容并表示 QQ 私聊。微信支持同一物理会话内的 reply_to 原生引用；上游明确拒绝时降级为 Markdown 引用。微信文本支持 Markdown。微信的 message 参数是 JSON 字符串而不是 XML/HTML：特殊符号和附件标签必须原样填写；除非用户明确要求展示实体拼写，否则禁止 &lt;、&gt;、&amp;、&quot;、&apos;、&#...; 和错误的 &it;。会受到逻辑 QQ 访问控制，最后必须调用 end。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -10,13 +10,24 @@
                     "type": "integer",
                     "description": "可选。目标用户 QQ 号；不填时默认当前会话用户。"
                 },
+                "address": {
+                    "type": "string",
+                    "pattern": "^(qq|wechat):[1-9][0-9]*$",
+                    "description": "可选。私聊投递地址：qq:<QQ号> 或 wechat:<逻辑QQ号>。不填时使用当前会话地址；不要与 user_id 混用。"
+                },
                 "message": {
                     "type": "string",
-                    "description": "要发送的私聊消息内容"
+                    "description": "要发送的私聊消息内容。微信通道可直接使用 Markdown；message 是 JSON 字符串，不需要 XML/HTML 转义，<、>、& 和引号须原样填写。发送前检查并消除 &lt;、&gt;、&amp;、&quot;、&apos;、&#...; 及错误的 &it;（用户明确要求展示实体字符串时除外）。"
                 },
                 "reply_to": {
-                    "type": "integer",
-                    "description": "可选。要引用回复的消息 ID (message_id)。设置后消息将以引用回复形式出现。可以使用任意已知的 message_id，包括当前消息 XML、历史消息、别人发的消息或 Bot 之前发出的消息。"
+                    "oneOf": [
+                        {"type": "integer", "minimum": 1},
+                        {
+                            "type": "string",
+                            "pattern": "^\\S+$"
+                        }
+                    ],
+                    "description": "可选。要引用回复的消息 ID (message_id)。QQ 私聊使用正整数；微信可使用当前 wechat 地址历史中的数字或字符串 ID，不能跨 QQ/微信或跨帐号引用。"
                 }
             },
             "required": ["message"]

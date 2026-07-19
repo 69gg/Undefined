@@ -13,6 +13,7 @@ from apscheduler.triggers.cron import CronTrigger
 
 from Undefined.api._context import RuntimeAPIContext
 from Undefined.api._helpers import _json_error
+from Undefined.utils.message_targets import parse_delivery_address
 from Undefined.utils.scheduler import SELF_CALL_TOOL_NAME
 
 _TASK_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,96}$")
@@ -102,6 +103,15 @@ def _parse_target_type(value: Any) -> str:
     if target_type not in _TARGET_TYPES:
         raise SchedulePayloadError("target_type must be 'group' or 'private'")
     return target_type
+
+
+def _parse_address(value: Any) -> str | None:
+    if value is None or str(value).strip() == "":
+        return None
+    address, error = parse_delivery_address(value)
+    if error or address is None:
+        raise SchedulePayloadError(error or "address is invalid")
+    return address.canonical
 
 
 def _parse_execution_mode(value: Any) -> str:
@@ -210,10 +220,14 @@ def _normalize_schedule_payload(
         normalized["task_name"] = task_name
         provided.add("task_name")
 
+    if "address" in body:
+        normalized["address"] = _parse_address(body.get("address"))
+        provided.add("address")
+
     if "target_type" in body:
         normalized["target_type"] = _parse_target_type(body.get("target_type"))
         provided.add("target_type")
-    elif not partial:
+    elif not partial and "address" not in body:
         normalized["target_type"] = "group"
         provided.add("target_type")
 
@@ -223,6 +237,19 @@ def _normalize_schedule_payload(
             field="target_id",
         )
         provided.add("target_id")
+
+    if (
+        normalized.get("address") is not None
+        and normalized.get("target_id") is not None
+    ):
+        legacy_channel = (
+            "group" if normalized.get("target_type", "group") == "group" else "qq"
+        )
+        legacy_address = f"{legacy_channel}:{normalized['target_id']}"
+        if legacy_address != normalized["address"]:
+            raise SchedulePayloadError(
+                "address conflicts with target_type and target_id"
+            )
 
     if "max_executions" in body:
         normalized["max_executions"] = _parse_optional_positive_int(
@@ -335,6 +362,11 @@ def serialize_schedule_task(
     task.setdefault("task_id", task_id)
     task["mode"] = _schedule_task_mode(task)
     task["next_run_time"] = _next_run_time_iso(ctx, task_id)
+    address, _error = parse_delivery_address(task.get("address"))
+    if address is None and task.get("target_id") is not None:
+        channel = "group" if task.get("target_type") == "group" else "qq"
+        address, _error = parse_delivery_address(f"{channel}:{task['target_id']}")
+    task["address"] = address.canonical if address is not None else None
     tool_args = task.get("tool_args")
     tools = task.get("tools")
     if (
@@ -448,6 +480,7 @@ async def schedules_create_handler(
         cron_expression=str(normalized["cron_expression"]),
         target_id=normalized.get("target_id"),
         target_type=str(normalized.get("target_type") or "group"),
+        target_address=normalized.get("address"),
         task_name=normalized.get("task_name"),
         max_executions=normalized.get("max_executions"),
         tools=normalized.get("tools"),
@@ -499,6 +532,9 @@ async def schedule_update_handler(
         kwargs["target_id_provided"] = True
     if "target_type" in provided:
         kwargs["target_type"] = normalized.get("target_type")
+    if "address" in provided:
+        kwargs["target_address"] = normalized.get("address")
+        kwargs["target_address_provided"] = True
     if "max_executions" in provided:
         kwargs["max_executions"] = normalized.get("max_executions")
         kwargs["max_executions_provided"] = True

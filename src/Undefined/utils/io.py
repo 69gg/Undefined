@@ -1,6 +1,7 @@
 """异步安全的 IO 工具模块"""
 
 import asyncio
+import gzip
 import json
 import logging
 import os
@@ -14,6 +15,25 @@ from typing import Any, Optional
 from Undefined.utils.file_lock import FileLock
 
 logger = logging.getLogger(__name__)
+
+
+def iter_text_lines(
+    file_path: Path | str,
+    *,
+    gzip_compressed: bool | None = None,
+) -> Iterator[tuple[int, str]]:
+    """同步流式读取文本行；供已在线程中运行的扫描任务使用。"""
+
+    target = Path(file_path)
+    if not target.exists():
+        return
+    compressed = target.suffix == ".gz" if gzip_compressed is None else gzip_compressed
+    if compressed:
+        with gzip.open(target, "rt", encoding="utf-8") as handle:
+            yield from enumerate(handle, start=1)
+        return
+    with open(target, "r", encoding="utf-8") as handle:
+        yield from enumerate(handle, start=1)
 
 
 async def write_json(file_path: Path | str, data: Any, use_lock: bool = True) -> None:
@@ -174,6 +194,18 @@ async def exists(file_path: Path | str) -> bool:
         file_path: 要检查的路径
     """
     return await asyncio.to_thread(Path(file_path).exists)
+
+
+async def ensure_dir(directory: Path | str) -> Path:
+    """异步确保目录存在并返回其路径。"""
+    path = Path(directory)
+    await asyncio.to_thread(path.mkdir, parents=True, exist_ok=True)
+    return path
+
+
+async def chmod(file_path: Path | str, mode: int) -> None:
+    """异步修改文件权限。"""
+    await asyncio.to_thread(Path(file_path).chmod, mode)
 
 
 async def is_file(file_path: Path | str) -> bool:

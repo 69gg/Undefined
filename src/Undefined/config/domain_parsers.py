@@ -23,6 +23,7 @@ from .models import (
     NagaConfig,
     PromptSystemInfoConfig,
     RenderCacheConfig,
+    WeixinConfig,
 )
 
 DEFAULT_API_HOST = "127.0.0.1"
@@ -339,6 +340,54 @@ def _parse_api_config(data: dict[str, Any]) -> APIConfig:
         tool_invoke_timeout=tool_invoke_timeout,
         tool_invoke_callback_timeout=tool_invoke_callback_timeout,
         tool_invoke_callback_use_proxy=tool_invoke_callback_use_proxy,
+    )
+
+
+def _parse_weixin_config(data: dict[str, Any]) -> WeixinConfig:
+    section_raw = data.get("weixin", {})
+    section = section_raw if isinstance(section_raw, dict) else {}
+    return WeixinConfig(
+        enabled=_coerce_bool(section.get("enabled"), False),
+        state_dir=_coerce_str(section.get("state_dir"), "data/weixin"),
+        long_poll_timeout_seconds=max(
+            1.0, _coerce_float(section.get("long_poll_timeout_seconds"), 35.0)
+        ),
+        stale_token_pause_seconds=max(
+            1.0, _coerce_float(section.get("stale_token_pause_seconds"), 3600.0)
+        ),
+        retry_delay_seconds=max(
+            0.1, _coerce_float(section.get("retry_delay_seconds"), 2.0)
+        ),
+        failure_backoff_seconds=max(
+            0.1, _coerce_float(section.get("failure_backoff_seconds"), 30.0)
+        ),
+        failures_before_backoff=max(
+            1, _coerce_int(section.get("failures_before_backoff"), 3)
+        ),
+        media_max_size_mb=max(1, _coerce_int(section.get("media_max_size_mb"), 100)),
+        media_upload_attempts=max(
+            1, min(10, _coerce_int(section.get("media_upload_attempts"), 3))
+        ),
+        media_upload_concurrency=max(
+            1, min(8, _coerce_int(section.get("media_upload_concurrency"), 3))
+        ),
+        multi_item_messages_enabled=_coerce_bool(
+            section.get("multi_item_messages_enabled"), True
+        ),
+        multi_item_max_items=max(
+            1, min(20, _coerce_int(section.get("multi_item_max_items"), 10))
+        ),
+        login_session_ttl_seconds=max(
+            30.0, _coerce_float(section.get("login_session_ttl_seconds"), 300.0)
+        ),
+        privileged_confirmation_ttl_seconds=max(
+            30.0,
+            _coerce_float(section.get("privileged_confirmation_ttl_seconds"), 300.0),
+        ),
+        pending_max_records=max(
+            1, _coerce_int(section.get("pending_max_records"), 100)
+        ),
+        audit_max_records=max(1, _coerce_int(section.get("audit_max_records"), 1000)),
     )
 
 

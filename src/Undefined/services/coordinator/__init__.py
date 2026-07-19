@@ -19,6 +19,7 @@ from Undefined.services.security import SecurityService
 from Undefined.utils.history import MessageHistoryManager
 from Undefined.utils.scheduler import TaskScheduler
 from Undefined.utils.sender import MessageSender
+from Undefined.weixin.audio import VOICE_SOURCE_SUFFIXES
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,7 @@ class AICoordinator(
     def batcher(self) -> MessageBatcher | None:
         return self._batcher
 
-    async def _send_image(self, tid: int, mtype: str, path: str) -> None:
+    async def _send_media(self, tid: int, mtype: str, path: str) -> None:
         """发送图片或语音消息到群聊或私聊"""
         import os
 
@@ -74,7 +75,7 @@ class AICoordinator(
         ext = os.path.splitext(path)[1].lower()
         if ext in [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"]:
             msg = f"[CQ:image,file={file_uri}]"
-        elif ext in [".mp3", ".wav", ".ogg", ".flac", ".m4a", ".aac"]:
+        elif ext in VOICE_SOURCE_SUFFIXES:
             msg = f"[CQ:record,file={file_uri}]"
         else:
             return

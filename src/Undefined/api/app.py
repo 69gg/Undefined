@@ -35,6 +35,7 @@ from .routes import (
     schedules,
     system,
     tools,
+    weixin,
 )
 
 logger = logging.getLogger(__name__)
@@ -213,6 +214,42 @@ class RuntimeAPIServer:
                 ),
                 web.get("/api/v1/tools", self._tools_list_handler),
                 web.post("/api/v1/tools/invoke", self._tools_invoke_handler),
+                web.get("/api/v1/weixin", self._weixin_status_handler),
+                web.post("/api/v1/weixin/login", self._weixin_login_start_handler),
+                web.get(
+                    "/api/v1/weixin/login/{session_id}",
+                    self._weixin_login_poll_handler,
+                ),
+                web.post(
+                    "/api/v1/weixin/login/{session_id}/refresh",
+                    self._weixin_login_refresh_handler,
+                ),
+                web.post(
+                    "/api/v1/weixin/login/{session_id}/verify",
+                    self._weixin_login_verify_handler,
+                ),
+                web.delete(
+                    "/api/v1/weixin/login/{session_id}",
+                    self._weixin_login_cancel_handler,
+                ),
+                web.get(
+                    "/api/v1/weixin/login/{session_id}/qr.png",
+                    self._weixin_login_qr_handler,
+                ),
+                web.patch(
+                    "/api/v1/weixin/accounts/{alias}",
+                    self._weixin_account_update_handler,
+                ),
+                web.delete(
+                    "/api/v1/weixin/accounts/{alias}",
+                    self._weixin_account_delete_handler,
+                ),
+                web.get("/api/v1/weixin/pending", self._weixin_pending_list_handler),
+                web.delete(
+                    "/api/v1/weixin/pending/{record_id}",
+                    self._weixin_pending_delete_handler,
+                ),
+                web.get("/api/v1/weixin/audit", self._weixin_audit_list_handler),
             ]
         )
         cfg = self._context.config_getter()
@@ -442,6 +479,45 @@ class RuntimeAPIServer:
         return await tools.tools_invoke_handler(
             self._ctx, self._background_tasks, request
         )
+
+    # WeChat iLink
+    async def _weixin_status_handler(self, request: web.Request) -> Response:
+        return await weixin.status_handler(self._ctx, request)
+
+    async def _weixin_login_start_handler(self, request: web.Request) -> Response:
+        return await weixin.login_start_handler(self._ctx, request)
+
+    async def _weixin_login_poll_handler(self, request: web.Request) -> Response:
+        return await weixin.login_poll_handler(self._ctx, request)
+
+    async def _weixin_login_refresh_handler(self, request: web.Request) -> Response:
+        return await weixin.login_refresh_handler(self._ctx, request)
+
+    async def _weixin_login_verify_handler(self, request: web.Request) -> Response:
+        return await weixin.login_verify_handler(self._ctx, request)
+
+    async def _weixin_login_cancel_handler(self, request: web.Request) -> Response:
+        return await weixin.login_cancel_handler(self._ctx, request)
+
+    async def _weixin_login_qr_handler(
+        self, request: web.Request
+    ) -> web.StreamResponse:
+        return await weixin.login_qr_handler(self._ctx, request)
+
+    async def _weixin_account_update_handler(self, request: web.Request) -> Response:
+        return await weixin.account_update_handler(self._ctx, request)
+
+    async def _weixin_account_delete_handler(self, request: web.Request) -> Response:
+        return await weixin.account_delete_handler(self._ctx, request)
+
+    async def _weixin_pending_list_handler(self, request: web.Request) -> Response:
+        return await weixin.pending_list_handler(self._ctx, request)
+
+    async def _weixin_pending_delete_handler(self, request: web.Request) -> Response:
+        return await weixin.pending_delete_handler(self._ctx, request)
+
+    async def _weixin_audit_list_handler(self, request: web.Request) -> Response:
+        return await weixin.audit_list_handler(self._ctx, request)
 
     async def _execute_tool_invoke(
         self,

@@ -118,16 +118,18 @@ class AutoExtractMixin:
         target_id: int,
         bvids: list[str],
         target_type: str,
+        sender: Any | None = None,
     ) -> None:
         """处理 bilibili 视频自动提取和发送。"""
         from Undefined.bilibili.sender import send_bilibili_video
 
+        resolved_sender = sender or self.sender
         for bvid in bvids[:3]:
             try:
                 # 单条消息最多自动提取 3 个 BV
                 await send_bilibili_video(
                     video_id=bvid,
-                    sender=self.sender,
+                    sender=resolved_sender,
                     onebot=self.onebot,
                     target_type=target_type,  # type: ignore[arg-type]
                     target_id=target_id,
@@ -151,9 +153,9 @@ class AutoExtractMixin:
                 try:
                     error_msg = f"视频提取失败: {exc}"
                     if target_type == "group":
-                        await self.sender.send_group_message(target_id, error_msg)
+                        await resolved_sender.send_group_message(target_id, error_msg)
                     else:
-                        await self.sender.send_private_message(target_id, error_msg)
+                        await resolved_sender.send_private_message(target_id, error_msg)
                 except Exception:
                     pass
 
@@ -162,6 +164,7 @@ class AutoExtractMixin:
         target_id: int,
         video_ids: list[str],
         target_type: str,
+        sender: Any | None = None,
     ) -> None:
         """处理 Douyin 视频自动提取和发送。"""
         from Undefined.douyin.sender import send_douyin_video
@@ -176,11 +179,12 @@ class AutoExtractMixin:
             "360p",
         )
 
+        resolved_sender = sender or self.sender
         for video_id in video_ids[:max_items]:
             try:
                 result = await send_douyin_video(
                     video_id=video_id,
-                    sender=self.sender,
+                    sender=resolved_sender,
                     target_type=target_type,  # type: ignore[arg-type]
                     target_id=target_id,
                     max_duration=self.config.douyin_max_duration,
@@ -205,9 +209,9 @@ class AutoExtractMixin:
                 try:
                     error_msg = f"抖音视频提取失败: {exc}"
                     if target_type == "group":
-                        await self.sender.send_group_message(target_id, error_msg)
+                        await resolved_sender.send_group_message(target_id, error_msg)
                     else:
-                        await self.sender.send_private_message(target_id, error_msg)
+                        await resolved_sender.send_private_message(target_id, error_msg)
                 except Exception:
                     pass
 
@@ -216,17 +220,19 @@ class AutoExtractMixin:
         target_id: int,
         paper_ids: list[str],
         target_type: str,
+        sender: Any | None = None,
     ) -> None:
         """处理 arXiv 论文自动提取和发送。"""
         from Undefined.arxiv.sender import send_arxiv_paper
 
         max_items = max(1, int(self.config.arxiv_auto_extract_max_items))
 
+        resolved_sender = sender or self.sender
         for paper_id in paper_ids[:max_items]:
             try:
                 result = await send_arxiv_paper(
                     paper_id=paper_id,
-                    sender=self.sender,
+                    sender=resolved_sender,
                     target_type=target_type,  # type: ignore[arg-type]
                     target_id=target_id,
                     max_file_size=self.config.arxiv_max_file_size,
@@ -258,6 +264,7 @@ class AutoExtractMixin:
         target_id: int,
         repo_ids: list[str],
         target_type: str,
+        sender: Any | None = None,
     ) -> None:
         """处理 GitHub 仓库自动提取和发送。"""
         from Undefined.github.client import (
@@ -280,11 +287,12 @@ class AutoExtractMixin:
             getattr(self.config, "github_request_retries", DEFAULT_REQUEST_RETRIES)
         )
 
+        resolved_sender = sender or self.sender
         for repo_id in repo_ids[:max_items]:
             try:
                 result = await send_github_repo_card(
                     repo_id=repo_id,
-                    sender=self.sender,
+                    sender=resolved_sender,
                     target_type=target_type,  # type: ignore[arg-type]
                     target_id=target_id,
                     request_timeout=request_timeout,

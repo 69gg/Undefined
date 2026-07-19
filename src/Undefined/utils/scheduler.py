@@ -17,13 +17,51 @@ from apscheduler.triggers.cron import CronTrigger
 from Undefined.context import RequestContext
 from Undefined.context_resource_registry import collect_context_resources
 from Undefined.scheduled_task_storage import ScheduledTaskStorage
+from Undefined.utils.message_targets import DeliveryAddress, parse_delivery_address
 from Undefined.utils.recent_messages import get_recent_messages_prefer_local
+from Undefined.utils.sender import AddressBoundSender
 from Undefined.utils import io
+from Undefined.weixin.audio import VOICE_SOURCE_SUFFIXES
 
 logger = logging.getLogger(__name__)
 
 CONTEXT_DIR = Path("data/scheduler_context")
 SELF_CALL_TOOL_NAME = "scheduler.call_self"
+
+
+def _resolve_task_address(
+    address: object,
+    target_id: int | None,
+    target_type: str,
+) -> DeliveryAddress | None:
+    address_text = str(address or "").strip()
+    explicit_address: DeliveryAddress | None = None
+    if address_text:
+        explicit_address, error = parse_delivery_address(address_text)
+        if error or explicit_address is None:
+            raise ValueError(error or "投递地址无效")
+
+    legacy_address: DeliveryAddress | None = None
+    if target_id is not None:
+        legacy_type = str(target_type or "group").strip().lower()
+        if legacy_type not in {"group", "private"}:
+            raise ValueError("target_type 只能是 group 或 private")
+        channel = "group" if legacy_type == "group" else "qq"
+        legacy_address, error = parse_delivery_address(f"{channel}:{target_id}")
+        if error or legacy_address is None:
+            raise ValueError(error or "投递目标无效")
+
+    if explicit_address is not None:
+        if legacy_address is not None and legacy_address != explicit_address:
+            raise ValueError("address 与旧目标参数指向不同会话")
+        return explicit_address
+    return legacy_address
+
+
+def _legacy_target_fields(address: DeliveryAddress) -> tuple[int | None, str]:
+    if address.channel == "wechat":
+        return None, "private"
+    return address.target_id, address.target_type
 
 
 class TaskScheduler:
@@ -73,6 +111,16 @@ class TaskScheduler:
         count = 0
         for task_id, info in list(self.tasks.items()):
             try:
+                address = _resolve_task_address(
+                    info.get("address"),
+                    info.get("target_id"),
+                    str(info.get("target_type", "group")),
+                )
+                if address is not None:
+                    info["address"] = address.canonical
+                    info["target_id"], info["target_type"] = _legacy_target_fields(
+                        address
+                    )
                 trigger = CronTrigger.from_crontab(info["cron"])
                 self.scheduler.add_job(
                     self._execute_tool_wrapper,
@@ -110,6 +158,7 @@ class TaskScheduler:
         tools: list[dict[str, Any]] | None = None,
         execution_mode: str = "serial",
         self_instruction: str | None = None,
+        target_address: str | None = None,
     ) -> bool:
         """添加定时任务
 
@@ -131,6 +180,13 @@ class TaskScheduler:
         """
         try:
             trigger = CronTrigger.from_crontab(cron_expression)
+            address = _resolve_task_address(
+                target_address,
+                target_id,
+                target_type,
+            )
+            if address is not None:
+                target_id, target_type = _legacy_target_fields(address)
 
             context_id = await self._save_context_snapshot()
 
@@ -149,6 +205,7 @@ class TaskScheduler:
                 "cron": cron_expression,
                 "target_id": target_id,
                 "target_type": target_type,
+                "address": address.canonical if address is not None else None,
                 "task_name": task_name or "",
                 "max_executions": max_executions,
                 "current_executions": 0,
@@ -207,6 +264,8 @@ class TaskScheduler:
         tools: list[dict[str, Any]] | None = None,
         execution_mode: str | None = None,
         self_instruction: str | None = None,
+        target_address: str | None = None,
+        target_address_provided: bool = False,
     ) -> bool:
         """修改定时任务（不支持修改 task_id）
 
@@ -257,11 +316,34 @@ class TaskScheduler:
                     if prompt:
                         task_info["self_instruction"] = prompt
 
-            if target_id is not None or target_id_provided or target_type is not None:
+            if target_address_provided:
+                address = _resolve_task_address(
+                    target_address,
+                    None,
+                    "private",
+                )
+                if address is None:
+                    task_info["address"] = None
+                    task_info["target_id"] = None
+                else:
+                    task_info["address"] = address.canonical
+                    (
+                        task_info["target_id"],
+                        task_info["target_type"],
+                    ) = _legacy_target_fields(address)
+            elif target_id is not None or target_id_provided or target_type is not None:
                 if target_id is not None or target_id_provided:
                     task_info["target_id"] = target_id
                 if target_type is not None:
                     task_info["target_type"] = target_type
+                address = _resolve_task_address(
+                    None,
+                    task_info.get("target_id"),
+                    str(task_info.get("target_type", "group")),
+                )
+                task_info["address"] = (
+                    address.canonical if address is not None else None
+                )
 
             if task_name is not None:
                 task_info["task_name"] = task_name
@@ -362,6 +444,8 @@ class TaskScheduler:
             "group_id": ctx.group_id,
             "user_id": ctx.user_id,
             "sender_id": ctx.sender_id,
+            "channel": ctx.get_resource("channel"),
+            "address": ctx.get_resource("address"),
             "resource_keys": list(ctx.get_resources().keys()),
         }
         await io.write_json(CONTEXT_DIR / f"{context_id}.json", snapshot, use_lock=True)
@@ -483,6 +567,11 @@ class TaskScheduler:
         task_info = self.tasks.get(task_id, {})
         tools = task_info.get("tools")
         execution_mode = task_info.get("execution_mode", "serial")
+        delivery_address = _resolve_task_address(
+            task_info.get("address"),
+            target_id,
+            target_type,
+        )
 
         # 兼容旧格式：如果没有 tools 字段，使用单工具模式
         if not tools:
@@ -491,7 +580,10 @@ class TaskScheduler:
         logger.info(
             f"[任务触发] 定时任务开始执行: ID={task_id}, 工具数={len(tools)}, 模式={execution_mode}"
         )
-        logger.debug(f"[任务详情] 目标={target_id}({target_type})")
+        logger.debug(
+            "[任务详情] 目标=%s",
+            delivery_address.canonical if delivery_address is not None else "未指定",
+        )
 
         try:
             context_snapshot = await self._load_context_snapshot(
@@ -499,21 +591,36 @@ class TaskScheduler:
             )
             if context_snapshot:
                 request_type = context_snapshot.get("request_type") or (
-                    "group" if target_type == "group" else "private"
+                    delivery_address.target_type
+                    if delivery_address is not None
+                    else ("group" if target_type == "group" else "private")
                 )
                 group_id = context_snapshot.get("group_id")
                 user_id = context_snapshot.get("user_id")
                 sender_id = context_snapshot.get("sender_id")
             else:
-                request_type = "group" if target_type == "group" else "private"
+                request_type = (
+                    delivery_address.target_type
+                    if delivery_address is not None
+                    else ("group" if target_type == "group" else "private")
+                )
                 group_id = None
                 user_id = None
                 sender_id = None
 
-            if request_type == "group" and group_id is None:
-                group_id = target_id
-            if request_type == "private" and user_id is None:
-                user_id = target_id
+            if delivery_address is not None:
+                request_type = delivery_address.target_type
+                if request_type == "group":
+                    group_id = delivery_address.target_id
+                    user_id = None
+                else:
+                    group_id = None
+                    user_id = delivery_address.target_id
+            else:
+                if request_type == "group" and group_id is None:
+                    group_id = target_id
+                if request_type == "private" and user_id is None:
+                    user_id = target_id
 
             async with RequestContext(
                 request_type=request_type,
@@ -525,7 +632,16 @@ class TaskScheduler:
                 async def send_msg_cb(
                     message: str, reply_to: int | None = None
                 ) -> None:
-                    if request_type == "group" and target_id:
+                    if (
+                        delivery_address is not None
+                        and delivery_address.channel == "wechat"
+                    ):
+                        await self.sender.send_address_message(
+                            delivery_address,
+                            message,
+                            reply_to=reply_to,
+                        )
+                    elif request_type == "group" and target_id:
                         await self.sender.send_group_message(
                             target_id, message, reply_to=reply_to
                         )
@@ -537,7 +653,22 @@ class TaskScheduler:
                 async def send_private_cb(
                     uid: int, msg: str, reply_to: int | None = None
                 ) -> None:
-                    await self.sender.send_private_message(uid, msg, reply_to=reply_to)
+                    if (
+                        delivery_address is not None
+                        and delivery_address.channel == "wechat"
+                        and delivery_address.target_id == uid
+                    ):
+                        await self.sender.send_address_message(
+                            delivery_address,
+                            msg,
+                            reply_to=reply_to,
+                        )
+                    else:
+                        await self.sender.send_private_message(
+                            uid,
+                            msg,
+                            reply_to=reply_to,
+                        )
 
                 async def send_img_cb(tid: int, mtype: str, path: str) -> None:
                     if not os.path.exists(path):
@@ -546,14 +677,29 @@ class TaskScheduler:
                     ext = os.path.splitext(path)[1].lower()
                     if ext in [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"]:
                         msg = f"[CQ:image,file={file_uri}]"
-                    elif ext in [".mp3", ".wav", ".ogg", ".flac", ".m4a", ".aac"]:
+                        media_kind = "image"
+                    elif ext in VOICE_SOURCE_SUFFIXES:
                         msg = f"[CQ:record,file={file_uri}]"
+                        media_kind = "record"
                     else:
                         return
 
                     if mtype == "group":
                         await self.sender.send_group_message(
                             tid, msg, auto_history=False
+                        )
+                    elif (
+                        mtype == "private"
+                        and delivery_address is not None
+                        and delivery_address.channel == "wechat"
+                        and delivery_address.target_id == tid
+                    ):
+                        await self.sender.send_address_file(
+                            delivery_address,
+                            path,
+                            name=Path(path).name,
+                            kind=media_kind,
+                            auto_history=False,
                         )
                     elif mtype == "private":
                         await self.sender.send_private_message(
@@ -582,7 +728,22 @@ class TaskScheduler:
                 ai_client = self.ai
                 memory_storage = self.ai.memory_storage
                 runtime_config = self.ai.runtime_config
-                sender = self.sender
+                sender = (
+                    AddressBoundSender(self.sender, delivery_address)
+                    if delivery_address is not None
+                    and delivery_address.channel == "wechat"
+                    else self.sender
+                )
+                channel = (
+                    delivery_address.channel
+                    if delivery_address is not None
+                    else str((context_snapshot or {}).get("channel") or "")
+                )
+                address = (
+                    delivery_address.canonical
+                    if delivery_address is not None
+                    else str((context_snapshot or {}).get("address") or "")
+                )
                 history_manager = self.history_manager
                 onebot_client = self.onebot
                 scheduler = self
@@ -607,6 +768,11 @@ class TaskScheduler:
                     for key, value in resources.items():
                         if value is not None:
                             ctx.set_resource(key, value)
+                if channel:
+                    ctx.set_resource("channel", channel)
+                if address:
+                    ctx.set_resource("address", address)
+                ctx.set_resource("sender", sender)
 
                 start_time = time.perf_counter()
                 results = []

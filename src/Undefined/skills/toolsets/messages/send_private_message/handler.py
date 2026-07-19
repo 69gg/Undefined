@@ -6,21 +6,13 @@ from Undefined.attachments import (
     render_message_with_pic_placeholders,
     scope_from_context,
 )
-from Undefined.skills.toolsets.messages.context_utils import mark_message_sent
+from Undefined.skills.toolsets.messages.context_utils import (
+    mark_message_sent,
+    normalize_sent_message_id,
+    parse_reply_to,
+)
 
 logger = logging.getLogger(__name__)
-
-
-def _parse_positive_int(value: Any, field_name: str) -> tuple[int | None, str | None]:
-    if value is None:
-        return None, None
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return None, f"{field_name} 必须是整数"
-    if parsed <= 0:
-        return None, f"{field_name} 必须是正整数"
-    return parsed, None
 
 
 def _private_access_error(runtime_config: Any, user_id: int) -> str:
@@ -37,21 +29,8 @@ def _private_access_error(runtime_config: Any, user_id: int) -> str:
     )
 
 
-def _normalize_message_id(value: Any) -> int | None:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value if value > 0 else None
-    if isinstance(value, str):
-        text = value.strip()
-        if text.isdigit():
-            parsed = int(text)
-            return parsed if parsed > 0 else None
-    return None
-
-
 def _format_send_success(user_id: int, message_id: Any) -> str:
-    resolved_message_id = _normalize_message_id(message_id)
+    resolved_message_id = normalize_sent_message_id(message_id)
     if resolved_message_id is not None:
         return f"私聊消息已发送给用户 {user_id}（message_id={resolved_message_id}）"
     return f"私聊消息已发送给用户 {user_id}"
@@ -60,22 +39,28 @@ def _format_send_success(user_id: int, message_id: Any) -> str:
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     """向指定用户发送私聊消息"""
     request_id = str(context.get("request_id", "-"))
-    user_id_raw = args.get("user_id")
-    if user_id_raw is None:
-        user_id_raw = context.get("user_id")
+    resolve_address = context.get("resolve_delivery_address")
+    parse_address = context.get("parse_delivery_address")
+    if not callable(resolve_address) or not callable(parse_address):
+        return "发送失败：投递地址解析服务未设置"
 
-    user_id, user_error = _parse_positive_int(user_id_raw, "user_id")
+    target, target_error = resolve_address(args, context)
+    if target_error or target is None:
+        return f"发送失败：{target_error or '无法确定目标私聊'}"
+    if target.target_type != "private":
+        return "发送失败：send_private_message 不支持群聊地址"
+    user_id = target.target_id
     message = str(args.get("message", ""))
 
-    # 解析 reply_to 参数（无效值静默忽略，视为未传）
-    reply_to_id, _ = _parse_positive_int(args.get("reply_to"), "reply_to")
+    reply_to_id, reply_error = parse_reply_to(
+        args.get("reply_to"),
+        channel=target.channel,
+    )
 
-    if user_error:
-        return f"发送失败：{user_error}"
-    if user_id is None:
-        return "目标用户 QQ 号不能为空"
     if not message:
         return "消息内容不能为空"
+    if reply_error:
+        return f"发送失败：{reply_error}"
 
     attachment_registry = context.get("attachment_registry")
     scope_key = scope_from_context(context)
@@ -111,11 +96,21 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             }
             if history_attachments:
                 send_kwargs["attachments"] = history_attachments
-            sent_message_id = await sender.send_private_message(
-                user_id,
-                message,
-                **send_kwargs,
-            )
+            send_address_message = getattr(sender, "send_address_message", None)
+            if callable(send_address_message):
+                sent_message_id = await send_address_message(
+                    target,
+                    message,
+                    **send_kwargs,
+                )
+            elif target.channel == "qq":
+                sent_message_id = await sender.send_private_message(
+                    user_id,
+                    message,
+                    **send_kwargs,
+                )
+            else:
+                raise RuntimeError("当前 sender 不支持微信投递地址")
             mark_message_sent(context)
             await dispatch_pending_file_sends(
                 rendered,
@@ -123,8 +118,11 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                 target_type="private",
                 target_id=user_id,
                 registry=attachment_registry,
+                address=target,
             )
             return _format_send_success(user_id, sent_message_id)
+        except ValueError as exc:
+            return f"发送失败：{exc}"
         except Exception as e:
             logger.exception(
                 "[私聊发送] sender 发送失败: user=%s request_id=%s err=%s",
@@ -134,7 +132,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             )
             return "发送失败：消息服务暂时不可用，请稍后重试"
 
-    if send_private_message_callback:
+    if send_private_message_callback and target.channel == "qq":
         try:
             await send_private_message_callback(user_id, message, reply_to=reply_to_id)
             mark_message_sent(context)
@@ -145,6 +143,22 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                 user_id,
                 request_id,
                 e,
+            )
+            return "发送失败：消息服务暂时不可用，请稍后重试"
+
+    send_message_callback = context.get("send_message_callback")
+    current_address, _ = parse_address(context.get("address"))
+    if send_message_callback and current_address == target:
+        try:
+            await send_message_callback(message, reply_to=reply_to_id)
+            mark_message_sent(context)
+            return f"私聊消息已发送给用户 {user_id}"
+        except Exception as exc:
+            logger.exception(
+                "[私聊发送] 当前会话回调失败: address=%s request_id=%s err=%s",
+                target.canonical,
+                request_id,
+                exc,
             )
             return "发送失败：消息服务暂时不可用，请稍后重试"
 

@@ -1397,6 +1397,62 @@ autostart_bot = false
 # en: Check GitHub Releases for updates in the background whenever WebUI is opened.
 check_updates = true
 
+# zh: 微信 ClawBot/iLink 私聊接入。凭据与游标仅写入 state_dir，不写入本配置。
+# zh: 关闭时不会创建网络连接；二维码登录只能从管理界面显式发起。
+# en: WeChat ClawBot/iLink private-chat integration. Credentials and cursors are
+# en: stored under state_dir and never in this configuration file.
+# en: No network connection is created when disabled; QR-code login can only be
+# en: started explicitly from the management interface.
+[weixin]
+# zh: 是否启用微信 iLink 接入。关闭时不建立网络连接。
+# en: Enable the WeChat iLink integration. No network connection is made when disabled.
+enabled = false
+# zh: 敏感凭据、游标、绑定、隔离记录和审计记录的存储目录。
+# en: Directory for sensitive credentials, cursors, bindings, quarantined peers, and audit records.
+state_dir = "data/weixin"
+# zh: 单次消息长轮询的超时时间（秒）。
+# en: Timeout for each message long-poll request, in seconds.
+long_poll_timeout_seconds = 35.0
+# zh: 上游提示 token 失效后暂停重试的时间（秒）。
+# en: Pause before retrying after the upstream reports a stale token, in seconds.
+stale_token_pause_seconds = 3600.0
+# zh: 普通请求失败后的重试间隔（秒）。
+# en: Retry delay after an ordinary request failure, in seconds.
+retry_delay_seconds = 2.0
+# zh: 连续失败达到阈值后的退避时间（秒）。
+# en: Backoff duration after consecutive failures reach the threshold, in seconds.
+failure_backoff_seconds = 30.0
+# zh: 进入长退避的连续失败次数阈值。
+# en: Consecutive failure threshold for entering the longer backoff.
+failures_before_backoff = 3
+# zh: 单个入站或出站媒体文件的大小上限（MB）。
+# en: Maximum size of one inbound or outbound media file, in MB.
+media_max_size_mb = 100
+# zh: 单个媒体上传请求遇到临时网络或服务端错误时的最大尝试次数（1-10）。
+# en: Maximum attempts for one media upload after transient network or server failures (1-10).
+media_upload_attempts = 3
+# zh: 单条多项目消息并发上传媒体的上限（1-8）。
+# en: Maximum concurrent media uploads for one multi-item message (1-8).
+media_upload_concurrency = 3
+# zh: 是否优先用 iLink 多项目消息模拟微信合并转发；上游明确拒绝时自动回退为逐段发送。
+# en: Prefer iLink multi-item messages for WeChat forward emulation; fall back to sequential sends on explicit rejection.
+multi_item_messages_enabled = true
+# zh: 单次 iLink 多项目消息最多包含的项目数（1-20）；超出时保持顺序分批。
+# en: Maximum items in one iLink multi-item message (1-20); larger forwards are split in order.
+multi_item_max_items = 10
+# zh: 二维码登录会话的有效期（秒）。
+# en: Lifetime of a QR-code login session, in seconds.
+login_session_ttl_seconds = 300.0
+# zh: 绑定管理员或超级管理员身份时，二次确认 token 的有效期（秒）。
+# en: Lifetime of a confirmation token when binding an admin or superadmin identity, in seconds.
+privileged_confirmation_ttl_seconds = 300.0
+# zh: 最多保留的未知来源隔离记录数。
+# en: Maximum number of quarantined unknown-peer records to retain.
+pending_max_records = 100
+# zh: 最多保留的帐号管理审计记录数。
+# en: Maximum number of account-management audit records to retain.
+audit_max_records = 1000
+
 # zh: 主进程 Runtime API（供 WebUI/外部系统读取探针、记忆检索、AI Chat 使用）。
 # en: Runtime API in the main process (for WebUI/external integrations: probes, memory queries, AI chat).
 [api]

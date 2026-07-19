@@ -542,6 +542,17 @@ async def test_index_handler_renders_schedules_tab() -> None:
     assert '<script src="/static/js/schedules.js"></script>' in payload_text
 
 
+async def test_index_handler_renders_weixin_landing_shortcut() -> None:
+    request = _request()
+
+    response = await _index.index_handler(cast(web.Request, cast(Any, request)))
+    payload_text = cast(web.Response, response).text
+
+    assert payload_text is not None
+    assert 'data-action="open-app" data-tab="weixin"' in payload_text
+    assert 'data-i18n="tabs.weixin">微信接入</button>' in payload_text
+
+
 def test_webui_cors_only_allows_trusted_origins(monkeypatch: Any) -> None:
     monkeypatch.setattr(
         webui_app,

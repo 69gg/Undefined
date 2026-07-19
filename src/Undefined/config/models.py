@@ -592,3 +592,25 @@ class APIConfig:
     def display_url(self) -> str:
         """用于日志和展示的格式化 URL（保留原始 host，仅处理 IPv6 方括号）。"""
         return f"http://{format_netloc(self.host or '0.0.0.0', self.port)}"
+
+
+@dataclass
+class WeixinConfig:
+    """微信 iLink 私聊接入配置。"""
+
+    enabled: bool = False
+    state_dir: str = "data/weixin"
+    long_poll_timeout_seconds: float = 35.0
+    stale_token_pause_seconds: float = 3600.0
+    retry_delay_seconds: float = 2.0
+    failure_backoff_seconds: float = 30.0
+    failures_before_backoff: int = 3
+    media_max_size_mb: int = 100
+    media_upload_attempts: int = 3
+    media_upload_concurrency: int = 3
+    multi_item_messages_enabled: bool = True
+    multi_item_max_items: int = 10
+    login_session_ttl_seconds: float = 300.0
+    privileged_confirmation_ttl_seconds: float = 300.0
+    pending_max_records: int = 100
+    audit_max_records: int = 1000

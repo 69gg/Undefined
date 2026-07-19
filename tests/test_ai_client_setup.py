@@ -442,6 +442,20 @@ class TestExtractMessageExcerpt:
         )
         assert "<b>" in result
 
+    def test_cdata_content_extracted_without_wrappers(self) -> None:
+        result = self.client._extract_message_excerpt(
+            "<content><![CDATA[比较 1 < 2 & 3 > 2]]></content>"
+        )
+
+        assert result == "比较 1 < 2 & 3 > 2"
+
+    def test_cdata_excerpt_keeps_literal_entity_spellings(self) -> None:
+        result = self.client._extract_message_excerpt(
+            "<content><![CDATA[字面 &lt;tag&gt; &amp;]]></content>"
+        )
+
+        assert result == "字面 &lt;tag&gt; &amp;"
+
     def test_multiple_spaces_collapsed(self) -> None:
         result = self.client._extract_message_excerpt("hello    world")
         assert result == "hello world"

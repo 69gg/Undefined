@@ -16,6 +16,7 @@ from ..domain_parsers import (
     _parse_naga_config,
     _parse_prompt_system_info_config,
     _parse_render_cache_config,
+    _parse_weixin_config,
 )
 from ..parsers import (
     _parse_image_edit_model_config,
@@ -40,6 +41,7 @@ def load_domains(
     prompt_system_info = _parse_prompt_system_info_config(data)
     render_cache = _parse_render_cache_config(data)
     naga = _parse_naga_config(data)
+    weixin = _parse_weixin_config(data)
     models_image_gen = _parse_image_gen_model_config(data)
     models_image_edit = _parse_image_edit_model_config(data)
     image_gen = _parse_image_gen_config(data)
@@ -57,6 +59,7 @@ def load_domains(
         "prompt_system_info": prompt_system_info,
         "render_cache": render_cache,
         "naga": naga,
+        "weixin": weixin,
         "image_gen": image_gen,
         "models_image_gen": models_image_gen,
         "models_image_edit": models_image_edit,

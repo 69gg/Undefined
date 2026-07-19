@@ -19,6 +19,8 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     task_name = args.get("task_name")
     max_executions = args.get("max_executions")
     self_instruction = args.get("self_instruction")
+    address_provided = "address" in args
+    target_address = str(args.get("address") or "").strip() or None
 
     if not task_id:
         return "请提供要修改的任务 ID"
@@ -82,6 +84,8 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         tools=tools,
         execution_mode=execution_mode,
         self_instruction=normalized_self_instruction if has_self_instruction else None,
+        target_address=target_address,
+        target_address_provided=address_provided,
     )
 
     if success:

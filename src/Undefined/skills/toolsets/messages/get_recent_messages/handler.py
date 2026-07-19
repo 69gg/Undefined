@@ -1,6 +1,7 @@
 """获取最近消息的工具处理器。"""
 
-from typing import Any, Dict
+from collections.abc import Callable
+from typing import Any, Dict, cast
 
 
 def _get_history_limit(context: Dict[str, Any], key: str, fallback: int) -> int:
@@ -232,6 +233,13 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     # 获取回调和管理器
     get_recent_messages_callback = context.get("get_recent_messages_callback")
     history_manager = context.get("history_manager")
+    formatter: Callable[[dict[str, Any]], str] = _format_message_xml
+    formatter_candidate = context.get("format_message_xml")
+    if callable(formatter_candidate):
+        formatter = cast(
+            Callable[[dict[str, Any]], str],
+            formatter_candidate,
+        )
 
     # 解析 chat_id
     resolved_chat_id = _resolve_chat_id(chat_id, msg_type, history_manager)
@@ -281,12 +289,12 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             messages = messages[:filtered_result_limit]
 
         # 格式化消息
-        formatted = [_format_message_xml(msg) for msg in messages]
+        formatted = [formatter(msg) for msg in messages]
         header = f"共找到 {total_matched} 条匹配消息"
         if len(formatted) < total_matched:
             header += f"（当前显示 {len(formatted)} 条）"
         return header + "\n" + "\n---\n".join(formatted)
 
     # 无过滤条件：保持原有行为
-    formatted = [_format_message_xml(msg) for msg in messages]
+    formatted = [formatter(msg) for msg in messages]
     return "\n---\n".join(formatted) if formatted else "没有找到最近的消息"

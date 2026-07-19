@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from .skills.registry import BaseRegistry as BaseRegistry
     from .skills.tools import ToolRegistry as ToolRegistry
 
-__version__: str = "3.8.1"
+__version__: str = "3.9.0"
 
 # symbol -> (module_path, attribute_name)；首次访问时才 importlib 加载
 _LAZY_IMPORTS: dict[str, tuple[str, str]] = {

@@ -6,17 +6,25 @@ from Undefined.attachments import (
     render_message_with_pic_placeholders,
     scope_from_context,
 )
-from Undefined.utils.message_targets import TargetType, parse_positive_int
-from Undefined.utils.message_targets import resolve_message_target
-from Undefined.skills.toolsets.messages.context_utils import mark_message_sent
+from Undefined.utils.message_targets import (
+    DeliveryAddress,
+    parse_delivery_address,
+    parse_positive_int,
+    resolve_delivery_address,
+)
+from Undefined.skills.toolsets.messages.context_utils import (
+    mark_message_sent,
+    normalize_sent_message_id,
+    parse_reply_to,
+)
 
 logger = logging.getLogger(__name__)
 
 
 def _resolve_target(
     args: Dict[str, Any], context: Dict[str, Any]
-) -> tuple[tuple[TargetType, int] | None, str | None]:
-    return resolve_message_target(args, context)
+) -> tuple[DeliveryAddress | None, str | None]:
+    return resolve_delivery_address(args, context)
 
 
 def _is_current_group_target(context: Dict[str, Any], target_id: int) -> bool:
@@ -62,21 +70,8 @@ def _private_access_error(runtime_config: Any, target_id: int) -> str:
     )
 
 
-def _normalize_message_id(value: Any) -> int | None:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value if value > 0 else None
-    if isinstance(value, str):
-        text = value.strip()
-        if text.isdigit():
-            parsed = int(text)
-            return parsed if parsed > 0 else None
-    return None
-
-
 def _format_send_success(message_id: Any) -> str:
-    resolved_message_id = _normalize_message_id(message_id)
+    resolved_message_id = normalize_sent_message_id(message_id)
     if resolved_message_id is not None:
         return f"消息已发送（message_id={resolved_message_id}）"
     return "消息已发送"
@@ -108,9 +103,6 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     history_message = rendered.history_text
     history_attachments = list(rendered.attachments)
 
-    # 解析 reply_to 参数（无效值静默忽略，视为未传）
-    reply_to_id, _ = parse_positive_int(args.get("reply_to"), "reply_to")
-
     runtime_config = context.get("runtime_config")
 
     send_message_callback = context.get("send_message_callback")
@@ -124,12 +116,17 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         )
         return f"发送失败：{target_error or '目标参数错误'}"
 
-    target_type, target_id = target
+    target_type, target_id = target.target_type, target.target_id
+    reply_to_id, reply_error = parse_reply_to(
+        args.get("reply_to"),
+        channel=target.channel,
+    )
+    if reply_error:
+        return f"发送失败：{reply_error}"
     logger.debug(
-        "[发送消息] request_id=%s target_type=%s target_id=%s",
+        "[发送消息] request_id=%s address=%s",
         request_id,
-        target_type,
-        target_id,
+        target.canonical,
     )
 
     if runtime_config is not None:
@@ -142,33 +139,37 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
     if sender:
         try:
-            if target_type == "group":
-                logger.info("[发送消息] 准备发送到群 %s: %s", target_id, message[:100])
-                send_kwargs: dict[str, Any] = {
-                    "reply_to": reply_to_id,
-                    "history_message": history_message,
-                }
-                if history_attachments:
-                    send_kwargs["attachments"] = history_attachments
-                sent_message_id = await sender.send_group_message(
-                    target_id,
+            logger.info("[发送消息] 准备发送到 %s: %s", target.canonical, message[:100])
+            send_kwargs: dict[str, Any] = {
+                "reply_to": reply_to_id,
+                "preferred_temp_group_id": _get_context_group_id(context),
+                "history_message": history_message,
+            }
+            if history_attachments:
+                send_kwargs["attachments"] = history_attachments
+            send_address_message = getattr(sender, "send_address_message", None)
+            if callable(send_address_message):
+                sent_message_id = await send_address_message(
+                    target,
                     message,
                     **send_kwargs,
                 )
-            else:
-                logger.info("[发送消息] 准备发送私聊 %s: %s", target_id, message[:100])
-                send_kwargs = {
-                    "reply_to": reply_to_id,
-                    "preferred_temp_group_id": _get_context_group_id(context),
-                    "history_message": history_message,
-                }
-                if history_attachments:
-                    send_kwargs["attachments"] = history_attachments
+            elif target.channel == "group":
+                group_kwargs = dict(send_kwargs)
+                group_kwargs.pop("preferred_temp_group_id", None)
+                sent_message_id = await sender.send_group_message(
+                    target_id,
+                    message,
+                    **group_kwargs,
+                )
+            elif target.channel == "qq":
                 sent_message_id = await sender.send_private_message(
                     target_id,
                     message,
                     **send_kwargs,
                 )
+            else:
+                raise RuntimeError("当前 sender 不支持微信投递地址")
             mark_message_sent(context)
             await dispatch_pending_file_sends(
                 rendered,
@@ -176,8 +177,11 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                 target_type=target_type,
                 target_id=target_id,
                 registry=attachment_registry,
+                address=target,
             )
             return _format_send_success(sent_message_id)
+        except ValueError as exc:
+            return f"发送失败：{exc}"
         except Exception as e:
             logger.exception(
                 "[发送消息] 发送失败: target_type=%s target_id=%s request_id=%s err=%s",
@@ -211,7 +215,12 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         )
         return "发送失败：当前环境无法发送到目标群聊"
 
-    if send_private_message_callback:
+    current_address, _ = parse_delivery_address(context.get("address"))
+    is_current_address = current_address == target
+    if target.channel == "wechat" and not is_current_address:
+        return "发送失败：当前环境无法发送到指定微信地址"
+
+    if send_private_message_callback and target.channel == "qq":
         try:
             await send_private_message_callback(
                 target_id, message, reply_to=reply_to_id
@@ -227,7 +236,9 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             )
             return "发送失败：消息服务暂时不可用，请稍后重试"
 
-    if send_message_callback and _is_current_private_target(context, target_id):
+    if send_message_callback and (
+        is_current_address or _is_current_private_target(context, target_id)
+    ):
         try:
             await send_message_callback(message, reply_to=reply_to_id)
             mark_message_sent(context)

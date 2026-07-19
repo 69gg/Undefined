@@ -8,7 +8,10 @@ from typing import TYPE_CHECKING, Any
 
 from Undefined.services.coordinator.group import _GROUP_STRATEGY_FOOTER
 from Undefined.services.coordinator.message_ids import collect_message_ids
-from Undefined.services.coordinator.private import _PRIVATE_STRATEGY_FOOTER
+from Undefined.services.coordinator.private import (
+    _PRIVATE_STRATEGY_FOOTER,
+    _WECHAT_DELIVERY_CONSTRAINTS,
+)
 from Undefined.services.message_batcher import BufferedMessage
 
 if TYPE_CHECKING:
@@ -80,7 +83,12 @@ class BatchingMixin:
             segments = [self._format_private_message_segment(it) for it in items]
         else:
             segments = [self._format_group_message_segment(it) for it in items]
-        body = prefix + "\n".join(segments)
+        runtime_constraints = (
+            f"{_WECHAT_DELIVERY_CONSTRAINTS}\n"
+            if is_private and items[0].channel == "wechat"
+            else ""
+        )
+        body = runtime_constraints + prefix + "\n".join(segments)
         if len(items) >= 2:
             body += self._build_continuous_messages_note(items)
         body += _GROUP_STRATEGY_FOOTER if not is_private else _PRIVATE_STRATEGY_FOOTER
@@ -111,6 +119,9 @@ class BatchingMixin:
                 "trigger_message_id": last.trigger_message_id,
                 "message_ids": message_ids,
                 "batched_count": len(items),
+                "channel": first.channel,
+                "address": first.address,
+                "batch_scope": first.scope,
             }
             if first.batch_token is not None:
                 request_data["_message_batcher_token"] = first.batch_token

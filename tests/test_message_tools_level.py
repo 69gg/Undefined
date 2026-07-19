@@ -2,10 +2,14 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 
 from Undefined.skills.toolsets.messages.get_recent_messages.handler import (
     _format_message_xml,
+    execute,
 )
+from Undefined.utils.xml import format_message_xml
 
 
 def test_format_message_xml_group_with_all_attributes() -> None:
@@ -159,3 +163,40 @@ def test_format_message_xml_private_with_level_ignored() -> None:
     assert "role=" not in result
     assert "title=" not in result
     assert "level=" not in result
+
+
+@pytest.mark.asyncio
+async def test_recent_wechat_messages_use_literal_cdata_formatter() -> None:
+    literal_text = '原始 <tag> & "引号"；字面实体 &lt;tag&gt; &amp;'
+
+    async def get_recent_messages(
+        _chat_id: str,
+        _msg_type: str,
+        _start: int,
+        _end: int,
+    ) -> list[dict[str, Any]]:
+        return [
+            {
+                "type": "private",
+                "display_name": "微信用户10001",
+                "user_id": "10001",
+                "chat_id": "10001",
+                "timestamp": "2026-07-16 12:00:00",
+                "message": literal_text,
+                "transport": {
+                    "channel": "wechat",
+                    "address": "wechat:10001",
+                },
+            }
+        ]
+
+    result = await execute(
+        {"chat_id": "10001", "type": "private"},
+        {
+            "get_recent_messages_callback": get_recent_messages,
+            "format_message_xml": format_message_xml,
+        },
+    )
+
+    assert f"<content><![CDATA[{literal_text}]]></content>" in result
+    assert "&amp;lt;tag&amp;gt;" not in result

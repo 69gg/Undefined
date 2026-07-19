@@ -24,6 +24,7 @@ from Undefined.end_summary_storage import EndSummaryStorage
 from Undefined.onebot import OneBotClient
 from Undefined.api import RuntimeAPIContext, RuntimeAPIServer
 from Undefined.token_usage_storage import TokenUsageStorage
+from Undefined.weixin import WeixinService
 from Undefined.utils.paths import (
     CACHE_DIR,
     DATA_DIR,
@@ -179,6 +180,7 @@ async def main() -> None:
     meme_job_queue = None
     retrieval_runtime = None
     runtime_api_server: RuntimeAPIServer | None = None
+    weixin_service: WeixinService | None = None
     _reranker: Any = None
     try:
         init_start = time.perf_counter()
@@ -364,6 +366,12 @@ async def main() -> None:
 
         handler = MessageHandler(config, onebot, ai, faq_storage, task_storage)
         await handler.initialize()
+        weixin_service = WeixinService(
+            config,
+            message_handler=handler,
+            attachment_registry=ai.attachment_registry,
+        )
+        handler.sender.set_weixin_service(weixin_service)
         onebot.set_message_handler(handler.handle_message)
         elapsed = time.perf_counter() - init_start
         logger.info("[初始化] 核心组件加载完成: elapsed=%.3fs", elapsed)
@@ -435,6 +443,9 @@ async def main() -> None:
         config.skills_hot_reload_debounce,
     )
 
+    if weixin_service is not None:
+        await weixin_service.start()
+
     if config.api.enabled:
         # Naga 外部网关集成（需同时开启 nagaagent_mode_enabled 和 naga.enabled）
         naga_store = None
@@ -461,6 +472,7 @@ async def main() -> None:
             naga_store=naga_store,
             message_batcher=handler.message_batcher,
             pipeline_registry=handler.pipeline_registry,
+            weixin_service=weixin_service,
         )
         runtime_api_server = RuntimeAPIServer(
             runtime_api_context,
@@ -492,12 +504,20 @@ async def main() -> None:
         logger.exception("[异常] 运行期间发生未捕获的错误: %s", exc)
     finally:
         logger.info("[清理] 正在关闭机器人并释放资源...")
+        if runtime_api_server is not None:
+            try:
+                await runtime_api_server.stop()
+            except Exception:
+                logger.exception("[清理] RuntimeAPIServer stop 失败")
+        if weixin_service is not None:
+            try:
+                await weixin_service.stop()
+            except Exception:
+                logger.exception("[清理] WeixinService stop 失败")
         try:
             await handler.close()
         except Exception:
             logger.exception("[清理] MessageHandler close 失败")
-        if runtime_api_server is not None:
-            await runtime_api_server.stop()
         if meme_worker is not None:
             await meme_worker.stop()
         if historian_worker:

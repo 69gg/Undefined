@@ -999,7 +999,40 @@ Prompt caching 补充：
 
 ---
 
-### 4.24 `[api]` Runtime API / OpenAPI
+### 4.24 `[weixin]` 微信 ClawBot / iLink 私聊
+
+| 字段 | 默认值 | 说明 |
+|---|---:|---|
+| `enabled` | `false` | 微信 iLink 总开关；关闭时不建立网络连接 |
+| `state_dir` | `data/weixin` | 敏感凭据、游标、绑定、隔离和审计状态目录 |
+| `long_poll_timeout_seconds` | `35.0` | 单次消息长轮询超时 |
+| `stale_token_pause_seconds` | `3600.0` | token 失效提示后的暂停时间 |
+| `retry_delay_seconds` | `2.0` | 普通失败重试间隔 |
+| `failure_backoff_seconds` | `30.0` | 连续失败后的退避时间 |
+| `failures_before_backoff` | `3` | 进入长退避的连续失败阈值 |
+| `media_max_size_mb` | `100` | 单个媒体大小上限 |
+| `media_upload_attempts` | `3` | 媒体上传遇到临时网络或服务端错误时的最大尝试次数，范围 1..10 |
+| `media_upload_concurrency` | `3` | 单条多项目消息并发上传媒体的上限，范围 1..8 |
+| `multi_item_messages_enabled` | `true` | 优先用 iLink 多项目消息模拟微信合并转发 |
+| `multi_item_max_items` | `10` | 单次多项目消息的项目上限，范围 1..20；超出时保持顺序分批 |
+| `login_session_ttl_seconds` | `300.0` | 二维码登录会话有效期 |
+| `privileged_confirmation_ttl_seconds` | `300.0` | 管理员身份二次确认有效期 |
+| `pending_max_records` | `100` | 未知来源隔离记录上限 |
+| `audit_max_records` | `1000` | 帐号管理审计记录上限 |
+
+关键行为：
+- 修改本节后需重启 Bot 主进程；二维码登录只能从已鉴权管理页或 Runtime API 显式发起。
+- 每个微信帐号绑定一个逻辑 QQ 身份，共享私聊权限、历史、认知记忆和模型偏好；物理回复地址为 `wechat:<逻辑QQ号>`。
+- `messages.send_voice` 可将音频附件显式发送为原生语音；WAV 等源音频由 FFmpeg 归一化并编码为 Tencent SILK，因此部署机需在 `PATH` 中提供 `ffmpeg`。普通附件标签不会自动改成语音。
+- iLink 没有 QQ 合并转发卡片的协议合同。默认开启的多项目模式会把转发节点按原顺序放入一个或多个 `sendmessage.item_list` 请求；上游明确拒绝该结构时自动回退逐段发送，超时等结果不确定的失败不会重发，以免重复消息。可通过 `multi_item_messages_enabled=false` 强制使用逐段模式。
+- 未匹配来源在进入命令、历史和 AI 前隔离，隔离记录不保存正文。
+- `state_dir` 中包含登录凭据，不应提交到版本库或通过静态文件服务暴露。
+
+详见 [微信 iLink 接入](wechat-ilink.md)。
+
+---
+
+### 4.25 `[api]` Runtime API / OpenAPI
 
 | 字段 | 默认值 | 说明 |
 |---|---:|---|
@@ -1019,23 +1052,23 @@ Prompt caching 补充：
 
 ---
 
-### 4.25 `[cognitive]` 认知记忆
+### 4.26 `[cognitive]` 认知记忆
 
-### 4.24.1 根配置
+### 4.26.1 根配置
 
 | 字段 | 默认值 | 说明 |
 |---|---:|---|
 | `enabled` | `true` | 开启认知记忆 |
 | `bot_name` | `Undefined` | 史官改写中使用的 bot 名称 |
 
-### 4.24.2 `[cognitive.vector_store]`
+### 4.26.2 `[cognitive.vector_store]`
 
 | 字段 | 默认值 | 说明 |
 |---|---:|---|
 | `path` | `data/cognitive/chromadb` | Chroma 存储目录 |
 | `scheduler_foreground_burst` | `8` | Chroma 前台连续处理上限；达到后若有维护/后台任务，会让出一次执行机会。需重启 |
 
-### 4.24.3 `[cognitive.query]`
+### 4.26.3 `[cognitive.query]`
 
 | 字段 | 默认值 | 说明 |
 |---|---:|---|
@@ -1054,7 +1087,7 @@ Prompt caching 补充：
 | `profile_top_k` | `8` | 侧写检索 top-k |
 | `rerank_candidate_multiplier` | `3` | 候选倍数（`top_k * multiplier`） |
 
-### 4.24.4 `[cognitive.historian]`
+### 4.26.4 `[cognitive.historian]`
 
 | 字段 | 默认值 | 说明 |
 |---|---:|---|
@@ -1065,14 +1098,14 @@ Prompt caching 补充：
 | `poll_interval_seconds` | `1.0` | 队列轮询间隔 |
 | `stale_job_timeout_seconds` | `300.0` | processing 超时回收阈值 |
 
-### 4.24.5 `[cognitive.profile]`
+### 4.26.5 `[cognitive.profile]`
 
 | 字段 | 默认值 | 说明 |
 |---|---:|---|
 | `path` | `data/cognitive/profiles` | 侧写存储目录 |
 | `revision_keep` | `5` | 保留历史版本数量 |
 
-### 4.24.6 `[cognitive.queue]`
+### 4.26.6 `[cognitive.queue]`
 
 | 字段 | 默认值 | 说明 |
 |---|---:|---|
@@ -1084,7 +1117,7 @@ Prompt caching 补充：
 
 ---
 
-### 4.26 `[memes]` 表情包库
+### 4.27 `[memes]` 表情包库
 
 | 字段 | 默认值 | 说明 | 约束/回退 |
 |---|---:|---|---|
@@ -1124,7 +1157,7 @@ Prompt caching 补充：
 - 关键词检索会按空白切分查询词项并构造 FTS phrase，因此中文标签、别名或描述词同样可以走 FTS 召回。
 - `query_default_mode` 只影响 `memes.search_memes` 未显式传 `query_mode` 时的默认值。
 
-### 4.27 `[naga]` Naga 外部网关集成
+### 4.28 `[naga]` Naga 外部网关集成
 
 > **⚠️ 此功能面向与 NagaAgent 对接的高级场景，普通用户不建议开启。**
 

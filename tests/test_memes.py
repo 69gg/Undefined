@@ -199,6 +199,24 @@ async def test_meme_service_search_and_send(tmp_path: Path) -> None:
         }
     ]
 
+    wechat_sender = SimpleNamespace(send_address_message=AsyncMock(return_value=None))
+    wechat_result = await service.send_meme_by_uid(
+        "pic_deadbeef",
+        {
+            "request_type": "private",
+            "user_id": 12345,
+            "address": "wechat:12345",
+            "sender": wechat_sender,
+        },
+    )
+
+    assert wechat_result == "表情包已发送"
+    wechat_sender.send_address_message.assert_awaited_once()
+    assert (
+        wechat_sender.send_address_message.await_args.args[0].canonical
+        == "wechat:12345"
+    )
+
 
 @pytest.mark.asyncio
 async def test_send_meme_by_uid_concurrent_sends_increment_use_count_atomically(

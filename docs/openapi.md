@@ -229,6 +229,7 @@ curl http://127.0.0.1:8788/openapi.json
       "task_name": "每日摘要",
       "mode": "self_instruction",
       "cron": "0 9 * * *",
+      "address": "group:123456",
       "target_type": "group",
       "target_id": 123456,
       "tool_name": "scheduler.call_self",
@@ -257,6 +258,7 @@ curl http://127.0.0.1:8788/openapi.json
 | `task_id` | 创建时可选；不传时自动生成。新建 ID 只允许字母、数字、`_`、`.`、`:`、`-`，最长 96 字符；已有历史任务即使 ID 含中文，也可继续通过详情、更新和删除接口管理 |
 | `task_name` | 可选的可读名称 |
 | `cron_expression` | 标准 5 段 crontab 表达式；也兼容字段名 `cron` |
+| `address` | 推荐的规范投递地址：`qq:<QQ号>`、`group:<群号>` 或 `wechat:<逻辑QQ号>`；`PATCH` 时传 `null` 可清空 |
 | `target_type` | `group` 或 `private`，默认 `group` |
 | `target_id` | 可选的发送目标 ID；`PATCH` 时传 `null` 可清空 |
 | `max_executions` | 可选的最大执行次数；`PATCH` 时传 `null` 可清空 |
@@ -270,8 +272,7 @@ curl http://127.0.0.1:8788/openapi.json
   "cron_expression": "0 9 * * *",
   "mode": "self_instruction",
   "self_instruction": "请总结昨天的待办，并提醒我今天优先处理前三项。",
-  "target_type": "private",
-  "target_id": 12345678
+  "address": "wechat:12345678"
 }
 ```
 
@@ -305,6 +306,22 @@ curl http://127.0.0.1:8788/openapi.json
 - 历史任务如果保存为单个 `scheduler.call_self` 工具调用，列表和详情会按 `self_instruction` 模式返回，并从 `prompt` 回填 `self_instruction`。
 - `tool_args` 必须是 JSON 对象；`tools` 必须是非空数组，最多 20 项。
 - 所有 `/api/v1/schedules*` 路由都遵循 Runtime API 的 `X-Undefined-API-Key` 鉴权。
+
+### 微信 ClawBot / iLink
+
+- `GET /api/v1/weixin`：服务、帐号连接状态和媒体能力。
+- `POST /api/v1/weixin/login`：创建二维码登录会话。Body 为 `{"alias":"primary","qq_id":12345678}`；管理员身份首次提交返回 `409`、警告与 `confirmation_token`，第二次提交同一参数及 token 后继续。
+- `GET /api/v1/weixin/login/{session_id}`：查询扫码、验证码、确认或过期状态。
+- `GET /api/v1/weixin/login/{session_id}/qr.png`：二维码 PNG，响应禁止缓存。
+- `POST /api/v1/weixin/login/{session_id}/refresh`：刷新二维码。
+- `POST /api/v1/weixin/login/{session_id}/verify`：提交 `{"code":"123456"}`。
+- `DELETE /api/v1/weixin/login/{session_id}`：取消未完成的登录会话。
+- `PATCH /api/v1/weixin/accounts/{alias}`：提交 `{"enabled":false}` 启停帐号，或提交 `{"qq_id":12345678}` 改绑逻辑身份；高权限改绑同样要求二次确认。
+- `DELETE /api/v1/weixin/accounts/{alias}`：停止帐号并删除本地绑定凭据。
+- `GET /api/v1/weixin/pending` / `DELETE /api/v1/weixin/pending/{record_id}`：查看或忽略未知来源隔离记录。
+- `GET /api/v1/weixin/audit?limit=100`：读取最近帐号管理审计。
+
+公开响应不会返回 iLink token、account ID、peer ID 或二维码原始载荷。所有端点都遵循 Runtime API Key 鉴权；WebUI 使用 Management 代理。身份映射、安全边界和媒体限制见 [微信 iLink 接入](wechat-ilink.md)。
 
 ### 认知记忆检索 / 侧写
 

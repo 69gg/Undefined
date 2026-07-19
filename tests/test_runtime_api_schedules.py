@@ -53,6 +53,7 @@ class _FakeScheduler:
             "cron": kwargs["cron_expression"],
             "target_id": kwargs.get("target_id"),
             "target_type": kwargs.get("target_type"),
+            "address": kwargs.get("target_address"),
             "max_executions": kwargs.get("max_executions"),
             "tools": kwargs.get("tools"),
             "execution_mode": kwargs.get("execution_mode"),
@@ -70,6 +71,8 @@ class _FakeScheduler:
             task["target_id"] = kwargs.get("target_id")
         if kwargs.get("target_type") is not None:
             task["target_type"] = kwargs.get("target_type")
+        if kwargs.get("target_address_provided"):
+            task["address"] = kwargs.get("target_address")
         if kwargs.get("max_executions_provided"):
             task["max_executions"] = kwargs.get("max_executions")
         if kwargs.get("tool_name") is not None:
@@ -243,6 +246,53 @@ async def test_runtime_schedule_create_supports_self_instruction() -> None:
     add_call = scheduler.add_calls[0]
     assert add_call["tool_args"] == {"prompt": "请总结昨天的待办。"}
     assert add_call["execution_mode"] == "serial"
+
+
+@pytest.mark.asyncio
+async def test_runtime_schedule_create_supports_wechat_address() -> None:
+    scheduler = _FakeScheduler()
+    server = RuntimeAPIServer(_context(scheduler), host="127.0.0.1", port=8788)
+    request = _JsonRequest(
+        _json={
+            "task_id": "task_wechat",
+            "cron_expression": "0 9 * * *",
+            "mode": "single",
+            "tool_name": "messages.send_message",
+            "tool_args": {"message": "早上好"},
+            "address": "wechat:12345",
+        }
+    )
+
+    response = await server._schedules_create_handler(
+        cast(web.Request, cast(Any, request))
+    )
+    payload = _payload(response)
+
+    assert response.status == 201
+    assert scheduler.add_calls[0]["target_address"] == "wechat:12345"
+    assert payload["task"]["address"] == "wechat:12345"
+
+
+@pytest.mark.asyncio
+async def test_runtime_schedule_create_rejects_invalid_address() -> None:
+    scheduler = _FakeScheduler()
+    server = RuntimeAPIServer(_context(scheduler), host="127.0.0.1", port=8788)
+    request = _JsonRequest(
+        _json={
+            "cron_expression": "0 9 * * *",
+            "mode": "single",
+            "tool_name": "get_current_time",
+            "address": "wechat:not-a-number",
+        }
+    )
+
+    response = await server._schedules_create_handler(
+        cast(web.Request, cast(Any, request))
+    )
+
+    assert response.status == 400
+    assert "address" in str(_payload(response)["error"])
+    assert scheduler.add_calls == []
 
 
 @pytest.mark.asyncio

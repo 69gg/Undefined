@@ -26,6 +26,7 @@ from .models import (
     RerankModelConfig,
     SecurityModelConfig,
     VisionModelConfig,
+    WeixinConfig,
 )
 from .toml_io import _load_env, load_toml_data
 
@@ -145,6 +146,7 @@ class Config:
     webui_autostart_bot: bool
     webui_check_updates: bool
     api: APIConfig
+    weixin: WeixinConfig
     # Code Delivery Agent
     code_delivery_enabled: bool
     code_delivery_task_root: str

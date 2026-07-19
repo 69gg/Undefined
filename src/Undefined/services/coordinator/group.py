@@ -19,6 +19,7 @@ from Undefined.utils.xml import (
     escape_xml_attr,
     escape_xml_text_preserving_attachment_tags,
 )
+from Undefined.utils.message_targets import DeliveryAddress
 
 if TYPE_CHECKING:
     from Undefined.config import Config
@@ -77,7 +78,7 @@ class GroupReplyMixin:
         async def _dispatch_grouped_request(
             self, items: list[BufferedMessage]
         ) -> None: ...
-        async def _send_image(self, tid: int, mtype: str, path: str) -> None: ...
+        async def _send_media(self, tid: int, mtype: str, path: str) -> None: ...
 
     async def handle_auto_reply(
         self,
@@ -214,7 +215,7 @@ class GroupReplyMixin:
                 await self.sender.send_private_message(uid, msg, reply_to=reply_to)
 
             async def send_img_cb(tid: int, mtype: str, path: str) -> None:
-                await self._send_image(tid, mtype, path)
+                await self._send_media(tid, mtype, path)
 
             async def send_like_cb(uid: int, times: int = 1) -> None:
                 await self.onebot.send_like(uid, times)
@@ -329,15 +330,30 @@ class GroupReplyMixin:
         text: str,
         is_private: bool = False,
         sender_id: Optional[int] = None,
+        address: DeliveryAddress | None = None,
     ) -> None:
         """当检测到注入攻击时，生成并发送特定的防御性回复"""
         reply = await self.security.generate_injection_response(text)
         if not reply.strip():
             return
         if is_private:
-            await self.sender.send_private_message(tid, reply, auto_history=False)
+            resolved_address = address or DeliveryAddress("qq", tid)
+            await self.sender.send_address_message(
+                resolved_address, reply, auto_history=False
+            )
             await self.history_manager.add_private_message(
-                tid, "<对注入消息的回复>", "Bot", "Bot"
+                tid,
+                "<对注入消息的回复>",
+                "Bot",
+                "Bot",
+                transport=(
+                    {
+                        "channel": resolved_address.channel,
+                        "address": resolved_address.canonical,
+                    }
+                    if resolved_address.channel == "wechat"
+                    else None
+                ),
             )
         else:
             msg = f"[@{sender_id}] {reply}" if sender_id else reply

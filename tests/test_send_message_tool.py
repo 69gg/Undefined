@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
+from jsonschema import Draft202012Validator
 
 from Undefined.attachments import AttachmentRecord, AttachmentRegistry
 from Undefined.context import RequestContext
 from Undefined.skills.toolsets.messages.send_message.handler import execute
+from Undefined.utils import io as async_io
 from Undefined.utils.coerce import was_message_sent
 from Undefined.utils.message_turn import mark_message_sent_this_turn
 
@@ -23,6 +26,101 @@ def _build_runtime_config() -> Any:
 
 def _tool_context(**values: Any) -> dict[str, Any]:
     return {"mark_message_sent_this_turn": mark_message_sent_this_turn, **values}
+
+
+@pytest.mark.asyncio
+async def test_send_message_schema_rejects_mixed_address_parameters() -> None:
+    config_text = await async_io.read_text(
+        Path("src/Undefined/skills/toolsets/messages/send_message/config.json")
+    )
+    assert config_text is not None
+    function = json.loads(config_text)["function"]
+    parameters = function["parameters"]
+    validator = Draft202012Validator(parameters)
+
+    assert "微信文本支持 Markdown" in function["description"]
+    assert "特殊符号和附件标签必须原样填写" in function["description"]
+    assert "message 参数是 JSON 字符串而不是 XML/HTML" in function["description"]
+    assert "错误的 &it;" in function["description"]
+    assert (
+        "<、>、& 等特殊符号须原样填写"
+        not in parameters["properties"]["message"]["description"]
+    )
+    assert (
+        "message 是 JSON 字符串，不需要 XML/HTML 转义"
+        in parameters["properties"]["message"]["description"]
+    )
+    assert "发送前检查并消除 &lt;" in parameters["properties"]["message"]["description"]
+
+    assert validator.is_valid({"message": "hello", "address": "wechat:123"})
+    assert validator.is_valid(
+        {
+            "message": "hello",
+            "address": "wechat:123",
+            "reply_to": "wechat-message+/=1",
+        }
+    )
+    assert not validator.is_valid(
+        {
+            "message": "hello",
+            "address": "wechat:123",
+            "reply_to": "invalid message id",
+        }
+    )
+    assert validator.is_valid(
+        {
+            "message": "hello",
+            "target_type": "private",
+            "target_id": 123,
+        }
+    )
+    assert not validator.is_valid(
+        {
+            "message": "hello",
+            "address": "wechat:123",
+            "target_type": "private",
+        }
+    )
+    assert not validator.is_valid(
+        {
+            "message": "hello",
+            "address": "wechat:123",
+            "target_id": 123,
+        }
+    )
+
+
+@pytest.mark.asyncio
+async def test_send_message_wechat_passes_string_reply_id_to_address_sender() -> None:
+    sender = SimpleNamespace(
+        send_address_message=AsyncMock(return_value="client-message-1"),
+    )
+    context: dict[str, Any] = _tool_context(
+        request_type="private",
+        user_id=12345,
+        sender_id=12345,
+        channel="wechat",
+        address="wechat:12345",
+        request_id="req-wechat-reply",
+        runtime_config=_build_runtime_config(),
+        sender=sender,
+    )
+
+    result = await execute(
+        {
+            "message": "微信引用回复",
+            "reply_to": "wechat-message+/=1",
+        },
+        context,
+    )
+
+    assert result == "消息已发送（message_id=client-message-1）"
+    sender.send_address_message.assert_awaited_once()
+    send_call = sender.send_address_message.await_args
+    assert send_call is not None
+    assert send_call.args[0].canonical == "wechat:12345"
+    assert send_call.args[1] == "微信引用回复"
+    assert send_call.kwargs["reply_to"] == "wechat-message+/=1"
 
 
 @pytest.mark.asyncio

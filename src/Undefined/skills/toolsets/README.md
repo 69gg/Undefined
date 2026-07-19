@@ -152,6 +152,11 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
 - `scheduler.update_schedule_task`: 更新定时任务
 - `scheduler.create_schedule_task` / `scheduler.update_schedule_task` 支持 `self_instruction` 参数，可在未来时刻调用 AI 自己执行一条延迟指令
 
+### Messages（消息）
+
+- `messages.send_message`: 发送文本、图片或普通文件附件
+- `messages.send_voice`: 将当前会话可访问的音频附件 UID 显式作为语音发送；QQ 使用 `CQ:record`，微信使用原生 iLink 语音
+
 ### Group Analysis（群聊深度分析）
 
 - `group_analysis.member_structure`: 统计成员结构事实

@@ -15,8 +15,13 @@ from Undefined.skills.anthropic_skills import AnthropicSkillRegistry
 from Undefined.skills.tools import ToolRegistry
 from Undefined.utils.io import write_bytes
 from Undefined.utils.logging import log_debug_json, redact_string
+from Undefined.utils.message_targets import (
+    parse_delivery_address,
+    resolve_delivery_address,
+)
 from Undefined.utils.message_turn import mark_message_sent_this_turn
 from Undefined.utils.paths import DOWNLOAD_CACHE_DIR, ensure_dir
+from Undefined.utils.xml import format_message_xml
 
 logger = logging.getLogger(__name__)
 
@@ -237,6 +242,9 @@ class ToolManager:
         context.setdefault("download_cache_dir", DOWNLOAD_CACHE_DIR)
         context.setdefault("ensure_dir_fn", ensure_dir)
         context.setdefault("write_bytes_fn", write_bytes)
+        context.setdefault("parse_delivery_address", parse_delivery_address)
+        context.setdefault("resolve_delivery_address", resolve_delivery_address)
+        context.setdefault("format_message_xml", format_message_xml)
         context.setdefault("mark_message_sent_this_turn", mark_message_sent_this_turn)
 
         agents_schema = self.agent_registry.get_agents_schema()

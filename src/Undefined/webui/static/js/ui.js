@@ -27,6 +27,12 @@ function updateI18N() {
     if (state.updateDialogPayload && typeof renderUpdateDialog === "function") {
         renderUpdateDialog(state.updateDialogPayload);
     }
+    if (
+        window.WeixinController &&
+        typeof window.WeixinController.onLanguageChanged === "function"
+    ) {
+        window.WeixinController.onLanguageChanged();
+    }
 }
 
 function updateToggleLabels() {

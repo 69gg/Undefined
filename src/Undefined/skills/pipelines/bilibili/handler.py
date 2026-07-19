@@ -35,8 +35,12 @@ async def process(
     context: PipelineContext,
 ) -> None:
     handler = context["handle_bilibili_extract"]
-    await handler(
+    args = (
         int(context["target_id"]),
         list(detection.items),
         str(context["target_type"]),
     )
+    if context.get("address") is None:
+        await handler(*args)
+    else:
+        await handler(*args, context["sender"])

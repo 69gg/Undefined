@@ -10,6 +10,7 @@ import logging
 import os
 from pathlib import Path
 import random
+import time
 from typing import Any, Coroutine, Literal
 
 import Undefined.handlers as handlers_module
@@ -48,7 +49,9 @@ from Undefined.utils.logging import log_debug_json, redact_string
 from Undefined.utils.queue_intervals import build_model_queue_intervals
 from Undefined.utils.resources import resolve_resource_path
 from Undefined.utils.scheduler import TaskScheduler
-from Undefined.utils.sender import MessageSender
+from Undefined.utils.message_reply import GENERIC_REPLY_PLACEHOLDER, ReplyContext
+from Undefined.utils.message_targets import DeliveryAddress
+from Undefined.utils.sender import AddressBoundSender, MessageSender
 
 logger = logging.getLogger(__name__)
 
@@ -737,6 +740,255 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
             trigger_message_id=trigger_message_id,
         )
 
+    async def handle_weixin_private_message(
+        self,
+        *,
+        qq_id: int,
+        text: str,
+        message_content: list[dict[str, Any]],
+        attachments: list[dict[str, str]],
+        sender_name: str,
+        message_id: str | None,
+        account_alias: str,
+        created_at_ms: int | None = None,
+        reply_context: ReplyContext | None = None,
+    ) -> None:
+        """处理已完成绑定校验的微信私聊消息。"""
+        if not self.config.is_private_allowed(qq_id):
+            return
+        address = DeliveryAddress("wechat", qq_id)
+        route_sender = AddressBoundSender(self.sender, address)
+        received_at_ms = (
+            created_at_ms
+            if created_at_ms is not None and created_at_ms > 0
+            else time.time_ns() // 1_000_000
+        )
+        reply_context = await self._restore_weixin_reply_context(
+            qq_id=qq_id,
+            address=address,
+            current_message_id=message_id,
+            current_received_at_ms=received_at_ms,
+            reply_context=reply_context,
+        )
+        parsed_content = append_attachment_text(text, attachments)
+        logger.info(
+            "[微信私聊] 逻辑QQ=%s 帐号=%s 内容=%s",
+            qq_id,
+            account_alias,
+            redact_string(text)[:100],
+        )
+        transport: dict[str, Any] = {
+            "channel": "wechat",
+            "address": address.canonical,
+            "account_alias": account_alias,
+            "direction": "inbound",
+        }
+        if created_at_ms is not None and created_at_ms > 0:
+            transport["created_at_ms"] = created_at_ms
+        await self.history_manager.add_private_message(
+            user_id=qq_id,
+            text_content=parsed_content,
+            display_name=sender_name,
+            user_name=sender_name,
+            message_id=message_id,
+            attachments=attachments,
+            transport=transport,
+            reply_context=reply_context,
+        )
+
+        self._schedule_meme_ingest(
+            attachments=attachments,
+            chat_type="private",
+            chat_id=qq_id,
+            sender_id=qq_id,
+            message_id=None,
+            scope_key=build_attachment_scope(user_id=qq_id, request_type="private"),
+        )
+        if not self.config.should_process_private_message():
+            return
+
+        if (
+            getattr(self.config, "model_pool_enabled", False)
+            and _is_private_model_pool_control_text(text)
+        ) and await self.ai_coordinator.model_pool.handle_private_message(
+            qq_id,
+            text,
+            sender=route_sender,
+        ):
+            return
+
+        command = self.command_dispatcher.parse_command(text)
+        batch_scope = f"private:{address.canonical}"
+        if command:
+            await self._flush_command_buffer(scope=batch_scope, sender_id=qq_id)
+
+            async def send_private_callback(user_id: int, message: str) -> None:
+                if user_id == qq_id:
+                    await self.sender.send_address_message(address, message)
+                else:
+                    await self.sender.send_private_message(user_id, message)
+
+            await self.command_dispatcher.dispatch_private(
+                user_id=qq_id,
+                sender_id=qq_id,
+                command=command,
+                send_private_callback=send_private_callback,
+                command_sender=route_sender,
+            )
+            return
+
+        await self._run_pipelines(
+            target_id=qq_id,
+            target_type="private",
+            text=text,
+            message_content=message_content,
+            address=address,
+        )
+        await self.ai_coordinator.handle_private_reply(
+            qq_id,
+            text,
+            message_content,
+            attachments=attachments,
+            sender_name=sender_name,
+            trigger_message_id=message_id,
+            channel="wechat",
+            address=address.canonical,
+            batch_scope=batch_scope,
+            reply_context=reply_context,
+        )
+
+    async def _restore_weixin_reply_context(
+        self,
+        *,
+        qq_id: int,
+        address: DeliveryAddress,
+        current_message_id: str | None,
+        current_received_at_ms: int,
+        reply_context: ReplyContext | None,
+    ) -> ReplyContext | None:
+        """从同一微信路由历史补全上游省略的引用摘要。"""
+        if (
+            reply_context is None
+            or not reply_context.message_id
+            or reply_context.text.strip() not in {"", GENERIC_REPLY_PLACEHOLDER}
+        ):
+            return reply_context
+
+        record = await self.history_manager.find_private_message_by_id(
+            qq_id,
+            reply_context.message_id,
+            channel="wechat",
+            address=address.canonical,
+        )
+        if record is None:
+            candidates = (
+                await self.history_manager.find_private_bot_messages_for_reference(
+                    qq_id,
+                    reply_context.message_id,
+                    current_message_id=current_message_id,
+                    current_received_at_ms=current_received_at_ms,
+                    reference_age_ms=reply_context.source_age_ms,
+                    channel="wechat",
+                    address=address.canonical,
+                )
+            )
+            if not candidates:
+                logger.info(
+                    "[微信私聊] 未能补全当前路由引用: qq=%s address=%s message=%s",
+                    qq_id,
+                    address.canonical,
+                    reply_context.message_id,
+                )
+                return reply_context
+            restored = self._reply_context_from_history_candidates(
+                reply_context,
+                candidates,
+            )
+            if restored is None:
+                return reply_context
+            logger.info(
+                "[微信私聊] 已按发送时间补全机器人引用: qq=%s address=%s "
+                "message=%s candidates=%s",
+                qq_id,
+                address.canonical,
+                reply_context.message_id,
+                len(candidates),
+            )
+            return restored
+
+        restored = ReplyContext.from_mapping(
+            {
+                "title": record.get("display_name", ""),
+                "message_id": reply_context.message_id,
+                "message": record.get("message", ""),
+                "attachments": record.get("attachments", []),
+            }
+        )
+        if restored is None or (
+            restored.text.strip() in {"", GENERIC_REPLY_PLACEHOLDER}
+            and not restored.attachments
+        ):
+            return reply_context
+
+        title = reply_context.title
+        if not title or title == "引用消息":
+            title = restored.title or title
+        logger.info(
+            "[微信私聊] 已按消息 ID 补全引用: qq=%s address=%s message=%s",
+            qq_id,
+            address.canonical,
+            reply_context.message_id,
+        )
+        return ReplyContext(
+            title=title,
+            message_id=reply_context.message_id,
+            text=restored.text or reply_context.text,
+            attachments=reply_context.attachments or restored.attachments,
+        )
+
+    @staticmethod
+    def _reply_context_from_history_candidates(
+        reply_context: ReplyContext,
+        records: list[dict[str, Any]],
+    ) -> ReplyContext | None:
+        restored: list[ReplyContext] = []
+        for record in records:
+            context = ReplyContext.from_mapping(
+                {
+                    "title": record.get("display_name", ""),
+                    "message_id": reply_context.message_id,
+                    "message": record.get("message", ""),
+                    "attachments": record.get("attachments", []),
+                }
+            )
+            if context is not None and (
+                context.text.strip() not in {"", GENERIC_REPLY_PLACEHOLDER}
+                or context.attachments
+            ):
+                restored.append(context)
+        if not restored:
+            return None
+
+        attachments_by_uid: dict[str, dict[str, str]] = {}
+        for context in restored:
+            for attachment in context.attachments:
+                attachments_by_uid.setdefault(attachment["uid"], attachment)
+        if len(restored) == 1:
+            text = restored[0].text
+            title = restored[0].title or reply_context.title
+        else:
+            text = "\n\n".join(
+                f"[同一发送时刻候选 {index}/{len(restored)}]\n{context.text}"
+                for index, context in enumerate(restored, start=1)
+            )
+            title = "机器人消息（iLink 未返回精确片段）"
+        return ReplyContext(
+            title=title,
+            message_id=reply_context.message_id,
+            text=text,
+            attachments=tuple(attachments_by_uid.values()),
+        )
+
     async def _handle_group_message(self, event: dict[str, Any]) -> None:
         """处理群聊消息事件。"""
         group_id: int = event.get("group_id", 0)
@@ -984,6 +1236,7 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
         target_type: Literal["group", "private"],
         text: str,
         message_content: list[dict[str, Any]],
+        address: DeliveryAddress | None = None,
     ) -> bool:
         """并行检测并处理所有命中的自动处理管线。"""
         if not getattr(self, "_pipelines_initialized", False):
@@ -994,6 +1247,7 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
             target_type=target_type,
             text=text,
             message_content=message_content,
+            address=address,
         )
         detections = await self.pipeline_registry.run(context)
         return bool(detections)

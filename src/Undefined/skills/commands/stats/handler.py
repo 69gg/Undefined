@@ -15,11 +15,26 @@ async def execute(args: list[str], context: CommandContext) -> None:
                 await send_private(user_id, message)
 
             send_message = _send_message
+        send_forward = getattr(context.sender, "send_private_forward_message", None)
+        supports_forward = bool(
+            getattr(
+                context.sender,
+                "supports_private_forward",
+                callable(send_forward),
+            )
+        )
         await context.dispatcher._handle_stats_private(
             user_id,
             context.sender_id,
             args,
             send_message=send_message,
+            send_forward=(
+                send_forward
+                if supports_forward
+                and callable(send_forward)
+                and not context.is_webui_session
+                else None
+            ),
             is_webui_session=bool(context.is_webui_session),
         )
         return

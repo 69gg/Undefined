@@ -154,6 +154,12 @@ function refreshUI() {
             ) {
                 window.SchedulesController.onTabActivated(state.tab);
             }
+            if (
+                window.WeixinController &&
+                typeof window.WeixinController.onTabActivated === "function"
+            ) {
+                window.WeixinController.onTabActivated(state.tab);
+            }
         } else {
             get("appContent").style.display = "none";
             state.configLoaded = false;
@@ -238,6 +244,12 @@ function switchTab(tab) {
         typeof window.SchedulesController.onTabActivated === "function"
     ) {
         window.SchedulesController.onTabActivated(tab);
+    }
+    if (
+        window.WeixinController &&
+        typeof window.WeixinController.onTabActivated === "function"
+    ) {
+        window.WeixinController.onTabActivated(tab);
     }
     if (tab === "about") {
         maybeLoadAboutChangelog();
@@ -363,10 +375,16 @@ const _cmdCommands = [
         keys: "7",
     },
     {
+        id: "weixin",
+        label: () => t("cmd.tab_weixin"),
+        action: () => switchTab("weixin"),
+        keys: "8",
+    },
+    {
         id: "cognitive",
         label: () => t("cmd.tab_cognitive"),
         action: () => switchTab("cognitive"),
-        keys: "8",
+        keys: "9",
     },
     {
         id: "refresh",
@@ -514,6 +532,12 @@ async function init() {
         typeof window.SchedulesController.init === "function"
     ) {
         window.SchedulesController.init();
+    }
+    if (
+        window.WeixinController &&
+        typeof window.WeixinController.init === "function"
+    ) {
+        window.WeixinController.init();
     }
 
     document.querySelectorAll('[data-action="toggle-lang"]').forEach((btn) => {

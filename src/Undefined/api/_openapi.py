@@ -221,6 +221,45 @@ def _build_openapi_spec(ctx: RuntimeAPIContext, request: web.Request) -> dict[st
                 ),
             }
         },
+        "/api/v1/weixin": {
+            "get": {"summary": "Get WeChat iLink runtime and account status"}
+        },
+        "/api/v1/weixin/login": {
+            "post": {
+                "summary": "Start a WeChat QR login",
+                "description": (
+                    "Binds one ClawBot account to a logical QQ identity. "
+                    "Privileged QQ identities require a second request with the "
+                    "returned confirmation_token."
+                ),
+            }
+        },
+        "/api/v1/weixin/login/{session_id}": {
+            "get": {"summary": "Poll a WeChat QR login"},
+            "delete": {"summary": "Cancel a WeChat QR login"},
+        },
+        "/api/v1/weixin/login/{session_id}/qr.png": {
+            "get": {"summary": "Render a temporary WeChat login QR code"}
+        },
+        "/api/v1/weixin/login/{session_id}/refresh": {
+            "post": {"summary": "Refresh a WeChat login QR code"}
+        },
+        "/api/v1/weixin/login/{session_id}/verify": {
+            "post": {"summary": "Submit a WeChat login verification code"}
+        },
+        "/api/v1/weixin/accounts/{alias}": {
+            "patch": {"summary": "Enable, disable, or rebind a WeChat account"},
+            "delete": {"summary": "Remove a local WeChat account binding"},
+        },
+        "/api/v1/weixin/pending": {
+            "get": {"summary": "List quarantined unknown WeChat peers"}
+        },
+        "/api/v1/weixin/pending/{record_id}": {
+            "delete": {"summary": "Dismiss a quarantined WeChat peer"}
+        },
+        "/api/v1/weixin/audit": {
+            "get": {"summary": "List local WeChat binding audit entries"}
+        },
     }
 
     if naga_routes_enabled:

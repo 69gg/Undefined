@@ -104,10 +104,11 @@ handler.py 需要导出 `detect` 和 `process` 两个顶层异步函数。
 | key | 类型 | 说明 |
 |-----|------|------|
 | `config` | object | 运行时配置对象（含 `xxx_auto_extract_enabled`、`is_xxx_auto_extract_allowed_group/private` 等方法） |
-| `sender` | object | 消息发送器 |
+| `sender` | object | 当前私聊可能已绑定规范投递地址的消息发送器 |
 | `onebot` | object | OneBot 客户端 |
 | `target_id` | int | 群号或私聊 QQ 号 |
 | `target_type` | str | `"group"` 或 `"private"` |
+| `address` | DeliveryAddress / null | 当前物理投递地址；微信私聊为 `wechat:<逻辑QQ号>`，管线发送结果时应优先复用 `sender` |
 | `text` | str | 提取的纯文本内容 |
 | `message_content` | list[dict] | 原始消息段列表 |
 | `extract_xxx_ids` | callable | 提取器函数 |

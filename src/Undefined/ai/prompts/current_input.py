@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import html
+from dataclasses import dataclass
 from typing import Any
 
 from Undefined.ai.prompts.constants import CURRENT_MESSAGE_RE, XML_ATTR_RE
+from Undefined.utils.xml import decode_xml_content_text
 
 
 @dataclass(frozen=True)
@@ -36,7 +37,7 @@ def extract_current_message_signatures(
     signatures: list[CurrentMessageSignature] = []
     for matched in CURRENT_MESSAGE_RE.finditer(str(question or "")):
         attrs = _parse_attrs(str(matched.group("attrs") or ""))
-        content = html.unescape(str(matched.group("content") or "")).strip()
+        content = decode_xml_content_text(matched.group("content")).strip()
         signatures.append(
             CurrentMessageSignature(
                 sender_id=attrs.get("sender_id", ""),
