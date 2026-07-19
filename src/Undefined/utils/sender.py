@@ -92,7 +92,7 @@ def _coerce_qq_reply_id(value: int | str | None) -> int | None:
     return parsed
 
 
-def _should_fallback_weixin_reference(exc: BaseException) -> bool:
+def is_definitive_weixin_delivery_rejection(exc: BaseException) -> bool:
     if isinstance(exc, SessionPausedError):
         return False
     if isinstance(exc, UnsupportedCapabilityError):
@@ -658,7 +658,7 @@ class MessageSender:
                             reference=reference,
                         )
                     except Exception as exc:
-                        if not _should_fallback_weixin_reference(exc):
+                        if not is_definitive_weixin_delivery_rejection(exc):
                             raise
                         logger.warning(
                             "[微信引用] 原生引用被明确拒绝，降级为 Markdown: "
@@ -694,7 +694,7 @@ class MessageSender:
                         item_reference=reference,
                     )
                 except Exception as exc:
-                    if not _should_fallback_weixin_reference(exc):
+                    if not is_definitive_weixin_delivery_rejection(exc):
                         raise
                     logger.warning(
                         "[微信引用] 原生媒体引用被明确拒绝，降级为 Markdown: "
@@ -1940,4 +1940,4 @@ class AddressBoundSender:
 
     @staticmethod
     def _is_definitive_multi_item_rejection(exc: Exception) -> bool:
-        return _should_fallback_weixin_reference(exc)
+        return is_definitive_weixin_delivery_rejection(exc)

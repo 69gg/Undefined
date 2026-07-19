@@ -16,9 +16,17 @@ from Undefined.onebot import (
     get_message_sender_id,
     parse_message_time,
 )
-from Undefined.utils.sender import MessageSender
+from Undefined.utils.sender import (
+    MessageSender,
+    is_definitive_weixin_delivery_rejection,
+)
 from Undefined.utils import io
-from Undefined.services.commands.context import CommandContext
+from Undefined.services.commands.context import (
+    CommandContext,
+    CommandSender,
+    PrivateForwardCallback,
+    PrivateMessageCallback,
+)
 from Undefined.services.commands.registry import (
     CommandRateLimit,
     CommandRegistry,
@@ -82,21 +90,40 @@ class _PrivateCommandSenderProxy:
     def __init__(
         self,
         user_id: int,
-        send_private_message: Callable[[int, str], Awaitable[Any]],
-        send_private_forward_message: Callable[..., Awaitable[None]] | None = None,
+        send_private_message: PrivateMessageCallback,
+        send_private_forward_message: PrivateForwardCallback | None = None,
     ) -> None:
         self._user_id = user_id
         self._send_private_message = send_private_message
         self._send_private_forward_message = send_private_forward_message
 
+    @property
+    def supports_private_forward(self) -> bool:
+        return self._send_private_forward_message is not None
+
     async def send_group_message(
         self,
         group_id: int,
         message: str,
-        mark_sent: bool = False,
-    ) -> None:
-        _ = group_id, mark_sent
+        auto_history: bool = True,
+        history_prefix: str = "",
+        *,
+        mark_sent: bool = True,
+        reply_to: int | None = None,
+        history_message: str | None = None,
+        attachments: list[dict[str, str]] | None = None,
+    ) -> int | None:
+        _ = (
+            group_id,
+            auto_history,
+            history_prefix,
+            mark_sent,
+            reply_to,
+            history_message,
+            attachments,
+        )
         await self._send_private_message(self._user_id, message)
+        return None
 
     async def send_private_message(
         self,
@@ -105,9 +132,22 @@ class _PrivateCommandSenderProxy:
         auto_history: bool = True,
         *,
         mark_sent: bool = True,
-    ) -> None:
-        _ = user_id, auto_history, mark_sent
+        reply_to: int | None = None,
+        preferred_temp_group_id: int | None = None,
+        history_message: str | None = None,
+        attachments: list[dict[str, str]] | None = None,
+    ) -> int | str | None:
+        _ = (
+            user_id,
+            auto_history,
+            mark_sent,
+            reply_to,
+            preferred_temp_group_id,
+            history_message,
+            attachments,
+        )
         await self._send_private_message(self._user_id, message)
+        return None
 
     async def send_private_forward_message(
         self,
@@ -297,9 +337,6 @@ class CommandDispatcher:
                 )
                 return
 
-            img_dir = await self._create_stats_render_dir()
-            await self._generate_stats_charts(summary, img_dir, days)
-
             ai_analysis = ""
             if enable_ai_analysis:
                 ai_analysis = await self._run_stats_ai_analysis(
@@ -309,6 +346,9 @@ class CommandDispatcher:
                     summary=summary,
                     days=days,
                 )
+
+            img_dir = await self._create_stats_render_dir()
+            await self._generate_stats_charts(summary, img_dir, days)
 
             forward_messages = await self._build_stats_forward_nodes(
                 summary, img_dir, days, ai_analysis
@@ -385,7 +425,7 @@ class CommandDispatcher:
         sender_id: int,
         args: list[str],
         send_message: Callable[[str], Awaitable[None]] | None = None,
-        send_forward: Callable[..., Awaitable[None]] | None = None,
+        send_forward: PrivateForwardCallback | None = None,
         *,
         is_webui_session: bool = False,
     ) -> None:
@@ -445,6 +485,14 @@ class CommandDispatcher:
                         ),
                     )
                 except Exception as exc:
+                    if not is_definitive_weixin_delivery_rejection(exc):
+                        logger.exception(
+                            "[Stats] 私聊图表投递结果不确定，不执行二次发送: "
+                            "user=%s err=%s",
+                            user_id,
+                            exc,
+                        )
+                        return
                     logger.exception(
                         "[Stats] 私聊图表投递失败，回退文本摘要: user=%s err=%s",
                         user_id,
@@ -563,7 +611,7 @@ class CommandDispatcher:
                 scope_id,
                 wait_timeout,
             )
-            return "AI 分析超时，已先发送图表与汇总数据。"
+            return "AI 分析在当前动态等待期限内超时。"
         finally:
             self._stats_analysis_events.pop(request_id, None)
             self._stats_analysis_results.pop(request_id, None)
@@ -1073,9 +1121,9 @@ class CommandDispatcher:
         user_id: int,
         sender_id: int,
         command: dict[str, Any],
-        send_private_callback: Callable[[int, str], Awaitable[None]] | None = None,
+        send_private_callback: PrivateMessageCallback | None = None,
         is_webui_session: bool = False,
-        command_sender: Any | None = None,
+        command_sender: object | None = None,
     ) -> None:
         await self._dispatch_internal(
             scope="private",
@@ -1096,14 +1144,38 @@ class CommandDispatcher:
         sender_id: int,
         command: dict[str, Any],
         user_id: int | None,
-        send_private_callback: Callable[[int, str], Awaitable[None]] | None,
+        send_private_callback: PrivateMessageCallback | None,
         is_webui_session: bool = False,
-        command_sender: Any | None = None,
+        command_sender: object | None = None,
     ) -> None:
         """统一分发入口：支持群聊与私聊。"""
         start_time = time.perf_counter()
         cmd_name = str(command["name"])
         cmd_args = command["args"]
+
+        private_delivery: PrivateMessageCallback | None = None
+        private_forward: PrivateForwardCallback | None = None
+        if scope == "private":
+            if command_sender is not None:
+                route_sender = command_sender
+                route_private = getattr(route_sender, "send_private_message", None)
+                if not callable(route_private):
+                    raise TypeError("私聊命令发送器缺少 send_private_message")
+                private_delivery = cast(PrivateMessageCallback, route_private)
+                route_forward = getattr(
+                    route_sender, "send_private_forward_message", None
+                )
+                if callable(route_forward):
+                    private_forward = cast(PrivateForwardCallback, route_forward)
+            elif send_private_callback is not None:
+                private_delivery = send_private_callback
+            else:
+                private_delivery = self.sender.send_private_message
+                default_forward = getattr(
+                    self.sender, "send_private_forward_message", None
+                )
+                if callable(default_forward):
+                    private_forward = cast(PrivateForwardCallback, default_forward)
 
         if scope == "private":
             logger.debug(
@@ -1129,11 +1201,9 @@ class CommandDispatcher:
                 if user_id is None:
                     logger.warning("[命令] 私聊命令无法发送：user_id 为 None")
                     return
-                target_user_id = int(user_id)
-                if send_private_callback is not None:
-                    await send_private_callback(target_user_id, message)
-                else:
-                    await self.sender.send_private_message(target_user_id, message)
+                if private_delivery is None:
+                    raise RuntimeError("私聊命令发送器尚未解析")
+                await private_delivery(int(user_id), message)
             else:
                 await self.sender.send_group_message(group_id, message)
 
@@ -1240,36 +1310,21 @@ class CommandDispatcher:
         logger.debug("[命令] 速率限制通过: cmd=/%s sender=%s", meta.name, sender_id)
 
         if scope == "private":
-            route_sender = command_sender or self.sender
-            route_private = getattr(route_sender, "send_private_message", None)
-            if send_private_callback is not None:
-                private_delivery: Callable[[int, str], Awaitable[Any]] = (
-                    send_private_callback
-                )
-            else:
-                if not callable(route_private):
-                    raise TypeError("私聊命令发送器缺少 send_private_message")
-                private_delivery = cast(
-                    Callable[[int, str], Awaitable[Any]], route_private
-                )
-            send_private_forward = (
-                getattr(route_sender, "send_private_forward_message", None)
-                if command_sender is not None or send_private_callback is None
-                else None
-            )
-            command_sender = _PrivateCommandSenderProxy(
+            if private_delivery is None:
+                raise RuntimeError("私聊命令发送器尚未解析")
+            context_sender: CommandSender = _PrivateCommandSenderProxy(
                 int(user_id or 0),
                 private_delivery,
-                (send_private_forward if callable(send_private_forward) else None),
+                private_forward,
             )
         else:
-            command_sender = self.sender
+            context_sender = self.sender
 
         context = CommandContext(
             group_id=group_id,
             sender_id=sender_id,
             config=self.config,
-            sender=command_sender,
+            sender=context_sender,
             ai=self.ai,
             faq_storage=self.faq_storage,
             onebot=self.onebot,

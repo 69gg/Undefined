@@ -6,6 +6,11 @@ from typing import Any, cast
 from unittest.mock import AsyncMock
 
 import pytest
+from weixin_ilink_client import (
+    HttpError,
+    RequestTimeoutError,
+    UnsupportedCapabilityError,
+)
 
 import Undefined.services.command as command_module
 from Undefined.services.command import CommandDispatcher
@@ -92,15 +97,73 @@ async def test_private_stats_uses_one_forward_delivery(
     assert not await async_io.exists(render_dir)
 
 
-@pytest.mark.asyncio
-async def test_private_stats_bundle_failure_keeps_text_summary(
+async def test_group_stats_waits_for_analysis_before_chart_rendering(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(command_module, "_MATPLOTLIB_AVAILABLE", True)
+    dispatcher, render_dir = await _dispatcher(tmp_path)
+    events: list[str] = []
+
+    async def run_analysis(**_kwargs: Any) -> str:
+        events.append("analysis")
+        return "analysis result"
+
+    original_generate = dispatcher._generate_stats_charts
+
+    async def generate_charts(
+        summary: dict[str, Any],
+        target: Path,
+        days: int,
+    ) -> None:
+        events.append("render")
+        await original_generate(summary, target, days)
+
+    dynamic_dispatcher = cast(Any, dispatcher)
+    dynamic_dispatcher.sender = SimpleNamespace(send_group_message=AsyncMock())
+    dynamic_dispatcher._run_stats_ai_analysis = run_analysis
+    dynamic_dispatcher._generate_stats_charts = generate_charts
+    dynamic_dispatcher._build_stats_forward_nodes = AsyncMock(return_value=[])
+    dynamic_dispatcher._send_group_forward_message = AsyncMock()
+
+    await dispatcher._handle_stats(10000, 12345, ["7d", "--ai"])
+
+    assert events == ["analysis", "render"]
+    assert not await async_io.exists(render_dir)
+
+
+async def test_private_stats_callback_only_channel_sends_chart_sequence(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(command_module, "_MATPLOTLIB_AVAILABLE", True)
     dispatcher, render_dir = await _dispatcher(tmp_path)
     send_message = AsyncMock()
-    send_forward = AsyncMock(side_effect=RuntimeError("upload failed"))
+
+    await dispatcher._handle_stats_private(
+        12345,
+        12345,
+        ["7d"],
+        send_message=send_message,
+    )
+
+    assert send_message.await_count == 6
+    messages = [str(call.args[0]) for call in send_message.await_args_list]
+    assert messages[0] == "📊 最近 7 天的 Token 使用统计："
+    assert all(message.startswith("[CQ:image,file=") for message in messages[1:5])
+    assert "总调用次数: 2" in messages[-1]
+    assert not await async_io.exists(render_dir)
+
+
+@pytest.mark.asyncio
+async def test_private_stats_definitive_rejection_keeps_text_summary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(command_module, "_MATPLOTLIB_AVAILABLE", True)
+    dispatcher, render_dir = await _dispatcher(tmp_path)
+    send_message = AsyncMock()
+    send_forward = AsyncMock(side_effect=UnsupportedCapabilityError("item_list"))
 
     await dispatcher._handle_stats_private(
         12345,
@@ -116,4 +179,34 @@ async def test_private_stats_bundle_failure_keeps_text_summary(
     message = str(call.args[0])
     assert "总调用次数: 2" in message
     assert "图表发送失败" in message
+    assert not await async_io.exists(render_dir)
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        pytest.param(RequestTimeoutError("sendmessage timed out"), id="timeout"),
+        pytest.param(HttpError(429, "sendmessage"), id="rate-limit"),
+    ],
+)
+async def test_private_stats_ambiguous_failure_does_not_send_fallback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    error: Exception,
+) -> None:
+    monkeypatch.setattr(command_module, "_MATPLOTLIB_AVAILABLE", True)
+    dispatcher, render_dir = await _dispatcher(tmp_path)
+    send_message = AsyncMock()
+    send_forward = AsyncMock(side_effect=error)
+
+    await dispatcher._handle_stats_private(
+        12345,
+        12345,
+        ["7d"],
+        send_message=send_message,
+        send_forward=send_forward,
+    )
+
+    send_forward.assert_awaited_once()
+    send_message.assert_not_awaited()
     assert not await async_io.exists(render_dir)

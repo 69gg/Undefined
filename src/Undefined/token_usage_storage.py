@@ -7,7 +7,6 @@ import asyncio
 import gzip
 import json
 import logging
-import os
 import re
 import shutil
 import time
@@ -17,32 +16,10 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
 
+from Undefined.utils import io
+from Undefined.utils.file_lock import FileLock
 
 logger = logging.getLogger(__name__)
-
-if os.name == "nt":
-    import msvcrt
-
-    def _lock_file(handle: Any) -> None:
-        handle.seek(0)
-        msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)  # type: ignore[attr-defined]
-
-    def _unlock_file(handle: Any) -> None:
-        try:
-            handle.seek(0)
-            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)  # type: ignore[attr-defined]
-        except OSError:
-            # 在 Windows 上如果 fd 已关闭或未持有锁，解锁可能抛错；忽略即可
-            return
-
-else:
-    import fcntl
-
-    def _lock_file(handle: Any) -> None:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-
-    def _unlock_file(handle: Any) -> None:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def _get_runtime_config() -> Any | None:
@@ -143,31 +120,24 @@ class TokenUsage:
 def _iter_usage_records(path: Path) -> Iterator[TokenUsage]:
     """逐行解析一个 JSONL 或 JSONL.GZ 文件，避免整文件驻留内存。"""
 
-    if not path.exists():
-        return
     invalid_lines = 0
     first_error: tuple[int, str, str] | None = None
     total_lines = 0
     try:
-        if path.suffix == ".gz":
-            f_handle = gzip.open(path, "rt", encoding="utf-8")
-        else:
-            f_handle = open(path, "r", encoding="utf-8")
-        with f_handle as handle:
-            for line_no, raw_line in enumerate(handle, start=1):
-                line = raw_line.strip()
-                if not line:
-                    continue
-                total_lines += 1
-                try:
-                    data = json.loads(line)
-                    if not isinstance(data, dict):
-                        raise TypeError("record is not a JSON object")
-                    yield TokenUsage.from_dict(data)
-                except Exception as exc:
-                    invalid_lines += 1
-                    if first_error is None:
-                        first_error = (line_no, type(exc).__name__, line[:240])
+        for line_no, raw_line in io.iter_text_lines(path):
+            line = raw_line.strip()
+            if not line:
+                continue
+            total_lines += 1
+            try:
+                data = json.loads(line)
+                if not isinstance(data, dict):
+                    raise TypeError("record is not a JSON object")
+                yield TokenUsage.from_dict(data)
+            except Exception as exc:
+                invalid_lines += 1
+                if first_error is None:
+                    first_error = (line_no, type(exc).__name__, line[:240])
     except OSError:
         logger.warning("[Token统计] 读取归档失败: %s", path)
     if invalid_lines:
@@ -497,20 +467,16 @@ class TokenUsageStorage:
             max_size_bytes,
         )
 
-        with open(self.lock_file_path, "a+b") as lock_handle:
-            _lock_file(lock_handle)
-            try:
-                if not self.file_path.exists():
-                    return False
+        with FileLock(self.lock_file_path, shared=False):
+            if not self.file_path.exists():
+                return False
 
-                current_size = self.file_path.stat().st_size
-                if current_size >= max_size_bytes and current_size > 0:
-                    self._do_compact_file()
-                    did_compact = True
+            current_size = self.file_path.stat().st_size
+            if current_size >= max_size_bytes and current_size > 0:
+                self._do_compact_file()
+                did_compact = True
 
-                self._prune_archives(max_archives, max_total_bytes)
-            finally:
-                _unlock_file(lock_handle)
+            self._prune_archives(max_archives, max_total_bytes)
 
         return did_compact
 
@@ -558,8 +524,6 @@ class TokenUsageStorage:
             line = json.dumps(data, ensure_ascii=False)
 
             # 使用统一 IO 层追加内容
-            from Undefined.utils import io
-
             await io.append_line(
                 self.file_path,
                 line,
@@ -585,10 +549,11 @@ class TokenUsageStorage:
 
             def sync_read() -> list[TokenUsage]:
                 batch: list[TokenUsage] = []
-                archives = self._list_archives()
-                for archive in archives:
-                    batch.extend(_iter_usage_records(archive))
-                batch.extend(_iter_usage_records(self.file_path))
+                with FileLock(self.lock_file_path, shared=True):
+                    archives = self._list_archives()
+                    for archive in archives:
+                        batch.extend(_iter_usage_records(archive))
+                    batch.extend(_iter_usage_records(self.file_path))
                 logger.info(
                     "[Token统计] 汇总读取完成: archives=%s total_records=%s",
                     len(archives),
@@ -683,6 +648,10 @@ class TokenUsageStorage:
         return await asyncio.to_thread(self._get_summary_sync, days)
 
     def _get_summary_sync(self, days: int) -> dict[str, Any]:
+        with FileLock(self.lock_file_path, shared=True):
+            return self._get_summary_locked(days)
+
+    def _get_summary_locked(self, days: int) -> dict[str, Any]:
         started_at = time.perf_counter()
         end_date = datetime.now()
         start_date = end_date - timedelta(days=days)

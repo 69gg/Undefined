@@ -55,6 +55,10 @@ class _DummyPrivateSender:
         del history_message
 
 
+class _CallbackOnlyPrivateSender(_DummyPrivateSender):
+    supports_private_forward = False
+
+
 def _build_context(
     *,
     dispatcher: _DummyDispatcher,
@@ -63,12 +67,13 @@ def _build_context(
     sender_id: int,
     user_id: int | None = None,
     is_webui_session: bool = False,
+    sender: Any | None = None,
 ) -> CommandContext:
     return CommandContext(
         group_id=group_id,
         sender_id=sender_id,
         config=cast(Any, SimpleNamespace()),
-        sender=cast(Any, _DummyPrivateSender()),
+        sender=cast(Any, sender or _DummyPrivateSender()),
         ai=cast(Any, SimpleNamespace()),
         faq_storage=cast(Any, SimpleNamespace()),
         onebot=cast(Any, SimpleNamespace()),
@@ -140,3 +145,20 @@ async def test_stats_handler_passes_private_forward_sender() -> None:
     await execute(["7d"], context)
 
     assert dispatcher.private_calls == [(42, 90001, ["7d"], True, True, False)]
+
+
+@pytest.mark.asyncio
+async def test_stats_handler_skips_unavailable_forward_on_callback_channel() -> None:
+    dispatcher = _DummyDispatcher()
+    context = _build_context(
+        dispatcher=dispatcher,
+        scope="private",
+        group_id=0,
+        sender_id=90001,
+        user_id=42,
+        sender=_CallbackOnlyPrivateSender(),
+    )
+
+    await execute(["7d"], context)
+
+    assert dispatcher.private_calls == [(42, 90001, ["7d"], True, False, False)]
