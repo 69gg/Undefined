@@ -82,6 +82,29 @@ async def test_ilink_state_store_round_trip(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_ilink_state_store_skips_unchanged_writes(tmp_path: Path) -> None:
+    path = tmp_path / "runtime.json"
+    store = UndefinedIlinkStateStore(path)
+    await store.set_cursor("account", "cursor-1")
+    await store.set_context_token("account", "peer", "context-token")
+    await store.set_pause_until("account", 123.5)
+    mtime = path.stat().st_mtime_ns
+
+    await store.set_cursor("account", "cursor-1")
+    await store.set_context_token("account", "peer", "context-token")
+    await store.set_pause_until("account", 123.5)
+    assert path.stat().st_mtime_ns == mtime
+
+    await store.set_cursor("account", "cursor-2")
+    await store.set_context_token("account", "peer", "context-token-2")
+    await store.set_pause_until("account", 456.5)
+    reloaded = UndefinedIlinkStateStore(path)
+    assert await reloaded.get_cursor("account") == "cursor-2"
+    assert await reloaded.get_context_token("account", "peer") == "context-token-2"
+    assert await reloaded.get_pause_until("account") == 456.5
+
+
+@pytest.mark.asyncio
 async def test_ilink_state_store_delete_account_removes_all_runtime_state(
     tmp_path: Path,
 ) -> None:

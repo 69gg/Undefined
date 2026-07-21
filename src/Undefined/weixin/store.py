@@ -296,7 +296,10 @@ class UndefinedIlinkStateStore:
     async def set_cursor(self, account_id: str, cursor: str) -> None:
         async with self._lock:
             await self._load_locked()
-            self._string_mapping("cursors")[account_id] = cursor
+            cursors = self._string_mapping("cursors")
+            if cursors.get(account_id, "") == cursor:
+                return
+            cursors[account_id] = cursor
             await self._write_locked()
 
     async def get_context_token(self, account_id: str, peer_id: str) -> str:
@@ -313,9 +316,10 @@ class UndefinedIlinkStateStore:
     ) -> None:
         async with self._lock:
             await self._load_locked()
-            self._nested_string_mapping("context_tokens").setdefault(account_id, {})[
-                peer_id
-            ] = token
+            context_tokens = self._nested_string_mapping("context_tokens")
+            if context_tokens.get(account_id, {}).get(peer_id, "") == token:
+                return
+            context_tokens.setdefault(account_id, {})[peer_id] = token
             await self._write_locked()
 
     async def has_seen(self, account_id: str, message_key: str) -> bool:
@@ -342,7 +346,10 @@ class UndefinedIlinkStateStore:
     async def set_pause_until(self, account_id: str, timestamp: float) -> None:
         async with self._lock:
             await self._load_locked()
-            self._number_mapping("pause_until")[account_id] = float(timestamp)
+            pause_until = self._number_mapping("pause_until")
+            if pause_until.get(account_id, 0.0) == float(timestamp):
+                return
+            pause_until[account_id] = float(timestamp)
             await self._write_locked()
 
     async def delete_account(self, account_id: str) -> None:
