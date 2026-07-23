@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import pytest
+
 from Undefined.config.domain_parsers import _parse_cognitive_config
+from Undefined.config.models import HISTORIAN_MIN_POLL_INTERVAL_SECONDS
 
 
 def test_parse_cognitive_historian_reference_limits() -> None:
@@ -54,3 +57,14 @@ def test_parse_cognitive_vector_store_scheduler_burst_clamps_to_positive() -> No
     )
 
     assert cfg.vector_store_scheduler_foreground_burst == 1
+
+
+@pytest.mark.parametrize("value", [0.0, -1.0, 0.05])
+def test_parse_cognitive_historian_poll_interval_clamps_to_minimum(
+    value: float,
+) -> None:
+    cfg = _parse_cognitive_config(
+        {"cognitive": {"historian": {"poll_interval_seconds": value}}}
+    )
+
+    assert cfg.poll_interval_seconds == HISTORIAN_MIN_POLL_INTERVAL_SECONDS

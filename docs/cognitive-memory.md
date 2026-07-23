@@ -319,7 +319,7 @@ data/cognitive/
 | `recent_messages_inject_k` | int | `12` | 提供给史官的最近消息参考条数（0=禁用，支持热更新） |
 | `recent_message_line_max_len` | int | `240` | 最近消息参考中每条文本最大长度（支持热更新） |
 | `source_message_max_len` | int | `800` | 当前消息原文最大长度（支持热更新） |
-| `poll_interval_seconds` | float | `1.0` | 史官轮询间隔秒数（支持热更新） |
+| `poll_interval_seconds` | float | `1.0` | 史官轮询间隔秒数，小于 `0.1` 时按 `0.1` 处理（支持热更新） |
 | `stale_job_timeout_seconds` | float | `300.0` | 启动时恢复 stale 任务的超时阈值 |
 
 ### [cognitive.profile]
@@ -336,7 +336,7 @@ data/cognitive/
 | `path` | str | `data/cognitive/queues` | 队列文件存储路径 |
 | `failed_max_age_days` | int | `30` | failed 队列文件最大保留天数 |
 | `failed_max_files` | int | `500` | failed 队列最大文件数 |
-| `failed_cleanup_interval` | int | `100` | 每 N 轮 poll 执行一次清理（0 禁用） |
+| `failed_cleanup_interval` | int | `100` | 每派发 N 个任务执行一次清理（0 禁用，每个阈值仅执行一次） |
 | `job_max_retries` | int | `3` | 单个任务最大自动重试次数（超过后移入 failed，0=不重试） |
 
 ### [models.embedding]（必须配置）

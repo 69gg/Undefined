@@ -8,6 +8,8 @@ from typing import Any
 
 from .api_modes import API_MODE_OPENAI_CHAT_COMPLETIONS, normalize_api_mode
 
+HISTORIAN_MIN_POLL_INTERVAL_SECONDS: float = 0.1
+
 
 def format_netloc(host: str, port: int) -> str:
     """格式化 host:port 为合法 netloc，IPv6 地址自动加方括号。"""

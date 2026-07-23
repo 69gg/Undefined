@@ -257,6 +257,73 @@ async def test_poll_loop_dispatches_without_waiting_previous_job_completion() ->
     assert "job-1" in finished and "job-2" in finished
 
 
+@pytest.mark.asyncio
+async def test_poll_loop_cleans_failed_queue_once_per_dispatch_threshold(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    stop_event = asyncio.Event()
+    cleanup_calls: list[tuple[Path, int, int]] = []
+
+    def _record_cleanup(
+        path: Path,
+        *,
+        max_age_seconds: int,
+        max_files: int,
+    ) -> int:
+        cleanup_calls.append((path, max_age_seconds, max_files))
+        return 0
+
+    monkeypatch.setattr(
+        "Undefined.utils.cache.cleanup_cache_dir",
+        _record_cleanup,
+    )
+
+    class _FakeQueue:
+        def __init__(self) -> None:
+            self._failed_dir = tmp_path
+            self.dequeue_calls = 0
+
+        async def dequeue(self) -> tuple[str, dict[str, Any]] | None:
+            self.dequeue_calls += 1
+            if self.dequeue_calls == 1:
+                return "job-1", {"_retry_count": 0}
+            if self.dequeue_calls >= 4:
+                stop_event.set()
+            return None
+
+        async def requeue(self, _job_id: str, _error: str) -> None:
+            return None
+
+        async def fail(self, _job_id: str, _error: str) -> None:
+            return None
+
+    class _NoopWorker(HistorianWorker):
+        async def _process_job(self, job_id: str, job: dict[str, Any]) -> None:
+            _ = job_id, job
+
+    queue = _FakeQueue()
+    worker = _NoopWorker(
+        job_queue=queue,
+        vector_store=None,
+        profile_storage=None,
+        ai_client=None,
+        config_getter=lambda: SimpleNamespace(
+            poll_interval_seconds=0,
+            failed_cleanup_interval=1,
+            failed_max_age_days=30,
+            failed_max_files=500,
+            job_max_retries=0,
+        ),
+    )
+    worker._stop_event = stop_event
+
+    await asyncio.wait_for(worker._poll_loop(), timeout=2.0)
+
+    assert queue.dequeue_calls == 4
+    assert cleanup_calls == [(tmp_path, 30 * 86400, 500)]
+
+
 def test_extract_required_tool_args_preserves_job_context_in_error() -> None:
     worker = _make_worker()
 

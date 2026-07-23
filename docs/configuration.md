@@ -1116,7 +1116,7 @@ api_key = "replace-with-your-key"
 | `recent_messages_inject_k` | `12` | 注入给史官的近期消息条数 |
 | `recent_message_line_max_len` | `240` | 每条近期消息最大字符数 |
 | `source_message_max_len` | `800` | 当前触发消息最大字符数 |
-| `poll_interval_seconds` | `1.0` | 队列轮询间隔 |
+| `poll_interval_seconds` | `1.0` | 队列轮询间隔；小于 `0.1` 时按 `0.1` 秒处理，避免空队列忙循环 |
 | `stale_job_timeout_seconds` | `300.0` | processing 超时回收阈值 |
 
 ### 4.26.5 `[cognitive.profile]`
@@ -1133,7 +1133,7 @@ api_key = "replace-with-your-key"
 | `path` | `data/cognitive/queues` | 队列目录 |
 | `failed_max_age_days` | `30` | failed 文件保留天数 |
 | `failed_max_files` | `500` | failed 文件上限 |
-| `failed_cleanup_interval` | `100` | 处理多少次后触发清理 |
+| `failed_cleanup_interval` | `100` | 每派发多少个任务后触发一次清理；`0` 禁用 |
 | `job_max_retries` | `3` | 单任务自动重试次数 |
 
 ---
