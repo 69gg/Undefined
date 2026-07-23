@@ -172,6 +172,24 @@ def test_keyword_scoring_uses_name_parameter_and_descriptions() -> None:
     )
 
 
+@pytest.mark.parametrize("query", ["search_songs", "load music.search_songs"])
+def test_keyword_query_normalizes_tool_name_separators(query: str) -> None:
+    session = ToolSearchSession(
+        [
+            _tool("music.search_songs", "Search songs across music platforms"),
+            _tool("music.get_hot_search", "Next call music.search_songs"),
+            _tool("music.get_lyrics", "Track from music.search_songs"),
+        ],
+        [],
+        max_results=1,
+    )
+
+    result = session.search_and_load(query)
+
+    assert result.loaded == ("music.search_songs",)
+    assert result.truncated is True
+
+
 def test_nested_parameter_descriptions_are_searchable() -> None:
     nested_properties = {
         "filters": {

@@ -49,10 +49,11 @@ tool_search(query: string, max_results?: integer)
 |---|---|
 | `select:web_agent,info_agent` | 按规范名称精确加载多个工具；优先匹配目录中的精确拼写，再按大小写不敏感方式解析并去重 |
 | `group.get_member_info` | 完整名称精确匹配，优先于关键词搜索 |
+| `member_info` | 关键词中的点号、下划线和连字符会与工具名使用相同规则拆分，可匹配 `group.get_member_info` |
 | `member avatar` | 按空格分词，在工具名、参数名、工具描述和参数描述中搜索 |
 | `member +user` | `+user` 为必需词；名称、参数名或描述均不包含该词的候选会先被排除 |
 
-关键词结果按名称命中优先，其次考虑参数名和描述；最终按得分降序、规范名称升序稳定排序。`max_results` 只能缩小配置上限，不能扩大单次加载数量，`select:` 也受同一上限约束。
+关键词中的 `.`、`_`、`-` 与工具名索引使用一致的分隔规则，例如 `search_songs` 可以匹配 `music.search_songs`，不会误命中仅在描述中引用该名称的工具。结果按名称命中优先，其次考虑参数名和描述；最终按得分降序、规范名称升序稳定排序。`max_results` 只能缩小配置上限，不能扩大单次加载数量，`select:` 也受同一上限约束。
 
 工具返回固定 JSON 字段：
 
