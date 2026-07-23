@@ -193,12 +193,16 @@ def test_music_tool_descriptions_define_audio_delivery_contract() -> None:
 
     search_description = str(functions["music.search_songs"]["description"])
     assert "不下载音频、不注册附件，也不向用户发送任何内容" in search_description
+    assert "不要固定取第一条或固定平台" in search_description
+    assert "匹配明确时无需询问" in search_description
+    assert "仅当没有结果或无法可靠判断原唱/目标版本时才询问用户" in search_description
     assert "再调用 music.get_audio" in search_description
     assert "仅搜索成功不代表发歌任务完成" in search_description
 
     audio_function = functions["music.get_audio"]
     audio_description = str(audio_function["description"])
     assert "本工具本身绝不会向用户发送消息或文件" in audio_description
+    assert "灵活选择其中实际列出的最高可用值" in audio_description
     assert "调用 messages.send_message" in audio_description
     assert "调用 messages.send_voice" in audio_description
     assert "发送工具成功后才可结束" in audio_description
@@ -206,6 +210,11 @@ def test_music_tool_descriptions_define_audio_delivery_contract() -> None:
         audio_function["parameters"]["properties"]["delivery"]["description"]
     )
     assert "不发送" in delivery_description
+    quality_description = str(
+        audio_function["parameters"]["properties"]["quality"]["description"]
+    )
+    assert "不要机械省略或固定填写" in quality_description
+    assert "Track.qualities" in quality_description
 
 
 def test_music_tools_are_not_shared_with_subagents() -> None:
@@ -489,7 +498,9 @@ async def test_get_audio_url_delivery_uses_resolver() -> None:
 
 async def test_get_audio_normalizes_string_boolean_for_direct_invocation() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
-        assert json.loads(request.content)["strictQuality"] is False
+        body = json.loads(request.content)
+        assert body["strictQuality"] is False
+        assert "quality" not in body
         return httpx.Response(200, json={"data": {"url": "https://audio.test"}})
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:

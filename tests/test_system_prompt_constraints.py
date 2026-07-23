@@ -73,6 +73,24 @@ def test_system_prompts_distinguish_attachment_creation_from_delivery(
         assert snippet in text
 
 
+@pytest.mark.parametrize("path", PROMPT_PATHS)
+def test_system_prompts_define_result_driven_music_audio_autonomy(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+
+    required_snippets = [
+        '<music_audio_autonomy priority="P1">',
+        "搜索结果不是固定取第一条，也不是固定某个平台",
+        "结合候选的歌名、歌手、专辑、版本标记和 `qualities` 灵活判断",
+        "明确识别原唱的标准录音室版本",
+        "实际列出的最高可用音质",
+        "不要默认询问“要哪个版本/平台/音质”",
+        "只有搜索确实无结果",
+        "无法可靠判断哪个是原唱/目标版本",
+    ]
+    for snippet in required_snippets:
+        assert snippet in text
+
+
 def test_naga_prompt_requires_scope_before_naga_analysis() -> None:
     text = Path("res/prompts/undefined_nagaagent.xml").read_text(encoding="utf-8")
 

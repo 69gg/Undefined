@@ -173,7 +173,7 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
 
 该分类没有 `callable.json`，因此默认仅主 AI 可见；同时不注册下载任务或作业管理类底层工具（例如 `music.download_jobs`、`music.create_download`）。上游返回的完整 `Track` 必须原样传入后续歌曲工具。
 
-音乐搜索与音频获取都不会自行发送消息。发歌时先用 `music.search_songs` 取得完整 `Track`，再用 `music.get_audio` 登记附件；普通音频把返回的 `<attachment uid="..."/>` 原样交给 `messages.send_message`，只有用户明确要求原生语音时才把返回的 `uid` 交给 `messages.send_voice`。
+音乐搜索与音频获取都不会自行发送消息。用户明确要音频时，主 AI 会根据搜索结果中的歌名、歌手、专辑、版本标记和 `qualities` 灵活选择原唱标准版及其最高可用音质，不固定第一条、平台或音质；用户已有具体要求时以其要求为准，只有没有结果或无法可靠判断原唱/目标版本时才追问。选定后用 `music.get_audio` 登记附件；普通音频把返回的 `<attachment uid="..."/>` 原样交给 `messages.send_message`，只有用户明确要求原生语音时才把返回的 `uid` 交给 `messages.send_voice`。
 
 ### Group Analysis（群聊深度分析）
 
