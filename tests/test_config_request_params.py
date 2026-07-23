@@ -352,6 +352,7 @@ api_key = "chat-key"
 model_name = "chat-model"
 max_tokens = 0
 api_mode = "anthropic.messages"
+thinking_param_enabled = false
 reasoning_content_replay = false
 reasoning_enabled = true
 reasoning_effort = "Vendor-Custom"
@@ -366,6 +367,7 @@ api_key = "pool-key"
 model_name = "chat-pool"
 max_tokens = -2
 api_mode = "openai.responses"
+thinking_param_enabled = true
 reasoning_content_replay = true
 reasoning_enabled = true
 reasoning_effort = "adaptive"
@@ -376,6 +378,7 @@ api_key = "vision-key"
 model_name = "vision-model"
 max_tokens = -1
 api_mode = "anthropic.messages"
+thinking_param_enabled = false
 reasoning_content_replay = false
 reasoning_enabled = true
 reasoning_effort = "Vendor-Custom"
@@ -386,6 +389,7 @@ api_key = "security-key"
 model_name = "security-model"
 max_tokens = 0
 api_mode = "anthropic.messages"
+thinking_param_enabled = false
 reasoning_content_replay = false
 reasoning_enabled = true
 reasoning_effort = "Vendor-Custom"
@@ -396,6 +400,7 @@ api_key = "naga-key"
 model_name = "naga-model"
 max_tokens = -1
 api_mode = "anthropic.messages"
+thinking_param_enabled = false
 reasoning_content_replay = false
 reasoning_enabled = true
 reasoning_effort = "Vendor-Custom"
@@ -406,6 +411,7 @@ api_key = "agent-key"
 model_name = "agent-model"
 max_tokens = 0
 api_mode = "anthropic.messages"
+thinking_param_enabled = false
 reasoning_content_replay = false
 reasoning_enabled = true
 reasoning_effort = "Vendor-Custom"
@@ -422,6 +428,7 @@ api_key = "pool-key"
 model_name = "agent-pool"
 max_tokens = -2
 api_mode = "openai.responses"
+thinking_param_enabled = true
 reasoning_content_replay = true
 reasoning_enabled = true
 reasoning_effort = "adaptive"
@@ -430,6 +437,7 @@ reasoning_effort = "adaptive"
 model_name = "historian-model"
 max_tokens = -1
 api_mode = "anthropic.messages"
+thinking_param_enabled = false
 reasoning_content_replay = false
 reasoning_enabled = true
 reasoning_effort = "Vendor-Custom"
@@ -438,6 +446,7 @@ reasoning_effort = "Vendor-Custom"
 model_name = "summary-model"
 max_tokens = 0
 api_mode = "anthropic.messages"
+thinking_param_enabled = false
 reasoning_content_replay = false
 reasoning_enabled = true
 reasoning_effort = "Vendor-Custom"
@@ -448,6 +457,7 @@ api_key = "grok-key"
 model_name = "grok-model"
 max_tokens = -1
 api_mode = "anthropic.messages"
+thinking_param_enabled = false
 reasoning_content_replay = false
 reasoning_enabled = true
 reasoning_effort = "Vendor-Custom"
@@ -473,6 +483,7 @@ reasoning_effort = "Vendor-Custom"
     for model in generation_models:
         assert model.api_mode == "anthropic.messages"
         assert model.reasoning_content_replay is False
+        assert model.thinking_param_enabled is False
         assert model.reasoning_enabled is True
         assert model.reasoning_effort == "Vendor-Custom"
         assert model.responses_tool_choice_compat is False
@@ -496,6 +507,7 @@ reasoning_effort = "Vendor-Custom"
     ]:
         assert entry.api_mode == "openai.responses"
         assert entry.reasoning_content_replay is True
+        assert entry.thinking_param_enabled is True
         assert entry.reasoning_enabled is True
         assert entry.reasoning_effort == "adaptive"
         assert entry.max_tokens == -2
@@ -504,3 +516,31 @@ reasoning_effort = "Vendor-Custom"
     assert cfg.historian_model.thinking_tool_call_compat is False
     assert cfg.summary_model.thinking_include_budget is False
     assert cfg.summary_model.thinking_tool_call_compat is False
+
+
+def test_thinking_param_enabled_defaults_and_fallbacks(tmp_path: Path) -> None:
+    cfg = _load_config(
+        tmp_path / "config.toml",
+        """
+[models.chat]
+api_url = "https://provider.example/v1"
+api_key = "chat-key"
+model_name = "chat-model"
+thinking_param_enabled = false
+
+[models.agent]
+api_url = "https://provider.example/v1"
+api_key = "agent-key"
+model_name = "agent-model"
+thinking_param_enabled = false
+""",
+    )
+
+    assert cfg.chat_model.thinking_param_enabled is False
+    assert cfg.security_model.thinking_param_enabled is False
+    assert cfg.naga_model.thinking_param_enabled is False
+    assert cfg.agent_model.thinking_param_enabled is False
+    assert cfg.historian_model.thinking_param_enabled is False
+    assert cfg.summary_model.thinking_param_enabled is False
+    assert cfg.vision_model.thinking_param_enabled is True
+    assert cfg.grok_model.thinking_param_enabled is True

@@ -45,6 +45,24 @@ def test_env_overridden_by_mapping(monkeypatch: pytest.MonkeyPatch) -> None:
     assert cfg.chat_model.model_name == "from-toml"
 
 
+def test_thinking_param_enabled_env_overrides_model_fallbacks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CHAT_MODEL_THINKING_PARAM_ENABLED", "false")
+    monkeypatch.setenv("AGENT_MODEL_THINKING_PARAM_ENABLED", "false")
+    monkeypatch.setenv("HISTORIAN_MODEL_THINKING_PARAM_ENABLED", "true")
+    monkeypatch.setenv("SUMMARY_MODEL_THINKING_PARAM_ENABLED", "true")
+
+    cfg = Config.from_mapping({}, strict=False)
+
+    assert cfg.chat_model.thinking_param_enabled is False
+    assert cfg.security_model.thinking_param_enabled is False
+    assert cfg.naga_model.thinking_param_enabled is False
+    assert cfg.agent_model.thinking_param_enabled is False
+    assert cfg.historian_model.thinking_param_enabled is True
+    assert cfg.summary_model.thinking_param_enabled is True
+
+
 def test_http_proxy_env_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:7890")
     cfg = Config.from_mapping(

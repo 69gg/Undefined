@@ -1118,6 +1118,7 @@ const MODEL_POOL_ENTRY_DEFAULTS = {
     use_proxy: false,
     context_window_tokens: 8192,
     queue_interval_seconds: 1.0,
+    thinking_param_enabled: true,
     thinking_enabled: false,
     thinking_budget_tokens: 0,
     thinking_include_budget: true,

@@ -42,10 +42,11 @@ model_name = "claude-sonnet-4-20250514"
 api_url = "https://api.anthropic.com/v1"
 api_key = "sk-ant-xxx"
 api_mode = "anthropic.messages"
+thinking_param_enabled = true
 thinking_enabled = true
 thinking_include_budget = false  # adaptive thinking
 reasoning_content_replay = true
-# 其他字段（max_tokens、reasoning_*、stream_enabled 等）可选，缺省继承主模型
+# 其他字段（max_tokens、thinking_param_enabled、reasoning_*、stream_enabled 等）可选，缺省继承主模型
 # Anthropic Messages 要求 max_tokens 为正整数
 
 [[models.chat.pool.models]]
@@ -69,6 +70,8 @@ api_key = "sk-ant-xxx"
 api_mode = "anthropic.messages"
 reasoning_content_replay = true
 ```
+
+`thinking_param_enabled` 默认 `true`。将某个池条目设为 `false` 只会禁止该条目根据 `thinking_enabled` 自动发送顶层 `thinking`，不会关闭 `reasoning_effort`，也不会覆盖调用方显式提供的 `thinking`。
 
 ### strategy 说明
 

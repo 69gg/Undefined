@@ -244,6 +244,7 @@ model_name = "gpt-4o-mini"
 | `api_mode` | `openai.chat_completions`、`openai.responses` 或 `anthropic.messages`；旧 `chat_completions` / `responses` 仍兼容但会告警 |
 | `reasoning_enabled` | 是否发送当前 API mode 对应的 effort 参数 |
 | `reasoning_effort` | 自定义 effort 字符串；`adaptive` 原样发送，其余值也不做枚举或大小写改写 |
+| `thinking_param_enabled` | 是否发送由 `thinking_enabled` 自动生成的顶层 `thinking` 参数；默认 `true`，不影响 effort 或调用方显式传入的 `thinking` |
 | `thinking_enabled` | 是否启用旧式 `thinking` 参数 |
 | `thinking_budget_tokens` | thinking 预算 |
 | `thinking_include_budget` | 是否发送手动 `budget_tokens`；`anthropic.messages` 下关闭时使用 adaptive thinking |
@@ -258,12 +259,13 @@ model_name = "gpt-4o-mini"
 请求模式说明：
 - `api_mode="openai.chat_completions"`：走 `AsyncOpenAI.chat.completions.create(...)`
   - `max_tokens > 0` 时发送 `max_tokens`；为 `0` 或负数时省略
-  - `thinking_enabled=true` 时发送兼容接口常用的顶层 `thinking`
+  - `thinking_enabled=true` 且 `thinking_param_enabled=true` 时发送兼容接口常用的顶层 `thinking`
   - `reasoning_enabled=true` 时发送顶层 `reasoning_effort="..."`
   - 回放开启时优先恢复响应原始字段：`reasoning_content`、`reasoning_details`、`reasoning`、`encrypted_content`、`thinking`；OpenRouter 的 `reasoning_details` 数组、签名与密文保持原顺序和原值
   - 旧历史没有原始载体时，才回退到可读 `reasoning_content`
 - `api_mode="openai.responses"`：走 `AsyncOpenAI.responses.create(...)`
   - `max_tokens > 0` 时映射为 `max_output_tokens`；为 `0` 或负数时省略
+  - `thinking_enabled=true` 且 `thinking_param_enabled=true` 时发送兼容接口使用的顶层 `thinking`
   - `reasoning_enabled=true` 时发送 `reasoning.effort`；`request_params.reasoning` 的 `summary` 等其他键会保留并与 effort 合并
   - 若 `request_params` 里带 `response_format` / `verbosity`，会自动映射到 `text.format` / `text.verbosity`
   - 默认使用官方对象格式：`{"type":"function","name":"..."}`
@@ -277,8 +279,8 @@ model_name = "gpt-4o-mini"
 - `api_mode="anthropic.messages"`：走 `AsyncAnthropic.messages.create(...)` / `messages.stream(...)`
   - 官方 Messages API 将 `max_tokens` 定义为必填字段；运行时要求其为正整数并原样发送，`0` 或负数会在请求发出前报错
   - 自动转换顶层 `system`、图片、函数工具、`tool_use` / `tool_result`，不使用手写 HTTP 请求
-  - `thinking_enabled=true` 且 `thinking_include_budget=true` 时发送 `thinking={type="enabled", budget_tokens=...}`；预算必须 `>=1024` 且严格小于本次 `max_tokens`
-  - `thinking_include_budget=false` 时发送 `thinking={type="adaptive"}`
+  - `thinking_enabled=true`、`thinking_param_enabled=true` 且 `thinking_include_budget=true` 时发送 `thinking={type="enabled", budget_tokens=...}`；预算必须 `>=1024` 且严格小于本次 `max_tokens`
+  - `thinking_enabled=true`、`thinking_param_enabled=true` 且 `thinking_include_budget=false` 时发送 `thinking={type="adaptive"}`
   - `reasoning_enabled=true` 时发送 `output_config.effort`，值按 `reasoning_effort` 原样透传；其他 `output_config` 键继续保留
   - 回放开启时按原顺序发送完整 `thinking` / `redacted_thinking` / `text` / `tool_use` blocks；关闭时只过滤 thinking 与 redacted blocks
   - Anthropic thinking 开启时不支持强制指定工具，强制 `tool_choice` 会降级为 `auto`
@@ -292,6 +294,7 @@ Prompt caching 补充：
 `request_params` 说明：
 - 适合放 provider 私有请求体字段，例如 `metadata`、`temperature`、兼容网关扩展参数等。
 - `reasoning_effort` 与 `thinking` 由正式配置字段控制，`request_params` 中的同名保留字段不能覆盖；兼容 Chat 的 `reasoning` 对象、Responses 的 `reasoning.summary` 等附加键、Anthropic 的其他 `output_config` 键属于明确的合并例外，专用 effort 配置优先。
+- `thinking_param_enabled=false` 只禁止根据 `thinking_enabled` 自动生成参数。代码调用方通过单次请求参数显式传入的 `thinking` 仍会发送；`reasoning_enabled` / `reasoning_effort` 完全独立，不受该开关影响。
 - 消息总结分块读取 `[models.summary].context_window_tokens`（未单独配置时回退 `[models.agent]`）；不再使用硬编码窗口或 `request_params` 里的 `context_length` 类字段。
 
 #### 思维链续传迁移说明
@@ -320,6 +323,7 @@ Prompt caching 补充：
 - `api_mode="openai.chat_completions"`
 - `reasoning_enabled=false`
 - `reasoning_effort="medium"`
+- `thinking_param_enabled=true`
 - `thinking_budget_tokens=20000`
 - `thinking_tool_call_compat=true`
 - `reasoning_content_replay=true`
@@ -338,6 +342,7 @@ Prompt caching 补充：
 - `api_mode="openai.chat_completions"`
 - `reasoning_enabled=false`
 - `reasoning_effort="medium"`
+- `thinking_param_enabled=true`
 - `thinking_budget_tokens=20000`
 - `thinking_tool_call_compat=true`
 - `reasoning_content_replay=true`
@@ -349,11 +354,11 @@ Prompt caching 补充：
 
 字段：
 - 额外开关：`enabled=true`
-- 默认：`max_tokens=100`、`queue_interval_seconds=1.0`（`0` 表示立即发车，`<0` 回退 `1.0`）、`api_mode="openai.chat_completions"`、`reasoning_enabled=false`、`reasoning_effort="medium"`、`thinking_budget_tokens=0`、`thinking_tool_call_compat=true`、`reasoning_content_replay=true`、`responses_tool_choice_compat=false`、`responses_force_stateless_replay=false`、`use_proxy=false`
+- 默认：`max_tokens=100`、`queue_interval_seconds=1.0`（`0` 表示立即发车，`<0` 回退 `1.0`）、`api_mode="openai.chat_completions"`、`reasoning_enabled=false`、`reasoning_effort="medium"`、`thinking_param_enabled=true`、`thinking_budget_tokens=0`、`thinking_tool_call_compat=true`、`reasoning_content_replay=true`、`responses_tool_choice_compat=false`、`responses_force_stateless_replay=false`、`use_proxy=false`
 
 关键回退逻辑：
 - 若 `api_url/api_key/model_name` 任一缺失，会自动回退为 chat 模型（并告警）。
-- 回退时会继承 chat 的 `api_mode`、`reasoning_*`、`responses_tool_choice_compat`、`responses_force_stateless_replay` 与 `request_params`；旧 `thinking_*` 仍保持安全模型自身默认值；`use_proxy` 仍只读取 `[models.security]` 自身配置，默认 `false`。
+- 回退时会继承 chat 的 `api_mode`、`reasoning_*`、`thinking_param_enabled`、`responses_tool_choice_compat`、`responses_force_stateless_replay` 与 `request_params`；其余旧 `thinking_*` 仍保持安全模型自身默认值；`use_proxy` 仍只读取 `[models.security]` 自身配置，默认 `false`。
 
 ### 4.4.5 `[models.naga]` Naga 审核模型
 
@@ -366,6 +371,7 @@ Prompt caching 补充：
 - `api_mode="openai.chat_completions"`
 - `reasoning_enabled=false`
 - `reasoning_effort="medium"`
+- `thinking_param_enabled=true`
 - `thinking_enabled=false`
 - `thinking_budget_tokens=0`
 - `thinking_include_budget=true`
@@ -386,6 +392,7 @@ Prompt caching 补充：
 - `api_mode="openai.chat_completions"`
 - `reasoning_enabled=false`
 - `reasoning_effort="medium"`
+- `thinking_param_enabled=true`
 - `thinking_tool_call_compat=true`
 - `reasoning_content_replay=true`
 - `responses_tool_choice_compat=false`
@@ -397,6 +404,7 @@ Prompt caching 补充：
 - 用于认知记忆后台改写。
 - 若整个节缺失或为空：完整回退到 `models.agent`。
 - 若部分字段缺失：逐项继承 agent 配置，包括 `api_mode`、`reasoning_*`、`thinking_*`、`responses_tool_choice_compat`、`responses_force_stateless_replay` 与 `request_params`。
+- `thinking_param_enabled` 默认继承 agent，也可在 historian 节或 `HISTORIAN_MODEL_THINKING_PARAM_ENABLED` 中独立覆盖。
 - `use_proxy` 不继承 agent；`[models.historian]` 存在时未显式配置仍默认 `false`。
 - `queue_interval_seconds=0` 时立即发车，`<0` 时回退到 agent 的间隔。
 
@@ -405,6 +413,7 @@ Prompt caching 补充：
 - 用于 `/summary`、`/sum` 与内部 SummaryService；主 AI 对话中的 `summary_agent` 仍走 `[models.agent]`。
 - 若整个节缺失或为空：完整回退到 `models.agent`。
 - 若部分字段缺失：逐项继承 agent 配置，包括 `api_mode`、`reasoning_*`、`thinking_*`、`responses_tool_choice_compat`、`responses_force_stateless_replay` 与 `request_params`。
+- `thinking_param_enabled` 默认继承 agent，也可在 summary 节或 `SUMMARY_MODEL_THINKING_PARAM_ENABLED` 中独立覆盖。
 - `use_proxy` 不继承 agent；`[models.summary]` 存在时未显式配置仍默认 `false`。
 
 ### 4.4.8 `[models.grok]` Grok 搜索模型
@@ -419,6 +428,7 @@ Prompt caching 补充：
 - `api_mode="openai.chat_completions"`
 - `reasoning_enabled=false`
 - `reasoning_effort="medium"`
+- `thinking_param_enabled=true`
 - `thinking_enabled=false`
 - `thinking_budget_tokens=20000`
 - `thinking_include_budget=true`
@@ -452,7 +462,7 @@ Prompt caching 补充：
 - `model_name`（必填）
 - `api_url` / `api_key` / `max_tokens` / `queue_interval_seconds`
 - `api_mode` / `reasoning_enabled` / `reasoning_effort` / `reasoning_content_replay`
-- `thinking_*` / `system_prompt_as_user` / `responses_tool_choice_compat` / `responses_force_stateless_replay`
+- `thinking_*`（包含 `thinking_param_enabled`）/ `system_prompt_as_user` / `responses_tool_choice_compat` / `responses_force_stateless_replay`
 - `prompt_cache_enabled` / `stream_enabled` / `request_params`
 - 以上可选字段缺省继承主模型
 - `use_proxy` 是每个池条目独立开关，默认 `false`，不继承主模型，也没有池级总开关
@@ -1425,6 +1435,7 @@ api_key = "replace-with-your-key"
 | `models.agent.thinking_budget_tokens` | `AGENT_MODEL_THINKING_BUDGET_TOKENS` |
 | `models.agent.thinking_enabled` | `AGENT_MODEL_THINKING_ENABLED` |
 | `models.agent.thinking_include_budget` | `AGENT_MODEL_THINKING_INCLUDE_BUDGET` |
+| `models.agent.thinking_param_enabled` | `AGENT_MODEL_THINKING_PARAM_ENABLED` |
 | `models.agent.thinking_tool_call_compat` | `AGENT_MODEL_THINKING_TOOL_CALL_COMPAT` |
 | `models.agent.use_proxy` | `AGENT_MODEL_USE_PROXY` |
 | `models.agent.reasoning_content_replay` | `AGENT_MODEL_REASONING_CONTENT_REPLAY` |
@@ -1450,6 +1461,7 @@ api_key = "replace-with-your-key"
 | `models.chat.thinking_budget_tokens` | `CHAT_MODEL_THINKING_BUDGET_TOKENS` |
 | `models.chat.thinking_enabled` | `CHAT_MODEL_THINKING_ENABLED` |
 | `models.chat.thinking_include_budget` | `CHAT_MODEL_THINKING_INCLUDE_BUDGET` |
+| `models.chat.thinking_param_enabled` | `CHAT_MODEL_THINKING_PARAM_ENABLED` |
 | `models.chat.thinking_tool_call_compat` | `CHAT_MODEL_THINKING_TOOL_CALL_COMPAT` |
 | `models.chat.use_proxy` | `CHAT_MODEL_USE_PROXY` |
 | `models.chat.reasoning_content_replay` | `CHAT_MODEL_REASONING_CONTENT_REPLAY` |
@@ -1489,6 +1501,7 @@ api_key = "replace-with-your-key"
 | `models.grok.thinking_budget_tokens` | `GROK_MODEL_THINKING_BUDGET_TOKENS` |
 | `models.grok.thinking_enabled` | `GROK_MODEL_THINKING_ENABLED` |
 | `models.grok.thinking_include_budget` | `GROK_MODEL_THINKING_INCLUDE_BUDGET` |
+| `models.grok.thinking_param_enabled` | `GROK_MODEL_THINKING_PARAM_ENABLED` |
 | `models.grok.thinking_tool_call_compat` | `GROK_MODEL_THINKING_TOOL_CALL_COMPAT` |
 | `models.grok.use_proxy` | `GROK_MODEL_USE_PROXY` |
 
@@ -1499,6 +1512,7 @@ api_key = "replace-with-your-key"
 | `models.historian.use_proxy` | `HISTORIAN_MODEL_USE_PROXY` |
 | `models.historian.reasoning_content_replay` | `HISTORIAN_MODEL_REASONING_CONTENT_REPLAY` |
 | `models.historian.system_prompt_as_user` | `HISTORIAN_MODEL_SYSTEM_PROMPT_AS_USER` |
+| `models.historian.thinking_param_enabled` | `HISTORIAN_MODEL_THINKING_PARAM_ENABLED` |
 
 #### `models.image_edit`
 
@@ -1530,6 +1544,7 @@ api_key = "replace-with-your-key"
 | `models.naga.thinking_budget_tokens` | `NAGA_MODEL_THINKING_BUDGET_TOKENS` |
 | `models.naga.thinking_enabled` | `NAGA_MODEL_THINKING_ENABLED` |
 | `models.naga.thinking_include_budget` | `NAGA_MODEL_THINKING_INCLUDE_BUDGET` |
+| `models.naga.thinking_param_enabled` | `NAGA_MODEL_THINKING_PARAM_ENABLED` |
 | `models.naga.thinking_tool_call_compat` | `NAGA_MODEL_THINKING_TOOL_CALL_COMPAT` |
 | `models.naga.use_proxy` | `NAGA_MODEL_USE_PROXY` |
 | `models.naga.reasoning_content_replay` | `NAGA_MODEL_REASONING_CONTENT_REPLAY` |
@@ -1565,6 +1580,7 @@ api_key = "replace-with-your-key"
 | `models.security.thinking_budget_tokens` | `SECURITY_MODEL_THINKING_BUDGET_TOKENS` |
 | `models.security.thinking_enabled` | `SECURITY_MODEL_THINKING_ENABLED` |
 | `models.security.thinking_include_budget` | `SECURITY_MODEL_THINKING_INCLUDE_BUDGET` |
+| `models.security.thinking_param_enabled` | `SECURITY_MODEL_THINKING_PARAM_ENABLED` |
 | `models.security.thinking_tool_call_compat` | `SECURITY_MODEL_THINKING_TOOL_CALL_COMPAT` |
 | `models.security.use_proxy` | `SECURITY_MODEL_USE_PROXY` |
 | `models.security.reasoning_content_replay` | `SECURITY_MODEL_REASONING_CONTENT_REPLAY` |
@@ -1590,6 +1606,7 @@ api_key = "replace-with-your-key"
 | `models.vision.thinking_budget_tokens` | `VISION_MODEL_THINKING_BUDGET_TOKENS` |
 | `models.vision.thinking_enabled` | `VISION_MODEL_THINKING_ENABLED` |
 | `models.vision.thinking_include_budget` | `VISION_MODEL_THINKING_INCLUDE_BUDGET` |
+| `models.vision.thinking_param_enabled` | `VISION_MODEL_THINKING_PARAM_ENABLED` |
 | `models.vision.thinking_tool_call_compat` | `VISION_MODEL_THINKING_TOOL_CALL_COMPAT` |
 | `models.vision.use_proxy` | `VISION_MODEL_USE_PROXY` |
 | `models.vision.reasoning_content_replay` | `VISION_MODEL_REASONING_CONTENT_REPLAY` |
@@ -1604,6 +1621,7 @@ api_key = "replace-with-your-key"
 | `models.summary.use_proxy` | `SUMMARY_MODEL_USE_PROXY` |
 | `models.summary.reasoning_content_replay` | `SUMMARY_MODEL_REASONING_CONTENT_REPLAY` |
 | `models.summary.system_prompt_as_user` | `SUMMARY_MODEL_SYSTEM_PROMPT_AS_USER` |
+| `models.summary.thinking_param_enabled` | `SUMMARY_MODEL_THINKING_PARAM_ENABLED` |
 
 #### `messages`
 

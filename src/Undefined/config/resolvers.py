@@ -51,6 +51,24 @@ def _resolve_thinking_compat_flags(
     )
 
 
+def _resolve_thinking_param_enabled(
+    data: dict[str, Any],
+    model_name: str,
+    env_key: str,
+    *,
+    default: bool = True,
+) -> bool:
+    """解析是否发送由 thinking_enabled 自动生成的 thinking 参数。"""
+    return _coerce_bool(
+        _get_value(
+            data,
+            ("models", model_name, "thinking_param_enabled"),
+            env_key,
+        ),
+        default,
+    )
+
+
 def _resolve_api_mode(
     data: dict[str, Any],
     model_name: str,

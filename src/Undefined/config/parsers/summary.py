@@ -5,6 +5,7 @@ from __future__ import annotations
 # 模型配置解析：原始 dict → ChatModelConfig 等 dataclass
 
 import logging
+from dataclasses import replace
 from typing import Any
 
 from Undefined.utils.request_params import merge_request_params
@@ -28,6 +29,7 @@ from ..resolvers import (
     _resolve_responses_tool_choice_compat,
     _resolve_system_prompt_as_user,
     _resolve_thinking_compat_flags,
+    _resolve_thinking_param_enabled,
 )
 
 logger = logging.getLogger(__name__)
@@ -37,8 +39,16 @@ def _parse_summary_model_config(
     data: dict[str, Any], fallback: AgentModelConfig
 ) -> tuple[AgentModelConfig, bool]:
     s = data.get("models", {}).get("summary", {})
+    thinking_param_enabled = _resolve_thinking_param_enabled(
+        data,
+        "summary",
+        "SUMMARY_MODEL_THINKING_PARAM_ENABLED",
+        default=fallback.thinking_param_enabled,
+    )
     if not isinstance(s, dict) or not s:
-        return fallback, False
+        if thinking_param_enabled == fallback.thinking_param_enabled:
+            return fallback, False
+        return replace(fallback, thinking_param_enabled=thinking_param_enabled), False
     queue_interval_seconds = _coerce_float(
         s.get("queue_interval_seconds"), fallback.queue_interval_seconds
     )
@@ -104,6 +114,7 @@ def _parse_summary_model_config(
             context_window_tokens=context_window_tokens,
             queue_interval_seconds=queue_interval_seconds,
             api_mode=api_mode,
+            thinking_param_enabled=thinking_param_enabled,
             thinking_enabled=_coerce_bool(
                 s.get("thinking_enabled"), fallback.thinking_enabled
             ),

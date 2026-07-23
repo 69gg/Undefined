@@ -97,6 +97,23 @@ def test_anthropic_effort_is_passed_through_unchanged(effort: str) -> None:
     assert body["output_config"]["effort"] == effort
 
 
+def test_anthropic_thinking_param_switch_only_suppresses_automatic_thinking() -> None:
+    body = build_request_body(
+        model_config=_config(
+            thinking_param_enabled=False,
+            thinking_enabled=True,
+            thinking_budget_tokens=2048,
+            reasoning_enabled=True,
+            reasoning_effort="high",
+        ),
+        messages=[{"role": "user", "content": "hello"}],
+        max_tokens=4096,
+    )
+
+    assert "thinking" not in body
+    assert body["output_config"] == {"effort": "high"}
+
+
 def test_anthropic_manual_thinking_system_images_tools_and_output_config() -> None:
     tools: list[dict[str, Any]] = [
         {
@@ -215,7 +232,10 @@ def test_anthropic_disabled_thinking_keeps_mapped_forced_tool_choice() -> None:
         },
     }
     body = build_request_body(
-        model_config=_config(thinking_enabled=True),
+        model_config=_config(
+            thinking_param_enabled=False,
+            thinking_enabled=True,
+        ),
         messages=[{"role": "user", "content": "hello"}],
         max_tokens=4096,
         tools=[tool],

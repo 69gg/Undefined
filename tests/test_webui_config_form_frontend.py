@@ -33,6 +33,15 @@ def _has_bare_form_group_query(source: str) -> bool:
     )
 
 
+def test_model_pool_entry_defaults_enable_thinking_parameter() -> None:
+    source = _read_source(CONFIG_FORM_JS)
+    defaults = source.split("const MODEL_POOL_ENTRY_DEFAULTS = {", 1)[1].split("};", 1)[
+        0
+    ]
+
+    assert "thinking_param_enabled: true" in defaults
+
+
 def _css_rule(source: str, selector: str) -> str:
     marker = f"{selector} {{"
     start = source.index(marker) + len(marker)

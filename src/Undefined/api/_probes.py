@@ -105,6 +105,10 @@ def _build_internal_model_probe_payload(mcfg: Any) -> dict[str, Any]:
         )
     if hasattr(mcfg, "thinking_enabled"):
         payload["thinking_enabled"] = getattr(mcfg, "thinking_enabled", False)
+    if hasattr(mcfg, "thinking_param_enabled"):
+        payload["thinking_param_enabled"] = getattr(
+            mcfg, "thinking_param_enabled", True
+        )
     if hasattr(mcfg, "thinking_tool_call_compat"):
         payload["thinking_tool_call_compat"] = getattr(
             mcfg, "thinking_tool_call_compat", True

@@ -29,6 +29,7 @@ from ..resolvers import (
     _resolve_responses_tool_choice_compat,
     _resolve_system_prompt_as_user,
     _resolve_thinking_compat_flags,
+    _resolve_thinking_param_enabled,
 )
 from .pool import _parse_model_pool
 
@@ -127,6 +128,11 @@ def _parse_agent_model_config(data: dict[str, Any]) -> AgentModelConfig:
         context_window_tokens=context_window_tokens,
         queue_interval_seconds=queue_interval_seconds,
         api_mode=api_mode,
+        thinking_param_enabled=_resolve_thinking_param_enabled(
+            data,
+            "agent",
+            "AGENT_MODEL_THINKING_PARAM_ENABLED",
+        ),
         thinking_enabled=_coerce_bool(
             _get_value(
                 data,

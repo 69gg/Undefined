@@ -30,6 +30,7 @@ from ..resolvers import (
     _resolve_responses_tool_choice_compat,
     _resolve_system_prompt_as_user,
     _resolve_thinking_compat_flags,
+    _resolve_thinking_param_enabled,
 )
 
 logger = logging.getLogger(__name__)
@@ -123,7 +124,14 @@ def _parse_naga_model_config(
         False,
     )
 
-    if api_url and api_key and model_name:
+    has_dedicated_model = bool(api_url and api_key and model_name)
+    thinking_param_enabled = _resolve_thinking_param_enabled(
+        data,
+        "naga",
+        "NAGA_MODEL_THINKING_PARAM_ENABLED",
+        default=True if has_dedicated_model else security_model.thinking_param_enabled,
+    )
+    if has_dedicated_model:
         context_window_tokens = _resolve_context_window_tokens(
             data,
             "naga",
@@ -146,6 +154,7 @@ def _parse_naga_model_config(
             context_window_tokens=context_window_tokens,
             queue_interval_seconds=queue_interval_seconds,
             api_mode=api_mode,
+            thinking_param_enabled=thinking_param_enabled,
             thinking_enabled=_coerce_bool(
                 _get_value(
                     data,
@@ -187,6 +196,7 @@ def _parse_naga_model_config(
         context_window_tokens=security_model.context_window_tokens,
         queue_interval_seconds=security_model.queue_interval_seconds,
         api_mode=security_model.api_mode,
+        thinking_param_enabled=thinking_param_enabled,
         thinking_enabled=security_model.thinking_enabled,
         thinking_budget_tokens=security_model.thinking_budget_tokens,
         thinking_include_budget=security_model.thinking_include_budget,

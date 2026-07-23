@@ -46,7 +46,9 @@ def get_reasoning_payload(model_config: Any) -> dict[str, Any] | None:
 
 def get_thinking_payload(model_config: Any) -> dict[str, Any] | None:
     """构建 thinking 请求参数，仅由 thinking_* 配置控制。"""
-    if not bool(getattr(model_config, "thinking_enabled", False)):
+    if not bool(getattr(model_config, "thinking_param_enabled", True)) or not bool(
+        getattr(model_config, "thinking_enabled", False)
+    ):
         return None
     param: dict[str, Any] = {"type": "enabled"}
     if bool(getattr(model_config, "thinking_include_budget", True)):

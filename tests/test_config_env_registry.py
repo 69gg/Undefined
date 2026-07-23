@@ -102,10 +102,19 @@ def test_generation_transport_env_keys_cover_every_primary_model() -> None:
         assert ENV_REGISTRY[("models", model_name, "thinking_enabled")] == (
             f"{prefix}_MODEL_THINKING_ENABLED"
         )
+        assert ENV_REGISTRY[("models", model_name, "thinking_param_enabled")] == (
+            f"{prefix}_MODEL_THINKING_PARAM_ENABLED"
+        )
 
     assert ENV_REGISTRY[("models", "historian", "reasoning_content_replay")] == (
         "HISTORIAN_MODEL_REASONING_CONTENT_REPLAY"
     )
     assert ENV_REGISTRY[("models", "summary", "reasoning_content_replay")] == (
         "SUMMARY_MODEL_REASONING_CONTENT_REPLAY"
+    )
+    assert ENV_REGISTRY[("models", "historian", "thinking_param_enabled")] == (
+        "HISTORIAN_MODEL_THINKING_PARAM_ENABLED"
+    )
+    assert ENV_REGISTRY[("models", "summary", "thinking_param_enabled")] == (
+        "SUMMARY_MODEL_THINKING_PARAM_ENABLED"
     )

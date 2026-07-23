@@ -299,7 +299,9 @@ def _normalize_tool_choice(
 
 
 def _thinking_payload(model_config: Any, max_tokens: int) -> dict[str, Any] | None:
-    if not bool(getattr(model_config, "thinking_enabled", False)):
+    if not bool(getattr(model_config, "thinking_param_enabled", True)) or not bool(
+        getattr(model_config, "thinking_enabled", False)
+    ):
         return None
     if not bool(getattr(model_config, "thinking_include_budget", True)):
         return {"type": "adaptive"}

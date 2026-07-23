@@ -36,6 +36,7 @@ max_tokens = 4096
 api_mode = "openai.chat_completions"
 reasoning_enabled = false
 reasoning_effort = "medium"
+thinking_param_enabled = true
 thinking_enabled = false
 thinking_budget_tokens = 0
 thinking_tool_call_compat = true
@@ -45,7 +46,7 @@ responses_force_stateless_replay = false
 ```
 
 说明：
-- `api_mode = "openai.chat_completions"` 时，`thinking_enabled` 发送兼容接口常用的 `thinking`，`reasoning_enabled` 发送顶层 `reasoning_effort`。回放支持 `reasoning_content`、OpenRouter `reasoning_details`、签名和加密字段。
+- `api_mode = "openai.chat_completions"` 时，`thinking_enabled` 与 `thinking_param_enabled` 同时开启才自动发送兼容接口常用的 `thinking`，`reasoning_enabled` 独立发送顶层 `reasoning_effort`。调用方显式传入的 `thinking` 不受 `thinking_param_enabled` 影响。回放支持 `reasoning_content`、OpenRouter `reasoning_details`、签名和加密字段。
 - `api_mode = "openai.responses"` 时，多轮工具调用默认使用 `previous_response_id + function_call_output`；`responses_force_stateless_replay=true` 才改为完整 `output` items 重放。工具结果使用 `call_id` 关联，`function_call.id` 仅保留模型返回的合法 `fc_*` id。
 - `api_mode = "anthropic.messages"` 时使用官方 `AsyncAnthropic` Messages SDK，并转换 system、图片、工具和 tool result；`max_tokens` 必须为正整数，`thinking_include_budget=false` 使用 adaptive thinking，手动预算必须至少 1024 且小于本次 `max_tokens`。
 - `reasoning_effort` 保持自定义输入：`adaptive` 原样发送，其余值也原样透传；具体字段位置由 `api_mode` 自动决定，不再需要 style 配置。
@@ -63,6 +64,7 @@ AGENT_MODEL_API_MODE=openai.chat_completions
 AGENT_MODEL_REASONING_ENABLED=false
 AGENT_MODEL_REASONING_EFFORT=medium
 AGENT_MODEL_REASONING_CONTENT_REPLAY=true
+AGENT_MODEL_THINKING_PARAM_ENABLED=true
 AGENT_MODEL_THINKING_ENABLED=false
 AGENT_MODEL_THINKING_BUDGET_TOKENS=0
 AGENT_MODEL_THINKING_TOOL_CALL_COMPAT=true

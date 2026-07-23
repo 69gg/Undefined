@@ -31,6 +31,7 @@ from ..resolvers import (
     _resolve_responses_tool_choice_compat,
     _resolve_system_prompt_as_user,
     _resolve_thinking_compat_flags,
+    _resolve_thinking_param_enabled,
 )
 
 logger = logging.getLogger(__name__)
@@ -123,7 +124,14 @@ def _parse_security_model_config(
     context_window_tokens = _resolve_context_window_tokens(
         data, "security", "SECURITY_MODEL_CONTEXT_WINDOW_TOKENS"
     )
-    if api_url and api_key and model_name:
+    has_dedicated_model = bool(api_url and api_key and model_name)
+    thinking_param_enabled = _resolve_thinking_param_enabled(
+        data,
+        "security",
+        "SECURITY_MODEL_THINKING_PARAM_ENABLED",
+        default=True if has_dedicated_model else chat_model.thinking_param_enabled,
+    )
+    if has_dedicated_model:
         return SecurityModelConfig(
             api_url=api_url,
             api_key=api_key,
@@ -140,6 +148,7 @@ def _parse_security_model_config(
             context_window_tokens=context_window_tokens,
             queue_interval_seconds=queue_interval_seconds,
             api_mode=api_mode,
+            thinking_param_enabled=thinking_param_enabled,
             thinking_enabled=_coerce_bool(
                 _get_value(
                     data,
@@ -179,6 +188,7 @@ def _parse_security_model_config(
         max_tokens=chat_model.max_tokens,
         queue_interval_seconds=chat_model.queue_interval_seconds,
         api_mode=chat_model.api_mode,
+        thinking_param_enabled=thinking_param_enabled,
         thinking_enabled=False,
         thinking_budget_tokens=0,
         thinking_include_budget=True,
