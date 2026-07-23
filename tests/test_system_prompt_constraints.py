@@ -13,6 +13,16 @@ PROMPT_PATHS = [
 
 
 @pytest.mark.parametrize("path", PROMPT_PATHS)
+def test_system_prompts_do_not_expose_text_tool_fallback_protocol(
+    path: Path,
+) -> None:
+    text = path.read_text(encoding="utf-8")
+    forbidden_syntax = ('{"tool"', "<tool name=", " params=", " parameters=")
+
+    assert all(syntax not in text for syntax in forbidden_syntax)
+
+
+@pytest.mark.parametrize("path", PROMPT_PATHS)
 def test_system_prompts_include_info_gate_and_style_constraints(path: Path) -> None:
     text = path.read_text(encoding="utf-8")
 

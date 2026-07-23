@@ -85,6 +85,36 @@ reasoning_content_replay = true
 
 `max_tokens` 也会按条目独立继承或覆盖。OpenAI 模式下，显式设为 `0` 或负数会保留该值，并在实际请求中省略 token 上限字段；Anthropic Messages 要求为正整数，非正数会在请求发出前报错。
 
+## 文本工具封包兼容回退（仅服务端）
+
+部分 OpenAI 兼容模型偶尔不会返回结构化 `tool_calls`，而是把工具调用写进普通 `content`。主 Chat 循环会在响应侧兼容以下完整文本格式：
+
+```text
+{"tool":"end","arguments":{"memo":"静默处理","observations":[]}}
+{"tool":"send_message","arguments":{"message":"在做了"}}
+{"tool":"end","arguments":{"memo":"已回应","observations":[]}}
+```
+
+JSON 对象可以单独出现，也可以由空白分隔后连续出现。`arguments` 可以是对象或编码该对象的 JSON 字符串。
+
+```text
+<tool name="end" parameters="{\"memo\":\"静默处理\",\"observations\":[]}"></tool>
+
+<tool name="send_message" params='{"message":"在做了在做了"}' />
+<tool name="end" params='{"memo":"已回应","observations":[]}' />
+```
+
+标签格式支持空的成对标签或自闭合标签；参数属性名可以是 `params`、`parameters` 或 `arguments`。完整封包外层允许使用 Markdown 代码围栏。
+
+这是一项服务端兼容措施，不是模型输出契约，也不会写入系统提示、工具描述或缺少工具调用时的纠错提示。处理边界如下：
+
+- 服务商原生返回的结构化 `tool_calls` 始终优先，不与文本回退结果合并。
+- 文本必须完全由受支持的工具封包组成。检测到封包标记但存在额外说明、格式错误或非对象参数时，整段拒绝。
+- 每个工具名必须属于当前会话经过权限过滤且在本轮实际暴露的 schema；文本回退不能绕过 Tool Search 加载阶段。
+- 转换后的调用继续使用原有名称映射、工具生命周期事件、并发执行和 `end` 同轮拒绝规则，不建立第二套执行路径。
+- Responses 模式恢复出文本工具调用后，下一轮强制使用 stateless replay，避免合成调用 ID 与上游响应状态不一致。
+- 被拒绝的工具协议文本不会在重试耗尽后作为普通消息发送。运行日志使用 `[工具调用兼容]` 标记恢复或拒绝原因，不记录完整参数正文。
+
 ## 私聊使用方法
 
 ### 自动轮换

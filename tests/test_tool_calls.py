@@ -9,11 +9,13 @@ from typing import Any
 import pytest
 
 from Undefined.utils.tool_calls import (
+    TextToolCallParseError,
     _clean_json_string,
     _repair_json_like_string,
     _strip_code_fences,
     extract_required_tool_call_arguments,
     normalize_tool_arguments_json,
+    parse_text_tool_calls,
     parse_tool_arguments,
 )
 
@@ -133,6 +135,120 @@ class TestParseToolArguments:
     def test_unsupported_type_returns_empty(self, test_logger: logging.Logger) -> None:
         result = parse_tool_arguments(42, logger=test_logger, tool_name="t")
         assert result == {}
+
+
+# ---------------------------------------------------------------------------
+# parse_text_tool_calls
+# ---------------------------------------------------------------------------
+
+
+class TestParseTextToolCalls:
+    @staticmethod
+    def _names(tool_calls: list[dict[str, Any]]) -> list[str]:
+        return [str(tool_call["function"]["name"]) for tool_call in tool_calls]
+
+    @staticmethod
+    def _arguments(tool_call: dict[str, Any]) -> dict[str, Any]:
+        parsed = json.loads(str(tool_call["function"]["arguments"]))
+        assert isinstance(parsed, dict)
+        return parsed
+
+    def test_single_json_envelope(self) -> None:
+        tool_calls = parse_text_tool_calls(
+            '{"tool":"end","arguments":{"memo":"静默处理","observations":[]}}'
+        )
+
+        assert self._names(tool_calls) == ["end"]
+        assert self._arguments(tool_calls[0]) == {
+            "memo": "静默处理",
+            "observations": [],
+        }
+        assert tool_calls[0]["type"] == "function"
+        assert str(tool_calls[0]["id"]).startswith("call_txt_")
+
+    def test_consecutive_json_envelopes_preserve_order(self) -> None:
+        tool_calls = parse_text_tool_calls(
+            '{"tool":"send_message","arguments":{"message":"在做了"}}\n'
+            '{"tool":"end","arguments":{"memo":"已回应","observations":[]}}'
+        )
+
+        assert self._names(tool_calls) == ["send_message", "end"]
+        assert self._arguments(tool_calls[0]) == {"message": "在做了"}
+        assert len({str(tool_call["id"]) for tool_call in tool_calls}) == 2
+
+    def test_json_envelope_accepts_encoded_arguments_object(self) -> None:
+        tool_calls = parse_text_tool_calls(
+            '{"tool":"send_message","arguments":"{\\"message\\":\\"在做了\\"}"}'
+        )
+
+        assert self._names(tool_calls) == ["send_message"]
+        assert self._arguments(tool_calls[0]) == {"message": "在做了"}
+
+    def test_escaped_parameters_attribute_and_paired_tag(self) -> None:
+        raw = (
+            r'<tool name="end" parameters="{\"force\": false, '
+            r'\"memo\": \"静默处理\", \"observations\": []}"></tool>'
+        )
+
+        tool_calls = parse_text_tool_calls(raw)
+
+        assert self._names(tool_calls) == ["end"]
+        assert self._arguments(tool_calls[0]) == {
+            "force": False,
+            "memo": "静默处理",
+            "observations": [],
+        }
+
+    def test_multiple_self_closing_params_tags(self) -> None:
+        raw = """<tool name="send_message" params='{"message": "在做了在做了"}' />
+<tool name="end" params='{"memo": "回应重试请求", "observations": ["一条观察"]}' />"""
+
+        tool_calls = parse_text_tool_calls(raw)
+
+        assert self._names(tool_calls) == ["send_message", "end"]
+        assert self._arguments(tool_calls[0]) == {"message": "在做了在做了"}
+        assert self._arguments(tool_calls[1]) == {
+            "memo": "回应重试请求",
+            "observations": ["一条观察"],
+        }
+
+    def test_arguments_attribute_alias(self) -> None:
+        tool_calls = parse_text_tool_calls("<tool name='end' arguments='{}' />")
+
+        assert self._names(tool_calls) == ["end"]
+        assert self._arguments(tool_calls[0]) == {}
+
+    def test_json_code_fence_is_accepted(self) -> None:
+        tool_calls = parse_text_tool_calls(
+            '```json\n{"tool":"end","arguments":{}}\n```'
+        )
+
+        assert self._names(tool_calls) == ["end"]
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            '{"message":"普通 JSON"}',
+            "一段普通回复",
+        ],
+    )
+    def test_ordinary_text_is_not_treated_as_tool_protocol(self, raw: str) -> None:
+        assert parse_text_tool_calls(raw) == []
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            '{"tool":"end","arguments":{}} trailing',
+            '普通文本 {"tool":"end","arguments":{}}',
+            '{"tool":"end","arguments":[],"extra":true}',
+            '<tool name="end" params="[]" />',
+            '<tool name="end" params="{}" /> trailing',
+            '普通文本 <tool name="end" params="{}" />',
+        ],
+    )
+    def test_invalid_tool_protocol_is_rejected(self, raw: str) -> None:
+        with pytest.raises(TextToolCallParseError):
+            parse_text_tool_calls(raw)
 
 
 # ---------------------------------------------------------------------------

@@ -146,6 +146,12 @@ class TestMissingToolCallRetryHint:
     def test_mentions_tool_requirement(self) -> None:
         assert "工具" in MISSING_TOOL_CALL_RETRY_HINT
 
+    def test_does_not_expose_text_tool_fallback_protocol(self) -> None:
+        forbidden_syntax = ('{"tool"', "<tool name=", " params=", " parameters=")
+        assert all(
+            syntax not in MISSING_TOOL_CALL_RETRY_HINT for syntax in forbidden_syntax
+        )
+
 
 # ---------------------------------------------------------------------------
 # _build_invalid_tool_call_response (additional edge cases)
