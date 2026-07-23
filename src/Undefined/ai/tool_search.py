@@ -187,7 +187,12 @@ def _build_tool_search_schema(max_results: int) -> dict[str, Any]:
             "name": TOOL_SEARCH_NAME,
             "description": (
                 "Search and load deferred tool schemas for this request. "
-                "Loaded tools become callable starting with the next model turn."
+                "This tool only exposes schemas: it never executes selected tools, "
+                "performs business actions, downloads or registers files, or sends "
+                "messages. A name in `loaded` becomes callable starting with the next "
+                "model turn; it does not mean the user's task is complete. If the "
+                "requested action remains unfinished, call the loaded target tool "
+                "before `end`."
             ),
             "parameters": {
                 "type": "object",

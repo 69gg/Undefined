@@ -300,7 +300,7 @@ HTML 和 Markdown 工具都支持显式长图版式：
 
 | 工具 | 说明 |
 |---|---|
-| `music.search_songs` | 按关键词跨平台搜索歌曲 |
+| `music.search_songs` | 按关键词跨平台搜索歌曲；只返回 Track，不下载也不发送 |
 | `music.search_playlists` | 搜索歌单 |
 | `music.get_hot_search` | 获取一个或全部平台热搜 |
 | `music.browse_playlists` | 获取歌单标签、列表和详情 |
@@ -309,11 +309,13 @@ HTML 和 Markdown 工具都支持显式长图版式：
 | `music.get_cover` | 获取封面，默认返回图片附件，也可返回 URL |
 | `music.get_comments` | 获取最新/热门评论及评论回复 |
 | `music.find_song_matches` | 查找其他平台的匹配版本 |
-| `music.get_audio` | 获取音频，默认返回普通音频附件，也可返回短时直链 |
+| `music.get_audio` | 下载或解析音频并返回附件/直链；只准备内容，不发送 |
 
 搜索、歌单详情、排行榜详情和匹配结果中的 `Track` 是后续操作所需的完整凭据。调用歌词、封面、评论、匹配或音频工具时，必须原样传递整份 `Track`，特别是 `sourceData` 与 `qualities`，不能只保留歌曲名或 ID。
 
-`music.get_audio` 默认流式读取 `/v1/tracks/stream` 并返回 `<attachment uid="..."/>`；音频大小受 `[attachments].remote_download_max_size_mb` 限制。普通音频附件不会自动成为 QQ/微信原生语音，只有用户明确要求“作为语音消息发送”时才应继续调用 `messages.send_voice`。`delivery="url"` 使用直链解析，链接可能快速失效。
+发歌是明确的三步流程：先用 `music.search_songs` 取得候选，再把选中歌曲的完整 `Track` 传给 `music.get_audio`，最后调用消息工具实际交付。前两个工具都不会自行向用户发送内容；仅搜索成功、音频下载成功或返回附件 UID 都不代表已经发歌。
+
+`music.get_audio` 默认流式读取 `/v1/tracks/stream`，登记当前会话附件并返回 `<attachment uid="..."/>` 与 `uid`；音频大小受 `[attachments].remote_download_max_size_mb` 限制。普通音频文件应调用 `messages.send_message`，把返回的附件标签原样放进 `message`。只有用户明确要求“作为原生语音消息发送”时才改用 `messages.send_voice(uid=返回的uid)`，不要同时发送两份。`delivery="url"` 只解析可能快速失效的直链，仍需通过 `messages.send_message` 发给用户。
 
 本工具集刻意不暴露下载任务、队列、暂停、恢复、删除等底层 API（例如不会注册 `music.download_jobs`、`music.create_download`）。上游服务的受管下载文件最长保留 24 小时并自动清理；流式音频进入 Undefined 后按本项目附件缓存策略清理。使用前请阅读上游仓库的部署、许可证和自定义音源说明，并确保内容使用符合版权要求。
 

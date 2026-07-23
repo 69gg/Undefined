@@ -56,6 +56,11 @@ def test_virtual_schema_uses_configured_result_cap() -> None:
     function = session.tool_search_schema["function"]
 
     assert function["name"] == TOOL_SEARCH_NAME
+    assert "only exposes schemas" in function["description"]
+    assert "never executes selected tools" in function["description"]
+    assert "or sends messages" in function["description"]
+    assert "does not mean the user's task is complete" in function["description"]
+    assert "before `end`" in function["description"]
     assert function["parameters"]["properties"]["max_results"]["maximum"] == 3
     assert function["parameters"]["additionalProperties"] is False
 

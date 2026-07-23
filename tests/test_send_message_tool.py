@@ -42,6 +42,8 @@ async def test_send_message_schema_rejects_mixed_address_parameters() -> None:
     assert "特殊符号和附件标签必须原样填写" in function["description"]
     assert "message 参数是 JSON 字符串而不是 XML/HTML" in function["description"]
     assert "错误的 &it;" in function["description"]
+    assert "工具仅返回附件标签或 UID 时并未发送" in function["description"]
+    assert "可发送已登记的图片或普通文件附件" in function["description"]
     assert (
         "<、>、& 等特殊符号须原样填写"
         not in parameters["properties"]["message"]["description"]
@@ -51,6 +53,10 @@ async def test_send_message_schema_rejects_mixed_address_parameters() -> None:
         in parameters["properties"]["message"]["description"]
     )
     assert "发送前检查并消除 &lt;" in parameters["properties"]["message"]["description"]
+    assert (
+        "把上游工具返回的 <attachment"
+        in parameters["properties"]["message"]["description"]
+    )
 
     assert validator.is_valid({"message": "hello", "address": "wechat:123"})
     assert validator.is_valid(

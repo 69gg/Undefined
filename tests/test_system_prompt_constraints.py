@@ -45,8 +45,29 @@ def test_system_prompts_define_conditional_tool_search_sequence(path: Path) -> N
         '优先使用 `query="select:工具名"` 精确加载',
         "等待系统在下一轮暴露目标 schema 后",
         "禁止与搜索同轮调用目标工具",
+        "不会执行目标工具",
+        "返回 `loaded` 只表示“下一轮可以调用”",
+        "禁止仅因加载成功而调用 `end`",
         "如果当前 tools 列表没有虚拟 `tool_search`",
         "或当前消息没有 `<available_deferred_tools>` 目录",
+    ]
+    for snippet in required_snippets:
+        assert snippet in text
+
+
+@pytest.mark.parametrize("path", PROMPT_PATHS)
+def test_system_prompts_distinguish_attachment_creation_from_delivery(
+    path: Path,
+) -> None:
+    text = path.read_text(encoding="utf-8")
+
+    required_snippets = [
+        "只表示附件已登记",
+        "不表示已经发给用户",
+        "必须在后续轮次调用 `send_message`",
+        "发送成功后才算交付完成",
+        "只有用户明确要求原生语音消息时",
+        "调用 `messages.send_voice`",
     ]
     for snippet in required_snippets:
         assert snippet in text

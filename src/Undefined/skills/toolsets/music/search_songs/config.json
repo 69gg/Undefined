@@ -2,7 +2,7 @@
   "type": "function",
   "function": {
     "name": "search_songs",
-    "description": "按关键词跨平台搜索歌曲。结果中的每首歌曲都是完整 Track 对象；后续获取歌词、封面、评论、跨平台匹配或音频时，必须原样传递该对象，不要删减 sourceData、qualities 等字段。",
+    "description": "仅按关键词跨平台搜索歌曲并返回候选 Track；本工具不下载音频、不注册附件，也不向用户发送任何内容。若用户要求下载或发送歌曲，必须从结果中选定完整 Track，再调用 music.get_audio 准备音频，并按其返回说明调用消息发送工具；仅搜索成功不代表发歌任务完成。后续获取歌词、封面、评论、跨平台匹配或音频时，必须原样传递完整 Track，不要删减 sourceData、qualities 等字段，也不要只传歌名或 ID。",
     "parameters": {
       "type": "object",
       "properties": {

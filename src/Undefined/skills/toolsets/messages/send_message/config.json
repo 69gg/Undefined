@@ -2,13 +2,13 @@
     "type": "function",
     "function": {
         "name": "send_message",
-        "description": "发送消息。默认回复当前物理会话；可用 address 精确指定 qq:<QQ号>、group:<群号> 或 wechat:<逻辑QQ号>。旧 target_type+target_id 参数继续兼容并表示 QQ/QQ群。会受到逻辑 QQ/群访问控制。微信支持同一物理会话内的 reply_to 原生引用；上游明确拒绝时降级为 Markdown 引用。微信文本支持 Markdown。微信的 message 参数是 JSON 字符串而不是 XML/HTML：特殊符号和附件标签必须原样填写；除非用户明确要求展示实体拼写，否则禁止 &lt;、&gt;、&amp;、&quot;、&apos;、&#...; 和错误的 &it;。可以在回答过程中多次调用，最后必须调用 end。\n群聊中 @ 某人：在消息里写 [@QQ号]，例如 [@2608261902] 你好。",
+        "description": "实际向用户发送消息。默认回复当前物理会话；可用 address 精确指定 qq:<QQ号>、group:<群号> 或 wechat:<逻辑QQ号>。把其他工具返回的 <attachment uid=\"...\"/> 原样放入 message，可发送已登记的图片或普通文件附件；工具仅返回附件标签或 UID 时并未发送，仍须调用本工具。旧 target_type+target_id 参数继续兼容并表示 QQ/QQ群。会受到逻辑 QQ/群访问控制。微信支持同一物理会话内的 reply_to 原生引用；上游明确拒绝时降级为 Markdown 引用。微信文本支持 Markdown。微信的 message 参数是 JSON 字符串而不是 XML/HTML：特殊符号和附件标签必须原样填写；除非用户明确要求展示实体拼写，否则禁止 &lt;、&gt;、&amp;、&quot;、&apos;、&#...; 和错误的 &it;。可以在回答过程中多次调用，最后必须调用 end。\n群聊中 @ 某人：在消息里写 [@QQ号]，例如 [@2608261902] 你好。",
         "parameters": {
             "type": "object",
             "properties": {
                 "message": {
                     "type": "string",
-                    "description": "要发送的消息内容。群聊中用 [@QQ号] 来 @ 用户，如 [@2608261902]。微信通道可直接使用 Markdown；message 是 JSON 字符串，不需要 XML/HTML 转义，<、>、& 和引号须原样填写。发送前检查并消除 &lt;、&gt;、&amp;、&quot;、&apos;、&#...; 及错误的 &it;（用户明确要求展示实体字符串时除外）。"
+                    "description": "要实际发送的消息内容。发送普通附件时，把上游工具返回的 <attachment uid=\"...\"/> 原样放在这里，不得臆造或改写 UID。群聊中用 [@QQ号] 来 @ 用户，如 [@2608261902]。微信通道可直接使用 Markdown；message 是 JSON 字符串，不需要 XML/HTML 转义，<、>、& 和引号须原样填写。发送前检查并消除 &lt;、&gt;、&amp;、&quot;、&apos;、&#...; 及错误的 &it;（用户明确要求展示实体字符串时除外）。"
                 },
                 "address": {
                     "type": "string",

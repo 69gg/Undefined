@@ -181,6 +181,33 @@ def test_music_registry_exposes_only_user_facing_tools() -> None:
     assert not any("download" in name or "job" in name for name in names)
 
 
+def test_music_tool_descriptions_define_audio_delivery_contract() -> None:
+    toolsets_root = (
+        Path(__file__).parents[1] / "src" / "Undefined" / "skills" / "toolsets"
+    )
+    registry = ToolSetRegistry(toolsets_root)
+    functions = {
+        str(schema["function"]["name"]): schema["function"]
+        for schema in registry.get_tools_schema()
+    }
+
+    search_description = str(functions["music.search_songs"]["description"])
+    assert "不下载音频、不注册附件，也不向用户发送任何内容" in search_description
+    assert "再调用 music.get_audio" in search_description
+    assert "仅搜索成功不代表发歌任务完成" in search_description
+
+    audio_function = functions["music.get_audio"]
+    audio_description = str(audio_function["description"])
+    assert "本工具本身绝不会向用户发送消息或文件" in audio_description
+    assert "调用 messages.send_message" in audio_description
+    assert "调用 messages.send_voice" in audio_description
+    assert "发送工具成功后才可结束" in audio_description
+    delivery_description = str(
+        audio_function["parameters"]["properties"]["delivery"]["description"]
+    )
+    assert "不发送" in delivery_description
+
+
 def test_music_tools_are_not_shared_with_subagents() -> None:
     music_root = (
         Path(__file__).parents[1]
