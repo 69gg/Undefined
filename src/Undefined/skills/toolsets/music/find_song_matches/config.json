@@ -1,0 +1,15 @@
+{
+  "type": "function",
+  "function": {
+    "name": "find_song_matches",
+    "description": "根据一首完整 Track 查找其他音乐平台上的匹配版本，可用于比较音质或在原平台音频不可用时选择候选。返回值仍是可供其他歌曲工具直接使用的完整 Track 列表。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "track": { "type": "object", "description": "完整 Track 对象，不得删减或重建", "additionalProperties": true }
+      },
+      "required": ["track"],
+      "additionalProperties": false
+    }
+  }
+}

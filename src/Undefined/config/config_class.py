@@ -168,6 +168,9 @@ class Config:
     messages_use_proxy: bool
     messages_send_text_file_max_size_kb: int
     messages_send_url_file_max_size_mb: int
+    # lxmusic2api 音乐工具集
+    lxmusic2api_base_url: str
+    lxmusic2api_api_key: str
     # 嵌入模型
     embedding_model: EmbeddingModelConfig
     rerank_model: RerankModelConfig

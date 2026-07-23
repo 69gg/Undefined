@@ -73,6 +73,8 @@ ENV_REGISTRY: Final[dict[tuple[str, ...], str]] = {
     ("logging", "log_thinking"): "LOG_THINKING",
     ("logging", "max_size_mb"): "LOG_MAX_SIZE_MB",
     ("logging", "tty_enabled"): "LOG_TTY_ENABLED",
+    ("lxmusic2api", "api_key"): "LXMUSIC2API_API_KEY",
+    ("lxmusic2api", "base_url"): "LXMUSIC2API_BASE_URL",
     ("mcp", "config_path"): "MCP_CONFIG_PATH",
     (
         "models",

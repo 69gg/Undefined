@@ -43,6 +43,7 @@ def _make_runtime_config(**kwargs: Any) -> Any:
         "prefetch_tools": [],
         "prefetch_tools_hide": False,
         "tools_dot_delimiter": "-_-",
+        "lxmusic2api_api_key": "",
     }
     defaults.update(kwargs)
     return SimpleNamespace(**defaults)
@@ -530,6 +531,36 @@ class TestFilterToolsForRuntimeConfig:
     def test_empty_tools_list(self) -> None:
         result = self.client._filter_tools_for_runtime_config([])
         assert result == []
+
+    def test_music_tools_filtered_without_api_key(self) -> None:
+        tools = [
+            self._make_tool("music.search_songs"),
+            self._make_tool("music.get_audio"),
+            self._make_tool("messages.send_message"),
+        ]
+
+        result = self.client._filter_tools_for_runtime_config(tools)
+
+        assert [tool["function"]["name"] for tool in result] == [
+            "messages.send_message"
+        ]
+
+    def test_music_tools_visible_with_api_key_even_when_naga_enabled(self) -> None:
+        self.client.runtime_config = _make_runtime_config(
+            lxmusic2api_api_key="music-key",
+            nagaagent_mode_enabled=True,
+        )
+        tools = [
+            self._make_tool("music.search_songs"),
+            self._make_tool("naga_code_analysis_agent"),
+        ]
+
+        result = self.client._filter_tools_for_runtime_config(tools)
+
+        assert [tool["function"]["name"] for tool in result] == [
+            "music.search_songs",
+            "naga_code_analysis_agent",
+        ]
 
 
 # ---------------------------------------------------------------------------

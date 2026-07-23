@@ -1,0 +1,18 @@
+{
+  "type": "function",
+  "function": {
+    "name": "browse_rankings",
+    "description": "浏览指定音乐平台的排行榜。action=list 获取榜单及 ranking_id；action=detail 分页读取榜单歌曲。详情返回的完整 Track 必须原样传给歌曲类工具。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "action": { "type": "string", "enum": ["list", "detail"], "description": "浏览动作" },
+        "source": { "type": "string", "enum": ["kw", "kg", "tx", "wy", "mg"], "default": "wy", "description": "音乐平台" },
+        "ranking_id": { "type": "string", "minLength": 1, "maxLength": 1024, "description": "action=detail 时必填，来自 list 结果" },
+        "page": { "type": "integer", "minimum": 1, "maximum": 100000, "default": 1, "description": "榜单详情页码" }
+      },
+      "required": ["action", "source"],
+      "additionalProperties": false
+    }
+  }
+}

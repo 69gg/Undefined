@@ -1,0 +1,20 @@
+{
+  "type": "function",
+  "function": {
+    "name": "browse_playlists",
+    "description": "浏览指定平台的歌单。action=tags 获取可用分类与排序；action=list 按 tag_id/sort_id 分页列出歌单；action=detail 按 playlist_id 读取歌单歌曲。详情返回的完整 Track 必须原样传给歌曲类工具。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "action": { "type": "string", "enum": ["tags", "list", "detail"], "description": "浏览动作" },
+        "source": { "type": "string", "enum": ["kw", "kg", "tx", "wy", "mg"], "default": "wy", "description": "音乐平台" },
+        "tag_id": { "type": "string", "maxLength": 1024, "description": "action=list 时可选，来自 tags 结果" },
+        "sort_id": { "type": "string", "maxLength": 1024, "description": "action=list 时可选，来自 tags 结果" },
+        "playlist_id": { "type": "string", "minLength": 1, "maxLength": 1024, "description": "action=detail 时必填，来自搜索或列表结果" },
+        "page": { "type": "integer", "minimum": 1, "maximum": 100000, "default": 1, "description": "list/detail 的页码" }
+      },
+      "required": ["action", "source"],
+      "additionalProperties": false
+    }
+  }
+}

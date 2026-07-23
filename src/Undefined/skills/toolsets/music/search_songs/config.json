@@ -1,0 +1,18 @@
+{
+  "type": "function",
+  "function": {
+    "name": "search_songs",
+    "description": "按关键词跨平台搜索歌曲。结果中的每首歌曲都是完整 Track 对象；后续获取歌词、封面、评论、跨平台匹配或音频时，必须原样传递该对象，不要删减 sourceData、qualities 等字段。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": { "type": "string", "minLength": 1, "maxLength": 200, "description": "歌曲名、歌手或组合关键词" },
+        "source": { "type": "string", "enum": ["all", "kw", "kg", "tx", "wy", "mg"], "default": "all", "description": "平台：all=全部，kw=酷我，kg=酷狗，tx=QQ 音乐，wy=网易云，mg=咪咕" },
+        "page": { "type": "integer", "minimum": 1, "maximum": 100000, "default": 1, "description": "页码" },
+        "limit": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20, "description": "每页数量" }
+      },
+      "required": ["query"],
+      "additionalProperties": false
+    }
+  }
+}

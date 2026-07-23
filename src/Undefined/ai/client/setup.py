@@ -697,6 +697,21 @@ class ClientSetupMixin:
                     except (TypeError, ValueError):
                         user_id = None
 
+        music_enabled = bool(
+            str(getattr(runtime_config, "lxmusic2api_api_key", "") or "").strip()
+        )
+        runtime_tools: list[dict[str, Any]] = []
+        for tool in tools:
+            function = tool.get("function") if isinstance(tool, dict) else None
+            name = function.get("name") if isinstance(function, dict) else None
+            if (
+                not music_enabled
+                and isinstance(name, str)
+                and name.startswith("music.")
+            ):
+                continue
+            runtime_tools.append(tool)
+
         enabled = resolve_naga_session_allowed(
             runtime_config,
             request_type=request_type,
@@ -704,11 +719,11 @@ class ClientSetupMixin:
             user_id=user_id,
         )
         if enabled:
-            return tools
+            return runtime_tools
 
         # 关闭 NagaAgent 模式时：隐藏相关 Agent，避免被模型误调用。
         filtered: list[dict[str, Any]] = []
-        for tool in tools:
+        for tool in runtime_tools:
             function = tool.get("function") if isinstance(tool, dict) else None
             name = function.get("name") if isinstance(function, dict) else None
             if name == "naga_code_analysis_agent":

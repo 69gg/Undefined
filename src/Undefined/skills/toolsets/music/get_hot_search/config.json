@@ -1,0 +1,14 @@
+{
+  "type": "function",
+  "function": {
+    "name": "get_hot_search",
+    "description": "获取一个或全部音乐平台的实时热搜词，可用于发现当前热门歌曲后再调用 music.search_songs。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "source": { "type": "string", "enum": ["all", "kw", "kg", "tx", "wy", "mg"], "default": "all", "description": "平台，all 表示汇总全部平台" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

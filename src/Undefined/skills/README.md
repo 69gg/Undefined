@@ -40,6 +40,7 @@ skills/
 │
 ├── toolsets/       # 工具集合，按功能分类组织
 │   ├── __init__.py
+│   ├── music/      # lxmusic2api 高层音乐工具（仅主 AI）
 │   ├── render/     # 渲染工具集
 │   │   ├── render_html/
 │   │   ├── render_latex/

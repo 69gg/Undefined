@@ -8,6 +8,11 @@
 
 ```
 toolsets/
+├── music/                   # lxmusic2api 高层音乐能力
+│   ├── search_songs/        # 歌曲搜索
+│   ├── browse_playlists/    # 歌单标签、列表与详情
+│   ├── browse_rankings/     # 排行榜列表与详情
+│   └── get_audio/           # 直链或会话音频附件
 ├── memes/                   # 表情包工具集
 │   ├── search_memes/        # 表情包检索
 │   └── send_meme_by_uid/    # 按 uid 发送表情包
@@ -156,6 +161,17 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
 
 - `messages.send_message`: 发送文本、图片或普通文件附件
 - `messages.send_voice`: 将当前会话可访问的音频附件 UID 显式作为语音发送；QQ 使用 `CQ:record`，微信使用原生 iLink 语音
+
+### Music（音乐）
+
+音乐工具集对接独立部署的 [lxmusic2api](https://github.com/69gg/lxmusic2api)。配置 `[lxmusic2api].base_url` 和 `api_key` 后，主 AI 可使用歌曲/歌单搜索、热搜、歌单与排行榜浏览、歌词、封面、评论、跨平台匹配和音频附件等高层能力。
+
+- `music.search_songs` / `music.search_playlists` / `music.get_hot_search`
+- `music.browse_playlists` / `music.browse_rankings`
+- `music.get_lyrics` / `music.get_cover` / `music.get_comments`
+- `music.find_song_matches` / `music.get_audio`
+
+该分类没有 `callable.json`，因此默认仅主 AI 可见；同时不注册下载任务或作业管理类底层工具（例如 `music.download_jobs`、`music.create_download`）。上游返回的完整 `Track` 必须原样传入后续歌曲工具。
 
 ### Group Analysis（群聊深度分析）
 

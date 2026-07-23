@@ -860,6 +860,27 @@ Prompt caching 补充：
 
 ---
 
+### 4.20.1 `[lxmusic2api]` 音乐服务
+
+`music.*` 工具由独立部署的 [lxmusic2api](https://github.com/69gg/lxmusic2api) 提供数据与音频解析能力。请先按照上游仓库说明完成部署、配置唯一自定义音源并确认其许可证及使用限制，再填写：
+
+| 字段 | 默认值 | 说明 | 约束/回退 |
+|---|---:|---|---|
+| `base_url` | `http://127.0.0.1:3000` | lxmusic2api 服务根地址 | 推荐不带 `/v1`；末尾 `/` 自动移除；仅接受 HTTP(S) 地址 |
+| `api_key` | `""` | 与 lxmusic2api `[auth].api_key` 一致的 Bearer Key | 留空时全部 `music.*` 工具从模型工具列表隐藏 |
+
+```toml
+[lxmusic2api]
+base_url = "http://127.0.0.1:3000"
+api_key = "replace-with-your-key"
+```
+
+配置会随 `config.toml` 热更新：修改 `base_url` 或 `api_key` 后，后续工具调用与工具可见性立即使用新值，无需重启。音乐工具沿用全局 `[access]` 会话访问控制，不另设用户白名单。
+
+音频附件模式受 `[attachments].remote_download_max_size_mb` 限制；值为 `0` 时应改用 `music.get_audio(delivery="url")`。URL 是上游自定义音源产生的短时直链，可能快速失效。上游受管下载文件采用最长 24 小时保留并自动清理；本集成不暴露下载任务生命周期接口，流式音频注册后的本地附件仍按 Undefined 的 `[attachments]` 缓存策略清理。部署者应根据版权、许可证与当地法律调整缓存保留并只处理有权使用的内容。
+
+---
+
 ### 4.21 `[bilibili]` 自动提取
 
 | 字段 | 默认值 | 说明 | 约束/回退 |
@@ -1256,6 +1277,7 @@ Prompt caching 补充：
 - `render.browser_max_concurrency` 会在当前渲染任务空闲后重建渲染并发信号量。
 - `skills.intro_autogen_*`（Agent intro 生成器配置刷新）
 - `skills.tool_search_*`（主 AI 后续新 `ask()` 的按需工具加载配置刷新）
+- `lxmusic2api.base_url` / `lxmusic2api.api_key`（后续音乐请求与 `music.*` 工具可见性刷新）
 - `search.searxng_url`（搜索客户端刷新）
 - `search.priority` / `search.grok_search_enabled` / `search.firecrawl_search_enabled` / `search.firecrawl.*` 会随运行时配置更新，用于后续 `web_agent` 工具暴露和提示词优先级；无需重启。
 - `api.tool_invoke_callback_use_proxy` 会随运行时配置更新，用于后续 Runtime tool invoke 回调。
@@ -1588,6 +1610,13 @@ Prompt caching 补充：
 | TOML 路径 | 环境变量 |
 |-----------|----------|
 | `messages.use_proxy` | `MESSAGES_USE_PROXY` |
+
+#### `lxmusic2api`
+
+| TOML 路径 | 环境变量 |
+|-----------|----------|
+| `lxmusic2api.api_key` | `LXMUSIC2API_API_KEY` |
+| `lxmusic2api.base_url` | `LXMUSIC2API_BASE_URL` |
 
 #### `naga`
 

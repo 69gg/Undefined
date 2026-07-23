@@ -1,0 +1,18 @@
+{
+  "type": "function",
+  "function": {
+    "name": "get_audio",
+    "description": "获取歌曲音频。默认通过 lxmusic2api 流式代理并注册为当前会话普通音频附件，返回的 <attachment uid=\"...\"/> 应直接嵌入回复；不要调用 messages.send_voice，除非用户明确要求作为原生语音发送。delivery=url 返回可能快速失效的直链。track 必须是完整 Track。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "track": { "type": "object", "description": "完整 Track 对象，不得删减或重建", "additionalProperties": true },
+        "quality": { "type": "string", "enum": ["flac24bit", "flac", "wav", "ape", "320k", "192k", "128k"], "description": "期望音质；省略时使用 lxmusic2api 服务端默认值" },
+        "strict_quality": { "type": "boolean", "default": false, "description": "是否禁止自动降级到其他音质" },
+        "delivery": { "type": "string", "enum": ["attachment", "url"], "default": "attachment", "description": "attachment=会话普通音频附件；url=短时有效直链" }
+      },
+      "required": ["track"],
+      "additionalProperties": false
+    }
+  }
+}

@@ -294,6 +294,35 @@ HTML 和 Markdown 工具都支持显式长图版式：
 
 ---
 
+### 音乐 (`music.*`)
+
+管理员完成 [lxmusic2api](https://github.com/69gg/lxmusic2api) 的部署、自定义音源和 API Key 配置后，AI 可使用以下面向用户的音乐能力；`api_key` 留空时整组工具自动隐藏。
+
+| 工具 | 说明 |
+|---|---|
+| `music.search_songs` | 按关键词跨平台搜索歌曲 |
+| `music.search_playlists` | 搜索歌单 |
+| `music.get_hot_search` | 获取一个或全部平台热搜 |
+| `music.browse_playlists` | 获取歌单标签、列表和详情 |
+| `music.browse_rankings` | 获取排行榜列表和详情 |
+| `music.get_lyrics` | 获取歌词、翻译或逐字歌词等上游数据 |
+| `music.get_cover` | 获取封面，默认返回图片附件，也可返回 URL |
+| `music.get_comments` | 获取最新/热门评论及评论回复 |
+| `music.find_song_matches` | 查找其他平台的匹配版本 |
+| `music.get_audio` | 获取音频，默认返回普通音频附件，也可返回短时直链 |
+
+搜索、歌单详情、排行榜详情和匹配结果中的 `Track` 是后续操作所需的完整凭据。调用歌词、封面、评论、匹配或音频工具时，必须原样传递整份 `Track`，特别是 `sourceData` 与 `qualities`，不能只保留歌曲名或 ID。
+
+`music.get_audio` 默认流式读取 `/v1/tracks/stream` 并返回 `<attachment uid="..."/>`；音频大小受 `[attachments].remote_download_max_size_mb` 限制。普通音频附件不会自动成为 QQ/微信原生语音，只有用户明确要求“作为语音消息发送”时才应继续调用 `messages.send_voice`。`delivery="url"` 使用直链解析，链接可能快速失效。
+
+本工具集刻意不暴露下载任务、队列、暂停、恢复、删除等底层 API（例如不会注册 `music.download_jobs`、`music.create_download`）。上游服务的受管下载文件最长保留 24 小时并自动清理；流式音频进入 Undefined 后按本项目附件缓存策略清理。使用前请阅读上游仓库的部署、许可证和自定义音源说明，并确保内容使用符合版权要求。
+
+**示例：**
+> *“搜一下周杰伦的夜曲，给我歌词和封面。”*
+> *“看看网易云飙升榜，再把第一首歌作为普通音频附件发给我。”*
+
+---
+
 ### 独立原子工具
 
 | 工具 | 说明 |
