@@ -346,7 +346,11 @@ async def test_send_message_dispatches_file_only_without_empty_message(
     assert send_call is not None
     assert send_call.args[0].canonical == "group:10001"
     assert send_call.args[1] == record.local_path
-    assert send_call.kwargs == {"name": "song.mp3", "auto_history": True}
+    assert send_call.kwargs == {
+        "name": "song.mp3",
+        "auto_history": True,
+        "history_attachment": record,
+    }
     assert context["message_sent_this_turn"] is True
 
 

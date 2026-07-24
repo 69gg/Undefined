@@ -10,6 +10,11 @@ from urllib.parse import quote, urlsplit
 
 import httpx
 
+from Undefined.skills.toolsets.music._constants import (
+    PROVIDER_VALUES,
+    QUALITY_VALUES,
+)
+
 
 class MusicRuntimeConfig(Protocol):
     lxmusic2api_base_url: str
@@ -44,9 +49,21 @@ class MusicApiError(MusicToolError):
 
 
 @dataclass(frozen=True, slots=True)
+class AudioResolutionMetadata:
+    """Final resolution details reported by a compatible lxmusic2api server."""
+
+    resolved_source: str = ""
+    requested_quality: str = ""
+    resolved_quality: str = ""
+    source_fallback_used: bool | None = None
+    quality_fallback_used: bool | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class StreamedPayload:
     content: bytes
     content_type: str
+    resolution: AudioResolutionMetadata
 
 
 def runtime_config(context: Mapping[str, Any]) -> MusicRuntimeConfig:
@@ -222,6 +239,52 @@ def _normalized_content_type(response: httpx.Response) -> str:
     )
 
 
+def _enum_header(
+    response: httpx.Response,
+    name: str,
+    allowed: frozenset[str],
+) -> str:
+    value = str(response.headers.get(name, "") or "").strip().lower()
+    return value if value in allowed else ""
+
+
+def _boolean_header(response: httpx.Response, name: str) -> bool | None:
+    value = str(response.headers.get(name, "") or "").strip().lower()
+    if value == "true":
+        return True
+    if value == "false":
+        return False
+    return None
+
+
+def _audio_resolution_metadata(response: httpx.Response) -> AudioResolutionMetadata:
+    return AudioResolutionMetadata(
+        resolved_source=_enum_header(
+            response,
+            "x-lxmusic2api-resolved-source",
+            PROVIDER_VALUES,
+        ),
+        requested_quality=_enum_header(
+            response,
+            "x-lxmusic2api-requested-quality",
+            QUALITY_VALUES,
+        ),
+        resolved_quality=_enum_header(
+            response,
+            "x-lxmusic2api-resolved-quality",
+            QUALITY_VALUES,
+        ),
+        source_fallback_used=_boolean_header(
+            response,
+            "x-lxmusic2api-source-fallback-used",
+        ),
+        quality_fallback_used=_boolean_header(
+            response,
+            "x-lxmusic2api-quality-fallback-used",
+        ),
+    )
+
+
 def _error_from_bytes(response: httpx.Response, content: bytes) -> MusicApiError:
     parsed = httpx.Response(
         response.status_code,
@@ -283,6 +346,7 @@ async def stream_data(
                     )
                 content_type = _normalized_content_type(response)
                 _validate_audio_content_type(content_type)
+                resolution = _audio_resolution_metadata(response)
 
                 content = bytearray()
                 async for chunk in response.aiter_bytes():
@@ -296,4 +360,8 @@ async def stream_data(
     except httpx.RequestError as exc:
         raise MusicApiError("无法连接 lxmusic2api 音频服务") from exc
 
-    return StreamedPayload(content=bytes(content), content_type=content_type)
+    return StreamedPayload(
+        content=bytes(content),
+        content_type=content_type,
+        resolution=resolution,
+    )

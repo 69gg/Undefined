@@ -100,9 +100,11 @@ class _WebUIVirtualSender:
         file_path: str,
         name: str | None = None,
         auto_history: bool = True,
+        *,
+        history_attachment: Any | None = None,
     ) -> None:
         """将文件拷贝到 WebUI 缓存并发送文件卡片消息。"""
-        _ = user_id, auto_history
+        _ = user_id, auto_history, history_attachment
         import shutil
         import uuid as _uuid
         from pathlib import Path as _Path
@@ -133,9 +135,17 @@ class _WebUIVirtualSender:
         file_path: str,
         name: str | None = None,
         auto_history: bool = True,
+        *,
+        history_attachment: Any | None = None,
     ) -> None:
         """群文件在虚拟会话中同样重定向为文本消息。"""
-        await self.send_private_file(group_id, file_path, name, auto_history)
+        await self.send_private_file(
+            group_id,
+            file_path,
+            name,
+            auto_history,
+            history_attachment=history_attachment,
+        )
 
 
 def _json_error(message: str, status: int = 400) -> Response:

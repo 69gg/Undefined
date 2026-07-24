@@ -145,3 +145,49 @@ async def test_register_local_file_deduplicates(tmp_path: Path) -> None:
         "group:1", file_path, kind="image", display_name="input.png"
     )
     assert r1.uid == r2.uid
+
+
+@pytest.mark.asyncio
+async def test_dedup_updates_and_persists_explicit_semantic_metadata(
+    tmp_path: Path,
+) -> None:
+    """A reused UID must not discard newly available music metadata."""
+
+    registry_path = tmp_path / "reg.json"
+    cache_dir = tmp_path / "cache"
+    reg = AttachmentRegistry(registry_path=registry_path, cache_dir=cache_dir)
+    original = await reg.register_bytes(
+        "group:1",
+        b"audio",
+        kind="audio",
+        display_name="song.mp3",
+        source_kind="lxmusic2api_audio",
+        segment_data={"requested_quality": "320k"},
+    )
+
+    enriched = await reg.register_bytes(
+        "group:1",
+        b"audio",
+        kind="audio",
+        display_name="song.mp3",
+        source_kind="lxmusic2api_audio",
+        segment_data={"resolved_quality": "128k"},
+        semantic_kind="music",
+        description="[音乐] 名称：测试歌曲；音质：128 kbps",
+    )
+
+    assert enriched.uid == original.uid
+    assert enriched.semantic_kind == "music"
+    assert enriched.description == "[音乐] 名称：测试歌曲；音质：128 kbps"
+    assert enriched.segment_data == {
+        "requested_quality": "320k",
+        "resolved_quality": "128k",
+    }
+
+    reloaded = AttachmentRegistry(registry_path=registry_path, cache_dir=cache_dir)
+    await reloaded.load()
+    restored = reloaded.resolve(enriched.uid, "group:1")
+    assert restored is not None
+    assert restored.semantic_kind == "music"
+    assert restored.description == enriched.description
+    assert restored.segment_data == enriched.segment_data

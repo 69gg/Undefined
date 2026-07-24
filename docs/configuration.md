@@ -895,6 +895,8 @@ api_key = "replace-with-your-key"
 
 音频附件模式受 `[attachments].remote_download_max_size_mb` 限制；值为 `0` 时应改用 `music.get_audio(delivery="url")`。URL 是上游自定义音源产生的短时直链，可能快速失效。上游受管下载文件采用最长 24 小时保留并自动清理；本集成不暴露下载任务生命周期接口，流式音频注册后的本地附件仍按 Undefined 的 `[attachments]` 缓存策略清理。部署者应根据版权、许可证与当地法律调整缓存保留并只处理有权使用的内容。
 
+音频附件注册时会保存仅供历史上下文使用的音乐描述，包含歌曲身份、最终平台/音质、媒体格式和回退信息；该行为没有额外配置项，也不会改变用户收到的消息正文。最终平台与音质来自新版 lxmusic2api `/tracks/stream` 的 `X-LXMusic2API-*` 响应头。Undefined 与旧版服务保持兼容：缺少或无法校验这些响应头时继续发送音频，并把现有值标记为“所选/请求”而不是实际结果。建议先升级 lxmusic2api，再升级 Undefined，以便部署后立即获得准确的回退记录。
+
 ---
 
 ### 4.21 `[bilibili]` 自动提取

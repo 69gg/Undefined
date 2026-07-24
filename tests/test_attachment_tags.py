@@ -248,12 +248,22 @@ async def test_dispatch_pending_file_sends_group(tmp_path: Path) -> None:
 
     class FakeSender:
         async def send_group_file(
-            self, group_id: int, file_path: str, name: str | None = None
+            self,
+            group_id: int,
+            file_path: str,
+            name: str | None = None,
+            auto_history: bool = True,
+            **kwargs: Any,
         ) -> None:
             calls.append(("group", group_id, file_path, name))
 
         async def send_private_file(
-            self, user_id: int, file_path: str, name: str | None = None
+            self,
+            user_id: int,
+            file_path: str,
+            name: str | None = None,
+            auto_history: bool = True,
+            **kwargs: Any,
         ) -> None:
             calls.append(("private", user_id, file_path, name))
 
@@ -395,7 +405,12 @@ async def test_dispatch_pending_file_sends_redownloads_with_registry(
 
     class FakeSender:
         async def send_group_file(
-            self, group_id: int, file_path: str, name: str | None = None
+            self,
+            group_id: int,
+            file_path: str,
+            name: str | None = None,
+            auto_history: bool = True,
+            **kwargs: Any,
         ) -> None:
             calls.append((group_id, file_path, name))
 

@@ -57,6 +57,8 @@ class FakeAttachmentRegistry:
         source_ref: str = "",
         mime_type: str | None = None,
         segment_data: Mapping[str, str] | None = None,
+        semantic_kind: str = "",
+        description: str = "",
     ) -> FakeRecord:
         self.bytes_calls.append(
             {
@@ -68,6 +70,8 @@ class FakeAttachmentRegistry:
                 "source_ref": source_ref,
                 "mime_type": mime_type,
                 "segment_data": dict(segment_data or {}),
+                "semantic_kind": semantic_kind,
+                "description": description,
             }
         )
         return FakeRecord("file_audio123", display_name, mime_type)
@@ -740,7 +744,15 @@ async def test_get_audio_streams_and_registers_attachment() -> None:
         }
         return httpx.Response(
             200,
-            headers={"content-type": "audio/mpeg", "content-length": str(len(audio))},
+            headers={
+                "content-type": "audio/mpeg",
+                "content-length": str(len(audio)),
+                "x-lxmusic2api-resolved-source": "kw",
+                "x-lxmusic2api-requested-quality": "320k",
+                "x-lxmusic2api-resolved-quality": "128k",
+                "x-lxmusic2api-source-fallback-used": "true",
+                "x-lxmusic2api-quality-fallback-used": "true",
+            },
             content=audio,
         )
 
@@ -757,6 +769,54 @@ async def test_get_audio_streams_and_registers_attachment() -> None:
     assert registry.bytes_calls[0]["content"] == audio
     assert registry.bytes_calls[0]["kind"] == "audio"
     assert registry.bytes_calls[0]["display_name"] == "Test Song - Test Singer.mp3"
+    assert registry.bytes_calls[0]["semantic_kind"] == "music"
+    description = str(registry.bytes_calls[0]["description"])
+    assert "[音乐] 名称：Test Song" in description
+    assert "歌手/作者：Test Singer" in description
+    assert "专辑：Test Album" in description
+    assert "平台：酷狗（kg） → 酷我（kw）（实际）" in description
+    assert "音质：320 kbps（请求）→ 128 kbps（实际）" in description
+    assert "回退：跨平台回退、音质降级" in description
+    segment_data = cast(dict[str, str], registry.bytes_calls[0]["segment_data"])
+    assert segment_data["resolved_source"] == "kw"
+    assert segment_data["resolved_quality"] == "128k"
+    assert segment_data["source_fallback_used"] == "true"
+    assert segment_data["quality_fallback_used"] == "true"
+
+
+async def test_get_audio_tolerates_missing_or_invalid_resolution_headers() -> None:
+    audio = b"audio-bytes"
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={
+                "content-type": "audio/mpeg",
+                "content-length": str(len(audio)),
+                "x-lxmusic2api-resolved-source": "unsupported",
+                "x-lxmusic2api-resolved-quality": "lossless",
+                "x-lxmusic2api-source-fallback-used": "maybe",
+            },
+            content=audio,
+        )
+
+    registry = FakeAttachmentRegistry()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await execute_get_audio(
+            {"track": TRACK, "quality": "320k"},
+            _context(client, registry=registry),
+        )
+
+    assert json.loads(result)["attachment"] == '<attachment uid="file_audio123"/>'
+    description = str(registry.bytes_calls[0]["description"])
+    assert "所选平台：酷狗（kg）（最终平台未报告）" in description
+    assert "请求音质：320 kbps（最终音质未报告）" in description
+    segment_data = cast(dict[str, str], registry.bytes_calls[0]["segment_data"])
+    assert segment_data["selected_source"] == "kg"
+    assert segment_data["requested_quality"] == "320k"
+    assert "resolved_source" not in segment_data
+    assert "resolved_quality" not in segment_data
+    assert "source_fallback_used" not in segment_data
 
 
 async def test_get_audio_rejects_content_length_over_limit() -> None:

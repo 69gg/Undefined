@@ -177,6 +177,8 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
 
 音乐搜索与音频获取都不会自行发送消息。用户明确要音频时，主 AI 会根据搜索结果中的歌名、歌手、专辑、版本标记和 `qualities` 灵活选择原唱标准版及其最高可用音质，不固定第一条、平台或音质；用户已有具体要求时以其要求为准，只有没有结果或无法可靠判断原唱/目标版本时才追问。选定后把 `track_ref` 交给 `music.get_audio` 登记附件；普通音频把返回的 `<attachment uid="..."/>` 原样交给 `messages.send_message`，只有用户明确要求原生语音时才把返回的 `uid` 交给 `messages.send_voice`。
 
+`music.get_audio` 登记的附件会附带 `semantic_kind="music"` 和仅供历史上下文使用的歌曲描述。描述保留名称、歌手/作者、专辑、时长、最终平台与音质、格式、大小和回退信息，发送时不会自动展示给用户；纯附件、图文混合、跨会话文件以及原生语音路径都会把这份元数据写入目标会话历史。最终解析结果由新版 lxmusic2api 的流响应头提供，旧版服务缺少响应头时安全回退为“所选平台/请求音质”。
+
 ### Group Analysis（群聊深度分析）
 
 - `group_analysis.member_structure`: 统计成员结构事实

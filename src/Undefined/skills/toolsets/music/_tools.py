@@ -10,10 +10,18 @@ from typing import Any, Protocol, cast
 
 from Undefined.skills.toolsets.music._client import (
     MusicToolError,
+    StreamedPayload,
     quote_path_segment,
     request_data,
     runtime_config,
     stream_data,
+)
+from Undefined.skills.toolsets.music._constants import (
+    PROVIDER_LABELS,
+    PROVIDER_VALUES,
+    QUALITY_LABELS,
+    QUALITY_VALUES,
+    SOURCE_VALUES,
 )
 from Undefined.skills.toolsets.music._track_refs import (
     MUSIC_TRACK_STORE_CONTEXT_KEY,
@@ -40,6 +48,8 @@ class AttachmentRegistry(Protocol):
         source_ref: str = "",
         mime_type: str | None = None,
         segment_data: Mapping[str, str] | None = None,
+        semantic_kind: str = "",
+        description: str = "",
     ) -> AttachmentRecord: ...
 
     async def register_remote_url(
@@ -55,9 +65,6 @@ class AttachmentRegistry(Protocol):
     ) -> AttachmentRecord: ...
 
 
-_SOURCE_VALUES = frozenset({"all", "kw", "kg", "tx", "wy", "mg"})
-_PROVIDER_VALUES = frozenset({"kw", "kg", "tx", "wy", "mg"})
-_QUALITY_VALUES = frozenset({"flac24bit", "flac", "wav", "ape", "320k", "192k", "128k"})
 _QUALITY_SUFFIXES: dict[str, str] = {
     "flac24bit": ".flac",
     "flac": ".flac",
@@ -80,6 +87,7 @@ _MIME_SUFFIXES: dict[str, str] = {
     "audio/x-wav": ".wav",
 }
 _UNSAFE_FILE_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+_MUSIC_DESCRIPTION_MAX_LENGTH = 1024
 _TRACK_REQUIRED_KEYS = frozenset(
     {
         "id",
@@ -121,7 +129,7 @@ def _positive_int(
 def _source(args: Mapping[str, Any], *, allow_all: bool) -> str:
     default = "all" if allow_all else "wy"
     source = _text(args, "source", default).lower()
-    allowed = _SOURCE_VALUES if allow_all else _PROVIDER_VALUES
+    allowed = SOURCE_VALUES if allow_all else PROVIDER_VALUES
     if source not in allowed:
         values = "、".join(sorted(allowed))
         raise MusicToolError(f"source 必须是 {values} 之一")
@@ -137,7 +145,7 @@ def _canonical_track(value: object) -> dict[str, object]:
         raise MusicToolError(f"Track 缺少必要字段：{'、'.join(missing_keys)}")
 
     source = str(track.get("source", "") or "").strip()
-    if source not in _PROVIDER_VALUES:
+    if source not in PROVIDER_VALUES:
         raise MusicToolError("Track 包含不支持的音乐平台")
     if not str(track.get("id", "") or "").strip():
         raise MusicToolError("Track 缺少 id")
@@ -185,7 +193,7 @@ def _compact_track(value: object, context: dict[str, Any]) -> dict[str, object]:
         if not isinstance(raw_quality, dict):
             continue
         quality = str(raw_quality.get("type", "") or "").strip()
-        if quality in _QUALITY_VALUES and quality not in qualities:
+        if quality in QUALITY_VALUES and quality not in qualities:
             qualities.append(quality)
     return {
         "track_ref": reference,
@@ -282,6 +290,125 @@ def _audio_file_name(
     return f"{label}{suffix}"
 
 
+def _metadata_text(value: object, maximum: int) -> str:
+    normalized = " ".join(str(value or "").split())
+    return normalized[:maximum]
+
+
+def _provider_display(source: str) -> str:
+    label = PROVIDER_LABELS.get(source, source)
+    return f"{label}（{source}）" if source else ""
+
+
+def _quality_display(quality: str) -> str:
+    return QUALITY_LABELS.get(quality, quality)
+
+
+def _size_display(size_bytes: int) -> str:
+    if size_bytes < 1024:
+        return f"{size_bytes} B"
+    if size_bytes < 1024 * 1024:
+        return f"{size_bytes / 1024:.1f} KiB"
+    return f"{size_bytes / 1024 / 1024:.2f} MiB"
+
+
+def _music_attachment_metadata(
+    track: Mapping[str, object],
+    payload: StreamedPayload,
+    requested_quality: str,
+) -> tuple[str, dict[str, str]]:
+    """Build persisted metadata for an AI-prepared music attachment."""
+
+    name = _metadata_text(track.get("name"), 256) or "未知歌曲"
+    singer = _metadata_text(track.get("singer"), 512)
+    album = _metadata_text(track.get("albumName"), 256)
+    interval = _metadata_text(track.get("interval"), 32)
+    selected_source = _metadata_text(track.get("source"), 16).lower()
+    resolution = payload.resolution
+    resolved_source = resolution.resolved_source
+    effective_requested_quality = (
+        resolution.requested_quality or requested_quality.strip().lower()
+    )
+    resolved_quality = resolution.resolved_quality
+
+    source_fallback_used = resolution.source_fallback_used
+    if resolved_source and selected_source and resolved_source != selected_source:
+        source_fallback_used = True
+    quality_fallback_used = resolution.quality_fallback_used
+    if (
+        resolved_quality
+        and effective_requested_quality
+        and resolved_quality != effective_requested_quality
+    ):
+        quality_fallback_used = True
+
+    details = [f"名称：{name}"]
+    if singer:
+        details.append(f"歌手/作者：{singer}")
+    if album:
+        details.append(f"专辑：{album}")
+    if interval:
+        details.append(f"时长：{interval}")
+
+    selected_platform = _provider_display(selected_source)
+    resolved_platform = _provider_display(resolved_source)
+    if resolved_platform:
+        if selected_platform and resolved_source != selected_source:
+            details.append(f"平台：{selected_platform} → {resolved_platform}（实际）")
+        else:
+            details.append(f"平台：{resolved_platform}")
+    elif selected_platform:
+        details.append(f"所选平台：{selected_platform}（最终平台未报告）")
+
+    requested_display = _quality_display(effective_requested_quality)
+    resolved_display = _quality_display(resolved_quality)
+    if resolved_display:
+        if requested_display and resolved_quality != effective_requested_quality:
+            details.append(
+                f"音质：{requested_display}（请求）→ {resolved_display}（实际）"
+            )
+        else:
+            details.append(f"音质：{resolved_display}")
+    elif requested_display:
+        details.append(f"请求音质：{requested_display}（最终音质未报告）")
+    else:
+        details.append("请求音质：服务默认（最终音质未报告）")
+
+    if payload.content_type:
+        details.append(f"格式：{payload.content_type}")
+    details.append(f"大小：{_size_display(len(payload.content))}")
+    fallbacks: list[str] = []
+    if source_fallback_used is True:
+        fallbacks.append("跨平台回退")
+    if quality_fallback_used is True:
+        fallbacks.append("音质降级")
+    if fallbacks:
+        details.append(f"回退：{'、'.join(fallbacks)}")
+
+    description = f"[音乐] {'；'.join(details)}"[:_MUSIC_DESCRIPTION_MAX_LENGTH]
+    segment_data: dict[str, str] = {
+        "music_metadata_version": "1",
+        "name": name,
+        "selected_source": selected_source,
+        "requested_quality": effective_requested_quality or "default",
+        "content_type": payload.content_type,
+        "bytes": str(len(payload.content)),
+    }
+    optional_values = {
+        "singer": singer,
+        "album_name": album,
+        "interval": interval,
+        "resolved_source": resolved_source,
+        "resolved_quality": resolved_quality,
+    }
+    segment_data.update({key: value for key, value in optional_values.items() if value})
+    if source_fallback_used is not None:
+        segment_data["source_fallback_used"] = str(source_fallback_used).lower()
+    if quality_fallback_used is not None:
+        segment_data["quality_fallback_used"] = str(quality_fallback_used).lower()
+    return description, segment_data
+
+
 def _resolve_body(
     args: Mapping[str, Any], track: dict[str, object]
 ) -> dict[str, object]:
@@ -291,7 +418,7 @@ def _resolve_body(
     }
     quality = _text(args, "quality")
     if quality:
-        if quality not in _QUALITY_VALUES:
+        if quality not in QUALITY_VALUES:
             raise MusicToolError("quality 不是支持的音质值")
         body["quality"] = quality
     return body
@@ -566,6 +693,11 @@ async def execute_get_audio(args: dict[str, Any], context: dict[str, Any]) -> st
         display_name = _audio_file_name(track, payload.content_type, quality)
         source = str(track.get("source", "") or "")
         track_id = str(track.get("id", "") or "")
+        description, music_segment_data = _music_attachment_metadata(
+            track,
+            payload,
+            quality,
+        )
         record = await registry.register_bytes(
             scope_key,
             payload.content,
@@ -575,10 +707,12 @@ async def execute_get_audio(args: dict[str, Any], context: dict[str, Any]) -> st
             source_ref=f"lxmusic2api:{source}:{track_id}",
             mime_type=payload.content_type or None,
             segment_data={
+                **music_segment_data,
                 "track_id": track_id,
                 "source": source,
-                "requested_quality": quality or "default",
             },
+            semantic_kind="music",
+            description=description,
         )
         return _json(
             {

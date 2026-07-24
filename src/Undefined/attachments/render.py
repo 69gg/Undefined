@@ -274,18 +274,23 @@ async def dispatch_pending_file_sends(
                     send_record.local_path,
                     name=send_record.display_name or None,
                     auto_history=auto_history,
+                    history_attachment=send_record,
                 )
             elif target_type == "group":
                 await sender.send_group_file(
                     target_id,
                     send_record.local_path,
                     name=send_record.display_name or None,
+                    auto_history=auto_history,
+                    history_attachment=send_record,
                 )
             elif target_type == "private":
                 await sender.send_private_file(
                     target_id,
                     send_record.local_path,
                     name=send_record.display_name or None,
+                    auto_history=auto_history,
+                    history_attachment=send_record,
                 )
             else:
                 logger.warning(

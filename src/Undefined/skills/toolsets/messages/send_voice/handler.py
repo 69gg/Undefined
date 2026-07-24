@@ -75,6 +75,7 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
             target,
             local_path,
             name=str(getattr(record, "display_name", "") or "").strip() or None,
+            history_attachment=record,
         )
         mark_message_sent(context)
     except ValueError as exc:

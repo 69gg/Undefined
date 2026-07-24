@@ -75,6 +75,7 @@ async def test_send_voice_resolves_attachment_and_current_wechat_route() -> None
     assert call.args[0].canonical == "wechat:12345"
     assert call.args[1] == "/cache/reply.wav"
     assert call.kwargs["name"] == "reply.wav"
+    assert call.kwargs["history_attachment"] is record
     assert context["message_sent_this_turn"] is True
 
 
@@ -102,6 +103,7 @@ async def test_send_voice_accepts_explicit_qq_address() -> None:
     call = sender.send_address_voice.await_args
     assert call is not None
     assert call.args[0].canonical == "qq:54321"
+    assert call.kwargs["history_attachment"] is record
 
 
 @pytest.mark.asyncio

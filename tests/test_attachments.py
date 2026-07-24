@@ -124,6 +124,28 @@ def test_attachment_refs_to_xml_includes_meme_semantic_metadata() -> None:
     assert 'description="无语猫猫表情包"' in xml
 
 
+def test_attachment_refs_to_xml_includes_music_semantic_metadata() -> None:
+    xml = attachment_refs_to_xml(
+        [
+            {
+                "uid": "file_music01",
+                "kind": "audio",
+                "media_type": "audio",
+                "display_name": "测试歌曲 - 测试歌手.mp3",
+                "source_kind": "lxmusic2api_audio",
+                "semantic_kind": "music",
+                "description": "[音乐] 名称：测试歌曲；歌手/作者：测试歌手；音质：320 kbps",
+            }
+        ]
+    )
+
+    assert 'type="audio"' in xml
+    assert 'source_kind="lxmusic2api_audio"' in xml
+    assert 'semantic_kind="music"' in xml
+    assert "名称：测试歌曲" in xml
+    assert "歌手/作者：测试歌手" in xml
+
+
 def test_attachment_refs_to_xml_includes_url_reference_source() -> None:
     xml = attachment_refs_to_xml(
         [

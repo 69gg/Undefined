@@ -21,7 +21,11 @@ from weixin_ilink_client import (
 )
 from weixin_ilink_client.constants import STALE_TOKEN_ERROR_CODE
 
-from Undefined.attachments import attachment_refs_to_text, build_attachment_scope
+from Undefined.attachments import (
+    AttachmentRecord,
+    attachment_refs_to_text,
+    build_attachment_scope,
+)
 from Undefined.config import Config
 from Undefined.onebot import OneBotClient
 from Undefined.utils import io
@@ -352,6 +356,7 @@ class MessageSender:
         *,
         kind: str | None = None,
         auto_history: bool = True,
+        history_attachment: AttachmentRecord | None = None,
     ) -> None:
         """按规范地址发送一个本地文件。"""
         normalized_kind = str(kind or "").strip().lower()
@@ -361,16 +366,25 @@ class MessageSender:
                 file_path,
                 name=name,
                 auto_history=auto_history,
+                history_attachment=history_attachment,
             )
             return
         if address.channel == "group":
             await self.send_group_file(
-                address.target_id, file_path, name=name, auto_history=auto_history
+                address.target_id,
+                file_path,
+                name=name,
+                auto_history=auto_history,
+                history_attachment=history_attachment,
             )
             return
         if address.channel == "qq":
             await self.send_private_file(
-                address.target_id, file_path, name=name, auto_history=auto_history
+                address.target_id,
+                file_path,
+                name=name,
+                auto_history=auto_history,
+                history_attachment=history_attachment,
             )
             return
         if not self.config.is_private_allowed(address.target_id):
@@ -406,7 +420,8 @@ class MessageSender:
             address.target_id,
             file_path,
             file_name,
-            kind=kind or "file",
+            kind=(history_attachment.kind if history_attachment else kind or "file"),
+            source_attachment=history_attachment,
         )
         history_content = _append_attachment_refs(
             _build_file_history_message(file_name, file_size),
@@ -435,22 +450,39 @@ class MessageSender:
         name: str | None = None,
         *,
         auto_history: bool = True,
+        history_attachment: AttachmentRecord | None = None,
     ) -> int | str | None:
         """按规范地址将本地音频显式作为语音发送。"""
 
         path = await io.resolve_path(file_path)
         file_uri = path.as_uri()
+        history_attachments: list[dict[str, str]] = []
+        if (
+            auto_history
+            and history_attachment is not None
+            and address.channel in {"group", "qq"}
+        ):
+            history_attachments = await self.register_sent_file_attachment(
+                "group" if address.channel == "group" else "private",
+                address.target_id,
+                str(path),
+                name or path.name,
+                kind="record",
+                source_attachment=history_attachment,
+            )
         if address.channel == "group":
             return await self.send_group_message(
                 address.target_id,
                 f"[CQ:record,file={file_uri}]",
                 auto_history=auto_history,
+                attachments=history_attachments or None,
             )
         if address.channel == "qq":
             return await self.send_private_message(
                 address.target_id,
                 f"[CQ:record,file={file_uri}]",
                 auto_history=auto_history,
+                attachments=history_attachments or None,
             )
         if not self.config.is_private_allowed(address.target_id):
             enabled = self.config.access_control_enabled()
@@ -477,6 +509,7 @@ class MessageSender:
             prepared,
             name=name,
             auto_history=auto_history,
+            history_attachment=history_attachment,
         )
 
     async def _send_weixin_prepared_voice(
@@ -487,6 +520,7 @@ class MessageSender:
         *,
         name: str | None,
         auto_history: bool,
+        history_attachment: AttachmentRecord | None = None,
     ) -> str:
         """发送已预检语音，供混合消息保持全量预检语义。"""
 
@@ -518,6 +552,7 @@ class MessageSender:
             str(path),
             file_name,
             kind="record",
+            source_attachment=history_attachment,
         )
         history_content = _append_attachment_refs(
             f"[语音] {file_name} ({_format_size(file_size)})",
@@ -803,6 +838,7 @@ class MessageSender:
         kind: str = "file",
         source_kind: str = "sent_file",
         source_ref: str = "",
+        source_attachment: AttachmentRecord | None = None,
     ) -> list[dict[str, str]]:
         """将发送出的本地文件登记为当前会话可见的统一附件 UID。"""
         registry = self.attachment_registry
@@ -820,13 +856,31 @@ class MessageSender:
         file_name = name or Path(file_path).name
         try:
             resolved_path = await io.resolve_path(file_path)
+            registered_source_kind = source_kind
+            registered_source_ref = source_ref or str(resolved_path)
+            registration_kwargs: dict[str, Any] = {}
+            if source_attachment is not None:
+                registered_source_kind = (
+                    source_attachment.source_kind or registered_source_kind
+                )
+                registered_source_ref = (
+                    source_attachment.source_ref or registered_source_ref
+                )
+                registration_kwargs.update(
+                    {
+                        "segment_data": dict(source_attachment.segment_data),
+                        "semantic_kind": source_attachment.semantic_kind,
+                        "description": source_attachment.description,
+                    }
+                )
             record = await registry.register_local_file(
                 scope_key,
                 file_path,
                 kind=kind,
                 display_name=file_name,
-                source_kind=source_kind,
-                source_ref=source_ref or str(resolved_path),
+                source_kind=registered_source_kind,
+                source_ref=registered_source_ref,
+                **registration_kwargs,
             )
             return [record.prompt_ref()]
         except Exception:
@@ -1455,6 +1509,8 @@ class MessageSender:
         file_path: str,
         name: str | None = None,
         auto_history: bool = True,
+        *,
+        history_attachment: AttachmentRecord | None = None,
     ) -> None:
         """通过统一发送层上传群文件。"""
         if not self.config.is_group_allowed(group_id):
@@ -1486,6 +1542,8 @@ class MessageSender:
             group_id,
             file_path,
             file_name,
+            kind=history_attachment.kind if history_attachment else "file",
+            source_attachment=history_attachment,
         )
         history_content = _append_attachment_refs(history_content, attachments)
         try:
@@ -1510,6 +1568,8 @@ class MessageSender:
         file_path: str,
         name: str | None = None,
         auto_history: bool = True,
+        *,
+        history_attachment: AttachmentRecord | None = None,
     ) -> None:
         """通过统一发送层上传私聊文件。"""
         if not self.config.is_private_allowed(user_id):
@@ -1541,6 +1601,8 @@ class MessageSender:
             user_id,
             file_path,
             file_name,
+            kind=history_attachment.kind if history_attachment else "file",
+            source_attachment=history_attachment,
         )
         history_content = _append_attachment_refs(history_content, attachments)
         try:
@@ -1611,6 +1673,8 @@ class AddressBoundSender:
         file_path: str,
         name: str | None = None,
         auto_history: bool = True,
+        *,
+        history_attachment: AttachmentRecord | None = None,
     ) -> None:
         if int(user_id) != self._address.target_id:
             await self._sender.send_private_file(
@@ -1618,6 +1682,7 @@ class AddressBoundSender:
                 file_path,
                 name=name,
                 auto_history=auto_history,
+                history_attachment=history_attachment,
             )
             return
         await self._sender.send_address_file(
@@ -1625,6 +1690,7 @@ class AddressBoundSender:
             file_path,
             name=name,
             auto_history=auto_history,
+            history_attachment=history_attachment,
         )
 
     async def send_private_forward_message(

@@ -223,7 +223,11 @@ async def test_send_private_message_dispatches_file_only_without_empty_message(
     assert send_call is not None
     assert send_call.args[0].canonical == "qq:12345"
     assert send_call.args[1] == record.local_path
-    assert send_call.kwargs == {"name": "doc.txt", "auto_history": True}
+    assert send_call.kwargs == {
+        "name": "doc.txt",
+        "auto_history": True,
+        "history_attachment": record,
+    }
     assert context["message_sent_this_turn"] is True
 
 
