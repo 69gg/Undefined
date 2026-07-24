@@ -92,11 +92,17 @@ def _build_client(
         Any,
         SimpleNamespace(build_messages=build_messages, end_summaries=[]),
     )
+    virtual_tool_announcements: list[str] = []
+
+    async def _announce_virtual_tool_call(name: str, _context: dict[str, Any]) -> None:
+        virtual_tool_announcements.append(name)
+
     client.tool_manager = cast(
         Any,
         SimpleNamespace(
             get_openai_tools=lambda: schemas,
             execute_tool=execute_tool,
+            announce_virtual_tool_call=_announce_virtual_tool_call,
         ),
     )
     client.agent_registry = cast(
@@ -143,6 +149,7 @@ def _build_client(
     client.submit_queued_llm_call = AsyncMock(side_effect=_submit_queued_llm_call)
     client._submit_calls = submit_calls
     client._build_messages_mock = build_messages
+    client._virtual_tool_announcements = virtual_tool_announcements
     return client
 
 
@@ -187,6 +194,7 @@ async def test_music_track_reference_store_survives_tool_search_rounds() -> None
     assert len(stores) == 2
     assert isinstance(stores[0], MusicTrackReferenceStore)
     assert stores[0] is stores[1]
+    assert client._virtual_tool_announcements == ["tool_search", "tool_search"]
 
 
 @pytest.mark.asyncio
@@ -227,6 +235,7 @@ async def test_tool_search_loads_schema_only_for_the_next_model_round() -> None:
     assert second_names == {"send_message", "end", "tool_search", "web_agent"}
     assert third_names == second_names
     assert executed == ["web_agent", "end"]
+    assert client._virtual_tool_announcements == ["tool_search"]
 
     prompt_kwargs = client._build_messages_mock.await_args.kwargs
     assert prompt_kwargs["deferred_tool_names"] == ("info_agent", "web_agent")

@@ -149,6 +149,8 @@ Undefined 搭载了基于 ChromaDB 向量数据库的后台认知系统，无需
 
 该机制只减少发送给主模型的 schema，不会卸载本地工具、绕过会话权限或改变子 Agent 的工具集。详细配置、查询规则与兼容边界见 [Tool Search 按需工具加载](tool-search.md)。
 
+若调用彩蛋模式为 `tools`、`clean` 或 `all`，虚拟 `tool_search` 与随后真正执行的目标工具会各自发送一次调用提示；`none` 和 `agent` 模式不会为 `tool_search` 提示。
+
 ### 渲染 (`render.*`)
 
 | 工具 | 说明 |

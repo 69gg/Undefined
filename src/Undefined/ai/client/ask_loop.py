@@ -875,6 +875,10 @@ class ClientAskLoopMixin(ClientQueueMixin):
                                 internal_name == "tool_search"
                                 and tool_search_session is not None
                             ):
+                                await self.tool_manager.announce_virtual_tool_call(
+                                    internal_name,
+                                    context,
+                                )
                                 result = tool_search_session.execute(args)
                             else:
                                 result = await self.tool_manager.execute_tool(

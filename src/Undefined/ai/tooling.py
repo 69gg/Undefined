@@ -174,6 +174,16 @@ class ToolManager:
         except Exception as exc:
             logger.debug("[彩蛋] 发送提示消息失败: %s", redact_string(str(exc)))
 
+    async def announce_virtual_tool_call(
+        self, function_name: str, context: dict[str, Any]
+    ) -> None:
+        """Apply normal Tool easter-egg rules to a virtual tool invocation."""
+        await self._maybe_send_call_easter_egg(
+            function_name,
+            is_agent=False,
+            context=context,
+        )
+
     async def execute_tool(
         self,
         function_name: str,

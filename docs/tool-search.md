@@ -37,6 +37,8 @@ tool_search_max_results = 5
 
 `tool_search` 只是 schema 加载器，不会代替目标工具执行任何业务操作，也不会查询业务数据、下载文件、登记附件或发送消息。返回值中的 `loaded` 仅表示对应工具会在下一轮可调用；模型仍须在后续轮次调用目标工具完成用户请求，不能把“加载成功”当成任务成功并直接结束。
 
+当 `[easter_egg].agent_call_message_enabled` 启用调用提示时，虚拟 `tool_search` 按普通 Tool 处理：`tools`、`clean`、`all` 模式会发送“tool_search，我调用你了”提示，`none`、`agent` 模式不发送。加载 schema 和下一轮真正执行目标工具是两个独立调用，因此启用对应模式时两者会分别提示；`clean` 模式下的 `easter_egg_silent` 上下文仍会抑制提示。
+
 ## 查询语法
 
 虚拟工具接口为：

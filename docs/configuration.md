@@ -613,6 +613,8 @@ Prompt caching 补充：
 | `repeat_cooldown_minutes` | `60` | 复读冷却时间（分钟）。同一内容被复读后，在冷却期内不再重复复读。？和 ? 视为等价。0 = 无冷却 | 整数，≥ 0 |
 | `inverted_question_enabled` | `false` | 倒问号（复读触发时若消息为问号则发送 ¿） | 布尔 |
 
+虚拟 `tool_search` 遵循普通 Tool 的调用提示规则：`tools`、`clean`、`all` 模式发送，`none`、`agent` 模式不发送。它只负责加载 schema，下一轮目标工具真正执行时会按对应规则再次独立提示。`clean` 会抑制带 `easter_egg_silent` 的自动预取调用以及 `send_message`、`end`，但不会过滤正常的 `tool_search` 调用。
+
 复读支持图片等已登记附件：当连续相同内容是 `<attachment uid="..."/>` 图片引用时，系统会先渲染成真实图片消息再发送，不会把 UID 占位字符串直接发到群里。
 
 兼容：历史字段 `[core].keyword_reply_enabled` 仍可读取，建议迁移到 `[easter_egg]`。
