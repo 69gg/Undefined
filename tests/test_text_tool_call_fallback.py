@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from types import SimpleNamespace
 from typing import Any, cast
@@ -229,6 +230,70 @@ async def test_tool_execution_uses_name_mapping_and_native_message_replay() -> N
     assert "_responses_output_items" not in recovered_message
     assert "_anthropic_content_blocks" not in recovered_message
     assert raw_content not in [message.get("content") for message in replayed_messages]
+
+
+@pytest.mark.asyncio
+async def test_named_json_text_tools_execute_non_end_calls_in_parallel() -> None:
+    started: set[str] = set()
+    all_started = asyncio.Event()
+
+    async def execute_tool(
+        name: str, arguments: dict[str, Any], context: dict[str, Any]
+    ) -> str:
+        if name in {"first_tool", "second_tool"}:
+            started.add(name)
+            if len(started) == 2:
+                all_started.set()
+            await asyncio.wait_for(all_started.wait(), timeout=1)
+            return str(arguments["value"])
+        if name == "end":
+            context["conversation_ended"] = True
+            return "对话已结束"
+        raise AssertionError(f"unexpected tool: {name}")
+
+    parallel_content = """{"name":"first_tool","arguments":{"value":1}}
+{"name":"second_tool","arguments":{"value":2}}"""
+    end_call = {
+        "id": "call_end",
+        "type": "function",
+        "function": {"name": "end", "arguments": "{}"},
+    }
+    client = _build_client(
+        responses=[
+            {"choices": [{"message": {"content": parallel_content}}]},
+            {"choices": [{"message": {"content": "", "tool_calls": [end_call]}}]},
+        ],
+        tool_names=["first_tool", "second_tool", "end"],
+        execute_tool=execute_tool,
+    )
+
+    result = await client.ask("hello", send_message_callback=AsyncMock())
+
+    assert result == ""
+    assert started == {"first_tool", "second_tool"}
+    submit = cast(AsyncMock, client.submit_queued_llm_call)
+    replayed_messages = submit.await_args_list[1].kwargs["messages"]
+    recovered_message = next(
+        message
+        for message in replayed_messages
+        if message.get("role") == "assistant"
+        and [
+            call.get("function", {}).get("name")
+            for call in message.get("tool_calls", [])
+        ]
+        == ["first_tool", "second_tool"]
+    )
+    recovered_ids = {str(call["id"]) for call in recovered_message["tool_calls"]}
+    replayed_result_ids = {
+        str(message.get("tool_call_id"))
+        for message in replayed_messages
+        if message.get("role") == "tool"
+        and str(message.get("tool_call_id")) in recovered_ids
+    }
+    assert replayed_result_ids == recovered_ids
+    assert parallel_content not in [
+        message.get("content") for message in replayed_messages
+    ]
 
 
 @pytest.mark.asyncio

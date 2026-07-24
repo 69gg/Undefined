@@ -95,7 +95,14 @@ reasoning_content_replay = true
 {"tool":"end","arguments":{"memo":"已回应","observations":[]}}
 ```
 
-JSON 对象可以单独出现，也可以由空白分隔后连续出现。`arguments` 可以是对象或编码该对象的 JSON 字符串。
+也兼容使用原生函数字段名的连续 JSON：
+
+```text
+{"name":"music.search_songs","arguments":{"query":"君往何处 m2u","limit":5}}
+{"name":"end","arguments":{"memo":"搜索 m2u 的《君往何处》","observations":[]}}
+```
+
+JSON 对象可以单独出现，也可以由空白分隔后连续出现；`tool` 与 `name` 两种封包允许混排。`arguments` 可以是对象或编码该对象的 JSON 字符串；`name` 形式要求显式提供 `arguments`，以免把普通的名称 JSON 误判为工具调用。连续调用会转换为同一个原生 `tool_calls` 列表，其中普通工具沿用现有并发执行；`end` 与其他工具同轮出现时仍拒绝本轮 `end`，等待其他工具结果回填后由模型下一轮决定是否结束。
 
 ```text
 <tool name="end" parameters="{\"memo\":\"静默处理\",\"observations\":[]}"></tool>

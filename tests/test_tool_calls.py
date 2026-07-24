@@ -176,6 +176,33 @@ class TestParseTextToolCalls:
         assert self._arguments(tool_calls[0]) == {"message": "在做了"}
         assert len({str(tool_call["id"]) for tool_call in tool_calls}) == 2
 
+    def test_consecutive_named_json_envelopes_preserve_parallel_calls(self) -> None:
+        tool_calls = parse_text_tool_calls(
+            '{"name":"music.search_songs","arguments":'
+            '{"query":"君往何处 m2u","limit":5}}\n'
+            '{"name":"end","arguments":'
+            '{"memo":"搜索 m2u 的《君往何处》","observations":[]}}'
+        )
+
+        assert self._names(tool_calls) == ["music.search_songs", "end"]
+        assert self._arguments(tool_calls[0]) == {
+            "query": "君往何处 m2u",
+            "limit": 5,
+        }
+        assert self._arguments(tool_calls[1]) == {
+            "memo": "搜索 m2u 的《君往何处》",
+            "observations": [],
+        }
+        assert len({str(tool_call["id"]) for tool_call in tool_calls}) == 2
+
+    def test_json_envelope_styles_can_be_mixed(self) -> None:
+        tool_calls = parse_text_tool_calls(
+            '{"tool":"first","arguments":{}}\n{"name":"second","arguments":{"value":2}}'
+        )
+
+        assert self._names(tool_calls) == ["first", "second"]
+        assert self._arguments(tool_calls[1]) == {"value": 2}
+
     def test_json_envelope_accepts_encoded_arguments_object(self) -> None:
         tool_calls = parse_text_tool_calls(
             '{"tool":"send_message","arguments":"{\\"message\\":\\"在做了\\"}"}'
@@ -259,6 +286,7 @@ class TestParseTextToolCalls:
         "raw",
         [
             '{"message":"普通 JSON"}',
+            '{"name":"普通 JSON"}',
             "一段普通回复",
         ],
     )
@@ -271,6 +299,7 @@ class TestParseTextToolCalls:
             '{"tool":"end","arguments":{}} trailing',
             '普通文本 {"tool":"end","arguments":{}}',
             '{"tool":"end","arguments":[],"extra":true}',
+            '{"name":"end","arguments":[],"extra":true}',
             '<tool name="end" params="[]" />',
             '<tool name="end" params="{}" /> trailing',
             '普通文本 <tool name="end" params="{}" />',
