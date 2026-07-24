@@ -634,11 +634,13 @@ class ClientAskLoopMixin(ClientQueueMixin):
                         return fallback_content
 
                     logger.warning(
-                        "[AI回复] 模型返回文本但未调用工具（iteration=%s retry=%s/%s content_len=%s），要求重试",
+                        "[AI回复未调用工具] 即将进入下一轮重试: "
+                        "iteration=%s retry=%s/%s content_len=%s raw_content=%r",
                         iteration,
                         missing_tool_call_count,
                         max_missing_tool_call_retries,
                         len(content),
+                        content,
                     )
                     assistant_retry_message: dict[str, Any] = {
                         "role": "assistant",

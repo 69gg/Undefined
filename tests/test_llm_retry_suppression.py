@@ -295,7 +295,10 @@ async def test_ai_ask_webchat_events_include_stage_and_tool_lifecycle() -> None:
 
 
 @pytest.mark.asyncio
-async def test_ai_ask_limits_missing_tool_call_retries() -> None:
+async def test_ai_ask_limits_missing_tool_call_retries(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.WARNING, logger="Undefined.ai.client.ask_loop")
     client: Any = object.__new__(AIClient)
     client.runtime_config = cast(
         Any,
@@ -374,6 +377,16 @@ async def test_ai_ask_limits_missing_tool_call_retries() -> None:
         {"role": "user", "content": MISSING_TOOL_CALL_RETRY_HINT},
     ]
     assert "send_message" not in MISSING_TOOL_CALL_RETRY_HINT
+
+    retry_log_messages = [
+        record.getMessage()
+        for record in caplog.records
+        if record.getMessage().startswith("[AI回复未调用工具]")
+    ]
+    assert len(retry_log_messages) == 2
+    assert "raw_content='plain 1'" in retry_log_messages[0]
+    assert "raw_content='plain 2'" in retry_log_messages[1]
+    assert all("plain 3" not in message for message in retry_log_messages)
 
 
 @pytest.mark.asyncio
