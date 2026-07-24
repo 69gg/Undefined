@@ -218,6 +218,36 @@ class TestParseTextToolCalls:
         assert self._names(tool_calls) == ["end"]
         assert self._arguments(tool_calls[0]) == {}
 
+    def test_tool_execution_envelope(self) -> None:
+        raw = """<tool_execution>
+<tool_call name="music-_-search_songs" arguments='{"query": "克罗地亚狂想曲 Maksim", "limit": 10}'>
+</tool_call>
+</tool_execution>"""
+
+        tool_calls = parse_text_tool_calls(raw)
+
+        assert self._names(tool_calls) == ["music-_-search_songs"]
+        assert self._arguments(tool_calls[0]) == {
+            "query": "克罗地亚狂想曲 Maksim",
+            "limit": 10,
+        }
+        assert str(tool_calls[0]["id"]).startswith("call_txt_")
+
+    def test_tool_execution_accepts_multiple_and_self_closing_calls(self) -> None:
+        raw = r"""```text
+<tool_execution >
+  <tool_call name='first' />
+  <tool_call name="second" arguments="{\"value\": 2}"></tool_call>
+</tool_execution>
+```"""
+
+        tool_calls = parse_text_tool_calls(raw)
+
+        assert self._names(tool_calls) == ["first", "second"]
+        assert self._arguments(tool_calls[0]) == {}
+        assert self._arguments(tool_calls[1]) == {"value": 2}
+        assert len({str(tool_call["id"]) for tool_call in tool_calls}) == 2
+
     def test_json_code_fence_is_accepted(self) -> None:
         tool_calls = parse_text_tool_calls(
             '```json\n{"tool":"end","arguments":{}}\n```'
@@ -244,6 +274,15 @@ class TestParseTextToolCalls:
             '<tool name="end" params="[]" />',
             '<tool name="end" params="{}" /> trailing',
             '普通文本 <tool name="end" params="{}" />',
+            "<tool_execution></tool_execution>",
+            '<tool_execution mode="parallel"></tool_execution>',
+            '<tool_execution><tool_call name="end" extra="x" /></tool_execution>',
+            '<tool_execution><tool_call name="end" name="again" /></tool_execution>',
+            '<tool_execution><tool_call name="end" arguments="[]" /></tool_execution>',
+            '<tool_execution><tool_call name="end">text</tool_call></tool_execution>',
+            '<tool_call name="end" arguments="{}"></tool_call>',
+            '<tool_execution><tool_call name="end" /></tool_execution> trailing',
+            '普通文本 <tool_execution><tool_call name="end" /></tool_execution>',
         ],
     )
     def test_invalid_tool_protocol_is_rejected(self, raw: str) -> None:

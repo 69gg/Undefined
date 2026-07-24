@@ -24,10 +24,16 @@ _JSON_DUMPS_KWARGS: dict[str, Any] = {
 _JSON_TOOL_MARKER_RE = re.compile(r'\{\s*"tool"\s*:', re.DOTALL)
 _TOOL_TAG_PREFIX_RE = re.compile(r"^<tool(?:\s|/?>)", re.IGNORECASE)
 _TOOL_TAG_MARKER_RE = re.compile(r"<tool(?:\s|/?>)", re.IGNORECASE)
+_TOOL_EXECUTION_PREFIX_RE = re.compile(r"^<tool_execution(?:\s|>)", re.IGNORECASE)
+_TOOL_EXECUTION_MARKER_RE = re.compile(
+    r"<(?:tool_execution|tool_call)(?:\s|/?>)", re.IGNORECASE
+)
+_TOOL_CALL_PREFIX_RE = re.compile(r"^<tool_call(?:\s|/?>)", re.IGNORECASE)
 _TOOL_ATTRIBUTE_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_.:-]*")
 _TOOL_ENVELOPE_KEYS = frozenset({"tool", "arguments"})
 _TOOL_TAG_ATTRIBUTE_KEYS = frozenset({"name", "params", "parameters", "arguments"})
 _TOOL_TAG_ARGUMENT_KEYS = ("params", "parameters", "arguments")
+_TOOL_CALL_ATTRIBUTE_KEYS = frozenset({"name", "arguments"})
 
 
 class TextToolCallParseError(ValueError):
@@ -123,10 +129,16 @@ def _unescape_tool_attribute(raw_value: str, quote: str) -> str:
     return unescape("".join(result))
 
 
-def _parse_tool_tag_open(text: str, position: int) -> tuple[dict[str, str], bool, int]:
-    if text[position : position + 5].lower() != "<tool":
+def _parse_attributed_tag_open(
+    text: str,
+    position: int,
+    *,
+    tag_name: str,
+) -> tuple[dict[str, str], bool, int]:
+    tag_prefix = f"<{tag_name}"
+    if text[position : position + len(tag_prefix)].lower() != tag_prefix:
         raise TextToolCallParseError("工具标签开头无效")
-    position += 5
+    position += len(tag_prefix)
     if position >= len(text) or not text[position].isspace():
         raise TextToolCallParseError("工具标签缺少属性")
 
@@ -173,6 +185,10 @@ def _parse_tool_tag_open(text: str, position: int) -> tuple[dict[str, str], bool
         )
 
 
+def _parse_tool_tag_open(text: str, position: int) -> tuple[dict[str, str], bool, int]:
+    return _parse_attributed_tag_open(text, position, tag_name="tool")
+
+
 def _tool_call_from_tag_attributes(attributes: dict[str, str]) -> dict[str, Any]:
     unexpected_keys = set(attributes) - _TOOL_TAG_ATTRIBUTE_KEYS
     if unexpected_keys:
@@ -205,16 +221,73 @@ def _parse_tag_text_tool_calls(text: str) -> list[dict[str, Any]]:
         position += 7
 
 
+def _parse_tool_execution_open(text: str, position: int) -> int:
+    tag_prefix = "<tool_execution"
+    if text[position : position + len(tag_prefix)].lower() != tag_prefix:
+        raise TextToolCallParseError("tool_execution 标签开头无效")
+    position = _skip_whitespace(text, position + len(tag_prefix))
+    if position >= len(text) or text[position] != ">":
+        raise TextToolCallParseError("tool_execution 标签不允许属性或自闭合")
+    return position + 1
+
+
+def _tool_call_from_execution_attributes(
+    attributes: dict[str, str],
+) -> dict[str, Any]:
+    unexpected_keys = set(attributes) - _TOOL_CALL_ATTRIBUTE_KEYS
+    if unexpected_keys:
+        raise TextToolCallParseError("tool_call 标签含有不支持的属性")
+    return _build_text_tool_call(
+        attributes.get("name"),
+        attributes.get("arguments", {}),
+    )
+
+
+def _parse_tool_execution_text_tool_calls(text: str) -> list[dict[str, Any]]:
+    position = _parse_tool_execution_open(text, 0)
+    tool_calls: list[dict[str, Any]] = []
+
+    while True:
+        position = _skip_whitespace(text, position)
+        if text[position : position + 17].lower() == "</tool_execution>":
+            position = _skip_whitespace(text, position + 17)
+            if position != len(text):
+                raise TextToolCallParseError("tool_execution 标签后存在普通文本")
+            if not tool_calls:
+                raise TextToolCallParseError("tool_execution 封包不能为空")
+            return tool_calls
+        if position >= len(text) or _TOOL_CALL_PREFIX_RE.match(text[position:]) is None:
+            raise TextToolCallParseError("tool_execution 内只允许 tool_call 标签")
+
+        attributes, self_closing, position = _parse_attributed_tag_open(
+            text,
+            position,
+            tag_name="tool_call",
+        )
+        tool_calls.append(_tool_call_from_execution_attributes(attributes))
+        if self_closing:
+            continue
+
+        position = _skip_whitespace(text, position)
+        if text[position : position + 12].lower() != "</tool_call>":
+            raise TextToolCallParseError("tool_call 标签只允许空内容")
+        position += 12
+
+
 def parse_text_tool_calls(raw_content: str) -> list[dict[str, Any]]:
     """将完整的模型文本工具封包转换为 OpenAI ``tool_calls``。
 
     普通文本返回空列表。疑似工具协议但格式非法时抛出
-    :class:`TextToolCallParseError`，调用方可据此阻止协议文本作为普通回复发送。
+    :class:`TextToolCallParseError`，由调用方决定是否按普通文本重试。
     """
 
     text = _strip_code_fences(raw_content).strip()
     if not text:
         return []
+    if _TOOL_EXECUTION_PREFIX_RE.match(text):
+        return _parse_tool_execution_text_tool_calls(text)
+    if _TOOL_EXECUTION_MARKER_RE.search(text):
+        raise TextToolCallParseError("tool_execution 工具封包前存在普通文本")
     if _TOOL_TAG_PREFIX_RE.match(text):
         return _parse_tag_text_tool_calls(text)
     if _TOOL_TAG_MARKER_RE.search(text):

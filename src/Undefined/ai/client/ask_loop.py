@@ -494,20 +494,19 @@ class ClientAskLoopMixin(ClientQueueMixin):
                 reasoning_content = message.get("reasoning_content")
                 raw_tool_calls = message.get("tool_calls", [])
                 tool_calls = raw_tool_calls if isinstance(raw_tool_calls, list) else []
-                text_tool_protocol_detected = False
+                recovered_text_tool_calls = False
                 if content.strip() and not tool_calls:
                     try:
                         recovered_tool_calls = parse_text_tool_calls(content)
                     except TextToolCallParseError as exc:
-                        text_tool_protocol_detected = True
                         logger.warning(
-                            "[工具调用兼容] 拒绝无效文本工具封包: reason=%s content_len=%s",
+                            "[工具调用兼容] 文本工具封包解析失败，"
+                            "按普通未调用工具响应重试: reason=%s content_len=%s",
                             exc,
                             len(content),
                         )
                     else:
                         if recovered_tool_calls:
-                            text_tool_protocol_detected = True
                             exposed_tool_names = iteration_exposed_tool_names
                             if exposed_tool_names is None:
                                 exposed_tool_names = frozenset(
@@ -525,36 +524,29 @@ class ClientAskLoopMixin(ClientQueueMixin):
                                 api_to_internal.get(api_name, api_name)
                                 for api_name in recovered_api_names
                             ]
-                            unavailable_names = sorted(
-                                {
-                                    name
-                                    for name in recovered_internal_names
-                                    if name not in exposed_tool_names
+                            # 文本恢复的调用必须经过与 Tool Search 相同的本轮
+                            # 可见性校验；即使未启用 Tool Search，也不能借回退
+                            # 解析调用未实际暴露给模型的工具。
+                            iteration_exposed_tool_names = exposed_tool_names
+                            tool_calls = recovered_tool_calls
+                            recovered_text_tool_calls = True
+                            content = ""
+                            if isinstance(transport_state, dict) and (
+                                transport_state.get("previous_response_id")
+                            ):
+                                stateless_state: dict[str, Any] = {
+                                    "stateless_replay": True
                                 }
+                                api_mode = transport_state.get("api_mode")
+                                if api_mode:
+                                    stateless_state["api_mode"] = api_mode
+                                transport_state = stateless_state
+                            logger.warning(
+                                "[工具调用兼容] 已从模型纯文本恢复原生工具调用: "
+                                "count=%s names=%s",
+                                len(tool_calls),
+                                ", ".join(recovered_internal_names),
                             )
-                            if unavailable_names:
-                                logger.warning(
-                                    "[工具调用兼容] 拒绝未暴露的文本工具调用: names=%s",
-                                    ", ".join(unavailable_names),
-                                )
-                            else:
-                                tool_calls = recovered_tool_calls
-                                content = ""
-                                if isinstance(transport_state, dict) and (
-                                    transport_state.get("previous_response_id")
-                                ):
-                                    stateless_state: dict[str, Any] = {
-                                        "stateless_replay": True
-                                    }
-                                    api_mode = transport_state.get("api_mode")
-                                    if api_mode:
-                                        stateless_state["api_mode"] = api_mode
-                                    transport_state = stateless_state
-                                logger.warning(
-                                    "[工具调用兼容] 已从模型纯文本恢复工具调用: count=%s names=%s",
-                                    len(tool_calls),
-                                    ", ".join(recovered_internal_names),
-                                )
                 if logger.isEnabledFor(logging.DEBUG):
                     logger.debug(
                         "[AI响应] content_len=%s tool_calls=%s",
@@ -614,9 +606,7 @@ class ClientAskLoopMixin(ClientQueueMixin):
                         return content
 
                     # 未调用工具：累计重试次数，超限则 fallback 发送或直接返回文本
-                    if text_tool_protocol_detected:
-                        last_missing_tool_call_content = ""
-                    elif content.strip():
+                    if content.strip():
                         last_missing_tool_call_content = content.strip()
                     missing_tool_call_count += 1
                     if missing_tool_call_count > max_missing_tool_call_retries:
@@ -683,6 +673,7 @@ class ClientAskLoopMixin(ClientQueueMixin):
                     message,
                     assistant_message,
                     include_readable_reasoning=capture_reasoning,
+                    include_raw_content_blocks=not recovered_text_tool_calls,
                 )
                 messages.append(assistant_message)
 

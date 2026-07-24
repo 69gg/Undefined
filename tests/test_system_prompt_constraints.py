@@ -17,7 +17,14 @@ def test_system_prompts_do_not_expose_text_tool_fallback_protocol(
     path: Path,
 ) -> None:
     text = path.read_text(encoding="utf-8")
-    forbidden_syntax = ('{"tool"', "<tool name=", " params=", " parameters=")
+    forbidden_syntax = (
+        '{"tool"',
+        "<tool name=",
+        "<tool_execution>",
+        "<tool_call name=",
+        " params=",
+        " parameters=",
+    )
 
     assert all(syntax not in text for syntax in forbidden_syntax)
 

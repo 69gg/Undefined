@@ -18,6 +18,9 @@ _TRANSPORT_MESSAGE_METADATA_KEYS: tuple[str, ...] = (
     RESPONSES_OUTPUT_ITEMS_KEY,
     ANTHROPIC_CONTENT_BLOCKS_KEY,
 )
+_RAW_CONTENT_REPLAY_KEYS = frozenset(
+    {RESPONSES_OUTPUT_ITEMS_KEY, ANTHROPIC_CONTENT_BLOCKS_KEY}
+)
 
 
 def copy_transport_message_metadata(
@@ -25,9 +28,12 @@ def copy_transport_message_metadata(
     target: dict[str, Any],
     *,
     include_readable_reasoning: bool,
+    include_raw_content_blocks: bool = True,
 ) -> None:
     """Copy raw replay structures, plus legacy readable reasoning when enabled."""
     for key in _TRANSPORT_MESSAGE_METADATA_KEYS:
+        if not include_raw_content_blocks and key in _RAW_CONTENT_REPLAY_KEYS:
+            continue
         if key in source:
             target[key] = deepcopy(source[key])
     if include_readable_reasoning and source.get("reasoning_content") is not None:

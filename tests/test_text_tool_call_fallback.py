@@ -30,12 +30,13 @@ def _build_client(
     responses: list[dict[str, Any]],
     tool_names: list[str],
     execute_tool: ToolExecutor,
+    missing_tool_call_retries: int = 0,
 ) -> AIClient:
     client: Any = object.__new__(AIClient)
     client.runtime_config = SimpleNamespace(
         log_thinking=False,
         ai_request_max_retries=0,
-        missing_tool_call_retries=0,
+        missing_tool_call_retries=missing_tool_call_retries,
         tool_search_enabled=False,
         prefetch_tools=[],
         prefetch_tools_hide=False,
@@ -127,33 +128,196 @@ async def test_text_tool_calls_use_normal_execution_and_stateless_replay() -> No
         "api_mode": "openai.responses",
         "stateless_replay": True,
     }
+    replayed_messages = submit.await_args_list[1].kwargs["messages"]
+    recovered_message = next(
+        message
+        for message in replayed_messages
+        if message.get("role") == "assistant"
+        and [
+            call.get("function", {}).get("name")
+            for call in message.get("tool_calls", [])
+        ]
+        == ["send_message", "end"]
+    )
+    assert recovered_message["content"] == ""
+    assert first_content not in [
+        message.get("content") for message in replayed_messages
+    ]
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "content",
-    [
-        '{"tool":"hidden_tool","arguments":{}}',
-        '{"tool":"end","arguments":{}} trailing',
-    ],
-)
-async def test_invalid_or_unexposed_text_tool_protocol_is_never_sent(
-    content: str,
-) -> None:
+async def test_tool_execution_uses_name_mapping_and_native_message_replay() -> None:
+    executed: list[tuple[str, dict[str, Any]]] = []
+
+    async def execute_tool(
+        name: str, arguments: dict[str, Any], context: dict[str, Any]
+    ) -> str:
+        executed.append((name, arguments))
+        if name == "music.search_songs":
+            return "搜索完成"
+        if name == "end":
+            context["conversation_ended"] = True
+            return "对话已结束"
+        raise AssertionError(f"unexpected tool: {name}")
+
+    raw_content = """<tool_execution>
+<tool_call name="music-_-search_songs" arguments='{"query": "克罗地亚狂想曲 Maksim", "limit": 10}'>
+</tool_call>
+</tool_execution>"""
+    end_call = {
+        "id": "call_end",
+        "type": "function",
+        "function": {"name": "end", "arguments": "{}"},
+    }
+    client = _build_client(
+        responses=[
+            {
+                "_tool_name_map": {
+                    "api_to_internal": {
+                        "music-_-search_songs": "music.search_songs",
+                        "end": "end",
+                    }
+                },
+                "choices": [
+                    {
+                        "message": {
+                            "content": raw_content,
+                            "reasoning_content": "需要搜索音乐",
+                            "_responses_output_items": [
+                                {
+                                    "type": "message",
+                                    "role": "assistant",
+                                    "content": [
+                                        {"type": "output_text", "text": raw_content}
+                                    ],
+                                }
+                            ],
+                            "_anthropic_content_blocks": [
+                                {"type": "text", "text": raw_content}
+                            ],
+                        }
+                    }
+                ],
+            },
+            {"choices": [{"message": {"content": "", "tool_calls": [end_call]}}]},
+        ],
+        tool_names=["music.search_songs", "end"],
+        execute_tool=execute_tool,
+    )
+
+    result = await client.ask("hello", send_message_callback=AsyncMock())
+
+    assert result == ""
+    assert executed == [
+        (
+            "music.search_songs",
+            {"query": "克罗地亚狂想曲 Maksim", "limit": 10},
+        ),
+        ("end", {}),
+    ]
+    submit = cast(AsyncMock, client.submit_queued_llm_call)
+    replayed_messages = submit.await_args_list[1].kwargs["messages"]
+    recovered_message = next(
+        message
+        for message in replayed_messages
+        if message.get("role") == "assistant"
+        and message.get("tool_calls")
+        and message["tool_calls"][0]["function"]["name"] == "music-_-search_songs"
+    )
+    assert recovered_message["content"] == ""
+    assert recovered_message["reasoning_content"] == "需要搜索音乐"
+    assert "_responses_output_items" not in recovered_message
+    assert "_anthropic_content_blocks" not in recovered_message
+    assert raw_content not in [message.get("content") for message in replayed_messages]
+
+
+@pytest.mark.asyncio
+async def test_unexposed_text_tool_is_replayed_natively_and_rejected() -> None:
+    executed: list[str] = []
+
+    async def execute_tool(
+        name: str, _arguments: dict[str, Any], context: dict[str, Any]
+    ) -> str:
+        executed.append(name)
+        if name == "end":
+            context["conversation_ended"] = True
+            return "对话已结束"
+        raise AssertionError("unexposed tool must not execute")
+
+    hidden_content = '{"tool":"hidden_tool","arguments":{}}'
+    end_call = {
+        "id": "call_end",
+        "type": "function",
+        "function": {"name": "end", "arguments": "{}"},
+    }
+    client = _build_client(
+        responses=[
+            {"choices": [{"message": {"content": hidden_content}}]},
+            {"choices": [{"message": {"content": "", "tool_calls": [end_call]}}]},
+        ],
+        tool_names=["end"],
+        execute_tool=execute_tool,
+    )
+
+    result = await client.ask("hello", send_message_callback=AsyncMock())
+
+    assert result == ""
+    assert executed == ["end"]
+    submit = cast(AsyncMock, client.submit_queued_llm_call)
+    replayed_messages = submit.await_args_list[1].kwargs["messages"]
+    hidden_call_message = next(
+        message
+        for message in replayed_messages
+        if message.get("role") == "assistant"
+        and message.get("tool_calls")
+        and message["tool_calls"][0]["function"]["name"] == "hidden_tool"
+    )
+    hidden_call_id = hidden_call_message["tool_calls"][0]["id"]
+    rejection = next(
+        message
+        for message in replayed_messages
+        if message.get("role") == "tool"
+        and message.get("tool_call_id") == hidden_call_id
+    )
+    assert "当前未加载或不可用" in rejection["content"]
+    assert hidden_content not in [
+        message.get("content") for message in replayed_messages
+    ]
+
+
+@pytest.mark.asyncio
+async def test_invalid_text_tool_protocol_retries_then_sends_original_content() -> None:
+    invalid_content = '{"tool":"end","arguments":{}} trailing'
+
     async def execute_tool(
         _name: str, _arguments: dict[str, Any], _context: dict[str, Any]
     ) -> str:
-        raise AssertionError("rejected text tool protocol must not execute")
+        raise AssertionError("invalid text tool protocol must not execute")
 
     client = _build_client(
-        responses=[{"choices": [{"message": {"content": content}}]}],
+        responses=[
+            {"choices": [{"message": {"content": invalid_content}}]},
+            {"choices": [{"message": {"content": invalid_content}}]},
+        ],
         tool_names=["end"],
         execute_tool=execute_tool,
+        missing_tool_call_retries=1,
     )
     send_message = AsyncMock()
 
     result = await client.ask("hello", send_message_callback=send_message)
 
     assert result == ""
-    send_message.assert_not_awaited()
-    assert cast(AsyncMock, client.submit_queued_llm_call).await_count == 1
+    send_message.assert_awaited_once_with(invalid_content)
+    submit = cast(AsyncMock, client.submit_queued_llm_call)
+    assert submit.await_count == 2
+    retried_messages = submit.await_args_list[1].kwargs["messages"]
+    assert any(
+        message.get("role") == "assistant" and message.get("content") == invalid_content
+        for message in retried_messages
+    )
+    assert any(
+        message.get("role") == "user"
+        and "未调用任何工具" in str(message.get("content"))
+        for message in retried_messages
+    )
