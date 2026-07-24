@@ -321,6 +321,8 @@ HTML 和 Markdown 工具都支持显式长图版式：
 
 `music.get_audio` 默认流式读取 `/v1/tracks/stream`，登记当前会话附件并返回 `<attachment uid="..."/>` 与 `uid`；音频大小受 `[attachments].remote_download_max_size_mb` 限制。普通音频文件应调用 `messages.send_message`，把返回的附件标签原样放进 `message`。只有用户明确要求“作为原生语音消息发送”时才改用 `messages.send_voice(uid=返回的uid)`，不要同时发送两份。`delivery="url"` 只解析可能快速失效的直链，仍需通过 `messages.send_message` 发给用户。
 
+`messages.send_message` 可以只接收一个或多个普通附件标签：此时它直接派发文件并由文件发送记录历史，不会先提交空文本消息。图文混合时仍先发送可见正文，再依次派发附件；工具结果会区分全部成功、部分成功和全部失败。
+
 本工具集刻意不暴露下载任务、队列、暂停、恢复、删除等底层 API（例如不会注册 `music.download_jobs`、`music.create_download`）。上游服务的受管下载文件最长保留 24 小时并自动清理；流式音频进入 Undefined 后按本项目附件缓存策略清理。使用前请阅读上游仓库的部署、许可证和自定义音源说明，并确保内容使用符合版权要求。
 
 **示例：**

@@ -303,6 +303,89 @@ async def test_send_message_returns_sent_message_id_when_available() -> None:
 
 
 @pytest.mark.asyncio
+async def test_send_message_dispatches_file_only_without_empty_message(
+    tmp_path: Path,
+) -> None:
+    registry = AttachmentRegistry(
+        registry_path=tmp_path / "attachment_registry.json",
+        cache_dir=tmp_path / "attachments",
+    )
+    record = await registry.register_bytes(
+        "group:10001",
+        b"audio-bytes",
+        kind="audio",
+        display_name="song.mp3",
+        source_kind="test",
+        mime_type="audio/mpeg",
+    )
+    sender = SimpleNamespace(
+        send_address_message=AsyncMock(),
+        send_address_file=AsyncMock(),
+    )
+    context: dict[str, Any] = _tool_context(
+        request_type="group",
+        group_id=10001,
+        sender_id=20002,
+        request_id="req-file-only",
+        runtime_config=_build_runtime_config(),
+        sender=sender,
+        attachment_registry=registry,
+    )
+
+    result = await execute(
+        {"message": f'<attachment uid="{record.uid}"/>'},
+        context,
+    )
+
+    assert result == "消息已发送"
+    sender.send_address_message.assert_not_awaited()
+    sender.send_address_file.assert_awaited_once()
+    send_call = sender.send_address_file.await_args
+    assert send_call is not None
+    assert send_call.args[0].canonical == "group:10001"
+    assert send_call.args[1] == record.local_path
+    assert send_call.kwargs == {"name": "song.mp3", "auto_history": True}
+    assert context["message_sent_this_turn"] is True
+
+
+@pytest.mark.asyncio
+async def test_send_message_reports_file_only_dispatch_failure(tmp_path: Path) -> None:
+    registry = AttachmentRegistry(
+        registry_path=tmp_path / "attachment_registry.json",
+        cache_dir=tmp_path / "attachments",
+    )
+    record = await registry.register_bytes(
+        "group:10001",
+        b"document",
+        kind="file",
+        display_name="doc.txt",
+        source_kind="test",
+    )
+    sender = SimpleNamespace(
+        send_address_message=AsyncMock(),
+        send_address_file=AsyncMock(side_effect=RuntimeError("upload failed")),
+    )
+    context: dict[str, Any] = _tool_context(
+        request_type="group",
+        group_id=10001,
+        sender_id=20002,
+        request_id="req-file-failure",
+        runtime_config=_build_runtime_config(),
+        sender=sender,
+        attachment_registry=registry,
+    )
+
+    result = await execute(
+        {"message": f'<attachment uid="{record.uid}"/>'},
+        context,
+    )
+
+    assert result == "发送失败：附件服务暂时不可用，请稍后重试"
+    sender.send_address_message.assert_not_awaited()
+    assert "message_sent_this_turn" not in context
+
+
+@pytest.mark.asyncio
 async def test_send_message_renders_pic_uid_before_sending(tmp_path: Path) -> None:
     sender = SimpleNamespace(
         send_group_message=AsyncMock(return_value=77777),

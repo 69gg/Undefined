@@ -14,6 +14,7 @@
 - 单文件、轻量交付优先使用 `messages.send_text_file`
 - 需要把网络文件直接发到群/私聊时使用 `messages.send_url_file`
 - 仅在用户明确要求语音消息时使用 `messages.send_voice`；普通 `<attachment uid="..."/>` 保持文件语义
+- 消息只包含普通附件标签时会直接派发文件，不会先向 OneBot/微信发送空正文；独立文件发送负责写入历史
 - 多文件工程、需要执行命令验证或打包交付，优先使用 `code_delivery_agent`
 - `messages.send_text_file` 默认单文件大小上限为 `512KB`，可通过 `config.toml` 的 `[messages].send_text_file_max_size_kb` 调整
 - `messages.send_url_file` 默认文件大小上限为 `100MB`，可通过 `config.toml` 的 `[messages].send_url_file_max_size_mb` 调整

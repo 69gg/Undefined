@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock
 import pytest
 from jsonschema import Draft202012Validator
 
+from Undefined.attachments import AttachmentRegistry
 from Undefined.context import RequestContext
 from Undefined.skills.toolsets.messages.send_private_message.handler import execute
 from Undefined.utils import io as async_io
@@ -177,3 +178,48 @@ async def test_send_private_message_returns_sent_message_id_when_available() -> 
         reply_to=None,
         history_message="hello sender private",
     )
+
+
+@pytest.mark.asyncio
+async def test_send_private_message_dispatches_file_only_without_empty_message(
+    tmp_path: Path,
+) -> None:
+    registry = AttachmentRegistry(
+        registry_path=tmp_path / "attachment_registry.json",
+        cache_dir=tmp_path / "attachments",
+    )
+    record = await registry.register_bytes(
+        "private:12345",
+        b"document",
+        kind="file",
+        display_name="doc.txt",
+        source_kind="test",
+    )
+    sender = SimpleNamespace(
+        send_address_message=AsyncMock(),
+        send_address_file=AsyncMock(),
+    )
+    context: dict[str, Any] = _tool_context(
+        request_type="private",
+        user_id=12345,
+        sender_id=12345,
+        request_id="req-private-file-only",
+        runtime_config=_build_runtime_config(),
+        sender=sender,
+        attachment_registry=registry,
+    )
+
+    result = await execute(
+        {"message": f'<attachment uid="{record.uid}"/>'},
+        context,
+    )
+
+    assert result == "私聊消息已发送给用户 12345"
+    sender.send_address_message.assert_not_awaited()
+    sender.send_address_file.assert_awaited_once()
+    send_call = sender.send_address_file.await_args
+    assert send_call is not None
+    assert send_call.args[0].canonical == "qq:12345"
+    assert send_call.args[1] == record.local_path
+    assert send_call.kwargs == {"name": "doc.txt", "auto_history": True}
+    assert context["message_sent_this_turn"] is True

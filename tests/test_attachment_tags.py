@@ -256,9 +256,10 @@ async def test_dispatch_pending_file_sends_group(tmp_path: Path) -> None:
         ) -> None:
             calls.append(("private", user_id, file_path, name))
 
-    await dispatch_pending_file_sends(
+    dispatched = await dispatch_pending_file_sends(
         rendered, sender=FakeSender(), target_type="group", target_id=12345
     )
+    assert dispatched == 1
     assert len(calls) == 1
     assert calls[0][0] == "group"
     assert calls[0][1] == 12345
@@ -291,9 +292,10 @@ async def test_dispatch_pending_file_sends_private(tmp_path: Path) -> None:
         async def send_private_file(self, *a: Any, **kw: Any) -> None:
             calls.append(("private", *a))
 
-    await dispatch_pending_file_sends(
+    dispatched = await dispatch_pending_file_sends(
         rendered, sender=FakeSender(), target_type="private", target_id=99999
     )
+    assert dispatched == 1
     assert len(calls) == 1
     assert calls[0][0] == "private"
     assert calls[0][1] == 99999
@@ -321,9 +323,10 @@ async def test_dispatch_best_effort_on_failure(tmp_path: Path) -> None:
             raise RuntimeError("network error")
 
     # Should not raise
-    await dispatch_pending_file_sends(
+    dispatched = await dispatch_pending_file_sends(
         rendered, sender=FailingSender(), target_type="group", target_id=1
     )
+    assert dispatched == 0
 
 
 @pytest.mark.asyncio
@@ -332,9 +335,10 @@ async def test_dispatch_no_pending_is_noop() -> None:
     rendered = RenderedRichMessage(
         delivery_text="text", history_text="text", attachments=[]
     )
-    await dispatch_pending_file_sends(
+    dispatched = await dispatch_pending_file_sends(
         rendered, sender=None, target_type="group", target_id=1
     )
+    assert dispatched == 0
 
 
 @pytest.mark.asyncio
