@@ -2,7 +2,7 @@
   "type": "function",
   "function": {
     "name": "browse_playlists",
-    "description": "浏览指定平台的歌单。action=tags 获取可用分类与排序；action=list 按 tag_id/sort_id 分页列出歌单；action=detail 按 playlist_id 读取歌单歌曲。详情返回的完整 Track 必须原样传给歌曲类工具。",
+    "description": "浏览指定平台的歌单。action=tags 获取可用分类与排序；action=list 按 tag_id/sort_id 分页列出歌单；action=detail 按 playlist_id 读取歌单歌曲，并为每首歌返回当前任务有效的 track_ref。后续歌曲工具只需传递所选引用，不要构造 Track。",
     "parameters": {
       "type": "object",
       "properties": {

@@ -171,9 +171,11 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
 - `music.get_lyrics` / `music.get_cover` / `music.get_comments`
 - `music.find_song_matches` / `music.get_audio`
 
-该分类没有 `callable.json`，因此默认仅主 AI 可见；同时不注册下载任务或作业管理类底层工具（例如 `music.download_jobs`、`music.create_download`）。上游返回的完整 `Track` 必须原样传入后续歌曲工具。
+该分类没有 `callable.json`，因此默认仅主 AI 可见；同时不注册下载任务或作业管理类底层工具（例如 `music.download_jobs`、`music.create_download`）。搜索、歌单详情、排行榜详情和匹配结果会把完整 Track 保存到本次 AI 任务共享的 `MusicTrackReferenceStore`，只向模型返回精简候选及 `track_ref`；后续歌曲工具通过引用恢复原始 Track。
 
-音乐搜索与音频获取都不会自行发送消息。用户明确要音频时，主 AI 会根据搜索结果中的歌名、歌手、专辑、版本标记和 `qualities` 灵活选择原唱标准版及其最高可用音质，不固定第一条、平台或音质；用户已有具体要求时以其要求为准，只有没有结果或无法可靠判断原唱/目标版本时才追问。选定后用 `music.get_audio` 登记附件；普通音频把返回的 `<attachment uid="..."/>` 原样交给 `messages.send_message`，只有用户明确要求原生语音时才把返回的 `uid` 交给 `messages.send_voice`。
+`track_ref` 可以跨同一次 `ask()` 内的工具轮次和 `tool_search`，任务结束即释放，不落盘也不跨用户消息。公开工具 schema 只包含 `track_ref`；执行层在未提供 `track_ref` 时暂时兼容旧的完整 `track` 参数，供已有代码和灰度调用使用，但这不是面向模型的公开契约。若两者同时存在，以 `track_ref` 为准。
+
+音乐搜索与音频获取都不会自行发送消息。用户明确要音频时，主 AI 会根据搜索结果中的歌名、歌手、专辑、版本标记和 `qualities` 灵活选择原唱标准版及其最高可用音质，不固定第一条、平台或音质；用户已有具体要求时以其要求为准，只有没有结果或无法可靠判断原唱/目标版本时才追问。选定后把 `track_ref` 交给 `music.get_audio` 登记附件；普通音频把返回的 `<attachment uid="..."/>` 原样交给 `messages.send_message`，只有用户明确要求原生语音时才把返回的 `uid` 交给 `messages.send_voice`。
 
 ### Group Analysis（群聊深度分析）
 

@@ -5,12 +5,17 @@ from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 import httpx
 import pytest
 
 from Undefined.skills.toolsets import ToolSetRegistry
+from Undefined.skills.toolsets.music._track_refs import (
+    MUSIC_TRACK_STORE_CONTEXT_KEY,
+    MusicTrackReferenceError,
+    MusicTrackReferenceStore,
+)
 from Undefined.skills.toolsets.music._tools import (
     execute_browse_playlists,
     execute_browse_rankings,
@@ -146,6 +151,9 @@ def _context(
             attachment_remote_download_max_size_mb=max_size_mb,
         ),
         "lxmusic2api_http_client": client,
+        MUSIC_TRACK_STORE_CONTEXT_KEY: MusicTrackReferenceStore(
+            reference_namespace="test"
+        ),
         "attachment_registry": registry,
         "get_scope_from_context": lambda _context: "group:100",
     }
@@ -196,8 +204,9 @@ def test_music_tool_descriptions_define_audio_delivery_contract() -> None:
     assert "不要固定取第一条或固定平台" in search_description
     assert "匹配明确时无需询问" in search_description
     assert "仅当没有结果或无法可靠判断原唱/目标版本时才询问用户" in search_description
-    assert "再调用 music.get_audio" in search_description
+    assert "传给 music.get_audio" in search_description
     assert "仅搜索成功不代表发歌任务完成" in search_description
+    assert "track_ref" in search_description
 
     audio_function = functions["music.get_audio"]
     audio_description = str(audio_function["description"])
@@ -214,7 +223,19 @@ def test_music_tool_descriptions_define_audio_delivery_contract() -> None:
         audio_function["parameters"]["properties"]["quality"]["description"]
     )
     assert "不要机械省略或固定填写" in quality_description
-    assert "Track.qualities" in quality_description
+    assert "候选的 qualities" in quality_description
+
+    for name in (
+        "music.get_lyrics",
+        "music.get_cover",
+        "music.get_comments",
+        "music.find_song_matches",
+        "music.get_audio",
+    ):
+        parameters = functions[name]["parameters"]
+        assert parameters["required"] == ["track_ref"]
+        assert "track_ref" in parameters["properties"]
+        assert "track" not in parameters["properties"]
 
 
 def test_music_tools_are_not_shared_with_subagents() -> None:
@@ -228,6 +249,57 @@ def test_music_tools_are_not_shared_with_subagents() -> None:
     )
 
     assert list(music_root.rglob("callable.json")) == []
+
+
+def _track_variant(track_id: str, *, name: str = "Test Song") -> dict[str, object]:
+    track = dict(TRACK)
+    track["id"] = track_id
+    track["name"] = name
+    track["sourceData"] = {"songId": track_id, "hash": f"hash-{track_id}"}
+    return track
+
+
+def test_music_track_reference_store_deduplicates_and_copies_tracks() -> None:
+    store = MusicTrackReferenceStore(reference_namespace="task-a")
+    original = _track_variant("kg_song-a")
+
+    reference = store.register(original)
+    cast(dict[str, object], original["sourceData"])["hash"] = "mutated"
+
+    resolved = store.resolve(reference)
+    assert reference == "mtrk_task-a_1"
+    assert cast(dict[str, object], resolved["sourceData"])["hash"] == ("hash-kg_song-a")
+
+    resolved["name"] = "mutated copy"
+    assert store.resolve(reference)["name"] == "Test Song"
+
+    updated = _track_variant("kg_song-a", name="Updated Song")
+    assert store.register(updated) == reference
+    assert store.resolve(reference)["name"] == "Updated Song"
+
+
+def test_music_track_reference_store_evicts_least_recently_used_track() -> None:
+    store = MusicTrackReferenceStore(max_entries=2, reference_namespace="task-a")
+    first = store.register(_track_variant("kg_first"))
+    second = store.register(_track_variant("kg_second"))
+    assert store.resolve(first)["id"] == "kg_first"
+
+    third = store.register(_track_variant("kg_third"))
+
+    assert store.resolve(first)["id"] == "kg_first"
+    assert store.resolve(third)["id"] == "kg_third"
+    with pytest.raises(MusicTrackReferenceError, match="无效、已淘汰"):
+        store.resolve(second)
+
+
+def test_music_track_references_do_not_collide_across_tasks() -> None:
+    first_store = MusicTrackReferenceStore(reference_namespace="task-a")
+    second_store = MusicTrackReferenceStore(reference_namespace="task-b")
+    first_reference = first_store.register(_track_variant("kg_first"))
+    second_store.register(_track_variant("kg_second"))
+
+    with pytest.raises(MusicTrackReferenceError, match="不属于当前任务"):
+        second_store.resolve(first_reference)
 
 
 @pytest.mark.parametrize(
@@ -352,11 +424,139 @@ async def test_json_tool_routes(
         if body is not None:
             assert json.loads(request.content) == body
 
-    transport = httpx.MockTransport(_success_handler(assertions))
+    response_data: object = {"ok": True}
+    if tool is execute_search_songs:
+        response_data = {"items": []}
+    elif tool is execute_find_song_matches:
+        response_data = []
+    elif (
+        tool in {execute_browse_playlists, execute_browse_rankings}
+        and args.get("action") == "detail"
+    ):
+        response_data = {"list": []}
+
+    transport = httpx.MockTransport(_success_handler(assertions, data=response_data))
     async with httpx.AsyncClient(transport=transport) as client:
         result = await tool(args, _context(client))
 
-    assert json.loads(result) == {"ok": True}
+    assert json.loads(result) == response_data
+
+
+async def test_search_reference_restores_exact_track_for_followup_tool() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            assert request.url.path == "/v1/search/tracks"
+            return httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "items": [TRACK],
+                        "page": 1,
+                        "limit": 20,
+                        "total": 1,
+                        "totalPages": 1,
+                        "upstreamErrors": [],
+                    }
+                },
+            )
+        assert request.method == "POST"
+        assert request.url.path == "/v1/tracks/lyrics"
+        assert json.loads(request.content) == {"track": TRACK}
+        return httpx.Response(200, json={"data": {"lyric": "test lyric"}})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        context = _context(client)
+        search_result = json.loads(
+            await execute_search_songs({"query": "Test Song"}, context)
+        )
+        candidate = search_result["items"][0]
+        lyrics_result = await execute_get_lyrics(
+            {"track_ref": candidate["track_ref"]}, context
+        )
+
+    assert candidate == {
+        "track_ref": "mtrk_test_1",
+        "name": "Test Song",
+        "singer": "Test Singer",
+        "albumName": "Test Album",
+        "interval": "03:20",
+        "source": "kg",
+        "qualities": ["320k"],
+    }
+    assert "id" not in candidate
+    assert "picUrl" not in candidate
+    assert "sourceData" not in candidate
+    assert json.loads(lyrics_result) == {"lyric": "test lyric"}
+
+
+@pytest.mark.parametrize(
+    ("tool", "args", "response_data", "result_field"),
+    [
+        (
+            execute_browse_playlists,
+            {"action": "detail", "source": "kg", "playlist_id": "playlist-1"},
+            {"list": [TRACK], "page": 1},
+            "list",
+        ),
+        (
+            execute_browse_rankings,
+            {"action": "detail", "source": "kg", "ranking_id": "ranking-1"},
+            {"list": [TRACK], "page": 1},
+            "list",
+        ),
+        (
+            execute_find_song_matches,
+            {"track": TRACK},
+            [TRACK],
+            None,
+        ),
+    ],
+)
+async def test_other_track_producers_return_compact_references(
+    tool: ExecuteTool,
+    args: dict[str, Any],
+    response_data: object,
+    result_field: str | None,
+) -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"data": response_data})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = json.loads(await tool(args, _context(client)))
+
+    candidates = result if result_field is None else result[result_field]
+    assert candidates[0] == {
+        "track_ref": "mtrk_test_1",
+        "name": "Test Song",
+        "singer": "Test Singer",
+        "albumName": "Test Album",
+        "interval": "03:20",
+        "source": "kg",
+        "qualities": ["320k"],
+    }
+
+
+async def test_invalid_track_reference_does_not_call_music_service() -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        raise AssertionError("invalid track_ref must not make a request")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await execute_get_lyrics({"track_ref": "mtrk_999"}, _context(client))
+
+    assert "track_ref 无效、已淘汰或不属于当前任务" in result
+    assert "重新搜索歌曲" in result
+
+
+async def test_invalid_track_reference_does_not_fall_back_to_legacy_track() -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        raise AssertionError("invalid track_ref must take precedence")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await execute_get_lyrics(
+            {"track_ref": "mtrk_999", "track": TRACK}, _context(client)
+        )
+
+    assert "track_ref 无效" in result
 
 
 async def test_api_error_is_readable_and_does_not_expose_key() -> None:
@@ -493,7 +693,22 @@ async def test_get_audio_url_delivery_uses_resolver() -> None:
             _context(client),
         )
 
-    assert json.loads(result) == resolved
+    payload = json.loads(result)
+    assert payload == {
+        "url": "https://audio.example.test/song.mp3",
+        "resolvedQuality": "320k",
+        "qualityFallbackUsed": False,
+        "sourceFallbackUsed": False,
+        "track": {
+            "track_ref": "mtrk_test_1",
+            "name": "Test Song",
+            "singer": "Test Singer",
+            "albumName": "Test Album",
+            "interval": "03:20",
+            "source": "kg",
+            "qualities": ["320k"],
+        },
+    }
 
 
 async def test_get_audio_normalizes_string_boolean_for_direct_invocation() -> None:

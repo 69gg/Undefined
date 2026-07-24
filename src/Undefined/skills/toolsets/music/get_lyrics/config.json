@@ -2,13 +2,13 @@
   "type": "function",
   "function": {
     "name": "get_lyrics",
-    "description": "获取歌曲歌词及平台提供的翻译、逐字歌词等数据。track 必须是 music.search_songs、歌单详情、排行榜详情或匹配结果返回的完整 Track，所有字段原样传递。",
+    "description": "获取歌曲歌词及平台提供的翻译、逐字歌词等数据。track_ref 必须来自当前任务中的 music.search_songs、歌单详情、排行榜详情或匹配结果；不要自行构造 Track。",
     "parameters": {
       "type": "object",
       "properties": {
-        "track": { "type": "object", "description": "完整 Track 对象，不得删减或重建", "additionalProperties": true }
+        "track_ref": { "type": "string", "minLength": 1, "maxLength": 64, "description": "歌曲候选返回的当前任务内引用" }
       },
-      "required": ["track"],
+      "required": ["track_ref"],
       "additionalProperties": false
     }
   }

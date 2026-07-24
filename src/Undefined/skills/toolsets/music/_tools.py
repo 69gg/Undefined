@@ -15,6 +15,11 @@ from Undefined.skills.toolsets.music._client import (
     runtime_config,
     stream_data,
 )
+from Undefined.skills.toolsets.music._track_refs import (
+    MUSIC_TRACK_STORE_CONTEXT_KEY,
+    MusicTrackReferenceError,
+    MusicTrackReferenceStore,
+)
 
 
 class AttachmentRecord(Protocol):
@@ -75,6 +80,19 @@ _MIME_SUFFIXES: dict[str, str] = {
     "audio/x-wav": ".wav",
 }
 _UNSAFE_FILE_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+_TRACK_REQUIRED_KEYS = frozenset(
+    {
+        "id",
+        "source",
+        "name",
+        "singer",
+        "interval",
+        "albumName",
+        "picUrl",
+        "qualities",
+        "sourceData",
+    }
+)
 
 
 def _json(value: object) -> str:
@@ -110,11 +128,110 @@ def _source(args: Mapping[str, Any], *, allow_all: bool) -> str:
     return source
 
 
-def _track(args: Mapping[str, Any]) -> dict[str, object]:
+def _canonical_track(value: object) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise MusicToolError("音乐服务返回了无效的 Track 对象")
+    track = {str(key): item for key, item in value.items()}
+    missing_keys = sorted(_TRACK_REQUIRED_KEYS.difference(track))
+    if missing_keys:
+        raise MusicToolError(f"Track 缺少必要字段：{'、'.join(missing_keys)}")
+
+    source = str(track.get("source", "") or "").strip()
+    if source not in _PROVIDER_VALUES:
+        raise MusicToolError("Track 包含不支持的音乐平台")
+    if not str(track.get("id", "") or "").strip():
+        raise MusicToolError("Track 缺少 id")
+    if not str(track.get("name", "") or "").strip():
+        raise MusicToolError("Track 缺少歌曲名称")
+    if not isinstance(track.get("qualities"), list):
+        raise MusicToolError("Track.qualities 格式无效")
+    if not isinstance(track.get("sourceData"), dict):
+        raise MusicToolError("Track.sourceData 格式无效")
+    return track
+
+
+def _track_store(context: dict[str, Any]) -> MusicTrackReferenceStore:
+    value = context.get(MUSIC_TRACK_STORE_CONTEXT_KEY)
+    if isinstance(value, MusicTrackReferenceStore):
+        return value
+    store = MusicTrackReferenceStore()
+    context[MUSIC_TRACK_STORE_CONTEXT_KEY] = store
+    return store
+
+
+def _track(args: Mapping[str, Any], context: dict[str, Any]) -> dict[str, object]:
+    reference = _text(args, "track_ref")
+    if reference:
+        try:
+            return _track_store(context).resolve(reference)
+        except MusicTrackReferenceError as exc:
+            raise MusicToolError(str(exc)) from exc
+
+    # Hidden compatibility for callers that still provide a canonical Track object.
     raw_track = args.get("track")
-    if not isinstance(raw_track, dict):
-        raise MusicToolError("track 必须是搜索、歌单或排行榜返回的完整 Track 对象")
-    return {str(key): value for key, value in raw_track.items()}
+    if isinstance(raw_track, dict):
+        return _canonical_track(raw_track)
+    raise MusicToolError(
+        "track_ref 不能为空，请先搜索歌曲、读取歌单/排行榜详情或查找匹配版本"
+    )
+
+
+def _compact_track(value: object, context: dict[str, Any]) -> dict[str, object]:
+    track = _canonical_track(value)
+    reference = _track_store(context).register(track)
+    raw_qualities = cast(list[object], track["qualities"])
+    qualities: list[str] = []
+    for raw_quality in raw_qualities:
+        if not isinstance(raw_quality, dict):
+            continue
+        quality = str(raw_quality.get("type", "") or "").strip()
+        if quality in _QUALITY_VALUES and quality not in qualities:
+            qualities.append(quality)
+    return {
+        "track_ref": reference,
+        "name": str(track.get("name", "") or ""),
+        "singer": str(track.get("singer", "") or ""),
+        "albumName": str(track.get("albumName", "") or ""),
+        "interval": track.get("interval"),
+        "source": str(track.get("source", "") or ""),
+        "qualities": qualities,
+    }
+
+
+def _compact_track_field(
+    value: object,
+    field: str,
+    context: dict[str, Any],
+    *,
+    response_name: str,
+) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise MusicToolError(f"{response_name}响应格式无效")
+    raw_items = value.get(field)
+    if not isinstance(raw_items, list):
+        raise MusicToolError(f"{response_name}响应缺少有效的 {field} 列表")
+    result = {str(key): item for key, item in value.items()}
+    result[field] = [_compact_track(item, context) for item in raw_items]
+    return result
+
+
+def _compact_track_list(
+    value: object, context: dict[str, Any], *, response_name: str
+) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        raise MusicToolError(f"{response_name}响应格式无效")
+    return [_compact_track(item, context) for item in value]
+
+
+def _compact_resolved_audio(
+    value: object, context: dict[str, Any]
+) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise MusicToolError("音频解析响应格式无效")
+    result = {str(key): item for key, item in value.items()}
+    if "track" in result:
+        result["track"] = _compact_track(result["track"], context)
+    return result
 
 
 def _track_label(track: Mapping[str, object]) -> str:
@@ -196,7 +313,14 @@ async def execute_search_songs(args: dict[str, Any], context: dict[str, Any]) ->
                 "limit": _positive_int(args, "limit", 20, maximum=100),
             },
         )
-        return _json(data)
+        return _json(
+            _compact_track_field(
+                data,
+                "items",
+                context,
+                response_name="歌曲搜索",
+            )
+        )
     except MusicToolError as exc:
         return _error(exc)
 
@@ -267,6 +391,12 @@ async def execute_browse_playlists(
                 f"/playlists/{encoded_source}/{playlist_id}",
                 params={"page": _positive_int(args, "page", 1, maximum=100000)},
             )
+            data = _compact_track_field(
+                data,
+                "list",
+                context,
+                response_name="歌单详情",
+            )
         else:
             raise MusicToolError("action 必须是 tags、list 或 detail")
         return _json(data)
@@ -288,6 +418,12 @@ async def execute_browse_rankings(args: dict[str, Any], context: dict[str, Any])
                 f"/leaderboards/{source}/{ranking_id}",
                 params={"page": _positive_int(args, "page", 1, maximum=100000)},
             )
+            data = _compact_track_field(
+                data,
+                "list",
+                context,
+                response_name="排行榜详情",
+            )
         else:
             raise MusicToolError("action 必须是 list 或 detail")
         return _json(data)
@@ -298,7 +434,10 @@ async def execute_browse_rankings(args: dict[str, Any], context: dict[str, Any])
 async def execute_get_lyrics(args: dict[str, Any], context: dict[str, Any]) -> str:
     try:
         data = await request_data(
-            context, "POST", "/tracks/lyrics", json_body={"track": _track(args)}
+            context,
+            "POST",
+            "/tracks/lyrics",
+            json_body={"track": _track(args, context)},
         )
         return _json(data)
     except MusicToolError as exc:
@@ -307,7 +446,7 @@ async def execute_get_lyrics(args: dict[str, Any], context: dict[str, Any]) -> s
 
 async def execute_get_cover(args: dict[str, Any], context: dict[str, Any]) -> str:
     try:
-        track = _track(args)
+        track = _track(args, context)
         data = await request_data(
             context, "POST", "/tracks/cover", json_body={"track": track}
         )
@@ -355,7 +494,7 @@ async def execute_get_cover(args: dict[str, Any], context: dict[str, Any]) -> st
 
 async def execute_get_comments(args: dict[str, Any], context: dict[str, Any]) -> str:
     try:
-        track = _track(args)
+        track = _track(args, context)
         mode = _text(args, "mode", "latest").lower()
         page = _positive_int(args, "page", 1, maximum=100000)
         limit = _positive_int(args, "limit", 20, maximum=100)
@@ -391,23 +530,26 @@ async def execute_find_song_matches(
 ) -> str:
     try:
         data = await request_data(
-            context, "POST", "/tracks/matches", json_body={"track": _track(args)}
+            context,
+            "POST",
+            "/tracks/matches",
+            json_body={"track": _track(args, context)},
         )
-        return _json(data)
+        return _json(_compact_track_list(data, context, response_name="跨平台匹配"))
     except MusicToolError as exc:
         return _error(exc)
 
 
 async def execute_get_audio(args: dict[str, Any], context: dict[str, Any]) -> str:
     try:
-        track = _track(args)
+        track = _track(args, context)
         body = _resolve_body(args, track)
         delivery = _text(args, "delivery", "attachment").lower()
         if delivery == "url":
             data = await request_data(
                 context, "POST", "/tracks/resolve", json_body=body
             )
-            return _json(data)
+            return _json(_compact_resolved_audio(data, context))
         if delivery != "attachment":
             raise MusicToolError("delivery 必须是 attachment 或 url")
 

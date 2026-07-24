@@ -1229,8 +1229,8 @@ send_text_file_max_size_kb = 512
 # en: Size limit for messages.send_url_file URL-file uploads (MB). Default 100MB.
 send_url_file_max_size_mb = 100
 
-# zh: lxmusic2api 音乐工具集配置。部署与自定义音源说明见 https://github.com/69gg/lxmusic2api
-# en: lxmusic2api music toolset. Deployment and custom-source guide: https://github.com/69gg/lxmusic2api
+# zh: lxmusic2api 音乐工具集配置。部署及单个/目录多自定义音源说明见 https://github.com/69gg/lxmusic2api
+# en: lxmusic2api music toolset. Deployment and single/directory custom-source guide: https://github.com/69gg/lxmusic2api
 [lxmusic2api]
 # zh: lxmusic2api 服务根地址，不要包含 /v1；末尾斜杠会自动移除。
 # en: lxmusic2api service root URL without /v1; a trailing slash is removed automatically.

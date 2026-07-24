@@ -2,14 +2,14 @@
   "type": "function",
   "function": {
     "name": "get_cover",
-    "description": "获取歌曲封面。默认下载并注册为当前会话图片附件，返回的 <attachment uid=\"...\"/> 应直接嵌入回复；只有明确需要原始地址时才使用 delivery=url。track 必须是完整 Track。",
+    "description": "获取 track_ref 对应歌曲的封面。默认下载并注册为当前会话图片附件，返回的 <attachment uid=\"...\"/> 应直接嵌入回复；只有明确需要原始地址时才使用 delivery=url。track_ref 必须来自当前任务中的歌曲候选。",
     "parameters": {
       "type": "object",
       "properties": {
-        "track": { "type": "object", "description": "完整 Track 对象，不得删减或重建", "additionalProperties": true },
+        "track_ref": { "type": "string", "minLength": 1, "maxLength": 64, "description": "歌曲候选返回的当前任务内引用" },
         "delivery": { "type": "string", "enum": ["attachment", "url"], "default": "attachment", "description": "attachment=返回会话附件；url=返回封面原始地址" }
       },
-      "required": ["track"],
+      "required": ["track_ref"],
       "additionalProperties": false
     }
   }

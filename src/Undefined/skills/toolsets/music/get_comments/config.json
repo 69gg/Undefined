@@ -2,17 +2,17 @@
   "type": "function",
   "function": {
     "name": "get_comments",
-    "description": "分页获取歌曲最新评论、热门评论或指定评论的回复。mode=replies 时必须传入前一次评论结果中的 comment_id。track 必须是完整 Track。",
+    "description": "分页获取 track_ref 对应歌曲的最新评论、热门评论或指定评论的回复。mode=replies 时必须传入前一次评论结果中的 comment_id。track_ref 必须来自当前任务中的歌曲候选。",
     "parameters": {
       "type": "object",
       "properties": {
-        "track": { "type": "object", "description": "完整 Track 对象，不得删减或重建", "additionalProperties": true },
+        "track_ref": { "type": "string", "minLength": 1, "maxLength": 64, "description": "歌曲候选返回的当前任务内引用" },
         "mode": { "type": "string", "enum": ["latest", "hot", "replies"], "default": "latest", "description": "评论类型" },
         "comment_id": { "type": "string", "minLength": 1, "maxLength": 1024, "description": "mode=replies 时必填" },
         "page": { "type": "integer", "minimum": 1, "maximum": 100000, "default": 1, "description": "页码" },
         "limit": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20, "description": "每页数量" }
       },
-      "required": ["track"],
+      "required": ["track_ref"],
       "additionalProperties": false
     }
   }

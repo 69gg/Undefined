@@ -11,6 +11,10 @@ import pytest
 
 from Undefined.ai.client import AIClient
 from Undefined.config.models import ChatModelConfig
+from Undefined.skills.toolsets.music._track_refs import (
+    MUSIC_TRACK_STORE_CONTEXT_KEY,
+    MusicTrackReferenceStore,
+)
 
 
 def _tool(name: str, description: str = "") -> dict[str, Any]:
@@ -140,6 +144,49 @@ def _build_client(
     client._submit_calls = submit_calls
     client._build_messages_mock = build_messages
     return client
+
+
+@pytest.mark.asyncio
+async def test_music_track_reference_store_survives_tool_search_rounds() -> None:
+    stores: list[object] = []
+
+    async def _execute_tool(
+        name: str, args: dict[str, Any], context: dict[str, Any]
+    ) -> str:
+        _ = args
+        if name == "end":
+            context["conversation_ended"] = True
+            return "ended"
+        stores.append(context[MUSIC_TRACK_STORE_CONTEXT_KEY])
+        return "ok"
+
+    client = _build_client(
+        execute_tool=_execute_tool,
+        llm_responses=[
+            _llm_tool_calls(
+                _tool_call(
+                    "call_search_web",
+                    "tool_search",
+                    '{"query":"select:web_agent"}',
+                )
+            ),
+            _llm_tool_calls(_tool_call("call_web", "web_agent")),
+            _llm_tool_calls(
+                _tool_call(
+                    "call_search_info",
+                    "tool_search",
+                    '{"query":"select:info_agent"}',
+                )
+            ),
+            _llm_tool_calls(_tool_call("call_info", "info_agent")),
+            _llm_tool_calls(_tool_call("call_end", "end")),
+        ],
+    )
+
+    assert await AIClient.ask(client, "hello") == ""
+    assert len(stores) == 2
+    assert isinstance(stores[0], MusicTrackReferenceStore)
+    assert stores[0] is stores[1]
 
 
 @pytest.mark.asyncio

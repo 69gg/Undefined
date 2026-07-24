@@ -2,16 +2,16 @@
   "type": "function",
   "function": {
     "name": "get_audio",
-    "description": "下载或解析指定 Track 的音频，但只准备交付内容，本工具本身绝不会向用户发送消息或文件。track 必须是上游工具返回的完整 Track。若用户未指定音质，应先查看该 Track 的 qualities，灵活选择其中实际列出的最高可用值并显式传入 quality；用户指定版本、格式或音质时优先遵从，不要用固定音质覆盖。delivery=attachment（默认）会下载音频、注册当前会话附件，并返回 JSON 中的 attachment 标签和 uid：普通音频文件必须在下一轮调用 messages.send_message，把返回的 <attachment uid=\"...\"/> 原样放入 message；仅当用户明确要求原生语音消息时，才调用 messages.send_voice 并传入返回的 uid，不要两种方式重复发送。delivery=url 只返回可能快速失效的直链，也必须再用 messages.send_message 发给用户。获取成功不等于交付完成，发送工具成功后才可结束。",
+    "description": "下载或解析 track_ref 对应歌曲的音频，但只准备交付内容，本工具本身绝不会向用户发送消息或文件。track_ref 必须来自当前任务中的歌曲候选，不要自行构造 Track。若用户未指定音质，应先查看该候选的 qualities，灵活选择其中实际列出的最高可用值并显式传入 quality；用户指定版本、格式或音质时优先遵从，不要用固定音质覆盖。delivery=attachment（默认）会下载音频、注册当前会话附件，并返回 JSON 中的 attachment 标签和 uid：普通音频文件必须在下一轮调用 messages.send_message，把返回的 <attachment uid=\"...\"/> 原样放入 message；仅当用户明确要求原生语音消息时，才调用 messages.send_voice 并传入返回的 uid，不要两种方式重复发送。delivery=url 只返回可能快速失效的直链，也必须再用 messages.send_message 发给用户。获取成功不等于交付完成，发送工具成功后才可结束。",
     "parameters": {
       "type": "object",
       "properties": {
-        "track": { "type": "object", "description": "完整 Track 对象，不得删减或重建", "additionalProperties": true },
-        "quality": { "type": "string", "enum": ["flac24bit", "flac", "wav", "ape", "320k", "192k", "128k"], "description": "期望音质。用户未指定时，不要机械省略或固定填写；应检查所选 Track.qualities 并传入其中实际列出的最高可用值" },
+        "track_ref": { "type": "string", "minLength": 1, "maxLength": 64, "description": "歌曲候选返回的当前任务内引用" },
+        "quality": { "type": "string", "enum": ["flac24bit", "flac", "wav", "ape", "320k", "192k", "128k"], "description": "期望音质。用户未指定时，不要机械省略或固定填写；应检查所选候选的 qualities 并传入其中实际列出的最高可用值" },
         "strict_quality": { "type": "boolean", "default": false, "description": "是否禁止自动降级到其他音质" },
         "delivery": { "type": "string", "enum": ["attachment", "url"], "default": "attachment", "description": "attachment=只下载并注册会话普通音频附件，不发送；url=只解析短时有效直链，不发送。两种模式都必须再调用相应消息工具完成交付" }
       },
-      "required": ["track"],
+      "required": ["track_ref"],
       "additionalProperties": false
     }
   }

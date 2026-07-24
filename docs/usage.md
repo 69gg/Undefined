@@ -300,7 +300,7 @@ HTML 和 Markdown 工具都支持显式长图版式：
 
 | 工具 | 说明 |
 |---|---|
-| `music.search_songs` | 按关键词跨平台搜索歌曲；只返回 Track，不下载也不发送 |
+| `music.search_songs` | 按关键词跨平台搜索歌曲；返回精简候选和任务内 `track_ref`，不下载也不发送 |
 | `music.search_playlists` | 搜索歌单 |
 | `music.get_hot_search` | 获取一个或全部平台热搜 |
 | `music.browse_playlists` | 获取歌单标签、列表和详情 |
@@ -311,9 +311,11 @@ HTML 和 Markdown 工具都支持显式长图版式：
 | `music.find_song_matches` | 查找其他平台的匹配版本 |
 | `music.get_audio` | 下载或解析音频并返回附件/直链；只准备内容，不发送 |
 
-搜索、歌单详情、排行榜详情和匹配结果中的 `Track` 是后续操作所需的完整凭据。调用歌词、封面、评论、匹配或音频工具时，必须原样传递整份 `Track`，特别是 `sourceData` 与 `qualities`，不能只保留歌曲名或 ID。
+搜索、歌单详情、排行榜详情和匹配结果只向 AI 返回精简歌曲信息，包括歌名、歌手、专辑、时长、平台、可用音质和短 `track_ref`。完整 Track 由程序在本次 AI 任务内保存；调用歌词、封面、评论、匹配或音频工具时只需传入所选候选的 `track_ref`，不再让 AI 复制 `sourceData`、`picUrl` 等底层字段。
 
-发歌是明确的三步流程：先用 `music.search_songs` 取得候选，再把选中歌曲的完整 `Track` 传给 `music.get_audio`，最后调用消息工具实际交付。前两个工具都不会自行向用户发送内容；仅搜索成功、音频下载成功或返回附件 UID 都不代表已经发歌。
+发歌是明确的三步流程：先用 `music.search_songs` 取得候选，再把选中歌曲的 `track_ref` 传给 `music.get_audio`，最后调用消息工具实际交付。前两个工具都不会自行向用户发送内容；仅搜索成功、音频下载成功或返回附件 UID 都不代表已经发歌。
+
+`track_ref` 只在当前这次 AI 决策链内有效，可以跨越其中的多轮工具调用和 `tool_search`，但不会跨到用户的下一条消息或进程重启。引用无效时工具会要求重新搜索；这是轻量引用的预期恢复方式，不表示 lxmusic2api 故障。
 
 `music.get_audio` 默认流式读取 `/v1/tracks/stream`，登记当前会话附件并返回 `<attachment uid="..."/>` 与 `uid`；音频大小受 `[attachments].remote_download_max_size_mb` 限制。普通音频文件应调用 `messages.send_message`，把返回的附件标签原样放进 `message`。只有用户明确要求“作为原生语音消息发送”时才改用 `messages.send_voice(uid=返回的uid)`，不要同时发送两份。`delivery="url"` 只解析可能快速失效的直链，仍需通过 `messages.send_message` 发给用户。
 
