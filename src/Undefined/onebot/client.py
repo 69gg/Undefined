@@ -1,6 +1,7 @@
 """OneBot v11 WebSocket 客户端实现。"""
 
 import asyncio
+import hashlib
 import json
 import logging
 import time
@@ -13,6 +14,78 @@ from Undefined.context import RequestContext
 from Undefined.utils.logging import log_debug_json, redact_string, sanitize_data
 
 logger = logging.getLogger(__name__)
+
+_DELIVERY_ACTIONS = frozenset(
+    {
+        "send_group_msg",
+        "send_private_msg",
+        "upload_group_file",
+        "upload_private_file",
+    }
+)
+_DELIVERY_TIMEOUT_MARKERS = ("timeout", "timed out", "超时")
+_UNCERTAIN_DELIVERY_KEYS_RESOURCE = "onebot_uncertain_delivery_keys"
+
+
+class OneBotDeliveryUncertainError(RuntimeError):
+    """OneBot 投递已发起，但最终是否送达无法确认。"""
+
+    delivery_uncertain: bool = True
+
+    def __init__(
+        self,
+        action: str,
+        message: str,
+        *,
+        retcode: Any = None,
+    ) -> None:
+        self.action = action
+        self.upstream_message = message
+        self.retcode = retcode
+        retcode_text = f" (retcode={retcode})" if retcode is not None else ""
+        super().__init__(f"OneBot 投递结果未确认: {message}{retcode_text}")
+
+
+def _is_delivery_timeout(action: str, message: Any) -> bool:
+    if action not in _DELIVERY_ACTIONS:
+        return False
+    normalized = str(message or "").strip().casefold()
+    return any(marker in normalized for marker in _DELIVERY_TIMEOUT_MARKERS)
+
+
+def _delivery_key(action: str, params: dict[str, Any]) -> str:
+    serialized = json.dumps(
+        {"action": action, "params": params},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def _uncertain_delivery_keys(*, create: bool) -> set[str] | None:
+    ctx = RequestContext.current()
+    if ctx is None:
+        return None
+    value = ctx.get_resource(_UNCERTAIN_DELIVERY_KEYS_RESOURCE)
+    if isinstance(value, set):
+        return value
+    if not create:
+        return None
+    keys: set[str] = set()
+    ctx.set_resource(_UNCERTAIN_DELIVERY_KEYS_RESOURCE, keys)
+    return keys
+
+
+def _remember_uncertain_delivery(action: str, params: dict[str, Any]) -> None:
+    keys = _uncertain_delivery_keys(create=True)
+    if keys is not None:
+        keys.add(_delivery_key(action, params))
+
+
+def _was_delivery_uncertain(action: str, params: dict[str, Any]) -> bool:
+    keys = _uncertain_delivery_keys(create=False)
+    return keys is not None and _delivery_key(action, params) in keys
 
 
 def _mark_message_sent_this_turn() -> None:
@@ -110,16 +183,30 @@ class OneBotClient:
         if not self.ws:
             raise RuntimeError("WebSocket 未连接")
 
+        request_params = params or {}
+        if action in _DELIVERY_ACTIONS and _was_delivery_uncertain(
+            action, request_params
+        ):
+            logger.warning(
+                "[投递防重] 同一请求内相同投递此前结果未确认，拒绝自动重试: action=%s",
+                action,
+            )
+            _mark_message_sent_this_turn()
+            raise OneBotDeliveryUncertainError(
+                action,
+                "同一请求内相同投递此前结果未确认，已阻止重复发送",
+            )
+
         self._message_id += 1
         echo = str(self._message_id)  # 使用字符串类型
 
         request = {
             "action": action,
-            "params": params or {},
+            "params": request_params,
             "echo": echo,
         }
 
-        safe_params = sanitize_data(params or {})
+        safe_params = sanitize_data(request_params)
         logger.debug(
             f"[bold yellow][API请求][/bold yellow] [green]{action}[/green] (ID=[magenta]{echo}[/magenta]) | 参数: {safe_params}"
         )
@@ -149,6 +236,14 @@ class OneBotClient:
                     logger.error(
                         f"[bold red][API失败][/bold red] [green]{action}[/green] (ID=[magenta]{echo}[/magenta]) | 耗时=[magenta]{duration:.2f}s[/magenta] | retcode=[red]{retcode}[/red] | message={msg}"
                     )
+                if _is_delivery_timeout(action, msg):
+                    _remember_uncertain_delivery(action, request_params)
+                    _mark_message_sent_this_turn()
+                    raise OneBotDeliveryUncertainError(
+                        action,
+                        str(msg),
+                        retcode=retcode,
+                    )
                 raise RuntimeError(f"API 调用失败: {msg} (retcode={retcode})")
 
             logger.info(
@@ -157,9 +252,16 @@ class OneBotClient:
             if logger.isEnabledFor(logging.DEBUG):
                 log_debug_json(logger, "[OneBot响应体]", response)
             return response
-        except asyncio.TimeoutError:
+        except asyncio.TimeoutError as exc:
             duration = time.perf_counter() - start_time
             logger.error(f"[API超时] {action} (ID={echo}) | 耗时={duration:.2f}s")
+            if action in _DELIVERY_ACTIONS:
+                _remember_uncertain_delivery(action, request_params)
+                _mark_message_sent_this_turn()
+                raise OneBotDeliveryUncertainError(
+                    action,
+                    "等待 OneBot 投递响应超时",
+                ) from exc
             raise
         finally:
             self._pending_responses.pop(echo, None)
@@ -635,6 +737,13 @@ class OneBotClient:
                     "name": file_name,
                 },
             )
+        except OneBotDeliveryUncertainError:
+            logger.warning(
+                "[文件上传] upload_group_file 投递结果未确认，"
+                "不执行文件消息段回退: group=%s",
+                group_id,
+            )
+            raise
         except RuntimeError:
             # 回退：尝试用文件消息段发送
             logger.warning(
@@ -677,6 +786,13 @@ class OneBotClient:
                     "name": file_name,
                 },
             )
+        except OneBotDeliveryUncertainError:
+            logger.warning(
+                "[文件上传] upload_private_file 投递结果未确认，"
+                "不执行文件消息段回退: user=%s",
+                user_id,
+            )
+            raise
         except RuntimeError:
             logger.warning(
                 "[文件上传] upload_private_file 失败，尝试文件消息段回退: user=%s",

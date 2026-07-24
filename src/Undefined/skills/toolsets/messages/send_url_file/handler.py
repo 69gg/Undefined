@@ -10,6 +10,10 @@ from urllib.parse import unquote, urlparse
 import httpx
 
 from Undefined.skills.http_config import get_request_timeout
+from Undefined.skills.toolsets.messages.context_utils import (
+    handle_delivery_uncertain,
+    is_delivery_uncertain_error,
+)
 from Undefined.utils.http_download import (
     cleanup_download_dir,
     download_remote_file,
@@ -524,6 +528,15 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         )
         return f"发送失败：{exc}"
     except Exception as exc:
+        if is_delivery_uncertain_error(exc):
+            logger.warning(
+                "[URL文件发送] 投递结果未确认，阻止自动重试: "
+                "request_id=%s target_type=%s target_id=%s",
+                request_id,
+                target_type,
+                target_id,
+            )
+            return handle_delivery_uncertain(context)
         logger.exception(
             "[URL文件发送] 失败: request_id=%s target_type=%s target_id=%s url=%s err=%s",
             request_id,

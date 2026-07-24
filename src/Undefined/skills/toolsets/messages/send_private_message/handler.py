@@ -7,6 +7,8 @@ from Undefined.attachments import (
     scope_from_context,
 )
 from Undefined.skills.toolsets.messages.context_utils import (
+    handle_delivery_uncertain,
+    is_delivery_uncertain_error,
     mark_message_sent,
     normalize_sent_message_id,
     parse_reply_to,
@@ -145,6 +147,13 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         except ValueError as exc:
             return f"发送失败：{exc}"
         except Exception as e:
+            if is_delivery_uncertain_error(e):
+                logger.warning(
+                    "[私聊发送] 投递结果未确认，阻止自动重试: user=%s request_id=%s",
+                    user_id,
+                    request_id,
+                )
+                return handle_delivery_uncertain(context)
             logger.exception(
                 "[私聊发送] sender 发送失败: user=%s request_id=%s err=%s",
                 user_id,

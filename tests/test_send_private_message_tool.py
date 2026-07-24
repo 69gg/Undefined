@@ -11,6 +11,8 @@ from jsonschema import Draft202012Validator
 
 from Undefined.attachments import AttachmentRegistry
 from Undefined.context import RequestContext
+from Undefined.onebot.client import OneBotDeliveryUncertainError
+from Undefined.skills.toolsets.messages.context_utils import DELIVERY_UNCERTAIN_RESULT
 from Undefined.skills.toolsets.messages.send_private_message.handler import execute
 from Undefined.utils import io as async_io
 from Undefined.utils.coerce import was_message_sent
@@ -223,3 +225,48 @@ async def test_send_private_message_dispatches_file_only_without_empty_message(
     assert send_call.args[1] == record.local_path
     assert send_call.kwargs == {"name": "doc.txt", "auto_history": True}
     assert context["message_sent_this_turn"] is True
+
+
+@pytest.mark.asyncio
+async def test_send_private_message_marks_uncertain_file_delivery_as_attempted(
+    tmp_path: Path,
+) -> None:
+    registry = AttachmentRegistry(
+        registry_path=tmp_path / "attachment_registry.json",
+        cache_dir=tmp_path / "attachments",
+    )
+    record = await registry.register_bytes(
+        "private:12345",
+        b"document",
+        kind="file",
+        display_name="doc.txt",
+        source_kind="test",
+    )
+    sender = SimpleNamespace(
+        send_address_message=AsyncMock(),
+        send_address_file=AsyncMock(
+            side_effect=OneBotDeliveryUncertainError(
+                "upload_private_file",
+                "Timeout while waiting for sendMsg",
+                retcode=1200,
+            )
+        ),
+    )
+    context: dict[str, Any] = _tool_context(
+        request_type="private",
+        user_id=12345,
+        sender_id=12345,
+        request_id="req-private-file-uncertain",
+        runtime_config=_build_runtime_config(),
+        sender=sender,
+        attachment_registry=registry,
+    )
+
+    result = await execute(
+        {"message": f'<attachment uid="{record.uid}"/>'},
+        context,
+    )
+
+    assert result == DELIVERY_UNCERTAIN_RESULT
+    assert context["message_sent_this_turn"] is True
+    sender.send_address_file.assert_awaited_once()

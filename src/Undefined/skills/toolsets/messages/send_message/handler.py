@@ -13,6 +13,8 @@ from Undefined.utils.message_targets import (
     resolve_delivery_address,
 )
 from Undefined.skills.toolsets.messages.context_utils import (
+    handle_delivery_uncertain,
+    is_delivery_uncertain_error,
     mark_message_sent,
     normalize_sent_message_id,
     parse_reply_to,
@@ -204,6 +206,15 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         except ValueError as exc:
             return f"发送失败：{exc}"
         except Exception as e:
+            if is_delivery_uncertain_error(e):
+                logger.warning(
+                    "[发送消息] 投递结果未确认，阻止自动重试: "
+                    "target_type=%s target_id=%s request_id=%s",
+                    target_type,
+                    target_id,
+                    request_id,
+                )
+                return handle_delivery_uncertain(context)
             logger.exception(
                 "[发送消息] 发送失败: target_type=%s target_id=%s request_id=%s err=%s",
                 target_type,

@@ -16,6 +16,7 @@ from Undefined.attachments import (
     render_message_with_attachments,
     render_message_with_pic_placeholders,
 )
+from Undefined.onebot.client import OneBotDeliveryUncertainError
 
 
 _PNG_BYTES = (
@@ -327,6 +328,37 @@ async def test_dispatch_best_effort_on_failure(tmp_path: Path) -> None:
         rendered, sender=FailingSender(), target_type="group", target_id=1
     )
     assert dispatched == 0
+
+
+@pytest.mark.asyncio
+async def test_dispatch_propagates_uncertain_delivery(tmp_path: Path) -> None:
+    """Ambiguous delivery must reach the tool layer so it cannot be retried."""
+    reg = _make_registry(tmp_path)
+    rec = await reg.register_bytes(
+        "group:1", _PDF_BYTES, kind="file", display_name="doc.pdf", source_kind="test"
+    )
+    rendered = RenderedRichMessage(
+        delivery_text="",
+        history_text="[文件]",
+        attachments=[],
+        pending_file_sends=(rec,),
+    )
+
+    class UncertainSender:
+        async def send_group_file(self, *args: Any, **kwargs: Any) -> None:
+            raise OneBotDeliveryUncertainError(
+                "upload_group_file",
+                "Timeout while waiting for sendMsg",
+                retcode=1200,
+            )
+
+    with pytest.raises(OneBotDeliveryUncertainError):
+        await dispatch_pending_file_sends(
+            rendered,
+            sender=UncertainSender(),
+            target_type="group",
+            target_id=1,
+        )
 
 
 @pytest.mark.asyncio

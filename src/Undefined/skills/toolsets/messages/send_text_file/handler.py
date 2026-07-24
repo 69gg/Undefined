@@ -9,6 +9,10 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, Dict, Literal, cast
 
+from Undefined.skills.toolsets.messages.context_utils import (
+    handle_delivery_uncertain,
+    is_delivery_uncertain_error,
+)
 from Undefined.utils.message_turn import mark_message_sent_this_turn
 
 logger = logging.getLogger(__name__)
@@ -460,6 +464,16 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     except UnicodeEncodeError:
         return f"编码 {encoding} 无法表示当前内容，请改用 utf-8"
     except Exception as exc:
+        if is_delivery_uncertain_error(exc):
+            logger.warning(
+                "[发送文本文件] 投递结果未确认，阻止自动重试: "
+                "request_id=%s target_type=%s target_id=%s file=%s",
+                request_id,
+                target_type,
+                target_id,
+                filename,
+            )
+            return handle_delivery_uncertain(context)
         logger.exception(
             "[发送文本文件] 失败: request_id=%s target_type=%s target_id=%s file=%s err=%s",
             request_id,
