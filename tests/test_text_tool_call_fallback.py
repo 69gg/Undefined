@@ -147,7 +147,26 @@ async def test_text_tool_calls_use_normal_execution_and_stateless_replay() -> No
 
 
 @pytest.mark.asyncio
-async def test_tool_execution_uses_name_mapping_and_native_message_replay() -> None:
+@pytest.mark.parametrize(
+    "raw_content",
+    [
+        """<tool_execution>
+<tool_call name="music-_-search_songs" arguments='{"query": "克罗地亚狂想曲 Maksim", "limit": 10}'>
+</tool_call>
+</tool_execution>""",
+        """<function_calls>
+<invoke name="music-_-search_songs">
+<arguments>
+{"query": "克罗地亚狂想曲 Maksim", "limit": 10}
+</arguments>
+</invoke>
+</function_calls>""",
+    ],
+    ids=["tool_execution", "function_calls"],
+)
+async def test_xml_text_tool_envelope_uses_name_mapping_and_native_message_replay(
+    raw_content: str,
+) -> None:
     executed: list[tuple[str, dict[str, Any]]] = []
 
     async def execute_tool(
@@ -161,10 +180,6 @@ async def test_tool_execution_uses_name_mapping_and_native_message_replay() -> N
             return "对话已结束"
         raise AssertionError(f"unexpected tool: {name}")
 
-    raw_content = """<tool_execution>
-<tool_call name="music-_-search_songs" arguments='{"query": "克罗地亚狂想曲 Maksim", "limit": 10}'>
-</tool_call>
-</tool_execution>"""
     end_call = {
         "id": "call_end",
         "type": "function",

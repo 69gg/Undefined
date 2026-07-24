@@ -31,12 +31,18 @@ _TOOL_EXECUTION_MARKER_RE = re.compile(
     r"<(?:tool_execution|tool_call)(?:\s|/?>)", re.IGNORECASE
 )
 _TOOL_CALL_PREFIX_RE = re.compile(r"^<tool_call(?:\s|/?>)", re.IGNORECASE)
+_FUNCTION_CALLS_PREFIX_RE = re.compile(r"^<function_calls(?:\s|>)", re.IGNORECASE)
+_FUNCTION_CALLS_MARKER_RE = re.compile(
+    r"<(?:function_calls|invoke)(?:\s|/?>)", re.IGNORECASE
+)
+_INVOKE_PREFIX_RE = re.compile(r"^<invoke(?:\s|/?>)", re.IGNORECASE)
 _TOOL_ATTRIBUTE_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_.:-]*")
 _TOOL_ENVELOPE_KEYS = frozenset({"tool", "arguments"})
 _NAMED_TOOL_ENVELOPE_KEYS = frozenset({"name", "arguments"})
 _TOOL_TAG_ATTRIBUTE_KEYS = frozenset({"name", "params", "parameters", "arguments"})
 _TOOL_TAG_ARGUMENT_KEYS = ("params", "parameters", "arguments")
 _TOOL_CALL_ATTRIBUTE_KEYS = frozenset({"name", "arguments"})
+_INVOKE_ATTRIBUTE_KEYS = frozenset({"name"})
 
 
 class TextToolCallParseError(ValueError):
@@ -244,14 +250,27 @@ def _parse_tag_text_tool_calls(text: str) -> list[dict[str, Any]]:
         position += 7
 
 
-def _parse_tool_execution_open(text: str, position: int) -> int:
-    tag_prefix = "<tool_execution"
+def _parse_unattributed_tag_open(
+    text: str,
+    position: int,
+    *,
+    tag_name: str,
+) -> int:
+    tag_prefix = f"<{tag_name}"
     if text[position : position + len(tag_prefix)].lower() != tag_prefix:
-        raise TextToolCallParseError("tool_execution 标签开头无效")
+        raise TextToolCallParseError(f"{tag_name} 标签开头无效")
     position = _skip_whitespace(text, position + len(tag_prefix))
     if position >= len(text) or text[position] != ">":
-        raise TextToolCallParseError("tool_execution 标签不允许属性或自闭合")
+        raise TextToolCallParseError(f"{tag_name} 标签不允许属性或自闭合")
     return position + 1
+
+
+def _parse_tool_execution_open(text: str, position: int) -> int:
+    return _parse_unattributed_tag_open(
+        text,
+        position,
+        tag_name="tool_execution",
+    )
 
 
 def _tool_call_from_execution_attributes(
@@ -297,6 +316,61 @@ def _parse_tool_execution_text_tool_calls(text: str) -> list[dict[str, Any]]:
         position += 12
 
 
+def _parse_function_calls_text_tool_calls(text: str) -> list[dict[str, Any]]:
+    position = _parse_unattributed_tag_open(
+        text,
+        0,
+        tag_name="function_calls",
+    )
+    lowered_text = text.lower()
+    tool_calls: list[dict[str, Any]] = []
+
+    while True:
+        position = _skip_whitespace(text, position)
+        if lowered_text.startswith("</function_calls>", position):
+            position = _skip_whitespace(text, position + len("</function_calls>"))
+            if position != len(text):
+                raise TextToolCallParseError("function_calls 标签后存在普通文本")
+            if not tool_calls:
+                raise TextToolCallParseError("function_calls 封包不能为空")
+            return tool_calls
+        if position >= len(text) or _INVOKE_PREFIX_RE.match(text[position:]) is None:
+            raise TextToolCallParseError("function_calls 内只允许 invoke 标签")
+
+        attributes, self_closing, position = _parse_attributed_tag_open(
+            text,
+            position,
+            tag_name="invoke",
+        )
+        if self_closing:
+            raise TextToolCallParseError("invoke 标签不允许自闭合")
+        unexpected_keys = set(attributes) - _INVOKE_ATTRIBUTE_KEYS
+        if unexpected_keys:
+            raise TextToolCallParseError("invoke 标签含有不支持的属性")
+
+        position = _skip_whitespace(text, position)
+        arguments_start = _parse_unattributed_tag_open(
+            text,
+            position,
+            tag_name="arguments",
+        )
+        try:
+            raw_arguments, arguments_end = json.JSONDecoder().raw_decode(
+                text,
+                _skip_whitespace(text, arguments_start),
+            )
+        except json.JSONDecodeError as exc:
+            raise TextToolCallParseError("arguments 内容不是有效 JSON 对象") from exc
+        position = _skip_whitespace(text, arguments_end)
+        if not lowered_text.startswith("</arguments>", position):
+            raise TextToolCallParseError("arguments 标签缺少结束标签")
+        position = _skip_whitespace(text, position + len("</arguments>"))
+        if not lowered_text.startswith("</invoke>", position):
+            raise TextToolCallParseError("invoke 标签缺少结束标签")
+        position += len("</invoke>")
+        tool_calls.append(_build_text_tool_call(attributes.get("name"), raw_arguments))
+
+
 def parse_text_tool_calls(raw_content: str) -> list[dict[str, Any]]:
     """将完整的模型文本工具封包转换为 OpenAI ``tool_calls``。
 
@@ -307,6 +381,10 @@ def parse_text_tool_calls(raw_content: str) -> list[dict[str, Any]]:
     text = _strip_code_fences(raw_content).strip()
     if not text:
         return []
+    if _FUNCTION_CALLS_PREFIX_RE.match(text):
+        return _parse_function_calls_text_tool_calls(text)
+    if _FUNCTION_CALLS_MARKER_RE.search(text):
+        raise TextToolCallParseError("function_calls 工具封包前存在普通文本")
     if _TOOL_EXECUTION_PREFIX_RE.match(text):
         return _parse_tool_execution_text_tool_calls(text)
     if _TOOL_EXECUTION_MARKER_RE.search(text):

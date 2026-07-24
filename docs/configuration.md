@@ -195,7 +195,7 @@ model_name = "gpt-4o-mini"
 | `process_poke_message` | `true` | 是否响应拍一拍 | 关闭后忽略 poke |
 | `context_recent_messages_limit` | `20` | 注入到提示词的最近历史条数 | `<0` 视为 `0`（关闭注入）；无固定上限，受 `max_records` 与存储约束 |
 | `ai_request_max_retries` | `2` | 单次 LLM 请求失败重试次数 | `<0` 自动回退到 `0`；支持热更新 |
-| `missing_tool_call_retries` | `3` | 模型返回纯文本且无法恢复为本轮可用工具调用时的纠正重试次数（保留 assistant 纯文本 + 通用纠正提示，不写死具体 tool）；每次进入下一轮纠正重试前，warning 日志会以 `raw_content=repr(...)` 完整记录该轮原始响应；识别为无效工具协议的文本不会在重试耗尽后对外发送 | `<0` 自动回退到 `0`；支持热更新 |
+| `missing_tool_call_retries` | `3` | 模型返回纯文本且无法恢复为本轮可用工具调用时的纠正重试次数（保留 assistant 纯文本 + 通用纠正提示，不写死具体 tool）；每次进入下一轮纠正重试前，warning 日志会以 `raw_content=repr(...)` 完整记录该轮原始响应；格式与失败回退规则见 [模型 API 与兼容层](model-compatibility.md#文本-tool-call-后备解析) | `<0` 自动回退到 `0`；支持热更新 |
 
 ---
 
@@ -314,6 +314,8 @@ Prompt caching 补充：
 - `models.<x>.deepseek_new_cot_support`
   - 若开启：等效默认 `thinking_include_budget=false` + `thinking_tool_call_compat=true`
   - 显式设置新字段时，以新字段为准。
+
+三种 SDK 的请求/响应归一化、CoT 原生载体回放、Responses 状态续轮和文本 Tool Call 后备解析统一记录在[模型 API 与兼容层](model-compatibility.md)。
 
 ### 4.4.2 `[models.chat]` 主对话模型
 

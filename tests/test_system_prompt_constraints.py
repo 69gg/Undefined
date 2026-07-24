@@ -22,6 +22,8 @@ def test_system_prompts_do_not_expose_text_tool_fallback_protocol(
         "<tool name=",
         "<tool_execution>",
         "<tool_call name=",
+        "<function_calls>",
+        "<invoke name=",
         " params=",
         " parameters=",
     )

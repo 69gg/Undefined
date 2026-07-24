@@ -275,6 +275,45 @@ class TestParseTextToolCalls:
         assert self._arguments(tool_calls[1]) == {"value": 2}
         assert len({str(tool_call["id"]) for tool_call in tool_calls}) == 2
 
+    def test_function_calls_envelope(self) -> None:
+        raw = """<function_calls>
+<invoke name="music.search_songs">
+<arguments>
+{"query": "童话镇 暗杠", "limit": 5}
+</arguments>
+</invoke>
+</function_calls>"""
+
+        tool_calls = parse_text_tool_calls(raw)
+
+        assert self._names(tool_calls) == ["music.search_songs"]
+        assert self._arguments(tool_calls[0]) == {
+            "query": "童话镇 暗杠",
+            "limit": 5,
+        }
+
+    def test_function_calls_envelope_preserves_multiple_invokes(self) -> None:
+        raw = """<function_calls>
+<invoke name="first"><arguments>{"value": 1}</arguments></invoke>
+<invoke name="second"><arguments>{"value": 2}</arguments></invoke>
+</function_calls>"""
+
+        tool_calls = parse_text_tool_calls(raw)
+
+        assert self._names(tool_calls) == ["first", "second"]
+        assert self._arguments(tool_calls[0]) == {"value": 1}
+        assert self._arguments(tool_calls[1]) == {"value": 2}
+        assert len({str(tool_call["id"]) for tool_call in tool_calls}) == 2
+
+    def test_function_calls_arguments_may_contain_closing_tag_text(self) -> None:
+        raw = """<function_calls>
+<invoke name="example"><arguments>{"value": "</arguments>"}</arguments></invoke>
+</function_calls>"""
+
+        tool_calls = parse_text_tool_calls(raw)
+
+        assert self._arguments(tool_calls[0]) == {"value": "</arguments>"}
+
     def test_json_code_fence_is_accepted(self) -> None:
         tool_calls = parse_text_tool_calls(
             '```json\n{"tool":"end","arguments":{}}\n```'
@@ -312,6 +351,16 @@ class TestParseTextToolCalls:
             '<tool_call name="end" arguments="{}"></tool_call>',
             '<tool_execution><tool_call name="end" /></tool_execution> trailing',
             '普通文本 <tool_execution><tool_call name="end" /></tool_execution>',
+            "<function_calls></function_calls>",
+            '<function_calls mode="parallel"></function_calls>',
+            '<function_calls><invoke name="end" /></function_calls>',
+            '<function_calls><invoke name="end" extra="x"><arguments>{}</arguments></invoke></function_calls>',
+            '<function_calls><invoke name="end"><arguments>[]</arguments></invoke></function_calls>',
+            '<function_calls><invoke name="end"><arguments>{}</arguments>text</invoke></function_calls>',
+            '<function_calls><invoke name="end"><arguments>{}</invoke></function_calls>',
+            '<invoke name="end"><arguments>{}</arguments></invoke>',
+            '<function_calls><invoke name="end"><arguments>{}</arguments></invoke></function_calls> trailing',
+            '普通文本 <function_calls><invoke name="end"><arguments>{}</arguments></invoke></function_calls>',
         ],
     )
     def test_invalid_tool_protocol_is_rejected(self, raw: str) -> None:

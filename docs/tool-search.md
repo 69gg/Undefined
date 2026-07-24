@@ -79,7 +79,7 @@ tool_search(query: string, max_results?: integer)
 - 如果完整注册表已经存在名为 `tool_search` 的真实工具，该请求记录错误并回退全量工具，且因不生成 `<available_deferred_tools>` 目录而禁用 Tool Search Prompt 规则，避免模型把真实工具误当作虚拟加载器。
 - 当权限过滤后没有延迟工具时，请求直接使用全量可用工具，不额外保留无意义的搜索会话。
 - Chat Completions 与 Responses 使用同一套普通 function tool 逐轮扩展逻辑，不依赖服务商专属 Tool Search 协议。
-- 主 AI 从模型普通文本中兼容恢复工具调用时，仍只接受本轮已经暴露的工具名；延迟工具必须先经 `tool_search` 加载并等到下一轮，文本封包不能绕过 schema 投影。
+- 主 AI 从模型普通文本中兼容恢复工具调用时，仍只接受本轮已经暴露的工具名；延迟工具必须先经 `tool_search` 加载并等到下一轮，文本封包不能绕过 schema 投影。支持格式与失败回退规则见 [模型 API 与兼容层](model-compatibility.md#文本-tool-call-后备解析)。
 
 ## 与 handler 延迟导入的区别
 

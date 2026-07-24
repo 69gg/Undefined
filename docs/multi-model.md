@@ -85,53 +85,6 @@ reasoning_content_replay = true
 
 `max_tokens` 也会按条目独立继承或覆盖。OpenAI 模式下，显式设为 `0` 或负数会保留该值，并在实际请求中省略 token 上限字段；Anthropic Messages 要求为正整数，非正数会在请求发出前报错。
 
-## 文本工具封包兼容回退（仅服务端）
-
-部分 OpenAI 兼容模型偶尔不会返回结构化 `tool_calls`，而是把工具调用写进普通 `content`。主 Chat 循环会在响应侧兼容以下完整文本格式：
-
-```text
-{"tool":"end","arguments":{"memo":"静默处理","observations":[]}}
-{"tool":"send_message","arguments":{"message":"在做了"}}
-{"tool":"end","arguments":{"memo":"已回应","observations":[]}}
-```
-
-也兼容使用原生函数字段名的连续 JSON：
-
-```text
-{"name":"music.search_songs","arguments":{"query":"君往何处 m2u","limit":5}}
-{"name":"end","arguments":{"memo":"搜索 m2u 的《君往何处》","observations":[]}}
-```
-
-JSON 对象可以单独出现，也可以由空白分隔后连续出现；`tool` 与 `name` 两种封包允许混排。`arguments` 可以是对象或编码该对象的 JSON 字符串；`name` 形式要求显式提供 `arguments`，以免把普通的名称 JSON 误判为工具调用。连续调用会转换为同一个原生 `tool_calls` 列表，其中普通工具沿用现有并发执行；`end` 与其他工具同轮出现时仍拒绝本轮 `end`，等待其他工具结果回填后由模型下一轮决定是否结束。
-
-```text
-<tool name="end" parameters="{\"memo\":\"静默处理\",\"observations\":[]}"></tool>
-
-<tool name="send_message" params='{"message":"在做了在做了"}' />
-<tool name="end" params='{"memo":"已回应","observations":[]}' />
-```
-
-标签格式支持空的成对标签或自闭合标签；参数属性名可以是 `params`、`parameters` 或 `arguments`。完整封包外层允许使用 Markdown 代码围栏。
-
-```text
-<tool_execution>
-<tool_call name="music-_-search_songs" arguments='{"query":"克罗地亚狂想曲 Maksim","limit":10}'>
-</tool_call>
-</tool_execution>
-```
-
-`tool_execution` 外层可以包含一个或多个 `tool_call`；`tool_call` 支持空的成对标签或自闭合标签，`name` 必填，`arguments` 缺省为 `{}`。工具名使用模型实际看到的 API 名称，后续仍由现有映射还原为内部名称。
-
-这是一项服务端兼容措施，不是模型输出契约，也不会写入系统提示、工具描述或缺少工具调用时的纠错提示。处理边界如下：
-
-- 服务商原生返回的结构化 `tool_calls` 始终优先，不与文本回退结果合并。
-- 文本必须完全由受支持的工具封包组成。检测到封包标记但存在额外说明、格式错误或非对象参数时，按普通“未调用工具”响应进入原有重试流程；重试耗尽后按普通文本 fallback 原样发送。
-- 每个工具名必须属于当前会话经过权限过滤且在本轮实际暴露的 schema；文本回退不能绕过 Tool Search 加载阶段。
-- 成功转换后的文本不会以原始封包写回上下文，而是保存为原生 `assistant.tool_calls`；即使工具本轮未暴露，也会配对写入原生 `role=tool` 拒绝结果，供下一轮模型继续决策。
-- 转换后的调用继续使用原有名称映射、工具生命周期事件、并发执行和 `end` 同轮拒绝规则，不建立第二套执行路径。
-- Responses 模式恢复出文本工具调用后，下一轮强制使用 stateless replay，避免合成调用 ID 与上游响应状态不一致。
-- 运行日志使用 `[工具调用兼容]` 标记恢复或解析失败原因，不记录完整参数正文。
-
 ## 私聊使用方法
 
 ### 自动轮换
@@ -180,6 +133,7 @@ features.pool_enabled        ← 全局总开关（false 时完全不生效）
 - 所有模型的 Token 使用均会被统计
 - 「选X」状态 5 分钟后过期
 - 群聊不受多模型池影响，始终使用主模型
+- 主模型和池内模型共用主 Chat 响应解析链；SDK、CoT 和服务商把工具调用写入普通 `content` 时的容错规则见 [模型 API 与兼容层](model-compatibility.md)。
 
 ## 代码结构
 
