@@ -5,6 +5,10 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from Undefined.skills.registry import BaseRegistry
+from Undefined.utils.easter_egg_calls import (
+    agent_call_key,
+    format_batched_easter_egg_message,
+)
 from Undefined.utils.logging import redact_string
 
 logger = logging.getLogger(__name__)
@@ -615,7 +619,13 @@ class AgentToolRegistry(BaseRegistry):
             if tool_name in {"send_message", "end"}:
                 return
 
-        message = f"{agent_name}：{tool_name}，我调用你了，我要调用你了！"
+        message = format_batched_easter_egg_message(
+            context,
+            call_key=agent_call_key(str(agent_name), tool_name),
+            message=f"{agent_name}：{tool_name}，我调用你了，我要调用你了！",
+        )
+        if message is None:
+            return
         sender = context.get("sender")
         group_id = context.get("group_id")
         user_id = context.get("user_id")
@@ -652,7 +662,13 @@ class AgentToolRegistry(BaseRegistry):
         if mode_text == "clean" and context.get("easter_egg_silent"):
             return
 
-        message = f"{caller_agent}：{callee_agent}，我调用你了，我要调用你了！"
+        message = format_batched_easter_egg_message(
+            context,
+            call_key=agent_call_key(caller_agent, f"call_{callee_agent}"),
+            message=f"{caller_agent}：{callee_agent}，我调用你了，我要调用你了！",
+        )
+        if message is None:
+            return
         sender = context.get("sender")
         group_id = context.get("group_id")
         user_id = context.get("user_id")

@@ -25,6 +25,10 @@ from Undefined.skills.toolsets.music._track_refs import (
 from Undefined.services.message_summary_fetch import fetch_session_messages
 from Undefined.attachments import scope_from_context
 from Undefined.utils.io import write_bytes
+from Undefined.utils.easter_egg_calls import (
+    main_call_key,
+    prepare_easter_egg_call_batch,
+)
 from Undefined.utils.logging import log_debug_json, redact_string
 from Undefined.utils.message_turn import mark_message_sent_this_turn
 from Undefined.utils.paths import DOWNLOAD_CACHE_DIR, ensure_dir
@@ -694,6 +698,25 @@ class ClientAskLoopMixin(ClientQueueMixin):
                 ] = []
                 tool_results: list[Any] = []
                 tool_response_messages: dict[int, dict[str, Any]] = {}
+
+                parallel_call_keys: list[str] = []
+                for pending_tool_call in tool_calls:
+                    if not isinstance(pending_tool_call, dict):
+                        continue
+                    pending_function = pending_tool_call.get("function")
+                    if not isinstance(pending_function, dict):
+                        continue
+                    pending_api_name = str(
+                        pending_function.get("name", "") or ""
+                    ).strip()
+                    if not pending_api_name:
+                        continue
+                    pending_internal_name = api_to_internal.get(
+                        pending_api_name,
+                        pending_api_name,
+                    )
+                    parallel_call_keys.append(main_call_key(pending_internal_name))
+                prepare_easter_egg_call_batch(tool_context, parallel_call_keys)
 
                 # 逐个处理模型返回的 tool_call
                 for tool_call_index, tool_call in enumerate(tool_calls):

@@ -1,11 +1,15 @@
 """AgentToolRegistry 单元测试"""
 
+import asyncio
+import logging
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from Undefined.skills.agents.agent_tool_registry import AgentToolRegistry
+from Undefined.skills.agents.runner.tools import execute_assistant_tool_calls
 
 
 class TestFindSkillsRoot:
@@ -156,6 +160,76 @@ class TestAgentCallEasterEgg:
                     False,
                 )
             ]
+
+    @pytest.mark.asyncio
+    async def test_parallel_duplicate_agent_tools_merge_easter_egg_messages(
+        self, tmp_path: Path
+    ) -> None:
+        tools_dir = tmp_path / "tools"
+        tools_dir.mkdir()
+        registry = AgentToolRegistry(tools_dir, current_agent_name="web_agent")
+
+        async def crawl_webpage(args: dict[str, Any], _context: dict[str, Any]) -> str:
+            await asyncio.sleep(0)
+            return f"ok:{args.get('url', '')}"
+
+        registry.register_external_item(
+            "crawl_webpage",
+            {
+                "type": "function",
+                "function": {
+                    "name": "crawl_webpage",
+                    "description": "抓取网页",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            },
+            crawl_webpage,
+        )
+        sender = _DummySender()
+        context = {
+            "agent_name": "web_agent",
+            "runtime_config": SimpleNamespace(easter_egg_agent_call_message_mode="all"),
+            "sender": sender,
+            "group_id": 123456,
+        }
+        messages: list[dict[str, Any]] = []
+        tool_calls = [
+            {
+                "id": f"call_{index}",
+                "function": {
+                    "name": "crawl_webpage",
+                    "arguments": f'{{"url":"https://example.com/{index}"}}',
+                },
+            }
+            for index in range(4)
+        ]
+
+        started = await execute_assistant_tool_calls(
+            agent_name="web_agent",
+            tool_calls=tool_calls,
+            api_to_internal={},
+            messages=messages,
+            tool_registry=registry,
+            agent_skill_registry=None,
+            context=context,
+            logger=logging.getLogger(__name__),
+            tool_error_prefix="执行失败",
+        )
+
+        assert started is True
+        assert sender.messages == [
+            (
+                123456,
+                "web_agent：crawl_webpage，我调用你了，我要调用你了！ x4",
+                False,
+            )
+        ]
+        assert [message["tool_call_id"] for message in messages] == [
+            "call_0",
+            "call_1",
+            "call_2",
+            "call_3",
+        ]
 
 
 def test_file_analysis_agent_can_see_shared_media_fetch_tools() -> None:

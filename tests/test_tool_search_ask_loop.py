@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import copy
 from types import SimpleNamespace
 from typing import Any, cast
@@ -14,6 +15,10 @@ from Undefined.config.models import ChatModelConfig
 from Undefined.skills.toolsets.music._track_refs import (
     MUSIC_TRACK_STORE_CONTEXT_KEY,
     MusicTrackReferenceStore,
+)
+from Undefined.utils.easter_egg_calls import (
+    format_batched_easter_egg_message,
+    main_call_key,
 )
 
 
@@ -394,6 +399,52 @@ async def test_disabled_tool_search_preserves_full_tool_list() -> None:
         "info_agent",
     }
     assert client._build_messages_mock.await_args.kwargs["deferred_tool_names"] is None
+
+
+@pytest.mark.asyncio
+async def test_main_parallel_duplicate_tools_prepare_shared_easter_egg_batch() -> None:
+    announcements: list[str] = []
+
+    async def _execute_tool(
+        name: str, args: dict[str, Any], context: dict[str, Any]
+    ) -> str:
+        _ = args
+        message = format_batched_easter_egg_message(
+            context,
+            call_key=main_call_key(name),
+            message=f"{name}，我调用你了，我要调用你了！",
+        )
+        if message is not None:
+            announcements.append(message)
+        await asyncio.sleep(0)
+        if name == "end":
+            context["conversation_ended"] = True
+        return "ok"
+
+    client = _build_client(
+        execute_tool=_execute_tool,
+        tool_search_enabled=False,
+        schemas=[_tool("crawl_webpage"), _tool("end")],
+        llm_responses=[
+            _llm_tool_calls(
+                *[
+                    _tool_call(
+                        f"call_{index}",
+                        "crawl_webpage",
+                        f'{{"url":"https://example.com/{index}"}}',
+                    )
+                    for index in range(4)
+                ]
+            ),
+            _llm_tool_calls(_tool_call("call_end", "end")),
+        ],
+    )
+
+    assert await AIClient.ask(client, "crawl") == ""
+    assert announcements == [
+        "crawl_webpage，我调用你了，我要调用你了！ x4",
+        "end，我调用你了，我要调用你了！",
+    ]
 
 
 @pytest.mark.asyncio

@@ -617,6 +617,8 @@ Prompt caching 补充：
 
 虚拟 `tool_search` 遵循普通 Tool 的调用提示规则：`tools`、`clean`、`all` 模式发送，`none`、`agent` 模式不发送。它只负责加载 schema，下一轮目标工具真正执行时会按对应规则再次独立提示。`clean` 会抑制带 `easter_egg_silent` 的自动预取调用以及 `send_message`、`end`，但不会过滤正常的 `tool_search` 调用。
 
+同一轮模型响应并行调用多个同名工具时，调用彩蛋会合并为一条并附加次数，例如 4 个 `web_agent` 内部的 `crawl_webpage` 调用只发送 `web_agent：crawl_webpage，我调用你了，我要调用你了！ x4`。不同工具仍分别提示；后续模型轮次会重新统计，不会与上一轮累计。
+
 复读支持图片等已登记附件：当连续相同内容是 `<attachment uid="..."/>` 图片引用时，系统会先渲染成真实图片消息再发送，不会把 UID 占位字符串直接发到群里。
 
 兼容：历史字段 `[core].keyword_reply_enabled` 仍可读取，建议迁移到 `[easter_egg]`。
