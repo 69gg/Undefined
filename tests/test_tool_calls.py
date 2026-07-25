@@ -195,6 +195,33 @@ class TestParseTextToolCalls:
         }
         assert len({str(tool_call["id"]) for tool_call in tool_calls}) == 2
 
+    def test_tool_calls_json_envelope(self) -> None:
+        tool_calls = parse_text_tool_calls(
+            '{"tool_calls":[{"name":"end","arguments":'
+            '{"memo":"静默处理","observations":[]}}]}'
+        )
+
+        assert self._names(tool_calls) == ["end"]
+        assert self._arguments(tool_calls[0]) == {
+            "memo": "静默处理",
+            "observations": [],
+        }
+        assert tool_calls[0]["type"] == "function"
+        assert str(tool_calls[0]["id"]).startswith("call_txt_")
+
+    def test_tool_calls_json_envelope_preserves_parallel_calls(self) -> None:
+        tool_calls = parse_text_tool_calls(
+            '{"tool_calls":['
+            '{"name":"first","arguments":{"value":1}},'
+            '{"name":"second","arguments":"{\\"value\\":2}"}'
+            "]}"
+        )
+
+        assert self._names(tool_calls) == ["first", "second"]
+        assert self._arguments(tool_calls[0]) == {"value": 1}
+        assert self._arguments(tool_calls[1]) == {"value": 2}
+        assert len({str(tool_call["id"]) for tool_call in tool_calls}) == 2
+
     def test_json_envelope_styles_can_be_mixed(self) -> None:
         tool_calls = parse_text_tool_calls(
             '{"tool":"first","arguments":{}}\n{"name":"second","arguments":{"value":2}}'
@@ -361,6 +388,14 @@ class TestParseTextToolCalls:
             '<invoke name="end"><arguments>{}</arguments></invoke>',
             '<function_calls><invoke name="end"><arguments>{}</arguments></invoke></function_calls> trailing',
             '普通文本 <function_calls><invoke name="end"><arguments>{}</arguments></invoke></function_calls>',
+            '{"tool_calls":[]}',
+            '{"tool_calls":{}}',
+            '{"tool_calls":[null]}',
+            '{"tool_calls":[{"name":"end"}]}',
+            '{"tool_calls":[{"name":"end","arguments":[],"extra":true}]}',
+            '{"tool_calls":[{"name":"end","arguments":{}}],"extra":true}',
+            '{"tool_calls":[{"name":"end","arguments":{}}]} '
+            '{"name":"second","arguments":{}}',
         ],
     )
     def test_invalid_tool_protocol_is_rejected(self, raw: str) -> None:

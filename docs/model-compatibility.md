@@ -88,6 +88,19 @@ Undefined 将“是否请求模型思考”和“是否在下一轮回放已有�
 
 JSON 对象可以单独出现，也可以由空白分隔后连续出现；`tool` 与 `name` 两种封包允许混排。`arguments` 可以是对象或编码该对象的 JSON 字符串；`name` 形式要求显式提供 `arguments`，避免把普通的名称 JSON 误判为工具调用。
 
+### `tool_calls` JSON 封包
+
+也兼容将一个或多个简写调用放入顶层 `tool_calls` 数组：
+
+```text
+{"tool_calls":[
+  {"name":"send_message","arguments":{"message":"在做了"}},
+  {"name":"end","arguments":{"memo":"已回应","observations":[]}}
+]}
+```
+
+顶层对象必须且只能包含 `tool_calls`，数组不能为空；每一项必须且只能包含 `name` 与 `arguments`。`arguments` 同样可以是对象或编码该对象的 JSON 字符串。多个数组项按原顺序恢复到同一个原生 `tool_calls` 列表，并沿用普通工具的并行执行规则；该封包不能与其他连续 JSON 对象混排。
+
 ### `tool` 标签
 
 ```text

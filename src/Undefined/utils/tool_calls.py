@@ -21,6 +21,7 @@ _JSON_DUMPS_KWARGS: dict[str, Any] = {
     "default": str,
 }
 
+_JSON_TOOL_CALLS_MARKER_RE = re.compile(r'"tool_calls"\s*:', re.DOTALL)
 _JSON_TOOL_MARKER_RE = re.compile(r'\{\s*"tool"\s*:', re.DOTALL)
 _JSON_NAME_MARKER_RE = re.compile(r'\{\s*"name"\s*:', re.DOTALL)
 _JSON_ARGUMENTS_MARKER_RE = re.compile(r'"arguments"\s*:', re.DOTALL)
@@ -37,6 +38,7 @@ _FUNCTION_CALLS_MARKER_RE = re.compile(
 )
 _INVOKE_PREFIX_RE = re.compile(r"^<invoke(?:\s|/?>)", re.IGNORECASE)
 _TOOL_ATTRIBUTE_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_.:-]*")
+_TOOL_CALLS_ENVELOPE_KEYS = frozenset({"tool_calls"})
 _TOOL_ENVELOPE_KEYS = frozenset({"tool", "arguments"})
 _NAMED_TOOL_ENVELOPE_KEYS = frozenset({"name", "arguments"})
 _TOOL_TAG_ATTRIBUTE_KEYS = frozenset({"name", "params", "parameters", "arguments"})
@@ -106,9 +108,44 @@ def _is_json_tool_envelope(value: Any) -> bool:
     )
 
 
+def _is_json_tool_calls_envelope(value: Any) -> bool:
+    return isinstance(value, dict) and "tool_calls" in value
+
+
+def _tool_calls_from_json_envelope(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, dict):
+        raise TextToolCallParseError("tool_calls JSON 封包必须是对象")
+    unexpected_keys = set(value) - _TOOL_CALLS_ENVELOPE_KEYS
+    if unexpected_keys:
+        raise TextToolCallParseError("tool_calls JSON 封包含有不支持的字段")
+
+    raw_tool_calls = value.get("tool_calls")
+    if not isinstance(raw_tool_calls, list):
+        raise TextToolCallParseError("tool_calls 字段必须是数组")
+    if not raw_tool_calls:
+        raise TextToolCallParseError("tool_calls 数组不能为空")
+
+    tool_calls: list[dict[str, Any]] = []
+    for raw_tool_call in raw_tool_calls:
+        if not isinstance(raw_tool_call, dict):
+            raise TextToolCallParseError("tool_calls 数组包含非对象调用")
+        if set(raw_tool_call) != _NAMED_TOOL_ENVELOPE_KEYS:
+            raise TextToolCallParseError(
+                "tool_calls 数组项必须且只能包含 name 与 arguments"
+            )
+        tool_calls.append(
+            _build_text_tool_call(
+                raw_tool_call.get("name"),
+                raw_tool_call.get("arguments"),
+            )
+        )
+    return tool_calls
+
+
 def _has_json_tool_marker(text: str) -> bool:
     return bool(
-        _JSON_TOOL_MARKER_RE.search(text)
+        _JSON_TOOL_CALLS_MARKER_RE.search(text)
+        or _JSON_TOOL_MARKER_RE.search(text)
         or (
             _JSON_NAME_MARKER_RE.search(text) and _JSON_ARGUMENTS_MARKER_RE.search(text)
         )
@@ -127,7 +164,10 @@ def _parse_json_text_tool_calls(text: str) -> list[dict[str, Any]]:
         try:
             value, position = decoder.raw_decode(text, position)
         except json.JSONDecodeError as exc:
-            has_tool_envelope = any(_is_json_tool_envelope(item) for item in values)
+            has_tool_envelope = any(
+                _is_json_tool_envelope(item) or _is_json_tool_calls_envelope(item)
+                for item in values
+            )
             if has_tool_envelope or _has_json_tool_marker(text):
                 raise TextToolCallParseError(
                     "JSON 工具封包后存在无法解析的内容"
@@ -135,6 +175,11 @@ def _parse_json_text_tool_calls(text: str) -> list[dict[str, Any]]:
             return []
         values.append(value)
 
+    wrapped_values = [value for value in values if _is_json_tool_calls_envelope(value)]
+    if wrapped_values:
+        if len(values) != 1:
+            raise TextToolCallParseError("tool_calls JSON 封包必须单独出现")
+        return _tool_calls_from_json_envelope(wrapped_values[0])
     if not any(_is_json_tool_envelope(value) for value in values):
         return []
     return [_tool_call_from_json_envelope(value) for value in values]

@@ -248,7 +248,21 @@ async def test_xml_text_tool_envelope_uses_name_mapping_and_native_message_repla
 
 
 @pytest.mark.asyncio
-async def test_named_json_text_tools_execute_non_end_calls_in_parallel() -> None:
+@pytest.mark.parametrize(
+    "parallel_content",
+    [
+        """{"name":"first_tool","arguments":{"value":1}}
+{"name":"second_tool","arguments":{"value":2}}""",
+        '{"tool_calls":['
+        '{"name":"first_tool","arguments":{"value":1}},'
+        '{"name":"second_tool","arguments":{"value":2}}'
+        "]}",
+    ],
+    ids=["consecutive_json", "tool_calls_json_envelope"],
+)
+async def test_named_json_text_tools_execute_non_end_calls_in_parallel(
+    parallel_content: str,
+) -> None:
     started: set[str] = set()
     all_started = asyncio.Event()
 
@@ -266,8 +280,6 @@ async def test_named_json_text_tools_execute_non_end_calls_in_parallel() -> None
             return "对话已结束"
         raise AssertionError(f"unexpected tool: {name}")
 
-    parallel_content = """{"name":"first_tool","arguments":{"value":1}}
-{"name":"second_tool","arguments":{"value":2}}"""
     end_call = {
         "id": "call_end",
         "type": "function",
