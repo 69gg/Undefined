@@ -194,8 +194,8 @@ model_name = "gpt-4o-mini"
 | `process_private_message` | `true` | 是否处理私聊回复 | 关闭后私聊只记录历史，不回复 |
 | `process_poke_message` | `true` | 是否响应拍一拍 | 关闭后忽略 poke |
 | `context_recent_messages_limit` | `20` | 注入到提示词的最近历史条数 | `<0` 视为 `0`（关闭注入）；无固定上限，受 `max_records` 与存储约束 |
-| `ai_request_max_retries` | `2` | 单次 LLM 请求失败重试次数 | `<0` 自动回退到 `0`；支持热更新 |
-| `missing_tool_call_retries` | `3` | 模型返回纯文本且无法恢复为本轮可用工具调用时的纠正重试次数（保留 assistant 纯文本 + 通用纠正提示，不写死具体 tool）；每次进入下一轮纠正重试前，warning 日志会以 `raw_content=repr(...)` 完整记录该轮原始响应；格式与失败回退规则见 [模型 API 与兼容层](model-compatibility.md#文本-tool-call-后备解析) | `<0` 自动回退到 `0`；支持热更新 |
+| `ai_request_max_retries` | `2` | 单次 LLM 请求失败重试次数；无工具调用且实际 `assistant.content` 为空白时也走此路径，原样重试同一轮请求 | `<0` 自动回退到 `0`；支持热更新 |
+| `missing_tool_call_retries` | `3` | 模型返回非空纯文本且无法恢复为本轮可用工具调用时的纠正重试次数（保留 assistant 纯文本 + 通用纠正提示，不写死具体 tool）；空白响应不计入此项；每次进入下一轮纠正重试前，warning 日志会以 `raw_content=repr(...)` 完整记录该轮原始响应；格式与失败回退规则见 [模型 API 与兼容层](model-compatibility.md#文本-tool-call-后备解析) | `<0` 自动回退到 `0`；支持热更新 |
 
 ---
 

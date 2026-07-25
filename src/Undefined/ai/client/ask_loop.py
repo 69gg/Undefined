@@ -551,6 +551,12 @@ class ClientAskLoopMixin(ClientQueueMixin):
                                 len(tool_calls),
                                 ", ".join(recovered_internal_names),
                             )
+                # reasoning_content 仅供推理回放，不能作为可发送内容或可执行动作。
+                # 实际 content 为空白且没有工具调用时视为请求失败，由下方统一
+                # pre-tool failure 分支回滚状态并重试同一轮请求，避免向上下文追加
+                # 空 assistant 消息和“未调用工具”纠正提示。
+                if not content.strip() and not tool_calls:
+                    raise RuntimeError("模型返回空白响应且未调用工具")
                 if logger.isEnabledFor(logging.DEBUG):
                     logger.debug(
                         "[AI响应] content_len=%s tool_calls=%s",

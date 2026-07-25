@@ -150,6 +150,131 @@ async def test_ai_ask_retries_pre_tool_local_failure() -> None:
     assert cast(AsyncMock, client.submit_queued_llm_call).await_count == 2
 
 
+@pytest.mark.parametrize("blank_content", [None, "", "\n\n", " \t\r\n"])
+@pytest.mark.asyncio
+async def test_ai_ask_retries_blank_response_as_request_failure(
+    blank_content: str | None,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.WARNING, logger="Undefined.ai.client.ask_loop")
+    client: Any = object.__new__(AIClient)
+    client.runtime_config = cast(
+        Any,
+        SimpleNamespace(
+            log_thinking=False,
+            ai_request_max_retries=1,
+            missing_tool_call_retries=3,
+        ),
+    )
+    initial_messages = [{"role": "user", "content": "hello"}]
+    client._prompt_builder = cast(
+        Any,
+        SimpleNamespace(
+            build_messages=AsyncMock(return_value=list(initial_messages)),
+            end_summaries=[],
+        ),
+    )
+
+    async def _execute_tool(
+        name: str, args: dict[str, Any], ctx: dict[str, Any]
+    ) -> str:
+        _ = args
+        if name == "end":
+            ctx["conversation_ended"] = True
+            return "对话已结束"
+        return "ok"
+
+    client.tool_manager = cast(
+        Any,
+        SimpleNamespace(
+            get_openai_tools=lambda: [],
+            execute_tool=_execute_tool,
+        ),
+    )
+    client._filter_tools_for_runtime_config = lambda tools, **_kwargs: tools
+    client._get_runtime_config = cast(Any, lambda: client.runtime_config)
+    client.model_selector = cast(Any, SimpleNamespace(wait_ready=AsyncMock()))
+    client.chat_config = ChatModelConfig(
+        api_url="https://api.openai.com/v1",
+        api_key="sk-test",
+        model_name="chat-model",
+        max_tokens=1024,
+    )
+    client._find_chat_config_by_name = lambda _name: client.chat_config
+    llm_responses: list[dict[str, Any]] = [
+        {
+            "choices": [
+                {
+                    "message": {
+                        "content": blank_content,
+                        "reasoning_content": "下一步应调用工具",
+                        "tool_calls": [],
+                    }
+                }
+            ]
+        },
+        {
+            "choices": [
+                {
+                    "message": {
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": "call_end",
+                                "function": {
+                                    "name": "end",
+                                    "arguments": "{}",
+                                },
+                            }
+                        ],
+                    }
+                }
+            ]
+        },
+    ]
+    submitted_messages: list[list[dict[str, Any]]] = []
+
+    async def _submit_queued_llm_call(
+        *, messages: list[dict[str, Any]], **_kwargs: Any
+    ) -> dict[str, Any]:
+        submitted_messages.append([dict(message) for message in messages])
+        return llm_responses[len(submitted_messages) - 1]
+
+    client.submit_queued_llm_call = AsyncMock(side_effect=_submit_queued_llm_call)
+    client._search_wrapper = None
+    client._end_summary_storage = cast(Any, None)
+    client._send_private_message_callback = None
+    client._send_image_callback = None
+    client.memory_storage = None
+    client._knowledge_manager = None
+    client._cognitive_service = None
+    client._meme_service = None
+    client._crawl4ai_capabilities = SimpleNamespace(
+        available=False,
+        error=None,
+        proxy_config_available=False,
+    )
+
+    result = await AIClient.ask(client, "hello")
+
+    assert result == ""
+    assert submitted_messages == [initial_messages, initial_messages]
+    assert all(
+        message.get("content") != MISSING_TOOL_CALL_RETRY_HINT
+        for request_messages in submitted_messages
+        for message in request_messages
+    )
+    warning_messages = [record.getMessage() for record in caplog.records]
+    assert any(
+        message.startswith("[chat.pre_tool_retry]")
+        and "模型返回空白响应且未调用工具" in message
+        for message in warning_messages
+    )
+    assert not any(
+        message.startswith("[AI回复未调用工具]") for message in warning_messages
+    )
+
+
 @pytest.mark.asyncio
 async def test_ai_ask_webchat_events_include_stage_and_tool_lifecycle() -> None:
     client: Any = object.__new__(AIClient)
