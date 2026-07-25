@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 # 解析 [models.chat]：主对话模型 API、thinking/reasoning、队列间隔与模型池
 def _parse_chat_model_config(data: dict[str, Any]) -> ChatModelConfig:
-    # 该模型独立的发车间隔（秒），0=立即发车
+    # 该模型独立的发车间隔（秒），非正数为事件驱动立即发车
     queue_interval_seconds = _normalize_queue_interval(
         _coerce_float(
             _get_value(

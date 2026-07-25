@@ -62,8 +62,7 @@ def _parse_embedding_model_config(data: dict[str, Any]) -> EmbeddingModelConfig:
                     data, ("models", "embedding", "queue_interval_seconds"), None
                 ),
                 0.0,
-            ),
-            0.0,
+            )
         ),
         dimensions=_coerce_int(
             _get_value(data, ("models", "embedding", "dimensions"), None), 0
@@ -88,8 +87,7 @@ def _parse_rerank_model_config(data: dict[str, Any]) -> RerankModelConfig:
         _coerce_float(
             _get_value(data, ("models", "rerank", "queue_interval_seconds"), None),
             0.0,
-        ),
-        0.0,
+        )
     )
     return RerankModelConfig(
         api_url=_coerce_str(

@@ -239,7 +239,7 @@ model_name = "gpt-4o-mini"
 | `model_name` | 模型名 |
 | `max_tokens` | 最大输出 token；OpenAI 模式下设为 `0` 或负数时不发送上限字段，Anthropic Messages 要求为正整数 |
 | `context_window_tokens` | 模型上下文窗口上限（token），用于 `/summary` 分块与 Prompt 预算；解析默认 `8192`，须按上游模型能力配置 |
-| `queue_interval_seconds` | 该模型请求队列发车间隔（秒，`0` 表示立即发车） |
+| `queue_interval_seconds` | 该模型请求队列发车间隔（秒）；`<=0` 为事件驱动，请求到达立即发车且空闲时不扫描；`>0` 按间隔扫描 |
 | `use_proxy` | 是否让该模型请求使用 `[proxy]` 中配置的代理地址；默认 `false`，各模型种类独立配置 |
 | `api_mode` | `openai.chat_completions`、`openai.responses` 或 `anthropic.messages`；旧 `chat_completions` / `responses` 仍兼容但会告警 |
 | `reasoning_enabled` | 是否发送当前 API mode 对应的 effort 参数 |
@@ -321,7 +321,7 @@ Prompt caching 补充：
 
 默认：
 - `max_tokens=8192`
-- `queue_interval_seconds=1.0`（`0` 表示立即发车，`<0` 回退 `1.0`）
+- `queue_interval_seconds=1.0`（`<=0` 事件驱动立即发车，`>0` 按间隔扫描）
 - `api_mode="openai.chat_completions"`
 - `reasoning_enabled=false`
 - `reasoning_effort="medium"`
@@ -340,7 +340,7 @@ Prompt caching 补充：
 ### 4.4.3 `[models.vision]` 视觉模型
 
 默认：
-- `queue_interval_seconds=1.0`（`0` 表示立即发车，`<0` 回退 `1.0`）
+- `queue_interval_seconds=1.0`（`<=0` 事件驱动立即发车，`>0` 按间隔扫描）
 - `api_mode="openai.chat_completions"`
 - `reasoning_enabled=false`
 - `reasoning_effort="medium"`
@@ -356,7 +356,7 @@ Prompt caching 补充：
 
 字段：
 - 额外开关：`enabled=true`
-- 默认：`max_tokens=100`、`queue_interval_seconds=1.0`（`0` 表示立即发车，`<0` 回退 `1.0`）、`api_mode="openai.chat_completions"`、`reasoning_enabled=false`、`reasoning_effort="medium"`、`thinking_param_enabled=true`、`thinking_budget_tokens=0`、`thinking_tool_call_compat=true`、`reasoning_content_replay=true`、`responses_tool_choice_compat=false`、`responses_force_stateless_replay=false`、`use_proxy=false`
+- 默认：`max_tokens=100`、`queue_interval_seconds=1.0`（`<=0` 事件驱动立即发车，`>0` 按间隔扫描）、`api_mode="openai.chat_completions"`、`reasoning_enabled=false`、`reasoning_effort="medium"`、`thinking_param_enabled=true`、`thinking_budget_tokens=0`、`thinking_tool_call_compat=true`、`reasoning_content_replay=true`、`responses_tool_choice_compat=false`、`responses_force_stateless_replay=false`、`use_proxy=false`
 
 关键回退逻辑：
 - 若 `api_url/api_key/model_name` 任一缺失，会自动回退为 chat 模型（并告警）。
@@ -369,7 +369,7 @@ Prompt caching 补充：
 
 默认：
 - `max_tokens=160`
-- `queue_interval_seconds=1.0`（`0` 表示立即发车，`<0` 回退 `1.0`）
+- `queue_interval_seconds=1.0`（`<=0` 事件驱动立即发车，`>0` 按间隔扫描）
 - `api_mode="openai.chat_completions"`
 - `reasoning_enabled=false`
 - `reasoning_effort="medium"`
@@ -390,7 +390,7 @@ Prompt caching 补充：
 
 默认：
 - `max_tokens=4096`
-- `queue_interval_seconds=1.0`（`0` 表示立即发车，`<0` 回退 `1.0`）
+- `queue_interval_seconds=1.0`（`<=0` 事件驱动立即发车，`>0` 按间隔扫描）
 - `api_mode="openai.chat_completions"`
 - `reasoning_enabled=false`
 - `reasoning_effort="medium"`
@@ -408,7 +408,7 @@ Prompt caching 补充：
 - 若部分字段缺失：逐项继承 agent 配置，包括 `api_mode`、`reasoning_*`、`thinking_*`、`responses_tool_choice_compat`、`responses_force_stateless_replay` 与 `request_params`。
 - `thinking_param_enabled` 默认继承 agent，也可在 historian 节或 `HISTORIAN_MODEL_THINKING_PARAM_ENABLED` 中独立覆盖。
 - `use_proxy` 不继承 agent；`[models.historian]` 存在时未显式配置仍默认 `false`。
-- `queue_interval_seconds=0` 时立即发车，`<0` 时回退到 agent 的间隔。
+- `queue_interval_seconds<=0` 时事件驱动立即发车，空闲时不扫描；`>0` 时按间隔扫描。
 
 #### `[models.summary]` 消息总结模型
 
@@ -426,7 +426,7 @@ Prompt caching 补充：
 
 默认：
 - `max_tokens=8192`
-- `queue_interval_seconds=1.0`（`0` 表示立即发车，`<0` 回退 `1.0`）
+- `queue_interval_seconds=1.0`（`<=0` 事件驱动立即发车，`>0` 按间隔扫描）
 - `api_mode="openai.chat_completions"`
 - `reasoning_enabled=false`
 - `reasoning_effort="medium"`
@@ -468,7 +468,7 @@ Prompt caching 补充：
 - `prompt_cache_enabled` / `stream_enabled` / `request_params`
 - 以上可选字段缺省继承主模型
 - `use_proxy` 是每个池条目独立开关，默认 `false`，不继承主模型，也没有池级总开关
-- `queue_interval_seconds=0` 表示立即发车；`<0` 时回退到主模型间隔。
+- `queue_interval_seconds<=0` 表示事件驱动立即发车；`>0` 时按间隔扫描。
 
 `request_params` 继承规则：
 - `[[models.chat.pool.models]]` 与 `[[models.agent.pool.models]]` 的 `request_params` 会与主模型按顶层键浅合并。
@@ -487,7 +487,7 @@ Prompt caching 补充：
 | `api_key` | `""` | API Key |
 | `model_name` | `""` | 模型名 |
 | `use_proxy` | `false` | 是否使用 `[proxy]` 中的代理地址 |
-| `queue_interval_seconds` | `0.0` | 发车间隔（`0` 立即发车，`<0` 回退 `0.0`） |
+| `queue_interval_seconds` | `0.0` | 发车间隔；`<=0` 表示请求到达立即发车，`>0` 表示两次发车间隔 |
 | `dimensions` | `0` | 向量维度；`0`/空视为 `None`（模型默认） |
 | `query_instruction` | `""` | 查询前缀 |
 | `document_instruction` | `""` | 文档前缀 |
@@ -501,7 +501,7 @@ Prompt caching 补充：
 | `api_key` | `""` | API Key |
 | `model_name` | `""` | 模型名 |
 | `use_proxy` | `false` | 是否使用 `[proxy]` 中的代理地址 |
-| `queue_interval_seconds` | `0.0` | `0` 立即发车，`<0` 回退 `0.0` |
+| `queue_interval_seconds` | `0.0` | `<=0` 请求到达立即发车，`>0` 表示两次发车间隔 |
 | `query_instruction` | `""` | 查询前缀 |
 | `request_params` | `{}` | 额外请求体参数；保留字段如 `model`/`query`/`documents`/`top_n` 会忽略 |
 
@@ -676,7 +676,7 @@ Prompt caching 补充：
 | `hot_reload_interval` | `2.0` | 扫描间隔（秒） |
 | `hot_reload_debounce` | `0.5` | 去抖时间（秒） |
 | `intro_autogen_enabled` | `true` | 是否自动生成 agent intro |
-| `intro_autogen_queue_interval` | `1.0` | intro 生成队列发车间隔（`0` 立即发车，`<0` 回退 `1.0`） |
+| `intro_autogen_queue_interval` | `1.0` | intro 生成队列发车间隔（`<=0` 请求到达立即发车） |
 | `intro_autogen_max_tokens` | `8192` | intro 生成上限 |
 | `intro_hash_path` | `.cache/agent_intro_hashes.json` | intro hash 缓存 |
 | `prefetch_tools` | `["get_current_time"]` | 预先执行并注入 system 的工具列表 |

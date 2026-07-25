@@ -52,9 +52,7 @@ def _parse_summary_model_config(
     queue_interval_seconds = _coerce_float(
         s.get("queue_interval_seconds"), fallback.queue_interval_seconds
     )
-    queue_interval_seconds = _normalize_queue_interval(
-        queue_interval_seconds, fallback.queue_interval_seconds
-    )
+    queue_interval_seconds = _normalize_queue_interval(queue_interval_seconds)
     thinking_include_budget, thinking_tool_call_compat = _resolve_thinking_compat_flags(
         data={"models": {"summary": s}},
         model_name="summary",

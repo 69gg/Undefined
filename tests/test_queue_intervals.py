@@ -110,7 +110,7 @@ queue_interval_seconds = 0
     assert queue_manager.get_interval("naga-model") == 0.0
 
 
-def test_negative_queue_intervals_still_fall_back_to_defaults(tmp_path: Path) -> None:
+def test_negative_queue_intervals_enable_immediate_dispatch(tmp_path: Path) -> None:
     cfg = _load_config(
         tmp_path / "config.toml",
         """
@@ -135,6 +135,20 @@ queue_interval_seconds = -1
 api_url = "https://api.openai.com/v1"
 api_key = "sk-vision"
 model_name = "vision-model"
+queue_interval_seconds = -1
+
+[models.security]
+enabled = true
+api_url = "https://api.openai.com/v1"
+api_key = "sk-security"
+model_name = "security-model"
+queue_interval_seconds = -1
+
+[models.naga]
+enabled = true
+api_url = "https://api.openai.com/v1"
+api_key = "sk-naga"
+model_name = "naga-model"
 queue_interval_seconds = -1
 
 [models.agent]
@@ -171,15 +185,17 @@ queue_interval_seconds = -1
 """,
     )
 
-    assert cfg.agent_intro_autogen_queue_interval == 1.0
+    assert cfg.agent_intro_autogen_queue_interval == 0.0
     assert cfg.chat_model.queue_interval_seconds == 0.0
     assert cfg.chat_model.pool is not None
     assert cfg.chat_model.pool.models[0].queue_interval_seconds == 0.0
-    assert cfg.vision_model.queue_interval_seconds == 1.0
+    assert cfg.vision_model.queue_interval_seconds == 0.0
+    assert cfg.security_model.queue_interval_seconds == 0.0
+    assert cfg.naga_model.queue_interval_seconds == 0.0
     assert cfg.agent_model.queue_interval_seconds == 0.5
-    assert cfg.historian_model.queue_interval_seconds == 0.5
-    assert cfg.summary_model.queue_interval_seconds == 0.5
-    assert cfg.grok_model.queue_interval_seconds == 1.0
+    assert cfg.historian_model.queue_interval_seconds == 0.0
+    assert cfg.summary_model.queue_interval_seconds == 0.0
+    assert cfg.grok_model.queue_interval_seconds == 0.0
     assert cfg.embedding_model.queue_interval_seconds == 0.0
     assert cfg.rerank_model.queue_interval_seconds == 0.0
 
@@ -209,6 +225,8 @@ model_name = "text-rerank-001"
 def test_queue_manager_allows_zero_default_interval() -> None:
     zero_default = QueueManager(ai_request_interval=0.0)
     assert zero_default.get_interval("unknown-model") == 0.0
+    negative_default = QueueManager(ai_request_interval=-1.0)
+    assert negative_default.get_interval("unknown-model") == 0.0
 
     queue_manager = QueueManager(
         ai_request_interval=0.25,
@@ -217,5 +235,5 @@ def test_queue_manager_allows_zero_default_interval() -> None:
             "immediate-model": 0.0,
         },
     )
-    assert queue_manager.get_interval("fallback-model") == 0.25
+    assert queue_manager.get_interval("fallback-model") == 0.0
     assert queue_manager.get_interval("immediate-model") == 0.0

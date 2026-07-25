@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 
@@ -13,6 +13,18 @@ from Undefined.services.queue_manager import (
     QUEUE_LANE_PRIVATE,
     QueueManager,
 )
+
+
+class _CountingEvent(asyncio.Event):
+    def __init__(self) -> None:
+        super().__init__()
+        self.wait_calls = 0
+        self.wait_started = asyncio.Event()
+
+    async def wait(self) -> Literal[True]:
+        self.wait_calls += 1
+        self.wait_started.set()
+        return await super().wait()
 
 
 def _load_config(path: Path, text: str) -> Config:
@@ -55,6 +67,58 @@ async def test_group_superadmin_is_prioritized_after_superadmin() -> None:
         await queue_manager.stop()
 
     assert order[:3] == ["superadmin", "group-superadmin", "private"]
+
+
+@pytest.mark.asyncio
+async def test_non_positive_interval_waits_for_work_without_idle_polling() -> None:
+    processed = asyncio.Event()
+    queue_manager = QueueManager(ai_request_interval=-1.0)
+
+    async def _handler(_: dict[str, Any]) -> None:
+        processed.set()
+
+    queue_manager.start(_handler)
+    queue_manager._get_or_create_queue("chat-model")
+    work_event = _CountingEvent()
+    queue_manager._model_work_events["chat-model"] = work_event
+
+    try:
+        await asyncio.wait_for(work_event.wait_started.wait(), timeout=1.0)
+        await asyncio.sleep(0.02)
+        assert work_event.wait_calls == 1
+
+        await queue_manager.add_private_request(
+            {"type": "private_reply", "request_id": "immediate"},
+            model_name="chat-model",
+        )
+        await asyncio.wait_for(processed.wait(), timeout=1.0)
+    finally:
+        await queue_manager.stop()
+
+
+@pytest.mark.asyncio
+async def test_positive_interval_keeps_periodic_queue_scanning() -> None:
+    processed = asyncio.Event()
+    queue_manager = QueueManager(ai_request_interval=0.1)
+
+    async def _handler(_: dict[str, Any]) -> None:
+        processed.set()
+
+    queue_manager.start(_handler)
+    queue_manager._get_or_create_queue("chat-model")
+
+    try:
+        # 让处理器先完成一次空队列扫描并进入下一扫描周期。
+        await asyncio.sleep(0)
+        await queue_manager.add_private_request(
+            {"type": "private_reply", "request_id": "periodic"},
+            model_name="chat-model",
+        )
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(processed.wait(), timeout=0.02)
+        await asyncio.wait_for(processed.wait(), timeout=0.2)
+    finally:
+        await queue_manager.stop()
 
 
 @pytest.mark.asyncio

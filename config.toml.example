@@ -96,8 +96,8 @@ max_tokens = 8192
 # zh: 模型上下文窗口上限（token），用于 /summary 分块与 Prompt 预算；须与上游模型能力一致。
 # en: Model context window cap (tokens) for /summary chunking and prompt budgeting; must match upstream capability.
 context_window_tokens = 32768
-# zh: 队列发车间隔（秒，0 表示立即发车）。
-# en: Queue interval (seconds; 0 dispatches immediately).
+# zh: 队列发车间隔（秒；<=0 事件驱动立即发车且空闲不扫描，>0 按间隔扫描）。
+# en: Queue interval (seconds; <=0 dispatches on arrival without idle polling; >0 polls periodically).
 queue_interval_seconds = 1.0
 # zh: API 模式：openai.chat_completions、openai.responses 或 anthropic.messages；旧无前缀值仍兼容但已弃用。
 # en: API mode: openai.chat_completions, openai.responses, or anthropic.messages. Legacy unprefixed values remain compatible but are deprecated.
@@ -181,8 +181,8 @@ max_tokens = 8192
 # zh: 模型上下文窗口上限（token），用于 /summary 分块与 Prompt 预算；须与上游模型能力一致。
 # en: Model context window cap (tokens) for /summary chunking and prompt budgeting; must match upstream capability.
 context_window_tokens = 32768
-# zh: 队列发车间隔（秒，0 表示立即发车）。
-# en: Queue interval (seconds; 0 dispatches immediately).
+# zh: 队列发车间隔（秒；<=0 事件驱动立即发车且空闲不扫描，>0 按间隔扫描）。
+# en: Queue interval (seconds; <=0 dispatches on arrival without idle polling; >0 polls periodically).
 queue_interval_seconds = 1.0
 # zh: API 模式：openai.chat_completions、openai.responses 或 anthropic.messages；旧无前缀值仍兼容但已弃用。
 # en: API mode: openai.chat_completions, openai.responses, or anthropic.messages. Legacy unprefixed values remain compatible but are deprecated.
@@ -256,8 +256,8 @@ max_tokens = 100
 # zh: 模型上下文窗口上限（token），用于 /summary 分块与 Prompt 预算；须与上游模型能力一致。
 # en: Model context window cap (tokens) for /summary chunking and prompt budgeting; must match upstream capability.
 context_window_tokens = 8192
-# zh: 队列发车间隔（秒，0 表示立即发车）。
-# en: Queue interval (seconds; 0 dispatches immediately).
+# zh: 队列发车间隔（秒；<=0 事件驱动立即发车且空闲不扫描，>0 按间隔扫描）。
+# en: Queue interval (seconds; <=0 dispatches on arrival without idle polling; >0 polls periodically).
 queue_interval_seconds = 1.0
 # zh: API 模式：openai.chat_completions、openai.responses 或 anthropic.messages；旧无前缀值仍兼容但已弃用。
 # en: API mode: openai.chat_completions, openai.responses, or anthropic.messages. Legacy unprefixed values remain compatible but are deprecated.
@@ -330,8 +330,8 @@ max_tokens = 160
 # zh: 模型上下文窗口上限（token），用于 /summary 分块与 Prompt 预算；须与上游模型能力一致。
 # en: Model context window cap (tokens) for /summary chunking and prompt budgeting; must match upstream capability.
 context_window_tokens = 8192
-# zh: 队列发车间隔（秒，0 表示立即发车）。
-# en: Queue interval (seconds; 0 dispatches immediately).
+# zh: 队列发车间隔（秒；<=0 事件驱动立即发车且空闲不扫描，>0 按间隔扫描）。
+# en: Queue interval (seconds; <=0 dispatches on arrival without idle polling; >0 polls periodically).
 queue_interval_seconds = 1.0
 # zh: API 模式：openai.chat_completions、openai.responses 或 anthropic.messages；旧无前缀值仍兼容但已弃用。
 # en: API mode: openai.chat_completions, openai.responses, or anthropic.messages. Legacy unprefixed values remain compatible but are deprecated.
@@ -399,8 +399,8 @@ max_tokens = 4096
 # zh: 模型上下文窗口上限（token），用于 /summary 分块与 Prompt 预算；须与上游模型能力一致。
 # en: Model context window cap (tokens) for /summary chunking and prompt budgeting; must match upstream capability.
 context_window_tokens = 32768
-# zh: 队列发车间隔（秒，0 表示立即发车）。
-# en: Queue interval (seconds; 0 dispatches immediately).
+# zh: 队列发车间隔（秒；<=0 事件驱动立即发车且空闲不扫描，>0 按间隔扫描）。
+# en: Queue interval (seconds; <=0 dispatches on arrival without idle polling; >0 polls periodically).
 queue_interval_seconds = 1.0
 # zh: API 模式：openai.chat_completions、openai.responses 或 anthropic.messages；旧无前缀值仍兼容但已弃用。
 # en: API mode: openai.chat_completions, openai.responses, or anthropic.messages. Legacy unprefixed values remain compatible but are deprecated.
@@ -484,8 +484,8 @@ max_tokens = 4096
 # zh: 模型上下文窗口上限（token），用于 /summary 分块与 Prompt 预算；须与上游模型能力一致。
 # en: Model context window cap (tokens) for /summary chunking and prompt budgeting; must match upstream capability.
 context_window_tokens = 32768
-# zh: 队列发车间隔（秒，0 表示立即发车）。
-# en: Queue interval (seconds; 0 dispatches immediately).
+# zh: 队列发车间隔（秒；<=0 事件驱动立即发车且空闲不扫描，>0 按间隔扫描）。
+# en: Queue interval (seconds; <=0 dispatches on arrival without idle polling; >0 polls periodically).
 queue_interval_seconds = 1.0
 # zh: API 模式：openai.chat_completions、openai.responses 或 anthropic.messages；旧无前缀值仍兼容但已弃用。
 # en: API mode: openai.chat_completions, openai.responses, or anthropic.messages. Legacy unprefixed values remain compatible but are deprecated.
@@ -556,8 +556,8 @@ max_tokens = 4096
 # zh: 模型上下文窗口上限（token），用于 /summary 分块与 Prompt 预算；须与上游模型能力一致。
 # en: Model context window cap (tokens) for /summary chunking and prompt budgeting; must match upstream capability.
 context_window_tokens = 32768
-# zh: 队列发车间隔（秒，0 表示立即发车）。
-# en: Queue interval (seconds; 0 dispatches immediately).
+# zh: 队列发车间隔（秒；<=0 事件驱动立即发车且空闲不扫描，>0 按间隔扫描）。
+# en: Queue interval (seconds; <=0 dispatches on arrival without idle polling; >0 polls periodically).
 queue_interval_seconds = 1.0
 # zh: API 模式：openai.chat_completions、openai.responses 或 anthropic.messages；旧无前缀值仍兼容但已弃用。
 # en: API mode: openai.chat_completions, openai.responses, or anthropic.messages. Legacy unprefixed values remain compatible but are deprecated.
@@ -628,8 +628,8 @@ max_tokens = 8192
 # zh: 模型上下文窗口上限（token），用于 /summary 分块与 Prompt 预算；须与上游模型能力一致。
 # en: Model context window cap (tokens) for /summary chunking and prompt budgeting; must match upstream capability.
 context_window_tokens = 32768
-# zh: 队列发车间隔（秒，0 表示立即发车）。
-# en: Queue interval (seconds; 0 dispatches immediately).
+# zh: 队列发车间隔（秒；<=0 事件驱动立即发车且空闲不扫描，>0 按间隔扫描）。
+# en: Queue interval (seconds; <=0 dispatches on arrival without idle polling; >0 polls periodically).
 queue_interval_seconds = 1.0
 # zh: API 模式：openai.chat_completions、openai.responses 或 anthropic.messages；旧无前缀值仍兼容但已弃用。
 # en: API mode: openai.chat_completions, openai.responses, or anthropic.messages. Legacy unprefixed values remain compatible but are deprecated.
@@ -697,8 +697,8 @@ model_name = ""
 # zh: 模型上下文窗口上限（token，可选）；嵌入/重排场景通常保持默认即可。
 # en: Model context window cap (tokens, optional); embedding/rerank can usually keep the default.
 context_window_tokens = 8192
-# zh: 队列发车间隔（秒，0 表示立即发车）。
-# en: Queue interval (seconds; 0 dispatches immediately).
+# zh: 队列发车间隔（秒；<=0 请求到达立即发车，>0 控制发车间隔）。
+# en: Queue interval (seconds; <=0 dispatches on arrival; >0 spaces dispatches).
 queue_interval_seconds = 0.0
 # zh: 向量维度（可选）。0 或留空表示使用模型默认维度。
 # en: Embedding dimensions (optional). Use 0/empty to use model defaults.
@@ -733,8 +733,8 @@ model_name = ""
 # zh: 模型上下文窗口上限（token，可选）；嵌入/重排场景通常保持默认即可。
 # en: Model context window cap (tokens, optional); embedding/rerank can usually keep the default.
 context_window_tokens = 8192
-# zh: 队列发车间隔（秒，0 表示立即发车）。
-# en: Queue interval (seconds; 0 dispatches immediately).
+# zh: 队列发车间隔（秒；<=0 请求到达立即发车，>0 控制发车间隔）。
+# en: Queue interval (seconds; <=0 dispatches on arrival; >0 spaces dispatches).
 queue_interval_seconds = 0.0
 # zh: 查询端指令前缀（可选，部分 rerank 模型需要，如 "Instruct: ...\\nQuery: "）。
 # en: Query instruction prefix (optional, required by some rerank models, e.g. "Instruct: ...\\nQuery: ").
@@ -1001,8 +1001,8 @@ hot_reload_debounce = 0.5
 # zh: Agent intro 自动生成（推荐开启）。
 # en: Agent intro auto-generation (recommended).
 intro_autogen_enabled = true
-# zh: 队列发车间隔（秒，0 表示立即发车）。
-# en: Queue interval (seconds; 0 dispatches immediately).
+# zh: 队列发车间隔（秒；<=0 请求到达立即发车）。
+# en: Queue interval (seconds; <=0 dispatches on arrival).
 intro_autogen_queue_interval = 1.0
 # zh: 单次生成最大 token；OpenAI 模式下非正数会省略上限，Anthropic Messages 要求为正整数。
 # en: Max tokens per generation; non-positive values omit the limit in OpenAI modes, while Anthropic Messages requires a positive integer.

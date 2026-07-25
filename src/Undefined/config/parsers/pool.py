@@ -66,8 +66,7 @@ def _parse_model_pool(
                     _coerce_float(
                         item.get("queue_interval_seconds"),
                         primary_config.queue_interval_seconds,
-                    ),
-                    primary_config.queue_interval_seconds,
+                    )
                 ),
                 api_mode=normalize_api_mode(
                     item.get("api_mode"),

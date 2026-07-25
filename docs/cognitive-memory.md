@@ -348,7 +348,7 @@ data/cognitive/
 | `api_url` | OpenAI 兼容 base URL |
 | `api_key` | API 密钥 |
 | `model_name` | 模型名称（推荐 `text-embedding-3-small`） |
-| `queue_interval_seconds` | 发车间隔（默认 `0.0`，立即发车；`<0` 回退 `0.0`） |
+| `queue_interval_seconds` | 发车间隔（默认 `0.0`；`<=0` 请求到达立即发车） |
 | `dimensions` | 向量维度（可选，模型默认值） |
 
 ### 热更新说明

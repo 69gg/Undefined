@@ -56,11 +56,17 @@ def _coerce_float(value: Any, default: float) -> float:
         return default
 
 
-def _normalize_queue_interval(value: float, default: float = 1.0) -> float:
+def _normalize_queue_interval(value: float) -> float:
     """规范化队列发车间隔。
 
-    `0` 表示立即发车，负数回退到默认值。
+    非正数表示事件驱动的立即发车模式。
     """
+
+    return max(0.0, value)
+
+
+def _normalize_poll_interval(value: float, default: float = 1.0) -> float:
+    """规范化非队列轮询间隔，负数回退到默认值。"""
 
     return default if value < 0 else value
 
