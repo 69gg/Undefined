@@ -418,6 +418,12 @@ class QueueManager:
             return lane_queue
         return model_queue.background_queue
 
+    def _notify_model_work(self, model_name: str) -> None:
+        """通知模型处理器和 drain 等待者队列状态已改变。"""
+
+        self._model_work_events[model_name].set()
+        self._work_changed.set()
+
     async def _enqueue_lane_request(
         self,
         request: dict[str, Any],
@@ -436,8 +442,7 @@ class QueueManager:
             await lane_queue.put_second(request)
         else:
             await lane_queue.put(request)
-        self._model_work_events[model_name].set()
-        self._work_changed.set()
+        self._notify_model_work(model_name)
         logger.info(
             "[队列入队][%s] %s: size=%s %s",
             model_name,
@@ -702,6 +707,7 @@ class QueueManager:
                     )
                     return
                 await self._get_lane_queue(model_queue, queue_lane).put_second(request)
+                self._notify_model_work(model_name)
                 logger.warning(
                     "[queued_llm_retry_requeue] model=%s lane=%s retry=%s/%s position=2 elapsed=%.2fs %s error=%s",
                     model_name,

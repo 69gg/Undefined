@@ -10,6 +10,8 @@ import pytest
 from jsonschema import Draft202012Validator
 
 from Undefined.attachments import scope_from_context
+from Undefined.onebot.client import OneBotDeliveryUncertainError
+from Undefined.skills.toolsets.messages.context_utils import DELIVERY_UNCERTAIN_RESULT
 from Undefined.skills.toolsets.messages.send_voice.handler import execute
 from Undefined.utils import io as async_io
 from Undefined.utils.message_targets import resolve_delivery_address
@@ -104,6 +106,41 @@ async def test_send_voice_accepts_explicit_qq_address() -> None:
     assert call is not None
     assert call.args[0].canonical == "qq:54321"
     assert call.kwargs["history_attachment"] is record
+
+
+@pytest.mark.asyncio
+async def test_send_voice_does_not_invite_retry_for_uncertain_delivery() -> None:
+    record = SimpleNamespace(
+        uid="file_voice",
+        media_type="audio",
+        mime_type="audio/ogg",
+        display_name="reply.ogg",
+        local_path="/cache/reply.ogg",
+    )
+    registry = SimpleNamespace(
+        resolve_async=AsyncMock(return_value=record),
+        ensure_local_file=AsyncMock(return_value=record),
+    )
+    sender = SimpleNamespace(
+        send_address_voice=AsyncMock(
+            side_effect=OneBotDeliveryUncertainError(
+                "send_private_msg",
+                "Timeout while waiting for sendMsg",
+                retcode=1200,
+            )
+        )
+    )
+    context = _context(attachment_registry=registry, sender=sender)
+
+    result = await execute(
+        {"uid": "file_voice", "address": "qq:54321"},
+        context,
+    )
+
+    assert result == DELIVERY_UNCERTAIN_RESULT
+    assert "禁止自动重试" in result
+    assert context["message_sent_this_turn"] is True
+    sender.send_address_voice.assert_awaited_once()
 
 
 @pytest.mark.asyncio
