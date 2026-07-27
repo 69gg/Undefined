@@ -353,6 +353,8 @@ async def stream_data(
                     if len(content) + len(chunk) > max_bytes:
                         raise MusicApiError(f"音频流超过附件上限（{max_bytes} 字节）")
                     content.extend(chunk)
+                if not content:
+                    raise MusicApiError("lxmusic2api 返回了空音频流")
     except MusicToolError:
         raise
     except httpx.TimeoutException as exc:

@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 from aiohttp import web
 from aiohttp.web_response import Response
 
+from Undefined.attachments import AttachmentRecord, attachment_ref_to_tag
 from Undefined.config import load_webui_settings
 from Undefined.utils.cors import is_allowed_cors_origin, normalize_origin
 
@@ -101,10 +102,16 @@ class _WebUIVirtualSender:
         name: str | None = None,
         auto_history: bool = True,
         *,
-        history_attachment: Any | None = None,
+        history_attachment: AttachmentRecord | None = None,
     ) -> None:
         """将文件拷贝到 WebUI 缓存并发送文件卡片消息。"""
-        _ = user_id, auto_history, history_attachment
+        _ = user_id, auto_history
+        if history_attachment is not None:
+            attachment_tag = attachment_ref_to_tag(history_attachment.prompt_ref())
+            if attachment_tag:
+                await self._send_private_callback(self._virtual_user_id, attachment_tag)
+                return
+
         import shutil
         import uuid as _uuid
         from pathlib import Path as _Path
@@ -136,7 +143,7 @@ class _WebUIVirtualSender:
         name: str | None = None,
         auto_history: bool = True,
         *,
-        history_attachment: Any | None = None,
+        history_attachment: AttachmentRecord | None = None,
     ) -> None:
         """群文件在虚拟会话中同样重定向为文本消息。"""
         await self.send_private_file(

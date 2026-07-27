@@ -75,6 +75,7 @@ _QUALITY_SUFFIXES: dict[str, str] = {
     "128k": ".mp3",
 }
 _MIME_SUFFIXES: dict[str, str] = {
+    "application/ogg": ".ogg",
     "audio/aac": ".aac",
     "audio/flac": ".flac",
     "audio/mp4": ".m4a",
@@ -278,15 +279,19 @@ def _attachment_context(
 
 
 def _audio_file_name(
-    track: Mapping[str, object], content_type: str, requested_quality: str
+    track: Mapping[str, object],
+    payload: StreamedPayload,
+    requested_quality: str,
 ) -> str:
     label = _UNSAFE_FILE_CHARS.sub("_", _track_label(track)).strip(" .")
     if not label:
         label = "music"
     label = label[:120].rstrip(" .") or "music"
-    suffix = _MIME_SUFFIXES.get(content_type.lower())
+    suffix = _MIME_SUFFIXES.get(payload.content_type.lower())
     if suffix is None:
-        suffix = _QUALITY_SUFFIXES.get(requested_quality, ".audio")
+        resolved_quality = payload.resolution.resolved_quality.strip().lower()
+        effective_quality = resolved_quality or requested_quality.strip().lower()
+        suffix = _QUALITY_SUFFIXES.get(effective_quality, ".audio")
     return f"{label}{suffix}"
 
 
@@ -690,7 +695,7 @@ async def execute_get_audio(args: dict[str, Any], context: dict[str, Any]) -> st
             max_bytes=max_bytes * 1024 * 1024,
         )
         quality = _text(args, "quality")
-        display_name = _audio_file_name(track, payload.content_type, quality)
+        display_name = _audio_file_name(track, payload, quality)
         source = str(track.get("source", "") or "")
         track_id = str(track.get("id", "") or "")
         description, music_segment_data = _music_attachment_metadata(

@@ -325,9 +325,9 @@ HTML 和 Markdown 工具都支持显式长图版式：
 
 `track_ref` 只在当前这次 AI 决策链内有效，可以跨越其中的多轮工具调用和 `tool_search`，但不会跨到用户的下一条消息或进程重启。引用无效时工具会要求重新搜索；这是轻量引用的预期恢复方式，不表示 lxmusic2api 故障。
 
-`music.get_audio` 默认流式读取 `/v1/tracks/stream`，登记当前会话附件并返回 `<attachment uid="..."/>` 与 `uid`；音频大小受 `[attachments].remote_download_max_size_mb` 限制。普通音频文件应调用 `messages.send_message`，把返回的附件标签原样放进 `message`。只有用户明确要求“作为原生语音消息发送”时才改用 `messages.send_voice(uid=返回的uid)`，不要同时发送两份。`delivery="url"` 只解析可能快速失效的直链，仍需通过 `messages.send_message` 发给用户。
+`music.get_audio` 默认流式读取 `/v1/tracks/stream`，登记当前会话附件并返回 `<attachment uid="..."/>` 与 `uid`；音频大小受 `[attachments].remote_download_max_size_mb` 限制。成功响应中的空音频流会被拒绝，不会生成零字节附件；文件扩展名优先依据响应 MIME 与服务端报告的最终音质确定，发生音质回退时不会沿用请求音质产生错误后缀。普通音频文件应调用 `messages.send_message`，把返回的附件标签原样放进 `message`。只有用户明确要求“作为原生语音消息发送”时才改用 `messages.send_voice(uid=返回的uid)`，不要同时发送两份。`delivery="url"` 只解析可能快速失效的直链，仍需通过 `messages.send_message` 发给用户。
 
-由 `music.get_audio` 准备并经 AI 发送的音频会以 `semantic_kind="music"` 保存附件描述，包括歌曲名称、歌手/作者、专辑、时长、实际平台、实际音质、格式、大小及平台/音质回退情况。该描述只写入本地历史并随历史附件自动注入后续 AI 上下文，不会额外拼接到用户可见消息。纯附件、图文混合以及显式原生语音发送都会保留同一份语义信息；跨会话发送时会复制到目标会话作用域。新版 lxmusic2api 通过 `/tracks/stream` 响应头报告最终平台与音质；连接旧版服务或收到无效响应头时仍可正常发送，但描述会明确标注所选平台、请求音质及“最终结果未报告”，避免把请求值误写成实际结果。
+由 `music.get_audio` 准备并经 AI 发送的音频会以 `semantic_kind="music"` 保存附件描述，包括歌曲名称、歌手/作者、专辑、时长、实际平台、实际音质、格式、大小及平台/音质回退情况。该描述只写入本地历史并随历史附件自动注入后续 AI 上下文，不会额外拼接到用户可见消息。纯附件、图文混合、WebUI 文件交付以及显式原生语音发送都会复用原附件记录并保留同一份语义信息；跨会话发送时会复制到目标会话作用域。新版 lxmusic2api 通过 `/tracks/stream` 响应头报告最终平台与音质；连接旧版服务或收到无效响应头时仍可正常发送，但描述会明确标注所选平台、请求音质及“最终结果未报告”，避免把请求值误写成实际结果。
 
 `messages.send_message` 可以只接收一个或多个普通附件标签：此时它直接派发文件并由文件发送记录历史，不会先提交空文本消息。图文混合时仍先发送可见正文，再依次派发附件；工具结果会区分全部成功、部分成功和全部失败。
 

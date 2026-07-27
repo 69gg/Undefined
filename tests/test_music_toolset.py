@@ -784,6 +784,45 @@ async def test_get_audio_streams_and_registers_attachment() -> None:
     assert segment_data["quality_fallback_used"] == "true"
 
 
+@pytest.mark.parametrize(
+    ("content_type", "requested_quality", "resolved_quality", "expected_suffix"),
+    [
+        ("application/octet-stream", "flac", "320k", ".mp3"),
+        ("application/octet-stream", "", "320k", ".mp3"),
+        ("application/ogg", "flac", "flac", ".ogg"),
+    ],
+)
+async def test_get_audio_names_file_from_resolved_response(
+    content_type: str,
+    requested_quality: str,
+    resolved_quality: str,
+    expected_suffix: str,
+) -> None:
+    audio = b"audio-bytes"
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={
+                "content-type": content_type,
+                "x-lxmusic2api-resolved-quality": resolved_quality,
+            },
+            content=audio,
+        )
+
+    args: dict[str, Any] = {"track": TRACK}
+    if requested_quality:
+        args["quality"] = requested_quality
+    registry = FakeAttachmentRegistry()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await execute_get_audio(args, _context(client, registry=registry))
+
+    assert json.loads(result)["attachment"] == '<attachment uid="file_audio123"/>'
+    display_name = str(registry.bytes_calls[0]["display_name"])
+    assert display_name.endswith(expected_suffix)
+    assert not display_name.endswith(".audio")
+
+
 async def test_get_audio_tolerates_missing_or_invalid_resolution_headers() -> None:
     audio = b"audio-bytes"
 
@@ -879,6 +918,29 @@ async def test_get_audio_rejects_non_audio_content() -> None:
         )
 
     assert "非音频内容" in result
+    assert registry.bytes_calls == []
+
+
+@pytest.mark.parametrize(
+    ("status_code", "headers"),
+    [
+        (204, {}),
+        (200, {"content-type": "audio/mpeg", "content-length": "0"}),
+    ],
+)
+async def test_get_audio_rejects_empty_success_stream(
+    status_code: int, headers: dict[str, str]
+) -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(status_code, headers=headers, content=b"")
+
+    registry = FakeAttachmentRegistry()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await execute_get_audio(
+            {"track": TRACK}, _context(client, registry=registry)
+        )
+
+    assert "空音频流" in result
     assert registry.bytes_calls == []
 
 
