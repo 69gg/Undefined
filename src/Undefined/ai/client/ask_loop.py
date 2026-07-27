@@ -685,7 +685,7 @@ class ClientAskLoopMixin(ClientQueueMixin):
                     message,
                     assistant_message,
                     include_readable_reasoning=capture_reasoning,
-                    include_raw_content_blocks=not recovered_text_tool_calls,
+                    strip_text_content_blocks=recovered_text_tool_calls,
                 )
                 messages.append(assistant_message)
 

@@ -9,6 +9,11 @@ from unittest.mock import AsyncMock
 import pytest
 
 from Undefined.ai.client import AIClient
+from Undefined.ai.llm.requester import build_request_body
+from Undefined.ai.transports import (
+    ANTHROPIC_CONTENT_BLOCKS_KEY,
+    RESPONSES_OUTPUT_ITEMS_KEY,
+)
 from Undefined.config.models import ChatModelConfig
 
 
@@ -185,6 +190,21 @@ async def test_xml_text_tool_envelope_uses_name_mapping_and_native_message_repla
         "type": "function",
         "function": {"name": "end", "arguments": "{}"},
     }
+    responses_reasoning_item = {
+        "type": "reasoning",
+        "id": "rs_1",
+        "summary": [{"type": "summary_text", "text": "需要搜索音乐"}],
+        "encrypted_content": "responses-ciphertext",
+        "status": "completed",
+    }
+    anthropic_reasoning_blocks = [
+        {
+            "type": "thinking",
+            "thinking": "需要搜索音乐",
+            "signature": "thinking-signature",
+        },
+        {"type": "redacted_thinking", "data": "anthropic-ciphertext"},
+    ]
     client = _build_client(
         responses=[
             {
@@ -199,17 +219,19 @@ async def test_xml_text_tool_envelope_uses_name_mapping_and_native_message_repla
                         "message": {
                             "content": raw_content,
                             "reasoning_content": "需要搜索音乐",
-                            "_responses_output_items": [
+                            RESPONSES_OUTPUT_ITEMS_KEY: [
+                                responses_reasoning_item,
                                 {
                                     "type": "message",
                                     "role": "assistant",
                                     "content": [
                                         {"type": "output_text", "text": raw_content}
                                     ],
-                                }
+                                },
                             ],
-                            "_anthropic_content_blocks": [
-                                {"type": "text", "text": raw_content}
+                            ANTHROPIC_CONTENT_BLOCKS_KEY: [
+                                *anthropic_reasoning_blocks,
+                                {"type": "text", "text": raw_content},
                             ],
                         }
                     }
@@ -242,9 +264,57 @@ async def test_xml_text_tool_envelope_uses_name_mapping_and_native_message_repla
     )
     assert recovered_message["content"] == ""
     assert recovered_message["reasoning_content"] == "需要搜索音乐"
-    assert "_responses_output_items" not in recovered_message
-    assert "_anthropic_content_blocks" not in recovered_message
+    assert recovered_message[RESPONSES_OUTPUT_ITEMS_KEY] == [responses_reasoning_item]
+    assert recovered_message[ANTHROPIC_CONTENT_BLOCKS_KEY] == (
+        anthropic_reasoning_blocks
+    )
     assert raw_content not in [message.get("content") for message in replayed_messages]
+
+    recovered_call = recovered_message["tool_calls"][0]
+    responses_body = build_request_body(
+        ChatModelConfig(
+            api_url="https://api.example.com/v1",
+            api_key="sk-test",
+            model_name="responses-model",
+            api_mode="openai.responses",
+            max_tokens=1024,
+        ),
+        [recovered_message],
+        max_tokens=1024,
+        transport_state={"stateless_replay": True},
+    )
+    assert [item["type"] for item in responses_body["input"]] == [
+        "reasoning",
+        "function_call",
+    ]
+    assert responses_body["input"][0]["encrypted_content"] == ("responses-ciphertext")
+    assert responses_body["input"][1] == {
+        "type": "function_call",
+        "call_id": recovered_call["id"],
+        "name": "music-_-search_songs",
+        "arguments": recovered_call["function"]["arguments"],
+    }
+
+    anthropic_body = build_request_body(
+        ChatModelConfig(
+            api_url="https://api.example.com/v1",
+            api_key="sk-test",
+            model_name="anthropic-model",
+            api_mode="anthropic.messages",
+            max_tokens=4096,
+        ),
+        [recovered_message],
+        max_tokens=4096,
+    )
+    assert anthropic_body["messages"][0]["content"] == [
+        *anthropic_reasoning_blocks,
+        {
+            "type": "tool_use",
+            "id": recovered_call["id"],
+            "name": "music-_-search_songs",
+            "input": {"query": "克罗地亚狂想曲 Maksim", "limit": 10},
+        },
+    ]
 
 
 @pytest.mark.asyncio

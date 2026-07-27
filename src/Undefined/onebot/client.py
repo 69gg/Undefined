@@ -178,6 +178,7 @@ class OneBotClient:
         params: dict[str, Any] | None = None,
         *,
         suppress_error_retcodes: set[int] | None = None,
+        mark_sent: bool = True,
     ) -> dict[str, Any]:
         """调用 OneBot API"""
         if not self.ws:
@@ -191,7 +192,8 @@ class OneBotClient:
                 "[投递防重] 同一请求内相同投递此前结果未确认，拒绝自动重试: action=%s",
                 action,
             )
-            _mark_message_sent_this_turn()
+            if mark_sent:
+                _mark_message_sent_this_turn()
             raise OneBotDeliveryUncertainError(
                 action,
                 "同一请求内相同投递此前结果未确认，已阻止重复发送",
@@ -238,7 +240,8 @@ class OneBotClient:
                     )
                 if _is_delivery_timeout(action, msg):
                     _remember_uncertain_delivery(action, request_params)
-                    _mark_message_sent_this_turn()
+                    if mark_sent:
+                        _mark_message_sent_this_turn()
                     raise OneBotDeliveryUncertainError(
                         action,
                         str(msg),
@@ -257,7 +260,8 @@ class OneBotClient:
             logger.error(f"[API超时] {action} (ID={echo}) | 耗时={duration:.2f}s")
             if action in _DELIVERY_ACTIONS:
                 _remember_uncertain_delivery(action, request_params)
-                _mark_message_sent_this_turn()
+                if mark_sent:
+                    _mark_message_sent_this_turn()
                 raise OneBotDeliveryUncertainError(
                     action,
                     "等待 OneBot 投递响应超时",
@@ -280,6 +284,7 @@ class OneBotClient:
                 "group_id": group_id,
                 "message": message,
             },
+            mark_sent=mark_sent,
         )
         if mark_sent:
             _mark_message_sent_this_turn()
@@ -311,6 +316,7 @@ class OneBotClient:
         result = await self._call_api(
             "send_private_msg",
             params,
+            mark_sent=mark_sent,
         )
         if mark_sent:
             _mark_message_sent_this_turn()

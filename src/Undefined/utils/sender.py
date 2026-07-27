@@ -28,6 +28,7 @@ from Undefined.attachments import (
 )
 from Undefined.config import Config
 from Undefined.onebot import OneBotClient
+from Undefined.onebot.client import OneBotDeliveryUncertainError
 from Undefined.utils import io
 from Undefined.utils.history import MessageHistoryManager
 from Undefined.utils.common import (
@@ -1288,6 +1289,14 @@ class MessageSender:
                     mark_sent=mark_sent,
                 )
                 return result, temp_group_id
+            except OneBotDeliveryUncertainError:
+                logger.warning(
+                    "[发送消息] 复用群临时会话投递结果未确认，停止回退: "
+                    "user=%s group=%s",
+                    user_id,
+                    temp_group_id,
+                )
+                raise
             except Exception as exc:
                 logger.warning(
                     "[发送消息] 复用群临时会话失败，尝试其他共享群: user=%s group=%s err=%s",
@@ -1310,6 +1319,12 @@ class MessageSender:
                 mark_sent=mark_sent,
             )
             return result, None
+        except OneBotDeliveryUncertainError:
+            logger.warning(
+                "[发送消息] 私聊直发投递结果未确认，停止临时会话回退: user=%s",
+                user_id,
+            )
+            raise
         except Exception as exc:
             logger.warning(
                 "[发送消息] 私聊直发失败，尝试群临时会话回退: user=%s err=%s",
@@ -1356,6 +1371,14 @@ class MessageSender:
                     group_id,
                 )
                 return result, group_id
+            except OneBotDeliveryUncertainError:
+                logger.warning(
+                    "[发送消息] 群临时会话投递结果未确认，停止遍历共享群: "
+                    "user=%s group=%s",
+                    user_id,
+                    group_id,
+                )
+                raise
             except Exception as exc:
                 last_error = exc
                 logger.debug(

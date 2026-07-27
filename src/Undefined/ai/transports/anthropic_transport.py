@@ -160,6 +160,43 @@ def _system_text(messages: list[dict[str, Any]]) -> str:
     return "\n\n".join(parts)
 
 
+def _anthropic_tool_use_blocks(message: dict[str, Any]) -> list[dict[str, Any]]:
+    blocks: list[dict[str, Any]] = []
+    tool_calls = message.get("tool_calls")
+    if not isinstance(tool_calls, list):
+        return blocks
+    for tool_call in tool_calls:
+        if not isinstance(tool_call, dict):
+            continue
+        function = tool_call.get("function")
+        if not isinstance(function, dict):
+            continue
+        name = str(function.get("name") or "").strip()
+        call_id = str(tool_call.get("id") or tool_call.get("call_id") or "").strip()
+        if not name or not call_id:
+            continue
+        raw_arguments = function.get("arguments", "{}")
+        try:
+            tool_input = (
+                json.loads(raw_arguments)
+                if isinstance(raw_arguments, str)
+                else raw_arguments
+            )
+        except (TypeError, ValueError, json.JSONDecodeError):
+            tool_input = {}
+        if not isinstance(tool_input, dict):
+            tool_input = {}
+        blocks.append(
+            {
+                "type": "tool_use",
+                "id": call_id,
+                "name": name,
+                "input": tool_input,
+            }
+        )
+    return blocks
+
+
 def _messages_to_anthropic(
     messages: list[dict[str, Any]],
     *,
@@ -198,6 +235,17 @@ def _messages_to_anthropic(
                     or str(block.get("type") or "").strip().lower()
                     not in {"thinking", "redacted_thinking"}
                 ]
+            existing_tool_use_ids = {
+                str(block.get("id") or "").strip()
+                for block in raw_blocks
+                if isinstance(block, dict)
+                and str(block.get("type") or "").strip().lower() == "tool_use"
+            }
+            raw_blocks.extend(
+                block
+                for block in _anthropic_tool_use_blocks(message)
+                if str(block.get("id") or "").strip() not in existing_tool_use_ids
+            )
             _append_anthropic_message(
                 converted,
                 role="assistant",
@@ -207,39 +255,7 @@ def _messages_to_anthropic(
 
         blocks = _content_to_anthropic_blocks(message.get("content"))
         if role == "assistant":
-            tool_calls = message.get("tool_calls")
-            if isinstance(tool_calls, list):
-                for tool_call in tool_calls:
-                    if not isinstance(tool_call, dict):
-                        continue
-                    function = tool_call.get("function")
-                    if not isinstance(function, dict):
-                        continue
-                    name = str(function.get("name") or "").strip()
-                    call_id = str(
-                        tool_call.get("id") or tool_call.get("call_id") or ""
-                    ).strip()
-                    if not name or not call_id:
-                        continue
-                    raw_arguments = function.get("arguments", "{}")
-                    try:
-                        tool_input = (
-                            json.loads(raw_arguments)
-                            if isinstance(raw_arguments, str)
-                            else raw_arguments
-                        )
-                    except (TypeError, ValueError, json.JSONDecodeError):
-                        tool_input = {}
-                    if not isinstance(tool_input, dict):
-                        tool_input = {}
-                    blocks.append(
-                        {
-                            "type": "tool_use",
-                            "id": call_id,
-                            "name": name,
-                            "input": tool_input,
-                        }
-                    )
+            blocks.extend(_anthropic_tool_use_blocks(message))
         _append_anthropic_message(converted, role=role, blocks=blocks)
     return converted
 

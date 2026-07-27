@@ -21,6 +21,7 @@ from weixin_ilink_client import (
 
 from Undefined.attachments import AttachmentRegistry
 from Undefined.context import RequestContext
+from Undefined.onebot.client import OneBotDeliveryUncertainError
 from Undefined.utils import io as async_io
 from Undefined.utils.message_reply import ReplyContext
 from Undefined.utils.message_targets import DeliveryAddress
@@ -539,6 +540,60 @@ async def test_send_private_message_falls_back_to_group_temp_session(
 
 
 @pytest.mark.asyncio
+async def test_send_private_message_does_not_fallback_after_uncertain_direct_send(
+    sender: MessageSender,
+) -> None:
+    sender.onebot.get_group_list = AsyncMock(  # type: ignore[method-assign]
+        return_value=[{"group_id": 11111}]
+    )
+    sender.onebot.send_private_message = AsyncMock(  # type: ignore[method-assign]
+        side_effect=OneBotDeliveryUncertainError(
+            "send_private_msg",
+            "Timeout while waiting for sendMsg",
+            retcode=1200,
+        )
+    )
+
+    with pytest.raises(OneBotDeliveryUncertainError):
+        await sender.send_private_message(54321, "possibly delivered")
+
+    sender.onebot.send_private_message.assert_awaited_once()
+    sender.onebot.get_group_list.assert_not_awaited()
+    history_mock = cast(AsyncMock, sender.history_manager.add_private_message)
+    history_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_temp_session_scan_stops_after_uncertain_delivery(
+    sender: MessageSender,
+) -> None:
+    sender.onebot.get_group_list = AsyncMock(  # type: ignore[method-assign]
+        return_value=[{"group_id": 11111}, {"group_id": 22222}]
+    )
+    sender.onebot.send_private_message = AsyncMock(  # type: ignore[method-assign]
+        side_effect=[
+            RuntimeError("direct failed"),
+            OneBotDeliveryUncertainError(
+                "send_private_msg",
+                "Timeout while waiting for sendMsg",
+                retcode=1200,
+            ),
+            {"data": {"message_id": 998877}},
+        ]
+    )
+
+    with pytest.raises(OneBotDeliveryUncertainError):
+        await sender.send_private_message(54321, "possibly delivered via temp session")
+
+    send_mock = sender.onebot.send_private_message
+    assert send_mock.await_count == 2
+    assert "group_id" not in send_mock.await_args_list[0].kwargs
+    assert send_mock.await_args_list[1].kwargs["group_id"] == 11111
+    history_mock = cast(AsyncMock, sender.history_manager.add_private_message)
+    history_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_send_private_message_prefers_context_group_before_group_scan(
     sender: MessageSender,
 ) -> None:
@@ -594,6 +649,40 @@ async def test_send_private_message_chunked_reuses_successful_temp_session_group
     assert history_mock.await_count == 1
     assert history_mock.await_args is not None
     assert history_mock.await_args.kwargs["message_id"] == 223344
+
+
+@pytest.mark.asyncio
+async def test_chunked_private_stops_after_uncertain_reused_temp_session(
+    sender: MessageSender,
+) -> None:
+    sender.onebot.get_group_list = AsyncMock(  # type: ignore[method-assign]
+        return_value=[{"group_id": 33333}, {"group_id": 44444}]
+    )
+    sender.onebot.send_private_message = AsyncMock(  # type: ignore[method-assign]
+        side_effect=[
+            RuntimeError("direct failed"),
+            {"data": {"message_id": "223344"}},
+            OneBotDeliveryUncertainError(
+                "send_private_msg",
+                "Timeout while waiting for sendMsg",
+                retcode=1200,
+            ),
+            {"data": {"message_id": "223346"}},
+        ]
+    )
+    long_message = f"{'a' * (MAX_MESSAGE_LENGTH - 500)}\n{'b' * 700}"
+
+    with pytest.raises(OneBotDeliveryUncertainError):
+        await sender.send_private_message(54321, long_message)
+
+    send_mock = sender.onebot.send_private_message
+    assert send_mock.await_count == 3
+    assert "group_id" not in send_mock.await_args_list[0].kwargs
+    assert send_mock.await_args_list[1].kwargs["group_id"] == 33333
+    assert send_mock.await_args_list[2].kwargs["group_id"] == 33333
+    sender.onebot.get_group_list.assert_awaited_once()
+    history_mock = cast(AsyncMock, sender.history_manager.add_private_message)
+    history_mock.assert_not_awaited()
 
 
 @pytest.mark.asyncio
