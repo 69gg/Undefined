@@ -116,16 +116,43 @@ def _history_msg_matches_signature(
 def drop_current_input_batch_if_duplicated(
     recent_msgs: list[dict[str, Any]], question: str
 ) -> tuple[list[dict[str, Any]], int]:
-    """Drop trailing history records that duplicate the whole current batch."""
+    """从历史中剔除当前输入批次；稳定 ID 可跨越交错消息精确匹配。"""
     signatures = extract_current_message_signatures(question)
     if not recent_msgs or not signatures:
         return recent_msgs, 0
 
-    remaining = list(recent_msgs)
+    expected_ids: dict[str, int] = {}
+    for signature in signatures:
+        message_id = signature.message_id.strip()
+        if message_id:
+            expected_ids[message_id] = expected_ids.get(message_id, 0) + 1
+
+    matched_ids: dict[str, int] = {}
+    remaining: list[dict[str, Any]] = []
     dropped = 0
-    cursor = len(signatures) - 1
+    for message in recent_msgs:
+        message_id = str(message.get("message_id", "") or "").strip()
+        matched_count = matched_ids.get(message_id, 0)
+        if message_id and matched_count < expected_ids.get(message_id, 0):
+            matched_ids[message_id] = matched_count + 1
+            dropped += 1
+            continue
+        remaining.append(message)
+
+    unmatched_signatures: list[CurrentMessageSignature] = []
+    remaining_matched_ids = dict(matched_ids)
+    for signature in signatures:
+        message_id = signature.message_id.strip()
+        if message_id and remaining_matched_ids.get(message_id, 0) > 0:
+            remaining_matched_ids[message_id] -= 1
+            continue
+        unmatched_signatures.append(signature)
+    cursor = len(unmatched_signatures) - 1
     while remaining and cursor >= 0:
-        if not _history_msg_matches_signature(remaining[-1], signatures[cursor]):
+        if not _history_msg_matches_signature(
+            remaining[-1],
+            unmatched_signatures[cursor],
+        ):
             break
         remaining.pop()
         dropped += 1

@@ -41,13 +41,16 @@ def _make_coordinator(
     coordinator.config = SimpleNamespace(
         superadmin_qq=superadmin_qq,
         chat_model=SimpleNamespace(model_name="chat-model"),
+        get_context_recent_messages_limit=lambda: 20,
     )
+    coordinator.ai = SimpleNamespace(attachment_registry=None)
     coordinator.security = SimpleNamespace(
         detect_injection=AsyncMock(return_value=False)
     )
     coordinator.history_manager = SimpleNamespace(
         modify_last_group_message=AsyncMock(),
         modify_last_private_message=AsyncMock(),
+        get_recent_snapshot=AsyncMock(return_value=[]),
     )
     coordinator.queue_manager = queue_manager
     coordinator._is_at_bot = lambda _content: False
@@ -106,6 +109,92 @@ async def test_two_group_messages_merge_into_single_request() -> None:
     assert "【连续消息说明】" in request_data["full_question"]
     assert "共同构成【当前输入批次】" in request_data["full_question"]
     assert "不要把同批前几条误判为历史旧任务" in request_data["full_question"]
+    assert request_data["recent_messages_snapshot"] == []
+
+
+@pytest.mark.asyncio
+async def test_dispatch_attaches_history_snapshot_before_enqueue() -> None:
+    coordinator, qm, _ = _make_coordinator(enabled=False)
+    frozen_history = [
+        {
+            "type": "group",
+            "message_id": "100",
+            "message": "发车前历史",
+        }
+    ]
+    coordinator.history_manager.get_recent_snapshot.return_value = frozen_history
+
+    await coordinator.handle_auto_reply(
+        group_id=12345,
+        sender_id=20001,
+        text="当前问题",
+        message_content=[],
+        sender_name="user",
+        group_name="测试群",
+        trigger_message_id=101,
+    )
+
+    coordinator.history_manager.get_recent_snapshot.assert_awaited_once_with(
+        "12345",
+        "group",
+        0,
+        20,
+    )
+    await_args = cast(AsyncMock, qm.add_group_normal_request).await_args
+    assert await_args is not None
+    assert await_args.args[0]["recent_messages_snapshot"] == frozen_history
+
+
+@pytest.mark.asyncio
+async def test_each_dispatch_captures_a_fresh_history_snapshot() -> None:
+    coordinator, qm, _ = _make_coordinator(enabled=False)
+    coordinator.history_manager.get_recent_snapshot.side_effect = [
+        [{"message_id": "100", "message": "第一轮快照"}],
+        [{"message_id": "200", "message": "第二轮快照"}],
+    ]
+
+    await coordinator.handle_auto_reply(
+        group_id=12345,
+        sender_id=20001,
+        text="第一轮",
+        message_content=[],
+        sender_name="user",
+        group_name="测试群",
+    )
+    await coordinator.handle_auto_reply(
+        group_id=12345,
+        sender_id=20001,
+        text="第二轮",
+        message_content=[],
+        sender_name="user",
+        group_name="测试群",
+    )
+
+    assert coordinator.history_manager.get_recent_snapshot.await_count == 2
+    requests = [call.args[0] for call in qm.add_group_normal_request.await_args_list]
+    assert requests[0]["recent_messages_snapshot"][0]["message"] == "第一轮快照"
+    assert requests[1]["recent_messages_snapshot"][0]["message"] == "第二轮快照"
+
+
+@pytest.mark.asyncio
+async def test_snapshot_failure_uses_authoritative_empty_history() -> None:
+    coordinator, qm, _ = _make_coordinator(enabled=False)
+    coordinator.history_manager.get_recent_snapshot.side_effect = RuntimeError(
+        "snapshot failed"
+    )
+
+    await coordinator.handle_auto_reply(
+        group_id=12345,
+        sender_id=20001,
+        text="当前问题",
+        message_content=[],
+        sender_name="user",
+        group_name="测试群",
+    )
+
+    await_args = cast(AsyncMock, qm.add_group_normal_request).await_args
+    assert await_args is not None
+    assert await_args.args[0]["recent_messages_snapshot"] == []
 
 
 @pytest.mark.asyncio

@@ -14,6 +14,44 @@ from Undefined.utils.history import (
 from Undefined.utils.message_reply import ReplyContext
 
 
+@pytest.mark.asyncio
+async def test_get_recent_snapshot_isolated_from_later_history_mutations() -> None:
+    manager = MessageHistoryManager.__new__(MessageHistoryManager)
+    manager._message_history = {
+        "20001": [
+            {
+                "message_id": "101",
+                "message": "快照前消息",
+                "attachments": [{"uid": "file_before"}],
+            }
+        ]
+    }
+    manager._private_message_history = {}
+    manager._max_records = 10000
+    manager._initialized = asyncio.Event()
+    manager._initialized.set()
+    manager._group_locks = {}
+    manager._private_locks = {}
+
+    snapshot = await manager.get_recent_snapshot("20001", "group", 0, 20)
+
+    manager._message_history["20001"][0]["message"] = "已被修改"
+    attachments = manager._message_history["20001"][0]["attachments"]
+    assert isinstance(attachments, list)
+    attachments[0]["uid"] = "file_changed"
+    manager._message_history["20001"].append(
+        {"message_id": "102", "message": "快照后消息"}
+    )
+
+    assert snapshot == [
+        {
+            "message_id": "101",
+            "message": "快照前消息",
+            "attachments": [{"uid": "file_before"}],
+        }
+    ]
+
+
 def test_wechat_history_timestamp_prefers_upstream_created_at() -> None:
     record = {
         "message_id": "1000",

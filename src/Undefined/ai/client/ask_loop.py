@@ -124,6 +124,7 @@ class ClientAskLoopMixin(ClientQueueMixin):
             [str, str, int, int], Awaitable[list[dict[str, Any]]]
         ]
         | None = None,
+        recent_messages_snapshot: list[dict[str, Any]] | None = None,
         get_image_url_callback: Callable[[str], Awaitable[str | None]] | None = None,
         get_forward_msg_callback: Callable[[str], Awaitable[list[dict[str, Any]]]]
         | None = None,
@@ -141,6 +142,7 @@ class ClientAskLoopMixin(ClientQueueMixin):
             context: 额外的上下文背景
             send_message_callback: 发送消息的回调，支持可选的 reply_to
             get_recent_messages_callback: 获取上下文历史消息的回调
+            recent_messages_snapshot: 入队前冻结的上下文历史快照
             get_image_url_callback: 获取图片 URL 的回调
             get_forward_msg_callback: 获取合并转发内容的回调
             send_like_callback: 点赞回调
@@ -253,6 +255,7 @@ class ClientAskLoopMixin(ClientQueueMixin):
         messages = await self._prompt_builder.build_messages(
             question,
             get_recent_messages_callback=get_recent_messages_callback,
+            recent_messages_snapshot=recent_messages_snapshot,
             extra_context=pre_context if pre_context else extra_context,
             deferred_tool_names=deferred_tool_names,
         )

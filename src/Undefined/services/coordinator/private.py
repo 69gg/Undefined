@@ -172,6 +172,12 @@ class PrivateReplyMixin:
             for item in request.get("message_ids", [])
             if str(item).strip()
         ]
+        recent_messages_snapshot_raw = request.get("recent_messages_snapshot")
+        recent_messages_snapshot: list[dict[str, Any]] | None = (
+            recent_messages_snapshot_raw
+            if isinstance(recent_messages_snapshot_raw, list)
+            else None
+        )
         address, address_error = parse_delivery_address(
             request.get("address") or f"qq:{user_id}"
         )
@@ -328,6 +334,7 @@ class PrivateReplyMixin:
                         full_question,
                         send_message_callback=send_msg_cb,
                         get_recent_messages_callback=get_recent_cb,
+                        recent_messages_snapshot=recent_messages_snapshot,
                         get_image_url_callback=self.onebot.get_image,
                         get_forward_msg_callback=self.onebot.get_forward_msg,
                         send_like_callback=send_like_cb,

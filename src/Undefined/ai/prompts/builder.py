@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import asyncio
+import copy
 from collections import deque
 from datetime import datetime
 from typing import Any, Awaitable, Callable, Literal, Sequence
@@ -253,6 +254,7 @@ class PromptBuilder:
             [str, str, int, int], Awaitable[list[dict[str, Any]]]
         ]
         | None = None,
+        recent_messages_snapshot: list[dict[str, Any]] | None = None,
         extra_context: dict[str, Any] | None = None,
         deferred_tool_names: Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
@@ -261,6 +263,7 @@ class PromptBuilder:
         参数:
             question: 当前用户消息
             get_recent_messages_callback: 获取历史消息的回调函数
+            recent_messages_snapshot: 入队前冻结的历史消息；空列表同样具有权威性
             extra_context: 额外的上下文信息 (如 group_id, user_id)
             deferred_tool_names: 可通过 tool_search 按需加载的工具名称
 
@@ -282,6 +285,18 @@ class PromptBuilder:
             if detail is not None:
                 payload["detail"] = detail
             await webchat_event_callback("stage", payload)
+
+        frozen_recent_messages: list[dict[str, Any]] | None = None
+        if recent_messages_snapshot is not None:
+            frozen_recent_messages = copy.deepcopy(
+                [item for item in recent_messages_snapshot if isinstance(item, dict)]
+            )
+        elif get_recent_messages_callback is not None:
+            await emit_webchat_stage("loading_chat_history")
+            frozen_recent_messages = await self._capture_recent_messages_for_prompt(
+                get_recent_messages_callback,
+                extra_context,
+            )
 
         nagaagent_active = self._resolve_nagaagent_active(extra_context)
         system_prompt = await self._load_system_prompt(
@@ -627,10 +642,11 @@ class PromptBuilder:
                     logger, "[AI会话] 注入短期回忆", list(self._end_summaries)
                 )
 
-        if get_recent_messages_callback:
-            await emit_webchat_stage("loading_chat_history")
+        if frozen_recent_messages is not None:
             await self._inject_recent_messages(
-                deferred_messages, get_recent_messages_callback, extra_context, question
+                deferred_messages,
+                frozen_recent_messages,
+                question,
             )
 
         # 记忆/认知/历史等上下文统一排在主 system 之后、当前消息之前
@@ -705,61 +721,65 @@ class PromptBuilder:
 
         return None
 
-    async def _inject_recent_messages(
+    def _get_context_recent_messages_limit(self) -> int:
+        recent_limit = 20
+        if self._runtime_config_getter is not None:
+            try:
+                runtime_config = self._runtime_config_getter()
+                if hasattr(runtime_config, "get_context_recent_messages_limit"):
+                    recent_limit = int(
+                        runtime_config.get_context_recent_messages_limit()
+                    )
+            except Exception as exc:
+                logger.debug("读取上下文历史条数配置失败: %s", exc)
+        return max(0, recent_limit)
+
+    async def _capture_recent_messages_for_prompt(
         self,
-        messages: list[dict[str, Any]],
         get_recent_messages_callback: Callable[
             [str, str, int, int], Awaitable[list[dict[str, Any]]]
         ],
         extra_context: dict[str, Any] | None,
-        question: str,
-    ) -> None:
+    ) -> list[dict[str, Any]]:
+        """在 Prompt 的慢操作开始前读取一次历史，作为兼容入口的快照。"""
+        recent_limit = self._get_context_recent_messages_limit()
+        if recent_limit == 0:
+            logger.debug("上下文历史消息注入已关闭 (limit=0)")
+            return []
+
+        scope = self._resolve_chat_scope(extra_context)
+        if scope is None:
+            msg_type: Literal["group", "private"] = "group"
+            chat_id = ""
+        else:
+            msg_type, numeric_chat_id = scope
+            chat_id = str(numeric_chat_id)
+
         try:
-            ctx = RequestContext.current()
-            if ctx:
-                group_id_from_ctx = ctx.group_id
-                user_id_from_ctx = ctx.user_id
-            elif extra_context:
-                group_id_from_ctx = extra_context.get("group_id")
-                user_id_from_ctx = extra_context.get("user_id")
-            else:
-                group_id_from_ctx = None
-                user_id_from_ctx = None
-
-            if group_id_from_ctx is not None:
-                chat_id = str(group_id_from_ctx)
-                msg_type = "group"
-            elif user_id_from_ctx is not None:
-                chat_id = str(user_id_from_ctx)
-                msg_type = "private"
-            else:
-                chat_id = ""
-                msg_type = "group"
-
-            recent_limit = 20
-            if self._runtime_config_getter is not None:
-                try:
-                    runtime_config = self._runtime_config_getter()
-                    if hasattr(runtime_config, "get_context_recent_messages_limit"):
-                        recent_limit = int(
-                            runtime_config.get_context_recent_messages_limit()
-                        )
-                except Exception as exc:
-                    logger.debug("读取上下文历史条数配置失败: %s", exc)
-
-            if recent_limit < 0:
-                recent_limit = 0
-            if recent_limit == 0:
-                logger.debug("上下文历史消息注入已关闭 (limit=0)")
-                return
-
             recent_msgs = await get_recent_messages_callback(
                 chat_id,
                 msg_type,
                 0,
                 recent_limit,
             )
-            recent_msgs = drop_current_message_if_duplicated(recent_msgs, question)
+            return copy.deepcopy(
+                [item for item in recent_msgs if isinstance(item, dict)]
+            )
+        except Exception as exc:
+            logger.warning("冻结历史消息快照失败，当前请求将使用空历史: %s", exc)
+            return []
+
+    async def _inject_recent_messages(
+        self,
+        messages: list[dict[str, Any]],
+        recent_messages_snapshot: list[dict[str, Any]],
+        question: str,
+    ) -> None:
+        try:
+            recent_msgs = drop_current_message_if_duplicated(
+                recent_messages_snapshot,
+                question,
+            )
             recent_msgs = [
                 msg for msg in recent_msgs if not _is_display_only_history_record(msg)
             ]

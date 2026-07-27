@@ -471,10 +471,16 @@ async def test_execute_auto_reply_send_msg_cb_passes_history_message(
     sender = SimpleNamespace(send_group_message=AsyncMock())
     captured_extra_context: dict[str, Any] = {}
     captured_resources: dict[str, Any] = {}
+    captured_snapshot: list[dict[str, Any]] | None = None
 
     async def _fake_ask(*_args: Any, **kwargs: Any) -> str:
+        nonlocal captured_snapshot
         extra_context = cast(dict[str, Any], kwargs.get("extra_context", {}))
         captured_extra_context.update(extra_context)
+        captured_snapshot = cast(
+            list[dict[str, Any]] | None,
+            kwargs.get("recent_messages_snapshot"),
+        )
         current_context = RequestContext.current()
         assert current_context is not None
         captured_resources.update(current_context.get_resources())
@@ -515,6 +521,7 @@ async def test_execute_auto_reply_send_msg_cb_passes_history_message(
             "full_question": "prompt",
             "message_ids": ["101", "102"],
             "batched_count": 2,
+            "recent_messages_snapshot": [{"message_id": "100", "message": "冻结历史"}],
         }
     )
 
@@ -528,6 +535,7 @@ async def test_execute_auto_reply_send_msg_cb_passes_history_message(
     assert captured_extra_context["batched_count"] == 2
     assert captured_extra_context["current_input_is_batched"] is True
     assert captured_resources["message_ids"] == ["101", "102"]
+    assert captured_snapshot == [{"message_id": "100", "message": "冻结历史"}]
 
 
 @pytest.mark.asyncio

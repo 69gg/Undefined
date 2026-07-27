@@ -1,6 +1,7 @@
 """历史记录管理"""
 
 import asyncio
+import copy
 import logging
 import os
 from datetime import datetime
@@ -16,6 +17,23 @@ HISTORY_DIR = os.path.join("data", "history")
 _HISTORY_TIMESTAMP_FORMAT: Final[str] = "%Y-%m-%d %H:%M:%S"
 # 旧记录只有秒级时间，数字 msg_id 插值也可能有几十秒偏差。
 _REFERENCE_MATCH_TOLERANCE_MS: Final[int] = 90_000
+
+
+def _slice_recent_records(
+    history: list[dict[str, Any]],
+    start: int,
+    end: int,
+) -> list[dict[str, Any]]:
+    """按倒序区间语义截取最近历史记录。"""
+    total = len(history)
+    if total == 0:
+        return []
+
+    actual_start = max(0, total - end)
+    actual_end = min(total, total - start)
+    if actual_start >= actual_end:
+        return []
+    return history[actual_start:actual_end]
 
 
 def _extract_id_from_history_filename(path: str, prefix: str) -> str:
@@ -587,21 +605,30 @@ class MessageHistoryManager:
         else:
             return []
 
-        total = len(history)
-        if total == 0:
+        return _slice_recent_records(history, start, end)
+
+    async def get_recent_snapshot(
+        self,
+        chat_id: str,
+        msg_type: str,
+        start: int,
+        end: int,
+    ) -> list[dict[str, Any]]:
+        """在会话锁内冻结最近历史，避免后续消息污染已发车请求。"""
+        await self._ensure_initialized()
+
+        if msg_type == "group":
+            history_store = self._message_history
+            lock = self._get_group_lock(chat_id)
+        elif msg_type == "private":
+            history_store = self._private_message_history
+            lock = self._get_private_lock(chat_id)
+        else:
             return []
 
-        actual_start = total - end
-        actual_end = total - start
-
-        if actual_start < 0:
-            actual_start = 0
-        if actual_end > total:
-            actual_end = total
-        if actual_start >= actual_end:
-            return []
-
-        return history[actual_start:actual_end]
+        async with lock:
+            history = history_store.get(chat_id, [])
+            return copy.deepcopy(_slice_recent_records(history, start, end))
 
     def get_recent_private(self, user_id: int, count: int) -> list[dict[str, Any]]:
         """获取最近的私聊消息"""

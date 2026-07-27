@@ -207,3 +207,72 @@ def test_drop_current_message_if_duplicated_matches_message_id_before_content() 
     filtered = drop_current_message_if_duplicated(recent_messages, question)
 
     assert filtered == []
+
+
+def test_drop_current_message_if_duplicated_handles_interleaved_batch_ids() -> None:
+    recent_messages = [
+        {
+            "type": "group",
+            "message_id": "100",
+            "user_id": "99999",
+            "message": "批次前历史",
+        },
+        {
+            "type": "group",
+            "message_id": "101",
+            "user_id": "10001",
+            "message": "第一条当前消息",
+        },
+        {
+            "type": "group",
+            "message_id": "201",
+            "user_id": "20001",
+            "message": "中间其他人的消息",
+        },
+        {
+            "type": "group",
+            "message_id": "102",
+            "user_id": "10001",
+            "message": "第二条当前消息",
+        },
+        {
+            "type": "group",
+            "message_id": "202",
+            "user_id": "20002",
+            "message": "发车前的其他消息",
+        },
+    ]
+    question = """<message message_id="101" sender="测试用户" sender_id="10001">
+<content>第一条当前消息</content>
+</message>
+<message message_id="102" sender="测试用户" sender_id="10001">
+<content>第二条当前消息</content>
+</message>"""
+
+    filtered = drop_current_message_if_duplicated(recent_messages, question)
+
+    assert [message["message_id"] for message in filtered] == ["100", "201", "202"]
+
+
+def test_drop_current_message_if_duplicated_keeps_same_text_with_different_id() -> None:
+    recent_messages = [
+        {
+            "type": "group",
+            "message_id": "100",
+            "user_id": "10001",
+            "message": "重复文本",
+        },
+        {
+            "type": "group",
+            "message_id": "101",
+            "user_id": "10001",
+            "message": "重复文本",
+        },
+    ]
+    question = """<message message_id="101" sender="测试用户" sender_id="10001">
+<content>重复文本</content>
+</message>"""
+
+    filtered = drop_current_message_if_duplicated(recent_messages, question)
+
+    assert [message["message_id"] for message in filtered] == ["100"]
