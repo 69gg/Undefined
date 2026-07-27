@@ -37,6 +37,9 @@ _FUNCTION_CALLS_MARKER_RE = re.compile(
     r"<(?:function_calls|invoke)(?:\s|/?>)", re.IGNORECASE
 )
 _INVOKE_PREFIX_RE = re.compile(r"^<invoke(?:\s|/?>)", re.IGNORECASE)
+_FUNCTION_EQUALS_PREFIX_RE = re.compile(r"^<function\s*=", re.IGNORECASE)
+_FUNCTION_EQUALS_MARKER_RE = re.compile(r"<(?:function|parameter)\s*=", re.IGNORECASE)
+_PARAMETER_EQUALS_PREFIX_RE = re.compile(r"^<parameter\s*=", re.IGNORECASE)
 _TOOL_ATTRIBUTE_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_.:-]*")
 _TOOL_CALLS_ENVELOPE_KEYS = frozenset({"tool_calls"})
 _TOOL_ENVELOPE_KEYS = frozenset({"tool", "arguments"})
@@ -444,6 +447,123 @@ def _parse_function_calls_text_tool_calls(text: str) -> list[dict[str, Any]]:
         tool_calls.append(_build_text_tool_call(attributes.get("name"), raw_arguments))
 
 
+def _parse_equals_tag_open(
+    text: str,
+    position: int,
+    *,
+    tag_name: str,
+) -> tuple[str, int]:
+    tag_prefix = f"<{tag_name}"
+    if text[position : position + len(tag_prefix)].lower() != tag_prefix:
+        raise TextToolCallParseError(f"{tag_name} 标签开头无效")
+    position = _skip_whitespace(text, position + len(tag_prefix))
+    if position >= len(text) or text[position] != "=":
+        raise TextToolCallParseError(f"{tag_name} 标签缺少等号")
+    position = _skip_whitespace(text, position + 1)
+
+    matched = _TOOL_ATTRIBUTE_NAME_RE.match(text, position)
+    if matched is None:
+        raise TextToolCallParseError(f"{tag_name} 标签名称无效")
+    value = matched.group(0)
+    position = _skip_whitespace(text, matched.end())
+    if position >= len(text) or text[position] != ">":
+        raise TextToolCallParseError(f"{tag_name} 标签名称后存在不支持的内容")
+    return value, position + 1
+
+
+def _parse_parameter_text_value(raw_value: str) -> Any:
+    value = raw_value.strip()
+    if not value:
+        return ""
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError as exc:
+        if value[0] in {'"', "[", "{"}:
+            raise TextToolCallParseError("parameter 内容包含无效 JSON") from exc
+        return value
+
+
+def _parse_function_parameter(
+    text: str,
+    lowered_text: str,
+    position: int,
+) -> tuple[str, Any, int]:
+    parameter_name, content_start = _parse_equals_tag_open(
+        text,
+        position,
+        tag_name="parameter",
+    )
+    closing_tag = "</parameter>"
+    value_start = _skip_whitespace(text, content_start)
+    if value_start < len(text) and text[value_start] in {'"', "[", "{"}:
+        try:
+            parameter_value, value_end = json.JSONDecoder().raw_decode(
+                text,
+                value_start,
+            )
+        except json.JSONDecodeError as exc:
+            raise TextToolCallParseError("parameter 内容包含无效 JSON") from exc
+        closing_position = _skip_whitespace(text, value_end)
+        if not lowered_text.startswith(closing_tag, closing_position):
+            raise TextToolCallParseError("parameter JSON 后存在不支持的内容")
+        return (
+            parameter_name,
+            parameter_value,
+            closing_position + len(closing_tag),
+        )
+
+    closing_position = lowered_text.find(closing_tag, content_start)
+    if closing_position < 0:
+        raise TextToolCallParseError("parameter 标签缺少结束标签")
+    raw_value = text[content_start:closing_position]
+    return (
+        parameter_name,
+        _parse_parameter_text_value(raw_value),
+        closing_position + len(closing_tag),
+    )
+
+
+def _parse_function_equals_text_tool_calls(text: str) -> list[dict[str, Any]]:
+    position = 0
+    lowered_text = text.lower()
+    tool_calls: list[dict[str, Any]] = []
+
+    while True:
+        position = _skip_whitespace(text, position)
+        if position >= len(text):
+            if not tool_calls:
+                raise TextToolCallParseError("function 封包不能为空")
+            return tool_calls
+        if _FUNCTION_EQUALS_PREFIX_RE.match(text[position:]) is None:
+            raise TextToolCallParseError("function 工具封包之间存在普通文本")
+
+        function_name, position = _parse_equals_tag_open(
+            text,
+            position,
+            tag_name="function",
+        )
+        parameters: dict[str, Any] = {}
+        while True:
+            position = _skip_whitespace(text, position)
+            if lowered_text.startswith("</function>", position):
+                position += len("</function>")
+                tool_calls.append(_build_text_tool_call(function_name, parameters))
+                break
+            if (
+                position >= len(text)
+                or _PARAMETER_EQUALS_PREFIX_RE.match(text[position:]) is None
+            ):
+                raise TextToolCallParseError("function 标签内只允许 parameter 标签")
+            parameter_name, parameter_value, position = _parse_function_parameter(
+                text,
+                lowered_text,
+                position,
+            )
+            if parameter_name in parameters:
+                raise TextToolCallParseError("function 标签包含重复 parameter")
+            parameters[parameter_name] = parameter_value
+
+
 def parse_text_tool_calls(raw_content: str) -> list[dict[str, Any]]:
     """将完整的模型文本工具封包转换为 OpenAI ``tool_calls``。
 
@@ -454,6 +574,10 @@ def parse_text_tool_calls(raw_content: str) -> list[dict[str, Any]]:
     text = _strip_code_fences(raw_content).strip()
     if not text:
         return []
+    if _FUNCTION_EQUALS_PREFIX_RE.match(text):
+        return _parse_function_equals_text_tool_calls(text)
+    if _FUNCTION_EQUALS_MARKER_RE.search(text):
+        raise TextToolCallParseError("function 工具封包前存在普通文本")
     if _FUNCTION_CALLS_PREFIX_RE.match(text):
         return _parse_function_calls_text_tool_calls(text)
     if _FUNCTION_CALLS_MARKER_RE.search(text):

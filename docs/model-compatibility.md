@@ -137,6 +137,21 @@ JSON 对象可以单独出现，也可以由空白分隔后连续出现；`tool`
 
 `function_calls` 外层可以包含一个或多个 `invoke`。每个 `invoke` 只接受必填的 `name` 属性和一个 `arguments` 子标签；`arguments` 内容必须是 JSON 对象。多个调用按原顺序转换到同一个原生 `tool_calls` 列表。
 
+### `function=...` / `parameter=...` 标签
+
+```text
+<function=end>
+<parameter=memo>
+静默处理这条消息
+</parameter>
+<parameter=observations>
+["观察一", "观察二"]
+</parameter>
+</function>
+```
+
+一个响应可以按顺序包含一个或多个 `function` 块，并恢复为同一组原生并行调用。函数名和参数名使用无引号的 `=名称` 形式；每个参数值若是完整 JSON，会恢复为对应的对象、数组、字符串、布尔值、数字或 `null`，否则作为去除首尾空白的普通字符串。空函数参数恢复为 `{}`，空参数值恢复为空字符串。重复参数名、残缺的 JSON 数组/对象/字符串、未知内层文本、缺失结束标签及封包外普通文本均会被拒绝并进入既有纠正重试，不进行可能改变调用语义的宽松猜测。
+
 ### 转换与执行边界
 
 - 服务商原生返回的结构化 `tool_calls` 始终优先，不与文本恢复结果合并。

@@ -166,8 +166,12 @@ async def test_text_tool_calls_use_normal_execution_and_stateless_replay() -> No
 </arguments>
 </invoke>
 </function_calls>""",
+        """<function=music-_-search_songs>
+<parameter=query>克罗地亚狂想曲 Maksim</parameter>
+<parameter=limit>10</parameter>
+</function>""",
     ],
-    ids=["tool_execution", "function_calls"],
+    ids=["tool_execution", "function_calls", "function_equals"],
 )
 async def test_xml_text_tool_envelope_uses_name_mapping_and_native_message_replay(
     raw_content: str,

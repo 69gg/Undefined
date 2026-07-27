@@ -354,6 +354,58 @@ class TestParseTextToolCalls:
 
         assert self._arguments(tool_calls[0]) == {"value": "</arguments>"}
 
+    def test_function_equals_envelope_parses_raw_and_json_parameters(self) -> None:
+        raw = """<function=end>
+<parameter=memo>
+静默处理这条消息
+</parameter>
+<parameter=observations>
+["观察一", "观察二"]
+</parameter>
+</function>"""
+
+        tool_calls = parse_text_tool_calls(raw)
+
+        assert self._names(tool_calls) == ["end"]
+        assert self._arguments(tool_calls[0]) == {
+            "memo": "静默处理这条消息",
+            "observations": ["观察一", "观察二"],
+        }
+
+    def test_function_equals_envelope_preserves_parallel_calls_and_types(self) -> None:
+        raw = """<function = send_message >
+<parameter=message>在做了</parameter>
+</function>
+<function=end>
+<parameter=force>false</parameter>
+<parameter=memo>已回应</parameter>
+<parameter=observations>[]</parameter>
+</function>"""
+
+        tool_calls = parse_text_tool_calls(raw)
+
+        assert self._names(tool_calls) == ["send_message", "end"]
+        assert self._arguments(tool_calls[0]) == {"message": "在做了"}
+        assert self._arguments(tool_calls[1]) == {
+            "force": False,
+            "memo": "已回应",
+            "observations": [],
+        }
+        assert len({str(tool_call["id"]) for tool_call in tool_calls}) == 2
+
+    def test_function_equals_json_may_contain_parameter_closing_tag_text(
+        self,
+    ) -> None:
+        raw = """<function=example>
+<parameter=values>["</parameter>", {"ok": true}]</parameter>
+</function>"""
+
+        tool_calls = parse_text_tool_calls(raw)
+
+        assert self._arguments(tool_calls[0]) == {
+            "values": ["</parameter>", {"ok": True}]
+        }
+
     def test_json_code_fence_is_accepted(self) -> None:
         tool_calls = parse_text_tool_calls(
             '```json\n{"tool":"end","arguments":{}}\n```'
@@ -401,6 +453,13 @@ class TestParseTextToolCalls:
             '<invoke name="end"><arguments>{}</arguments></invoke>',
             '<function_calls><invoke name="end"><arguments>{}</arguments></invoke></function_calls> trailing',
             '普通文本 <function_calls><invoke name="end"><arguments>{}</arguments></invoke></function_calls>',
+            "<function=end><parameter=memo>x</parameter>",
+            "<function=end><parameter=memo>x</parameter></function> trailing",
+            "普通文本 <function=end><parameter=memo>x</parameter></function>",
+            "<parameter=memo>x</parameter>",
+            '<function=end><parameter=memo>["broken"</parameter></function>',
+            "<function=end><parameter=memo>x</parameter><parameter=memo>y</parameter></function>",
+            "<function=end>text</function>",
             '{"tool_calls":[]}',
             '{"tool_calls":{}}',
             '{"tool_calls":[null]}',

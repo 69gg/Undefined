@@ -4,7 +4,7 @@
 
 - 新增可选的 `lxmusic2api` 音乐工具集。通过 `[lxmusic2api]` 配置 `base_url` 与 `api_key`，支持环境变量、热更新和未配置密钥时自动隐藏全部音乐工具；提供歌曲、歌单、榜单、热搜、歌词、封面、评论、跨平台匹配和音频获取等 10 项面向用户的高层能力，不暴露下载任务等底层接口。部署与 API 配置参见 [lxmusic2api](https://github.com/69gg/lxmusic2api)。
 - 完成结果驱动的搜歌与交付链路。搜索结果使用请求内有效的紧凑 `track_ref`，减少完整 Track 在模型上下文中的重复传输；AI 根据标题、歌手、专辑、版本与可用音质灵活选择结果，在用户未指定时优先可明确识别的原唱录音室版本和最高可用音质，无法确认时再询问。`music.get_audio` 负责准备附件或链接，普通音频由 `messages.send_message` 实际发送，并在历史中保留平台、音质、名称、作者、专辑、时长、格式、大小和回退信息。
-- 扩展多模型请求与文本 Tool Call 兼容。新增每模型 `thinking_param_enabled` 开关，默认启用且仅控制自动生成的顶层 `thinking` 参数，不影响 reasoning effort 或显式请求参数；兼容连续 JSON、XML 风格 `tool` / `tool_execution`、`function_calls` 以及顶层 `tool_calls` JSON 封包等常见非原生输出，并将安全恢复的调用规范化为原生消息，保留调用 ID、并行顺序、工具可见性与执行边界。恢复时仅剥离文本封包载体，Responses reasoning items 与 Anthropic 签名或加密 thinking blocks 会继续参与下一轮原生回放。
+- 扩展多模型请求与文本 Tool Call 兼容。新增每模型 `thinking_param_enabled` 开关，默认启用且仅控制自动生成的顶层 `thinking` 参数，不影响 reasoning effort 或显式请求参数；兼容连续 JSON、XML 风格 `tool` / `tool_execution`、`function_calls`、`function=...` / `parameter=...` 以及顶层 `tool_calls` JSON 封包等常见非原生输出，并将安全恢复的调用规范化为原生消息，保留调用 ID、并行顺序、工具可见性与执行边界。恢复时仅剥离文本封包载体，Responses reasoning items 与 Anthropic 签名或加密 thinking blocks 会继续参与下一轮原生回放。
 - 加固工具续轮与异常恢复。空白模型响应改走同一次请求的失败重试，未调用工具的响应在纠正续轮前记录原始内容；Tool Search 规范化工具标识符查询、明确“先搜索再调用”的续轮语义，并拒绝执行本轮尚未加载的工具。无法安全解析的文本封包仍遵循既有重试与原文回退路径。
 - 优化消息投递可靠性。纯附件消息直接投递附件，不再额外发送空正文；对 NapCat / OneBot 已受理但结果不确定的超时，文本、附件和原生语音工具均按已尝试投递处理且不自动重发，私聊不会转入临时会话或遍历共享群回退。防重记录与 `mark_sent` 语义相互独立，后台播报不会误计作本轮用户回复，同时保留用户显式重试能力。
 - 改进队列与后台稳定性。`queue_interval_seconds <= 0` 改为有请求即唤醒的事件驱动即时发送，不再空闲轮询；静默重试重新入队时同步唤醒处理器，避免空闲队列无限等待。正数配置继续按间隔扫描。同步修复认知史官清理空转，以及转发消息解析器返回非 awaitable 对象时的类型与运行时处理。
