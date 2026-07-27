@@ -73,9 +73,17 @@ class BatchingMixin:
         any_poke = any(it.is_poke for it in items)
         any_at_bot = any(it.is_at_bot for it in items)
         if any_poke:
-            prefix = "(用户拍了拍你) "
+            prefix = (
+                "(用户拍了拍你)"
+                "（仅表示当前输入批次至少有一条拍一拍；"
+                "逐条收件人以各 <message> 的 bot_trigger 为准）\n"
+            )
         elif any_at_bot:
-            prefix = "(用户 @ 了你) "
+            prefix = (
+                "(用户 @ 了你)"
+                "（仅表示当前输入批次至少有一条 @ Undefined；"
+                "逐条收件人以各 <message> 的 bot_trigger 为准）\n"
+            )
         else:
             prefix = ""
 

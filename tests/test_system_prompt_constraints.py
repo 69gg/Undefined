@@ -297,6 +297,52 @@ def test_system_prompts_define_batched_current_input(path: Path) -> None:
 
 
 @pytest.mark.parametrize("path", PROMPT_PATHS)
+def test_system_prompts_gate_group_actions_by_recipient_evidence(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+
+    required_snippets = [
+        "P0 收件人闸门",
+        "先证明当前群消息确实说给 Undefined",
+        "只调用 end，禁止继续解释请求或调用任何其他工具",
+        'bot_trigger="mention" / "poke" 是系统确认的直接触发',
+        'bot_trigger="none" 表示没有显式 @/拍一拍',
+        "问号、祈使句、命令语气、技术相关性、发言者权限都**不算**叫你",
+        "@/回复其他人、两名群友连续对话、明显承接其他群友",
+        "收件人本身不明确时禁止调用 cognitive.*",
+        "每次收到搜索/Agent/工具结果后、每次发送消息或再次调用工具前",
+        "你就自作主张回消息",
+        '<case id="forbidden_pronoun_without_recipient_evidence"',
+        "规则禁止的是仅凭人称猜测，不是否定明确证据",
+    ]
+    for snippet in required_snippets:
+        assert snippet in text
+
+    assert text.index("P0 收件人闸门") < text.index(
+        '<optional_triggers description="可选回复,需谨慎判断">'
+    )
+
+
+def test_each_rules_gate_group_actions_by_recipient_evidence() -> None:
+    text = Path("res/IMPORTANT/each.md").read_text(encoding="utf-8")
+
+    required_snippets = [
+        "群聊收件人闸门（防误插话，每次行动前重做）",
+        '`bot_trigger="mention"`',
+        '`bot_trigger="poke"`',
+        '`bot_trigger="none"`',
+        "话题、语气、任务难度和你的能力不能倒推收件人是 Undefined",
+        "发言者是 Null/管理员/高优先级用户",
+        "你就自作主张回消息",
+        "记忆/搜索不能证明当前收件人",
+        "一条 @/拍一拍不自动改变其它独立消息的收件人",
+        "每次收到搜索、Agent 或其它工具结果后",
+        "规则不否定明确证据",
+    ]
+    for snippet in required_snippets:
+        assert snippet in text
+
+
+@pytest.mark.parametrize("path", PROMPT_PATHS)
 def test_system_prompts_enforce_privacy_and_safety_boundaries(path: Path) -> None:
     text = path.read_text(encoding="utf-8")
 
