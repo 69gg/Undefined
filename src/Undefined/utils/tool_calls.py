@@ -41,6 +41,7 @@ _TOOL_ATTRIBUTE_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_.:-]*")
 _TOOL_CALLS_ENVELOPE_KEYS = frozenset({"tool_calls"})
 _TOOL_ENVELOPE_KEYS = frozenset({"tool", "arguments"})
 _NAMED_TOOL_ENVELOPE_KEYS = frozenset({"name", "arguments"})
+_TOOL_CALLS_ITEM_KEYS = frozenset({"id", "name", "arguments"})
 _TOOL_TAG_ATTRIBUTE_KEYS = frozenset({"name", "params", "parameters", "arguments"})
 _TOOL_TAG_ARGUMENT_KEYS = ("params", "parameters", "arguments")
 _TOOL_CALL_ATTRIBUTE_KEYS = frozenset({"name", "arguments"})
@@ -72,12 +73,17 @@ def _parse_text_tool_arguments(raw_arguments: Any) -> dict[str, Any]:
     raise TextToolCallParseError("工具参数必须是 JSON 对象")
 
 
-def _build_text_tool_call(name: Any, raw_arguments: Any) -> dict[str, Any]:
+def _build_text_tool_call(
+    name: Any,
+    raw_arguments: Any,
+    *,
+    call_id: str | None = None,
+) -> dict[str, Any]:
     if not isinstance(name, str) or not name.strip():
         raise TextToolCallParseError("工具名称必须是非空字符串")
     arguments = _parse_text_tool_arguments(raw_arguments)
     return {
-        "id": f"call_txt_{uuid4().hex[:24]}",
+        "id": call_id or f"call_txt_{uuid4().hex[:24]}",
         "type": "function",
         "function": {
             "name": name.strip(),
@@ -126,19 +132,41 @@ def _tool_calls_from_json_envelope(value: Any) -> list[dict[str, Any]]:
         raise TextToolCallParseError("tool_calls 数组不能为空")
 
     tool_calls: list[dict[str, Any]] = []
+    seen_call_ids: set[str] = set()
     for raw_tool_call in raw_tool_calls:
         if not isinstance(raw_tool_call, dict):
             raise TextToolCallParseError("tool_calls 数组包含非对象调用")
-        if set(raw_tool_call) != _NAMED_TOOL_ENVELOPE_KEYS:
+        raw_keys = set(raw_tool_call)
+        if not _NAMED_TOOL_ENVELOPE_KEYS.issubset(raw_keys) or (
+            raw_keys - _TOOL_CALLS_ITEM_KEYS
+        ):
             raise TextToolCallParseError(
-                "tool_calls 数组项必须且只能包含 name 与 arguments"
+                "tool_calls 数组项必须包含 name 与 arguments，且只允许额外提供 id"
             )
-        tool_calls.append(
-            _build_text_tool_call(
-                raw_tool_call.get("name"),
-                raw_tool_call.get("arguments"),
-            )
+
+        call_id: str | None = None
+        if "id" in raw_tool_call:
+            raw_call_id = raw_tool_call.get("id")
+            if (
+                not isinstance(raw_call_id, str)
+                or not raw_call_id
+                or raw_call_id != raw_call_id.strip()
+            ):
+                raise TextToolCallParseError(
+                    "tool_calls 数组项的 id 必须是无首尾空白的非空字符串"
+                )
+            call_id = raw_call_id
+
+        tool_call = _build_text_tool_call(
+            raw_tool_call.get("name"),
+            raw_tool_call.get("arguments"),
+            call_id=call_id,
         )
+        resolved_call_id = str(tool_call["id"])
+        if resolved_call_id in seen_call_ids:
+            raise TextToolCallParseError("tool_calls 数组项包含重复 id")
+        seen_call_ids.add(resolved_call_id)
+        tool_calls.append(tool_call)
     return tool_calls
 
 

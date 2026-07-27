@@ -249,19 +249,37 @@ async def test_xml_text_tool_envelope_uses_name_mapping_and_native_message_repla
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "parallel_content",
+    ("parallel_content", "expected_recovered_ids"),
     [
-        """{"name":"first_tool","arguments":{"value":1}}
+        (
+            """{"name":"first_tool","arguments":{"value":1}}
 {"name":"second_tool","arguments":{"value":2}}""",
-        '{"tool_calls":['
-        '{"name":"first_tool","arguments":{"value":1}},'
-        '{"name":"second_tool","arguments":{"value":2}}'
-        "]}",
+            None,
+        ),
+        (
+            '{"tool_calls":['
+            '{"name":"first_tool","arguments":{"value":1}},'
+            '{"name":"second_tool","arguments":{"value":2}}'
+            "]}",
+            None,
+        ),
+        (
+            '{"tool_calls":['
+            '{"id":"call_1","name":"first_tool","arguments":{"value":1}},'
+            '{"id":"call_2","name":"second_tool","arguments":{"value":2}}'
+            "]}",
+            {"call_1", "call_2"},
+        ),
     ],
-    ids=["consecutive_json", "tool_calls_json_envelope"],
+    ids=[
+        "consecutive_json",
+        "tool_calls_json_envelope",
+        "tool_calls_json_envelope_with_ids",
+    ],
 )
 async def test_named_json_text_tools_execute_non_end_calls_in_parallel(
     parallel_content: str,
+    expected_recovered_ids: set[str] | None,
 ) -> None:
     started: set[str] = set()
     all_started = asyncio.Event()
@@ -311,6 +329,8 @@ async def test_named_json_text_tools_execute_non_end_calls_in_parallel(
         == ["first_tool", "second_tool"]
     )
     recovered_ids = {str(call["id"]) for call in recovered_message["tool_calls"]}
+    if expected_recovered_ids is not None:
+        assert recovered_ids == expected_recovered_ids
     replayed_result_ids = {
         str(message.get("tool_call_id"))
         for message in replayed_messages

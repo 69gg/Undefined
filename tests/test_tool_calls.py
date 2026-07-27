@@ -209,6 +209,19 @@ class TestParseTextToolCalls:
         assert tool_calls[0]["type"] == "function"
         assert str(tool_calls[0]["id"]).startswith("call_txt_")
 
+    def test_tool_calls_json_envelope_preserves_optional_id(self) -> None:
+        tool_calls = parse_text_tool_calls(
+            '{"tool_calls":[{"id":"call_1","name":"end","arguments":'
+            '{"memo":"静默处理","observations":[]}}]}'
+        )
+
+        assert self._names(tool_calls) == ["end"]
+        assert tool_calls[0]["id"] == "call_1"
+        assert self._arguments(tool_calls[0]) == {
+            "memo": "静默处理",
+            "observations": [],
+        }
+
     def test_tool_calls_json_envelope_preserves_parallel_calls(self) -> None:
         tool_calls = parse_text_tool_calls(
             '{"tool_calls":['
@@ -393,6 +406,13 @@ class TestParseTextToolCalls:
             '{"tool_calls":[null]}',
             '{"tool_calls":[{"name":"end"}]}',
             '{"tool_calls":[{"name":"end","arguments":[],"extra":true}]}',
+            '{"tool_calls":[{"id":null,"name":"end","arguments":{}}]}',
+            '{"tool_calls":[{"id":" ","name":"end","arguments":{}}]}',
+            '{"tool_calls":[{"id":" call_1 ","name":"end","arguments":{}}]}',
+            '{"tool_calls":[{"id":1,"name":"end","arguments":{}}]}',
+            '{"tool_calls":['
+            '{"id":"call_1","name":"first","arguments":{}},'
+            '{"id":"call_1","name":"second","arguments":{}}]}',
             '{"tool_calls":[{"name":"end","arguments":{}}],"extra":true}',
             '{"tool_calls":[{"name":"end","arguments":{}}]} '
             '{"name":"second","arguments":{}}',
