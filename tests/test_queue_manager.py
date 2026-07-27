@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 
@@ -13,6 +13,18 @@ from Undefined.services.queue_manager import (
     QUEUE_LANE_PRIVATE,
     QueueManager,
 )
+
+
+class _CountingEvent(asyncio.Event):
+    def __init__(self) -> None:
+        super().__init__()
+        self.wait_calls = 0
+        self.wait_started = asyncio.Event()
+
+    async def wait(self) -> Literal[True]:
+        self.wait_calls += 1
+        self.wait_started.set()
+        return await super().wait()
 
 
 def _load_config(path: Path, text: str) -> Config:
@@ -58,6 +70,58 @@ async def test_group_superadmin_is_prioritized_after_superadmin() -> None:
 
 
 @pytest.mark.asyncio
+async def test_non_positive_interval_waits_for_work_without_idle_polling() -> None:
+    processed = asyncio.Event()
+    queue_manager = QueueManager(ai_request_interval=-1.0)
+
+    async def _handler(_: dict[str, Any]) -> None:
+        processed.set()
+
+    queue_manager.start(_handler)
+    queue_manager._get_or_create_queue("chat-model")
+    work_event = _CountingEvent()
+    queue_manager._model_work_events["chat-model"] = work_event
+
+    try:
+        await asyncio.wait_for(work_event.wait_started.wait(), timeout=1.0)
+        await asyncio.sleep(0.02)
+        assert work_event.wait_calls == 1
+
+        await queue_manager.add_private_request(
+            {"type": "private_reply", "request_id": "immediate"},
+            model_name="chat-model",
+        )
+        await asyncio.wait_for(processed.wait(), timeout=1.0)
+    finally:
+        await queue_manager.stop()
+
+
+@pytest.mark.asyncio
+async def test_positive_interval_keeps_periodic_queue_scanning() -> None:
+    processed = asyncio.Event()
+    queue_manager = QueueManager(ai_request_interval=0.1)
+
+    async def _handler(_: dict[str, Any]) -> None:
+        processed.set()
+
+    queue_manager.start(_handler)
+    queue_manager._get_or_create_queue("chat-model")
+
+    try:
+        # 让处理器先完成一次空队列扫描并进入下一扫描周期。
+        await asyncio.sleep(0)
+        await queue_manager.add_private_request(
+            {"type": "private_reply", "request_id": "periodic"},
+            model_name="chat-model",
+        )
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(processed.wait(), timeout=0.02)
+        await asyncio.wait_for(processed.wait(), timeout=0.2)
+    finally:
+        await queue_manager.stop()
+
+
+@pytest.mark.asyncio
 async def test_queued_llm_request_requeues_to_second_position() -> None:
     attempts: dict[str, int] = {"first": 0}
 
@@ -98,6 +162,56 @@ async def test_queued_llm_request_requeues_to_second_position() -> None:
     remaining_ids = [item["request_id"] for item in model_queue.private_queue.drain()]
     assert first_request["_retry_count"] == 1
     assert remaining_ids == ["second", "first", "third"]
+
+
+@pytest.mark.asyncio
+async def test_immediate_queue_wakes_for_requeued_llm_retry() -> None:
+    queue_manager = QueueManager(ai_request_interval=0.0, max_retries=1)
+    model_queue = queue_manager._get_or_create_queue("chat-model")
+    work_event = _CountingEvent()
+    queue_manager._model_work_events["chat-model"] = work_event
+    first_started = asyncio.Event()
+    release_failure = asyncio.Event()
+    retry_completed = asyncio.Event()
+    attempts = 0
+
+    await queue_manager.add_queued_llm_request(
+        {
+            "request_id": "immediate-retry",
+            "model_config": SimpleNamespace(model_name="chat-model", max_tokens=128),
+            "messages": [{"role": "user", "content": "hello"}],
+            "call_type": "chat",
+        },
+        lane=QUEUE_LANE_PRIVATE,
+        model_name="chat-model",
+    )
+
+    async def _handler(_: dict[str, Any]) -> None:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            first_started.set()
+            await release_failure.wait()
+            raise RuntimeError("retry me")
+        retry_completed.set()
+
+    queue_manager.start(_handler)
+    queue_manager._processor_tasks["chat-model"] = asyncio.create_task(
+        queue_manager._process_model_loop("chat-model")
+    )
+
+    try:
+        await asyncio.wait_for(first_started.wait(), timeout=1.0)
+        await asyncio.wait_for(work_event.wait_started.wait(), timeout=1.0)
+        assert model_queue.private_queue.empty()
+
+        release_failure.set()
+        await asyncio.wait_for(retry_completed.wait(), timeout=1.0)
+    finally:
+        release_failure.set()
+        await queue_manager.stop()
+
+    assert attempts == 2
 
 
 @pytest.mark.asyncio

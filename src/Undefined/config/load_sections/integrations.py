@@ -16,6 +16,7 @@ from ..coercers import (
     _coerce_str,
     _coerce_str_list,
     _get_value,
+    _normalize_base_url,
 )
 
 logger = logging.getLogger(__name__)
@@ -26,6 +27,7 @@ _MAX_GITHUB_REQUEST_TIMEOUT_SECONDS: float = 60.0
 _MAX_GITHUB_REQUEST_RETRIES: int = 5
 _DEFAULT_GITHUB_AUTO_EXTRACT_MAX_ITEMS: int = 3
 _MAX_GITHUB_AUTO_EXTRACT_MAX_ITEMS: int = 10
+_DEFAULT_LXMUSIC2API_BASE_URL: str = "http://127.0.0.1:3000"
 
 
 def load_integrations(
@@ -298,6 +300,27 @@ def load_integrations(
     if messages_send_url_file_max_size_mb <= 0:
         messages_send_url_file_max_size_mb = 100
 
+    # lxmusic2api 音乐工具集配置
+    lxmusic2api_base_url = _normalize_base_url(
+        _coerce_str(
+            _get_value(
+                data,
+                ("lxmusic2api", "base_url"),
+                "LXMUSIC2API_BASE_URL",
+            ),
+            _DEFAULT_LXMUSIC2API_BASE_URL,
+        ),
+        _DEFAULT_LXMUSIC2API_BASE_URL,
+    )
+    lxmusic2api_api_key = _coerce_str(
+        _get_value(
+            data,
+            ("lxmusic2api", "api_key"),
+            "LXMUSIC2API_API_KEY",
+        ),
+        "",
+    )
+
     return {
         "bilibili_use_proxy": bilibili_use_proxy,
         "bilibili_auto_extract_enabled": bilibili_auto_extract_enabled,
@@ -353,4 +376,6 @@ def load_integrations(
         "messages_use_proxy": messages_use_proxy,
         "messages_send_text_file_max_size_kb": messages_send_text_file_max_size_kb,
         "messages_send_url_file_max_size_mb": messages_send_url_file_max_size_mb,
+        "lxmusic2api_base_url": lxmusic2api_base_url,
+        "lxmusic2api_api_key": lxmusic2api_api_key,
     }

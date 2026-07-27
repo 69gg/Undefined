@@ -18,6 +18,7 @@ from .coercers import (
 from .models import (
     APIConfig,
     CognitiveConfig,
+    HISTORIAN_MIN_POLL_INTERVAL_SECONDS,
     MemeConfig,
     MessageBatcherConfig,
     NagaConfig,
@@ -133,9 +134,12 @@ def _parse_cognitive_config(data: dict[str, Any]) -> CognitiveConfig:
             hist.get("source_message_max_len") if isinstance(hist, dict) else None,
             800,
         ),
-        poll_interval_seconds=_coerce_float(
-            hist.get("poll_interval_seconds") if isinstance(hist, dict) else None,
-            1.0,
+        poll_interval_seconds=max(
+            HISTORIAN_MIN_POLL_INTERVAL_SECONDS,
+            _coerce_float(
+                hist.get("poll_interval_seconds") if isinstance(hist, dict) else None,
+                1.0,
+            ),
         ),
         stale_job_timeout_seconds=_coerce_float(
             hist.get("stale_job_timeout_seconds") if isinstance(hist, dict) else None,

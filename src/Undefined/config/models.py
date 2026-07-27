@@ -8,6 +8,8 @@ from typing import Any
 
 from .api_modes import API_MODE_OPENAI_CHAT_COMPLETIONS, normalize_api_mode
 
+HISTORIAN_MIN_POLL_INTERVAL_SECONDS: float = 0.1
+
 
 def format_netloc(host: str, port: int) -> str:
     """格式化 host:port 为合法 netloc，IPv6 地址自动加方括号。"""
@@ -39,6 +41,7 @@ class ModelPoolEntry:
     context_window_tokens: int = 8192
     queue_interval_seconds: float = 1.0
     api_mode: str = API_MODE_OPENAI_CHAT_COMPLETIONS
+    thinking_param_enabled: bool = True
     thinking_enabled: bool = False
     thinking_budget_tokens: int = 0
     thinking_include_budget: bool = True
@@ -78,6 +81,9 @@ class ChatModelConfig:
     context_window_tokens: int = 8192
     queue_interval_seconds: float = 1.0
     api_mode: str = API_MODE_OPENAI_CHAT_COMPLETIONS  # 请求 API 模式
+    thinking_param_enabled: bool = (
+        True  # 是否发送 thinking_enabled 自动生成的 thinking 参数
+    )
     thinking_enabled: bool = False  # 是否启用 thinking
     thinking_budget_tokens: int = 20000  # 思维预算 token 数量
     thinking_include_budget: bool = True  # 是否在请求中发送 budget_tokens
@@ -115,6 +121,9 @@ class VisionModelConfig:
     context_window_tokens: int = 8192
     queue_interval_seconds: float = 1.0
     api_mode: str = API_MODE_OPENAI_CHAT_COMPLETIONS  # 请求 API 模式
+    thinking_param_enabled: bool = (
+        True  # 是否发送 thinking_enabled 自动生成的 thinking 参数
+    )
     thinking_enabled: bool = False  # 是否启用 thinking
     thinking_budget_tokens: int = 20000  # 思维预算 token 数量
     thinking_include_budget: bool = True  # 是否在请求中发送 budget_tokens
@@ -149,6 +158,9 @@ class SecurityModelConfig:
     context_window_tokens: int = 8192
     queue_interval_seconds: float = 1.0
     api_mode: str = API_MODE_OPENAI_CHAT_COMPLETIONS  # 请求 API 模式
+    thinking_param_enabled: bool = (
+        True  # 是否发送 thinking_enabled 自动生成的 thinking 参数
+    )
     thinking_enabled: bool = False  # 是否启用 thinking
     thinking_budget_tokens: int = 0  # 思维预算 token 数量
     thinking_include_budget: bool = True  # 是否在请求中发送 budget_tokens
@@ -213,6 +225,9 @@ class AgentModelConfig:
     context_window_tokens: int = 8192
     queue_interval_seconds: float = 1.0
     api_mode: str = API_MODE_OPENAI_CHAT_COMPLETIONS  # 请求 API 模式
+    thinking_param_enabled: bool = (
+        True  # 是否发送 thinking_enabled 自动生成的 thinking 参数
+    )
     thinking_enabled: bool = False  # 是否启用 thinking
     thinking_budget_tokens: int = 0  # 思维预算 token 数量
     thinking_include_budget: bool = True  # 是否在请求中发送 budget_tokens
@@ -248,6 +263,9 @@ class GrokModelConfig:
     context_window_tokens: int = 8192
     queue_interval_seconds: float = 1.0
     api_mode: str = API_MODE_OPENAI_CHAT_COMPLETIONS
+    thinking_param_enabled: bool = (
+        True  # 是否发送 thinking_enabled 自动生成的 thinking 参数
+    )
     thinking_enabled: bool = False  # 是否启用 thinking
     thinking_budget_tokens: int = 20000  # 思维预算 token 数量
     thinking_include_budget: bool = True  # 是否在请求中发送 budget_tokens

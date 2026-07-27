@@ -569,12 +569,13 @@ class ModelRequester:
         try:
             if cot_compat and logger.isEnabledFor(logging.DEBUG):
                 logger.debug(
-                    "[思维链兼容] enabled=%s type=%s model=%s api_mode=%s thinking_enabled=%s tools=%s messages=%s",
+                    "[思维链兼容] enabled=%s type=%s model=%s api_mode=%s thinking_enabled=%s thinking_param_enabled=%s tools=%s messages=%s",
                     cot_compat,
                     call_type,
                     model_config.model_name,
                     api_mode,
                     getattr(model_config, "thinking_enabled", False),
+                    getattr(model_config, "thinking_param_enabled", True),
                     bool(tools),
                     len(messages),
                 )

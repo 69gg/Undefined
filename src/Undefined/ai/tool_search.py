@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 import re
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Self
 
 TOOL_SEARCH_NAME = "tool_search"
+_LOG_QUERY_MAX_LENGTH = 200
+
+logger = logging.getLogger(__name__)
 
 _CAMEL_BOUNDARY_1_RE = re.compile(r"(.)([A-Z][a-z]+)")
 _CAMEL_BOUNDARY_2_RE = re.compile(r"([a-z0-9])([A-Z])")
@@ -183,7 +187,12 @@ def _build_tool_search_schema(max_results: int) -> dict[str, Any]:
             "name": TOOL_SEARCH_NAME,
             "description": (
                 "Search and load deferred tool schemas for this request. "
-                "Loaded tools become callable starting with the next model turn."
+                "This tool only exposes schemas: it never executes selected tools, "
+                "performs business actions, downloads or registers files, or sends "
+                "messages. A name in `loaded` becomes callable starting with the next "
+                "model turn; it does not mean the user's task is complete. If the "
+                "requested action remains unfinished, call the loaded target tool "
+                "before `end`."
             ),
             "parameters": {
                 "type": "object",
@@ -335,7 +344,18 @@ class ToolSearchSession:
             and not isinstance(raw_max_results, bool)
             else None
         )
-        return self.search_and_load(query, requested_max).to_json()
+        result = self.search_and_load(query, requested_max)
+        logger.info(
+            "[tool_search] query=%r max_results=%s loaded=%s already_loaded=%s "
+            "not_found=%s truncated=%s",
+            query[:_LOG_QUERY_MAX_LENGTH],
+            requested_max,
+            result.loaded,
+            result.already_loaded,
+            result.not_found,
+            result.truncated,
+        )
+        return result.to_json()
 
     def search_and_load(
         self, query: str, max_results: int | None = None
@@ -401,10 +421,12 @@ class ToolSearchSession:
         required_terms: list[str] = []
         optional_terms: list[str] = []
         for raw_term in query.casefold().split():
-            if raw_term.startswith("+") and len(raw_term) > 1:
-                required_terms.append(raw_term[1:])
-            elif raw_term:
-                optional_terms.append(raw_term)
+            is_required = raw_term.startswith("+") and len(raw_term) > 1
+            normalized_term = raw_term[1:] if is_required else raw_term
+            destination = required_terms if is_required else optional_terms
+            for part in _split_identifier(normalized_term):
+                if part not in destination:
+                    destination.append(part)
         return tuple(required_terms), tuple(optional_terms)
 
     def _select_and_load(

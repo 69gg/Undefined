@@ -222,11 +222,14 @@ async def dispatch_pending_file_sends(
     target_id: int,
     registry: AttachmentRegistry | None = None,
     address: Any | None = None,
-) -> None:
+    auto_history: bool = False,
+) -> int:
     """Send pending file attachments collected by *render_message_with_attachments*.
 
     This is best-effort: each file send failure is logged but does not interrupt
-    the remaining sends or the caller.
+    the remaining sends or the caller. The return value is the number of
+    successfully dispatched files, allowing callers that only contain file
+    attachments to avoid reporting a false success.
 
     Args:
         rendered: ``render_message_with_attachments`` 的返回值。
@@ -234,9 +237,14 @@ async def dispatch_pending_file_sends(
         target_type: ``group`` 或 ``private``。
         target_id: 目标群号或 QQ 号。
         registry: 可选，用于发送前回源下载仅有 URL 的附件。
+        auto_history: 是否由独立文件发送写入历史；纯附件消息应开启，图文混合消息关闭。
+
+    Returns:
+        成功派发的附件数量。
     """
     if not rendered.pending_file_sends or sender is None:
-        return
+        return 0
+    dispatched_count = 0
     for record in rendered.pending_file_sends:
         send_record = record
         if (
@@ -265,19 +273,24 @@ async def dispatch_pending_file_sends(
                     address,
                     send_record.local_path,
                     name=send_record.display_name or None,
-                    auto_history=False,
+                    auto_history=auto_history,
+                    history_attachment=send_record,
                 )
             elif target_type == "group":
                 await sender.send_group_file(
                     target_id,
                     send_record.local_path,
                     name=send_record.display_name or None,
+                    auto_history=auto_history,
+                    history_attachment=send_record,
                 )
             elif target_type == "private":
                 await sender.send_private_file(
                     target_id,
                     send_record.local_path,
                     name=send_record.display_name or None,
+                    auto_history=auto_history,
+                    history_attachment=send_record,
                 )
             else:
                 logger.warning(
@@ -286,7 +299,18 @@ async def dispatch_pending_file_sends(
                     send_record.uid,
                 )
                 continue
-        except Exception:
+            dispatched_count += 1
+        except Exception as exc:
+            if bool(getattr(exc, "delivery_uncertain", False)):
+                logger.warning(
+                    "[文件发送] 投递结果未确认，停止继续派发以避免重复发送 "
+                    "uid=%s target=%s:%s",
+                    send_record.uid,
+                    target_type,
+                    target_id,
+                    exc_info=True,
+                )
+                raise
             logger.warning(
                 "[文件发送] 发送失败（最佳努力） uid=%s target=%s:%s",
                 send_record.uid,
@@ -294,3 +318,4 @@ async def dispatch_pending_file_sends(
                 target_id,
                 exc_info=True,
             )
+    return dispatched_count

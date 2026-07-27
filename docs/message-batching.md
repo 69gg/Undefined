@@ -12,6 +12,7 @@
   - `fixed`：定时器从首条算起；窗口期结束统一发车。
 - **硬顶**：`max_window_seconds` 防止极端情况下窗口被无限延长（`0` = 不限制，仅靠 `window_seconds` + `max_messages_per_batch` 触发发车）；`max_messages_per_batch` 达到立即发车（`0` = 不限）。
 - **历史记录不变**：每条消息照旧由 `handlers/message_flow` 写入 history；batcher 只决定何时调用 AI。
+- **历史上下文冻结**：当前输入批次确定后、队列请求入队前，系统按 `context_recent_messages_limit` 冻结请求级历史快照。排队、认知检索和 LLM 执行期间后来到达的消息不会穿透到本轮 `history_archive`。
 - **拍一拍永远旁路**：拍一拍触发不进入 batcher，直接立即处理。
 - **群聊 @bot 规则**：
   - 当前桶**为空**且新消息 @bot → 进入 buffer，本批走 `add_group_mention_request`（提及优先级）。
@@ -20,7 +21,11 @@
 
 ## Prompt 行为
 
-合并时构造的 `<message>` 块按时间先后排列；当 `count >= 2` 时追加"连续消息说明"：
+合并时构造的 `<message>` 块按时间先后排列。每条群消息会额外携带系统生成的 `bot_trigger`：`mention` 表示明确 @ Undefined（含已识别的假 @），`poke` 表示拍一拍，`none` 表示未检测到显式 @/拍一拍。`none` 不是程序级拒绝，模型仍可通过把 Undefined 名字用作呼语、明确回复或紧邻承接 Bot 上一条发言来判断直接对话；但不能仅凭“你”、命令语气、技术相关性或发送者权限猜测收件人。
+
+批次级的“至少一条 @/拍一拍”说明只用于提示存在显式触发，逐条收件人仍以各自 `bot_trigger` 和对话流为准。一条消息 @bot 不会把同批其他独立消息自动改成对 Bot 说话。收件人闸门未通过时，模型只调用 `end`，不会调用发送、Tool Search、认知查询或业务工具。
+
+当 `count >= 2` 时追加"连续消息说明"：
 
 > 把整批 `<message>` 视作本轮的全部输入：
 > 0. 这些 `<message>` 共同构成"当前输入批次"，同批前几条不是历史旧任务；批次之外的历史消息仍只作为背景，不能回溯拾荒。
@@ -30,7 +35,13 @@
 
 `res/prompts/undefined.xml`、`res/prompts/undefined_nagaagent.xml` 与 `res/IMPORTANT/each.md` 均按"当前输入批次"适配：有【连续消息说明】时整批当前 `<message>` 都属于本轮输入；没有连续说明时，当前输入批次退化为最后一条消息。防幽灵任务规则仍然生效，但它只隔离当前输入批次之外的历史消息；「催促/在吗」不等于新任务，历史同类或语义等价操作不得自动重跑（与 each.md 硬性熔断一致）。
 
+记忆与历史上下文同样受当前输入批次约束：memory、认知记忆、侧写、短期行动记录、旧定时任务和旧工具参数只用于背景理解与消歧，不能独立成为本轮指令。执行目标、收件人、发送地址和工具参数以当前输入及当前会话元数据为准；未明确指定跨会话目标时默认使用当前会话，不能因召回了语义相似的旧任务就套用旧群号或私聊地址。
+
+长工具链中的记忆优先级不会改变：每次搜索、Agent 或其他工具返回后，下一步行动仍应重新以整个当前输入批次为事实基准。召回内容即使带有命令语气、规则名称、旧参数或历史成功结果，也不能替用户改写本轮意图；与当前输入冲突或由记忆额外补出的部分应被忽略，除非当前输入明确要求沿用过去信息。
+
 Prompt 构建顺序按缓存命中友好设计：固定系统提示词、运行环境配置、Skills 元数据和强制规则尽量放在前面；会频繁变化的 memory / cognitive / end 摘要 / history / 可选系统信息 / 当前时间 / 当前输入批次放在后面。`system_prompt_as_user=true` 时，系统块会合并进首条 user，但合并后的文本仍保留这个顺序，且当前输入批次仍在最后。
+
+其中 history 使用批次发车时冻结的深拷贝快照，而不是在慢速认知检索结束后重新读取实时历史。快照会优先按 `message_id` 从任意位置剔除当前输入批次自身的记录，因此即使批次消息之间或其后出现其他人的消息，也不会把当前输入重复注入；显式调用 `messages.get_recent_messages` 仍按工具调用时读取实时历史。
 
 `end.memo` / `end.observations` 也按同一语义适配：当前输入批次包含多条连续消息时，短期 memo 要概括整批处理结果，认知 observations 要覆盖整批消息中有价值的新观察；这些观察不要求与 bot 相关，也不要求长期稳定，但只能来自当前输入批次。历史消息、认知记忆、侧写和最近消息参考只用于消歧，不能作为 observations 的新事实来源。后台史官收到的 `source_message` 会按时间顺序列出本批所有 `<message>`，不会只取最后一条。
 
@@ -128,6 +139,7 @@ allow_cancel_after_send = false
 ### 防竞态设计
 
 - 所有桶状态变更在 `MessageBatcher._lock` 内完成；LLM/队列等待不会发生在锁内。
+- 每次批次发车都会独立冻结最近历史并随队列请求传递；队列重试复用原快照，投机请求被新消息取消并重新发车时则重新拍摄快照。快照失败会记录 warning 并使用权威空历史，不会在稍后回退读取实时消息。
 - timer 触发后由 `asyncio.create_task` 创建 flush 协程，强引用挂到 `_pending_tasks: set[Task]`，`task.add_done_callback(self._pending_tasks.discard)` 清理（asyncio 文档要求避免被 GC）。
 - T2 预发送会给队列请求附带 `BatchDispatchToken`。新消息抢占时先取消旧 token；若旧请求已入队但尚未执行，`AICoordinator.execute_reply()` 会直接跳过，避免队列拥堵窗口里的陈旧回复。
 - T2 的 `flush_callback` 若异常或被取消，桶会从 `SPECULATING` 回滚到 `TYPING` 并换新 token，保留原 items 等 T1 正常重试，避免静默丢消息。

@@ -46,7 +46,9 @@ def get_reasoning_payload(model_config: Any) -> dict[str, Any] | None:
 
 def get_thinking_payload(model_config: Any) -> dict[str, Any] | None:
     """构建 thinking 请求参数，仅由 thinking_* 配置控制。"""
-    if not bool(getattr(model_config, "thinking_enabled", False)):
+    if not bool(getattr(model_config, "thinking_param_enabled", True)) or not bool(
+        getattr(model_config, "thinking_enabled", False)
+    ):
         return None
     param: dict[str, Any] = {"type": "enabled"}
     if bool(getattr(model_config, "thinking_include_budget", True)):
@@ -322,6 +324,37 @@ def _responses_compat_reasoning_fields(
     return {}
 
 
+def _responses_function_call_items(
+    message: dict[str, Any],
+    internal_to_api: dict[str, str],
+) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    tool_calls = message.get("tool_calls")
+    if not isinstance(tool_calls, list):
+        return items
+    for tool_call in tool_calls:
+        if not isinstance(tool_call, dict):
+            continue
+        function = tool_call.get("function") or {}
+        if not isinstance(function, dict):
+            continue
+        name = str(function.get("name", "")).strip()
+        if not name:
+            continue
+        call_id = str(tool_call.get("id") or tool_call.get("call_id") or "").strip()
+        if not call_id:
+            continue
+        items.append(
+            {
+                "type": "function_call",
+                "call_id": call_id,
+                "name": internal_to_api.get(name, name),
+                "arguments": str(function.get("arguments", "{}")),
+            }
+        )
+    return items
+
+
 def _message_to_responses_input(
     message: dict[str, Any],
     internal_to_api: dict[str, str],
@@ -353,6 +386,19 @@ def _message_to_responses_input(
                 preserve_reasoning=preserve_reasoning,
             )
             if replay_items:
+                existing_call_ids = {
+                    str(item.get("call_id") or item.get("id") or "").strip()
+                    for item in replay_items
+                    if str(item.get("type") or "").strip().lower() == "function_call"
+                }
+                replay_items.extend(
+                    item
+                    for item in _responses_function_call_items(
+                        message,
+                        internal_to_api,
+                    )
+                    if str(item.get("call_id") or "").strip() not in existing_call_ids
+                )
                 if preserve_reasoning:
                     has_original_reasoning = any(
                         str(item.get("type") or "").strip().lower()
@@ -419,31 +465,7 @@ def _message_to_responses_input(
         items.append(item)
 
     if role == "assistant":
-        tool_calls = message.get("tool_calls")
-        if isinstance(tool_calls, list):
-            for tool_call in tool_calls:
-                if not isinstance(tool_call, dict):
-                    continue
-                function = tool_call.get("function") or {}
-                if not isinstance(function, dict):
-                    continue
-                name = str(function.get("name", "")).strip()
-                if not name:
-                    continue
-                api_name = internal_to_api.get(name, name)
-                call_id = str(
-                    tool_call.get("id") or tool_call.get("call_id") or ""
-                ).strip()
-                if not call_id:
-                    continue
-                items.append(
-                    {
-                        "type": "function_call",
-                        "call_id": call_id,
-                        "name": api_name,
-                        "arguments": str(function.get("arguments", "{}")),
-                    }
-                )
+        items.extend(_responses_function_call_items(message, internal_to_api))
     return items
 
 

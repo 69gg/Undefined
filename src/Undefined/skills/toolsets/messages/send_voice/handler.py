@@ -4,7 +4,11 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from Undefined.skills.toolsets.messages.context_utils import mark_message_sent
+from Undefined.skills.toolsets.messages.context_utils import (
+    handle_delivery_uncertain,
+    is_delivery_uncertain_error,
+    mark_message_sent,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -75,11 +79,19 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
             target,
             local_path,
             name=str(getattr(record, "display_name", "") or "").strip() or None,
+            history_attachment=record,
         )
         mark_message_sent(context)
     except ValueError as exc:
         return f"发送失败：{exc}"
-    except Exception:
+    except Exception as exc:
+        if is_delivery_uncertain_error(exc):
+            logger.warning(
+                "[语音发送] 投递结果未确认，阻止自动重试: uid=%s address=%s",
+                uid,
+                target.canonical,
+            )
+            return handle_delivery_uncertain(context)
         logger.exception("[语音发送] 投递失败: uid=%s", uid)
         return "发送失败：语音服务暂时不可用，请稍后重试"
 

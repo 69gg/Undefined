@@ -185,6 +185,62 @@ def test_openai_request_body_omits_non_positive_token_limit(
     assert token_field not in body
 
 
+@pytest.mark.parametrize(
+    "api_mode",
+    ["openai.chat_completions", "openai.responses"],
+)
+def test_openai_thinking_param_switch_only_suppresses_automatic_thinking(
+    api_mode: str,
+) -> None:
+    cfg = ChatModelConfig(
+        api_url="https://api.example.com/v1",
+        api_key="sk-test",
+        model_name="test-model",
+        max_tokens=4096,
+        api_mode=api_mode,
+        thinking_param_enabled=False,
+        thinking_enabled=True,
+        thinking_budget_tokens=2048,
+        reasoning_enabled=True,
+        reasoning_effort="high",
+    )
+
+    body = build_request_body(
+        model_config=cfg,
+        messages=[{"role": "user", "content": "hello"}],
+        max_tokens=4096,
+    )
+
+    assert "thinking" not in body
+    if api_mode == "openai.responses":
+        assert body["reasoning"] == {"effort": "high"}
+    else:
+        assert body["reasoning_effort"] == "high"
+
+
+def test_chat_thinking_param_switch_keeps_explicit_thinking_override() -> None:
+    cfg = ChatModelConfig(
+        api_url="https://api.example.com/v1",
+        api_key="sk-test",
+        model_name="test-model",
+        max_tokens=4096,
+        thinking_param_enabled=False,
+        thinking_enabled=True,
+        reasoning_enabled=True,
+        reasoning_effort="high",
+    )
+
+    body = build_request_body(
+        model_config=cfg,
+        messages=[{"role": "user", "content": "hello"}],
+        max_tokens=4096,
+        thinking={"type": "disabled"},
+    )
+
+    assert body["thinking"] == {"type": "disabled"}
+    assert body["reasoning_effort"] == "high"
+
+
 @pytest.mark.asyncio
 async def test_chat_request_uses_model_reasoning_and_request_params(
     caplog: pytest.LogCaptureFixture,
@@ -626,6 +682,7 @@ async def test_responses_request_respects_explicit_thinking_override() -> None:
         model_name="gpt-test",
         max_tokens=512,
         api_mode="responses",
+        thinking_param_enabled=False,
         reasoning_enabled=True,
         reasoning_effort="low",
     )

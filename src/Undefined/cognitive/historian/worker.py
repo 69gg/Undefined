@@ -14,6 +14,7 @@ from Undefined.cognitive.chroma_scheduler import (
     CHROMA_PRIORITY_MAINTENANCE,
 )
 from Undefined.cognitive.vector_store_compat import call_vector_store_method
+from Undefined.config.models import HISTORIAN_MIN_POLL_INTERVAL_SECONDS
 from Undefined.utils.tool_calls import extract_required_tool_call_arguments
 
 from Undefined.cognitive.historian.helpers import (
@@ -90,6 +91,7 @@ class HistorianWorker:
         logger.info("[史官] 轮询循环已开始")
         while not self._stop_event.is_set():
             result = await self._job_queue.dequeue()
+            config = self._config_getter()
             if result:
                 job_id, job = result
                 task = asyncio.create_task(self._process_job_with_retry(job_id, job))
@@ -101,28 +103,30 @@ class HistorianWorker:
                     job_id,
                     len(self._inflight_tasks),
                 )
+                if (
+                    config.failed_cleanup_interval > 0
+                    and dispatch_count % config.failed_cleanup_interval == 0
+                ):
+                    from Undefined.utils.cache import cleanup_cache_dir
 
-            config = self._config_getter()
-            if (
-                config.failed_cleanup_interval > 0
-                and dispatch_count > 0
-                and dispatch_count % config.failed_cleanup_interval == 0
-            ):
-                from Undefined.utils.cache import cleanup_cache_dir
+                    cleanup_cache_dir(
+                        self._job_queue._failed_dir,
+                        max_age_seconds=config.failed_max_age_days * 86400,
+                        max_files=config.failed_max_files,
+                    )
+                    logger.info(
+                        "[史官] failed 队列清理已执行: interval=%s max_age_days=%s max_files=%s",
+                        config.failed_cleanup_interval,
+                        config.failed_max_age_days,
+                        config.failed_max_files,
+                    )
 
-                cleanup_cache_dir(
-                    self._job_queue._failed_dir,
-                    max_age_seconds=config.failed_max_age_days * 86400,
-                    max_files=config.failed_max_files,
+            await asyncio.sleep(
+                max(
+                    HISTORIAN_MIN_POLL_INTERVAL_SECONDS,
+                    float(config.poll_interval_seconds),
                 )
-                logger.info(
-                    "[史官] failed 队列清理已执行: interval=%s max_age_days=%s max_files=%s",
-                    config.failed_cleanup_interval,
-                    config.failed_max_age_days,
-                    config.failed_max_files,
-                )
-
-            await asyncio.sleep(config.poll_interval_seconds)
+            )
 
         if self._inflight_tasks:
             logger.info(

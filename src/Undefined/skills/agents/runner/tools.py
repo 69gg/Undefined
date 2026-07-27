@@ -13,6 +13,10 @@ from Undefined.skills.agents.runner.webchat_utils import (
     webchat_depth,
 )
 from Undefined.config.search import SEARCH_TOOL_FIRECRAWL, SEARCH_TOOL_GROK
+from Undefined.utils.easter_egg_calls import (
+    agent_call_key,
+    prepare_easter_egg_call_batch,
+)
 from Undefined.utils.tool_calls import parse_tool_arguments
 
 
@@ -87,6 +91,23 @@ async def execute_assistant_tool_calls(
     callable_agent_names: set[str] = getattr(
         tool_registry, "_callable_agent_tool_names", set()
     )
+
+    parallel_call_keys: list[str] = []
+    for pending_tool_call in tool_calls:
+        if not isinstance(pending_tool_call, dict):
+            continue
+        pending_function = pending_tool_call.get("function")
+        if not isinstance(pending_function, dict):
+            continue
+        pending_api_name = str(pending_function.get("name", "") or "").strip()
+        if not pending_api_name:
+            continue
+        pending_internal_name = api_to_internal.get(
+            pending_api_name,
+            pending_api_name,
+        )
+        parallel_call_keys.append(agent_call_key(agent_name, pending_internal_name))
+    prepare_easter_egg_call_batch(context, parallel_call_keys)
 
     for tool_call in tool_calls:
         call_id = str(tool_call.get("id", ""))

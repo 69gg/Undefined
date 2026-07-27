@@ -56,6 +56,11 @@ def test_virtual_schema_uses_configured_result_cap() -> None:
     function = session.tool_search_schema["function"]
 
     assert function["name"] == TOOL_SEARCH_NAME
+    assert "only exposes schemas" in function["description"]
+    assert "never executes selected tools" in function["description"]
+    assert "or sends messages" in function["description"]
+    assert "does not mean the user's task is complete" in function["description"]
+    assert "before `end`" in function["description"]
     assert function["parameters"]["properties"]["max_results"]["maximum"] == 3
     assert function["parameters"]["additionalProperties"] is False
 
@@ -170,6 +175,24 @@ def test_keyword_scoring_uses_name_parameter_and_descriptions() -> None:
         "lookup",
         "generic",
     )
+
+
+@pytest.mark.parametrize("query", ["search_songs", "load music.search_songs"])
+def test_keyword_query_normalizes_tool_name_separators(query: str) -> None:
+    session = ToolSearchSession(
+        [
+            _tool("music.search_songs", "Search songs across music platforms"),
+            _tool("music.get_hot_search", "Next call music.search_songs"),
+            _tool("music.get_lyrics", "Track from music.search_songs"),
+        ],
+        [],
+        max_results=1,
+    )
+
+    result = session.search_and_load(query)
+
+    assert result.loaded == ("music.search_songs",)
+    assert result.truncated is True
 
 
 def test_nested_parameter_descriptions_are_searchable() -> None:

@@ -8,6 +8,10 @@
 - **认知记忆**（`end.observations` + `cognitive.*`）：核心层，AI 在每轮对话中只观察当前输入批次，提取有价值的新观察（用户/群聊/第三方事实及有价值的自身行为）。`observations` 不要求与 bot 相关，也不要求长期稳定；历史消息、认知记忆、侧写和最近消息参考只能用于消歧，不能作为新事实来源。后台史官会异步改写为绝对化事件并存入 ChromaDB 向量库，支持语义检索；当对话中出现可沉淀为稳定画像的新信息（偏好、身份、习惯等）时，史官自动合并更新 Markdown 侧写文件，下次对话时注入 prompt。
 - **置顶备忘录**（`memory.*`）：AI 自身的置顶提醒（自我约束、待办事项，如"用户要求以后用英文回复"），每轮固定注入，支持增删改查。注意：用户事实（偏好、身份、习惯等）不应写入此层，一律通过 `end.observations` 写入认知记忆。
 
+三层记忆都只为当前请求提供背景、默认偏好和消歧信息，不能独立构成本轮可执行指令，也不能覆盖当前输入批次。任务目标、收件人、发送地址、工具参数和输出位置始终以当前输入及当前会话元数据为准；当前消息没有明确指定跨会话目标时，默认回复或发送到当前会话，不得从记忆、旧定时任务或历史工具调用中继承其他地址。只有当前输入明确要求沿用某项历史配置时，才可把对应记忆作为参数参考。
+
+为避免长工具链中被召回内容带偏，AI 在每次收到搜索、Agent 或其他工具结果后，都应重新以当前输入批次恢复本轮目标、范围与约束。记忆即使写成规则、命令、默认值或成功案例，也只是历史转述；如果它与当前输入冲突、补入了当前输入没有给出的前提或参数，冲突和新增部分应被丢弃。只有当前输入明确要求参考、沿用或恢复过去信息时，才在授权范围内使用记忆。
+
 与旧 `end_summaries` 的区别：
 
 | | 旧模式（end_summaries） | 认知记忆 |
@@ -319,7 +323,7 @@ data/cognitive/
 | `recent_messages_inject_k` | int | `12` | 提供给史官的最近消息参考条数（0=禁用，支持热更新） |
 | `recent_message_line_max_len` | int | `240` | 最近消息参考中每条文本最大长度（支持热更新） |
 | `source_message_max_len` | int | `800` | 当前消息原文最大长度（支持热更新） |
-| `poll_interval_seconds` | float | `1.0` | 史官轮询间隔秒数（支持热更新） |
+| `poll_interval_seconds` | float | `1.0` | 史官轮询间隔秒数，小于 `0.1` 时按 `0.1` 处理（支持热更新） |
 | `stale_job_timeout_seconds` | float | `300.0` | 启动时恢复 stale 任务的超时阈值 |
 
 ### [cognitive.profile]
@@ -336,7 +340,7 @@ data/cognitive/
 | `path` | str | `data/cognitive/queues` | 队列文件存储路径 |
 | `failed_max_age_days` | int | `30` | failed 队列文件最大保留天数 |
 | `failed_max_files` | int | `500` | failed 队列最大文件数 |
-| `failed_cleanup_interval` | int | `100` | 每 N 轮 poll 执行一次清理（0 禁用） |
+| `failed_cleanup_interval` | int | `100` | 每派发 N 个任务执行一次清理（0 禁用，每个阈值仅执行一次） |
 | `job_max_retries` | int | `3` | 单个任务最大自动重试次数（超过后移入 failed，0=不重试） |
 
 ### [models.embedding]（必须配置）
@@ -348,7 +352,7 @@ data/cognitive/
 | `api_url` | OpenAI 兼容 base URL |
 | `api_key` | API 密钥 |
 | `model_name` | 模型名称（推荐 `text-embedding-3-small`） |
-| `queue_interval_seconds` | 发车间隔（默认 `0.0`，立即发车；`<0` 回退 `0.0`） |
+| `queue_interval_seconds` | 发车间隔（默认 `0.0`；`<=0` 请求到达立即发车） |
 | `dimensions` | 向量维度（可选，模型默认值） |
 
 ### 热更新说明

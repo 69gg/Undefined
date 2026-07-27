@@ -193,9 +193,9 @@ model_name = "gpt-4o-mini"
 | `process_every_message` | `true` | 群聊是否处理每条消息 | 关闭后仅处理 @ 触发 |
 | `process_private_message` | `true` | 是否处理私聊回复 | 关闭后私聊只记录历史，不回复 |
 | `process_poke_message` | `true` | 是否响应拍一拍 | 关闭后忽略 poke |
-| `context_recent_messages_limit` | `20` | 注入到提示词的最近历史条数 | `<0` 视为 `0`（关闭注入）；无固定上限，受 `max_records` 与存储约束 |
-| `ai_request_max_retries` | `2` | 单次 LLM 请求失败重试次数 | `<0` 自动回退到 `0`；支持热更新 |
-| `missing_tool_call_retries` | `3` | 模型返回纯文本但未调用任何工具时的纠正重试次数（保留 assistant 纯文本 + 通用纠正提示，不写死具体 tool） | `<0` 自动回退到 `0`；支持热更新 |
+| `context_recent_messages_limit` | `20` | 注入到提示词的最近历史条数；当前输入批次发车入队前冻结为请求级快照 | `<0` 视为 `0`（关闭注入）；无固定上限，受 `max_records` 与存储约束；已入队请求不受后续消息或配置热更新影响 |
+| `ai_request_max_retries` | `2` | 单次 LLM 请求失败重试次数；无工具调用且实际 `assistant.content` 为空白时也走此路径，原样重试同一轮请求 | `<0` 自动回退到 `0`；支持热更新 |
+| `missing_tool_call_retries` | `3` | 模型返回非空纯文本且无法恢复为本轮可用工具调用时的纠正重试次数（保留 assistant 纯文本 + 通用纠正提示，不写死具体 tool）；空白响应不计入此项；每次进入下一轮纠正重试前，warning 日志会以 `raw_content=repr(...)` 完整记录该轮原始响应；格式与失败回退规则见 [模型 API 与兼容层](model-compatibility.md#文本-tool-call-后备解析) | `<0` 自动回退到 `0`；支持热更新 |
 
 ---
 
@@ -239,11 +239,12 @@ model_name = "gpt-4o-mini"
 | `model_name` | 模型名 |
 | `max_tokens` | 最大输出 token；OpenAI 模式下设为 `0` 或负数时不发送上限字段，Anthropic Messages 要求为正整数 |
 | `context_window_tokens` | 模型上下文窗口上限（token），用于 `/summary` 分块与 Prompt 预算；解析默认 `8192`，须按上游模型能力配置 |
-| `queue_interval_seconds` | 该模型请求队列发车间隔（秒，`0` 表示立即发车） |
+| `queue_interval_seconds` | 该模型请求队列发车间隔（秒）；`<=0` 为事件驱动，请求到达立即发车且空闲时不扫描；`>0` 按间隔扫描 |
 | `use_proxy` | 是否让该模型请求使用 `[proxy]` 中配置的代理地址；默认 `false`，各模型种类独立配置 |
 | `api_mode` | `openai.chat_completions`、`openai.responses` 或 `anthropic.messages`；旧 `chat_completions` / `responses` 仍兼容但会告警 |
 | `reasoning_enabled` | 是否发送当前 API mode 对应的 effort 参数 |
 | `reasoning_effort` | 自定义 effort 字符串；`adaptive` 原样发送，其余值也不做枚举或大小写改写 |
+| `thinking_param_enabled` | 是否发送由 `thinking_enabled` 自动生成的顶层 `thinking` 参数；默认 `true`，不影响 effort 或调用方显式传入的 `thinking` |
 | `thinking_enabled` | 是否启用旧式 `thinking` 参数 |
 | `thinking_budget_tokens` | thinking 预算 |
 | `thinking_include_budget` | 是否发送手动 `budget_tokens`；`anthropic.messages` 下关闭时使用 adaptive thinking |
@@ -258,12 +259,13 @@ model_name = "gpt-4o-mini"
 请求模式说明：
 - `api_mode="openai.chat_completions"`：走 `AsyncOpenAI.chat.completions.create(...)`
   - `max_tokens > 0` 时发送 `max_tokens`；为 `0` 或负数时省略
-  - `thinking_enabled=true` 时发送兼容接口常用的顶层 `thinking`
+  - `thinking_enabled=true` 且 `thinking_param_enabled=true` 时发送兼容接口常用的顶层 `thinking`
   - `reasoning_enabled=true` 时发送顶层 `reasoning_effort="..."`
   - 回放开启时优先恢复响应原始字段：`reasoning_content`、`reasoning_details`、`reasoning`、`encrypted_content`、`thinking`；OpenRouter 的 `reasoning_details` 数组、签名与密文保持原顺序和原值
   - 旧历史没有原始载体时，才回退到可读 `reasoning_content`
 - `api_mode="openai.responses"`：走 `AsyncOpenAI.responses.create(...)`
   - `max_tokens > 0` 时映射为 `max_output_tokens`；为 `0` 或负数时省略
+  - `thinking_enabled=true` 且 `thinking_param_enabled=true` 时发送兼容接口使用的顶层 `thinking`
   - `reasoning_enabled=true` 时发送 `reasoning.effort`；`request_params.reasoning` 的 `summary` 等其他键会保留并与 effort 合并
   - 若 `request_params` 里带 `response_format` / `verbosity`，会自动映射到 `text.format` / `text.verbosity`
   - 默认使用官方对象格式：`{"type":"function","name":"..."}`
@@ -277,8 +279,8 @@ model_name = "gpt-4o-mini"
 - `api_mode="anthropic.messages"`：走 `AsyncAnthropic.messages.create(...)` / `messages.stream(...)`
   - 官方 Messages API 将 `max_tokens` 定义为必填字段；运行时要求其为正整数并原样发送，`0` 或负数会在请求发出前报错
   - 自动转换顶层 `system`、图片、函数工具、`tool_use` / `tool_result`，不使用手写 HTTP 请求
-  - `thinking_enabled=true` 且 `thinking_include_budget=true` 时发送 `thinking={type="enabled", budget_tokens=...}`；预算必须 `>=1024` 且严格小于本次 `max_tokens`
-  - `thinking_include_budget=false` 时发送 `thinking={type="adaptive"}`
+  - `thinking_enabled=true`、`thinking_param_enabled=true` 且 `thinking_include_budget=true` 时发送 `thinking={type="enabled", budget_tokens=...}`；预算必须 `>=1024` 且严格小于本次 `max_tokens`
+  - `thinking_enabled=true`、`thinking_param_enabled=true` 且 `thinking_include_budget=false` 时发送 `thinking={type="adaptive"}`
   - `reasoning_enabled=true` 时发送 `output_config.effort`，值按 `reasoning_effort` 原样透传；其他 `output_config` 键继续保留
   - 回放开启时按原顺序发送完整 `thinking` / `redacted_thinking` / `text` / `tool_use` blocks；关闭时只过滤 thinking 与 redacted blocks
   - Anthropic thinking 开启时不支持强制指定工具，强制 `tool_choice` 会降级为 `auto`
@@ -292,6 +294,7 @@ Prompt caching 补充：
 `request_params` 说明：
 - 适合放 provider 私有请求体字段，例如 `metadata`、`temperature`、兼容网关扩展参数等。
 - `reasoning_effort` 与 `thinking` 由正式配置字段控制，`request_params` 中的同名保留字段不能覆盖；兼容 Chat 的 `reasoning` 对象、Responses 的 `reasoning.summary` 等附加键、Anthropic 的其他 `output_config` 键属于明确的合并例外，专用 effort 配置优先。
+- `thinking_param_enabled=false` 只禁止根据 `thinking_enabled` 自动生成参数。代码调用方通过单次请求参数显式传入的 `thinking` 仍会发送；`reasoning_enabled` / `reasoning_effort` 完全独立，不受该开关影响。
 - 消息总结分块读取 `[models.summary].context_window_tokens`（未单独配置时回退 `[models.agent]`）；不再使用硬编码窗口或 `request_params` 里的 `context_length` 类字段。
 
 #### 思维链续传迁移说明
@@ -312,14 +315,17 @@ Prompt caching 补充：
   - 若开启：等效默认 `thinking_include_budget=false` + `thinking_tool_call_compat=true`
   - 显式设置新字段时，以新字段为准。
 
+三种 SDK 的请求/响应归一化、CoT 原生载体回放、Responses 状态续轮和文本 Tool Call 后备解析统一记录在[模型 API 与兼容层](model-compatibility.md)。
+
 ### 4.4.2 `[models.chat]` 主对话模型
 
 默认：
 - `max_tokens=8192`
-- `queue_interval_seconds=1.0`（`0` 表示立即发车，`<0` 回退 `1.0`）
+- `queue_interval_seconds=1.0`（`<=0` 事件驱动立即发车，`>0` 按间隔扫描）
 - `api_mode="openai.chat_completions"`
 - `reasoning_enabled=false`
 - `reasoning_effort="medium"`
+- `thinking_param_enabled=true`
 - `thinking_budget_tokens=20000`
 - `thinking_tool_call_compat=true`
 - `reasoning_content_replay=true`
@@ -334,10 +340,11 @@ Prompt caching 补充：
 ### 4.4.3 `[models.vision]` 视觉模型
 
 默认：
-- `queue_interval_seconds=1.0`（`0` 表示立即发车，`<0` 回退 `1.0`）
+- `queue_interval_seconds=1.0`（`<=0` 事件驱动立即发车，`>0` 按间隔扫描）
 - `api_mode="openai.chat_completions"`
 - `reasoning_enabled=false`
 - `reasoning_effort="medium"`
+- `thinking_param_enabled=true`
 - `thinking_budget_tokens=20000`
 - `thinking_tool_call_compat=true`
 - `reasoning_content_replay=true`
@@ -349,11 +356,11 @@ Prompt caching 补充：
 
 字段：
 - 额外开关：`enabled=true`
-- 默认：`max_tokens=100`、`queue_interval_seconds=1.0`（`0` 表示立即发车，`<0` 回退 `1.0`）、`api_mode="openai.chat_completions"`、`reasoning_enabled=false`、`reasoning_effort="medium"`、`thinking_budget_tokens=0`、`thinking_tool_call_compat=true`、`reasoning_content_replay=true`、`responses_tool_choice_compat=false`、`responses_force_stateless_replay=false`、`use_proxy=false`
+- 默认：`max_tokens=100`、`queue_interval_seconds=1.0`（`<=0` 事件驱动立即发车，`>0` 按间隔扫描）、`api_mode="openai.chat_completions"`、`reasoning_enabled=false`、`reasoning_effort="medium"`、`thinking_param_enabled=true`、`thinking_budget_tokens=0`、`thinking_tool_call_compat=true`、`reasoning_content_replay=true`、`responses_tool_choice_compat=false`、`responses_force_stateless_replay=false`、`use_proxy=false`
 
 关键回退逻辑：
 - 若 `api_url/api_key/model_name` 任一缺失，会自动回退为 chat 模型（并告警）。
-- 回退时会继承 chat 的 `api_mode`、`reasoning_*`、`responses_tool_choice_compat`、`responses_force_stateless_replay` 与 `request_params`；旧 `thinking_*` 仍保持安全模型自身默认值；`use_proxy` 仍只读取 `[models.security]` 自身配置，默认 `false`。
+- 回退时会继承 chat 的 `api_mode`、`reasoning_*`、`thinking_param_enabled`、`responses_tool_choice_compat`、`responses_force_stateless_replay` 与 `request_params`；其余旧 `thinking_*` 仍保持安全模型自身默认值；`use_proxy` 仍只读取 `[models.security]` 自身配置，默认 `false`。
 
 ### 4.4.5 `[models.naga]` Naga 审核模型
 
@@ -362,10 +369,11 @@ Prompt caching 补充：
 
 默认：
 - `max_tokens=160`
-- `queue_interval_seconds=1.0`（`0` 表示立即发车，`<0` 回退 `1.0`）
+- `queue_interval_seconds=1.0`（`<=0` 事件驱动立即发车，`>0` 按间隔扫描）
 - `api_mode="openai.chat_completions"`
 - `reasoning_enabled=false`
 - `reasoning_effort="medium"`
+- `thinking_param_enabled=true`
 - `thinking_enabled=false`
 - `thinking_budget_tokens=0`
 - `thinking_include_budget=true`
@@ -382,10 +390,11 @@ Prompt caching 补充：
 
 默认：
 - `max_tokens=4096`
-- `queue_interval_seconds=1.0`（`0` 表示立即发车，`<0` 回退 `1.0`）
+- `queue_interval_seconds=1.0`（`<=0` 事件驱动立即发车，`>0` 按间隔扫描）
 - `api_mode="openai.chat_completions"`
 - `reasoning_enabled=false`
 - `reasoning_effort="medium"`
+- `thinking_param_enabled=true`
 - `thinking_tool_call_compat=true`
 - `reasoning_content_replay=true`
 - `responses_tool_choice_compat=false`
@@ -397,14 +406,16 @@ Prompt caching 补充：
 - 用于认知记忆后台改写。
 - 若整个节缺失或为空：完整回退到 `models.agent`。
 - 若部分字段缺失：逐项继承 agent 配置，包括 `api_mode`、`reasoning_*`、`thinking_*`、`responses_tool_choice_compat`、`responses_force_stateless_replay` 与 `request_params`。
+- `thinking_param_enabled` 默认继承 agent，也可在 historian 节或 `HISTORIAN_MODEL_THINKING_PARAM_ENABLED` 中独立覆盖。
 - `use_proxy` 不继承 agent；`[models.historian]` 存在时未显式配置仍默认 `false`。
-- `queue_interval_seconds=0` 时立即发车，`<0` 时回退到 agent 的间隔。
+- `queue_interval_seconds<=0` 时事件驱动立即发车，空闲时不扫描；`>0` 时按间隔扫描。
 
 #### `[models.summary]` 消息总结模型
 
 - 用于 `/summary`、`/sum` 与内部 SummaryService；主 AI 对话中的 `summary_agent` 仍走 `[models.agent]`。
 - 若整个节缺失或为空：完整回退到 `models.agent`。
 - 若部分字段缺失：逐项继承 agent 配置，包括 `api_mode`、`reasoning_*`、`thinking_*`、`responses_tool_choice_compat`、`responses_force_stateless_replay` 与 `request_params`。
+- `thinking_param_enabled` 默认继承 agent，也可在 summary 节或 `SUMMARY_MODEL_THINKING_PARAM_ENABLED` 中独立覆盖。
 - `use_proxy` 不继承 agent；`[models.summary]` 存在时未显式配置仍默认 `false`。
 
 ### 4.4.8 `[models.grok]` Grok 搜索模型
@@ -415,10 +426,11 @@ Prompt caching 补充：
 
 默认：
 - `max_tokens=8192`
-- `queue_interval_seconds=1.0`（`0` 表示立即发车，`<0` 回退 `1.0`）
+- `queue_interval_seconds=1.0`（`<=0` 事件驱动立即发车，`>0` 按间隔扫描）
 - `api_mode="openai.chat_completions"`
 - `reasoning_enabled=false`
 - `reasoning_effort="medium"`
+- `thinking_param_enabled=true`
 - `thinking_enabled=false`
 - `thinking_budget_tokens=20000`
 - `thinking_include_budget=true`
@@ -452,11 +464,11 @@ Prompt caching 补充：
 - `model_name`（必填）
 - `api_url` / `api_key` / `max_tokens` / `queue_interval_seconds`
 - `api_mode` / `reasoning_enabled` / `reasoning_effort` / `reasoning_content_replay`
-- `thinking_*` / `system_prompt_as_user` / `responses_tool_choice_compat` / `responses_force_stateless_replay`
+- `thinking_*`（包含 `thinking_param_enabled`）/ `system_prompt_as_user` / `responses_tool_choice_compat` / `responses_force_stateless_replay`
 - `prompt_cache_enabled` / `stream_enabled` / `request_params`
 - 以上可选字段缺省继承主模型
 - `use_proxy` 是每个池条目独立开关，默认 `false`，不继承主模型，也没有池级总开关
-- `queue_interval_seconds=0` 表示立即发车；`<0` 时回退到主模型间隔。
+- `queue_interval_seconds<=0` 表示事件驱动立即发车；`>0` 时按间隔扫描。
 
 `request_params` 继承规则：
 - `[[models.chat.pool.models]]` 与 `[[models.agent.pool.models]]` 的 `request_params` 会与主模型按顶层键浅合并。
@@ -475,7 +487,7 @@ Prompt caching 补充：
 | `api_key` | `""` | API Key |
 | `model_name` | `""` | 模型名 |
 | `use_proxy` | `false` | 是否使用 `[proxy]` 中的代理地址 |
-| `queue_interval_seconds` | `0.0` | 发车间隔（`0` 立即发车，`<0` 回退 `0.0`） |
+| `queue_interval_seconds` | `0.0` | 发车间隔；`<=0` 表示请求到达立即发车，`>0` 表示两次发车间隔 |
 | `dimensions` | `0` | 向量维度；`0`/空视为 `None`（模型默认） |
 | `query_instruction` | `""` | 查询前缀 |
 | `document_instruction` | `""` | 文档前缀 |
@@ -489,7 +501,7 @@ Prompt caching 补充：
 | `api_key` | `""` | API Key |
 | `model_name` | `""` | 模型名 |
 | `use_proxy` | `false` | 是否使用 `[proxy]` 中的代理地址 |
-| `queue_interval_seconds` | `0.0` | `0` 立即发车，`<0` 回退 `0.0` |
+| `queue_interval_seconds` | `0.0` | `<=0` 请求到达立即发车，`>0` 表示两次发车间隔 |
 | `query_instruction` | `""` | 查询前缀 |
 | `request_params` | `{}` | 额外请求体参数；保留字段如 `model`/`query`/`documents`/`top_n` 会忽略 |
 
@@ -603,6 +615,10 @@ Prompt caching 补充：
 | `repeat_cooldown_minutes` | `60` | 复读冷却时间（分钟）。同一内容被复读后，在冷却期内不再重复复读。？和 ? 视为等价。0 = 无冷却 | 整数，≥ 0 |
 | `inverted_question_enabled` | `false` | 倒问号（复读触发时若消息为问号则发送 ¿） | 布尔 |
 
+虚拟 `tool_search` 遵循普通 Tool 的调用提示规则：`tools`、`clean`、`all` 模式发送，`none`、`agent` 模式不发送。它只负责加载 schema，下一轮目标工具真正执行时会按对应规则再次独立提示。`clean` 会抑制带 `easter_egg_silent` 的自动预取调用以及 `send_message`、`end`，但不会过滤正常的 `tool_search` 调用。
+
+同一轮模型响应并行调用多个同名工具时，调用彩蛋会合并为一条并附加次数，例如 4 个 `web_agent` 内部的 `crawl_webpage` 调用只发送 `web_agent：crawl_webpage，我调用你了，我要调用你了！ x4`。不同工具仍分别提示；后续模型轮次会重新统计，不会与上一轮累计。
+
 复读支持图片等已登记附件：当连续相同内容是 `<attachment uid="..."/>` 图片引用时，系统会先渲染成真实图片消息再发送，不会把 UID 占位字符串直接发到群里。
 
 兼容：历史字段 `[core].keyword_reply_enabled` 仍可读取，建议迁移到 `[easter_egg]`。
@@ -650,7 +666,7 @@ Prompt caching 补充：
 | `pre_send_seconds` | `0.0` | 投机预发送阈值（秒）。`0 < pre_send_seconds < window_seconds` 时启用：静默到该阈值先把当前 batch 提前发给 LLM 抢时间（speculative pre-fire），但 batch 仍要等到 `window_seconds` 才正式结束；新消息在投机期间到达且 inflight 调用尚未发出消息时会取消 inflight 并把消息合并入下一轮调用。`0` 或 `>= window_seconds` 视为关闭 |
 | `allow_cancel_after_send` | `false` | 投机调用已向用户发出消息后是否仍允许新消息取消该 inflight。默认 `false`（安全：不取消，新消息开新 batch）；启用后可能造成重复发送 |
 
-启用后，同一发送者在窗口内连续发送的多条消息会合并到同一轮 AI 调用，`<message>` 块按时间顺序排列，并带有"当前输入批次"说明，AI 一次性处理整批意图。拍一拍永远旁路立即处理；群聊已有 buffer 时新到的 @bot 也会单独立即处理（不打断 buffer）；首条 @bot 进入 buffer 时整批发车走 `add_group_mention_request`。配置支持热更新，关停时会 `flush_all` 并等待队列 drain，避免缓冲消息只入队未执行。详细行为矩阵与设计要点见 [docs/message-batching.md](message-batching.md)。
+启用后，同一发送者在窗口内连续发送的多条消息会合并到同一轮 AI 调用，`<message>` 块按时间顺序排列，并带有"当前输入批次"说明，AI 一次性处理整批意图。群聊中的每条 `<message>` 还会分别标记 `bot_trigger="mention|poke|none"`，避免批次内一条 @bot 错误改变其他独立消息的收件人；`none` 仅表示未检测到显式 @/拍一拍，明确呼语或连续回复仍由模型结合上下文判断。拍一拍永远旁路立即处理；群聊已有 buffer 时新到的 @bot 也会单独立即处理（不打断 buffer）；首条 @bot 进入 buffer 时整批发车走 `add_group_mention_request`。配置支持热更新，关停时会 `flush_all` 并等待队列 drain，避免缓冲消息只入队未执行。详细行为矩阵与设计要点见 [docs/message-batching.md](message-batching.md)。
 
 ---
 
@@ -662,7 +678,7 @@ Prompt caching 补充：
 | `hot_reload_interval` | `2.0` | 扫描间隔（秒） |
 | `hot_reload_debounce` | `0.5` | 去抖时间（秒） |
 | `intro_autogen_enabled` | `true` | 是否自动生成 agent intro |
-| `intro_autogen_queue_interval` | `1.0` | intro 生成队列发车间隔（`0` 立即发车，`<0` 回退 `1.0`） |
+| `intro_autogen_queue_interval` | `1.0` | intro 生成队列发车间隔（`<=0` 请求到达立即发车） |
 | `intro_autogen_max_tokens` | `8192` | intro 生成上限 |
 | `intro_hash_path` | `.cache/agent_intro_hashes.json` | intro hash 缓存 |
 | `prefetch_tools` | `["get_current_time"]` | 预先执行并注入 system 的工具列表 |
@@ -857,6 +873,33 @@ Prompt caching 补充：
 | `use_proxy` | `false` | URL 文件下载等消息工具联网请求是否使用 `[proxy]` 中的代理地址 | |
 | `send_text_file_max_size_kb` | `512` | 文本文件发送上限（KB） | `<=0` 回退 `512` |
 | `send_url_file_max_size_mb` | `100` | URL 文件发送上限（MB） | `<=0` 回退 `100` |
+
+---
+
+### 4.20.1 `[lxmusic2api]` 音乐服务
+
+`music.*` 工具由独立部署的 [lxmusic2api](https://github.com/69gg/lxmusic2api) 提供数据与音频解析能力。请先按照上游仓库说明完成部署，配置单个自定义音源脚本或音源目录中的多个脚本，并确认其许可证及使用限制，再填写：
+
+| 字段 | 默认值 | 说明 | 约束/回退 |
+|---|---:|---|---|
+| `base_url` | `http://127.0.0.1:3000` | lxmusic2api 服务根地址 | 推荐不带 `/v1`；末尾 `/` 自动移除；仅接受 HTTP(S) 地址 |
+| `api_key` | `""` | 与 lxmusic2api `[auth].api_key` 一致的 Bearer Key | 留空时全部 `music.*` 工具从模型工具列表隐藏 |
+
+```toml
+[lxmusic2api]
+base_url = "http://127.0.0.1:3000"
+api_key = "replace-with-your-key"
+```
+
+配置会随 `config.toml` 热更新：修改 `base_url` 或 `api_key` 后，后续工具调用与工具可见性立即使用新值，无需重启。音乐工具沿用全局 `[access]` 会话访问控制，不另设用户白名单。
+
+当用户明确要求收听、下载或发送歌曲时，主 AI 会先读取 `music.search_songs` 的实际候选，而不是固定选择第一条、某个平台或某种音质。用户指定歌手、版本、平台、格式或音质时优先遵从；未指定时，AI 根据歌名、歌手、专辑、版本标记和 `qualities` 选择可明确识别的原唱标准版，并从候选实际提供的音质中选择最高可用值。匹配明确后会把该候选的 `track_ref` 传给 `music.get_audio`，再调用消息发送工具，不会停在候选列表或默认追问；只有没有结果或无法可靠判断原唱/目标版本时才向用户澄清。此选择由 AI 根据每次搜索结果完成，后端不固定歌曲、平台或音质。
+
+`track_ref` 是 Undefined 在单次 AI 任务内维护的短引用，完整 Track 不进入模型的后续工具参数。它不落盘、没有新增配置，也不会跨用户消息或重启保留；失效后重新搜索即可。该机制只改变 Undefined 的模型工具接口，不改变 lxmusic2api 的 HTTP API。
+
+音频附件模式受 `[attachments].remote_download_max_size_mb` 限制；值为 `0` 时应改用 `music.get_audio(delivery="url")`。URL 是上游自定义音源产生的短时直链，可能快速失效。上游受管下载文件采用最长 24 小时保留并自动清理；本集成不暴露下载任务生命周期接口，流式音频注册后的本地附件仍按 Undefined 的 `[attachments]` 缓存策略清理。部署者应根据版权、许可证与当地法律调整缓存保留并只处理有权使用的内容。
+
+音频附件注册时会保存仅供历史上下文使用的音乐描述，包含歌曲身份、最终平台/音质、媒体格式和回退信息；该行为没有额外配置项，也不会改变用户收到的消息正文。最终平台与音质来自新版 lxmusic2api `/tracks/stream` 的 `X-LXMusic2API-*` 响应头。Undefined 与旧版服务保持兼容：缺少或无法校验这些响应头时继续发送音频，并把现有值标记为“所选/请求”而不是实际结果。建议先升级 lxmusic2api，再升级 Undefined，以便部署后立即获得准确的回退记录。
 
 ---
 
@@ -1095,7 +1138,7 @@ Prompt caching 补充：
 | `recent_messages_inject_k` | `12` | 注入给史官的近期消息条数 |
 | `recent_message_line_max_len` | `240` | 每条近期消息最大字符数 |
 | `source_message_max_len` | `800` | 当前触发消息最大字符数 |
-| `poll_interval_seconds` | `1.0` | 队列轮询间隔 |
+| `poll_interval_seconds` | `1.0` | 队列轮询间隔；小于 `0.1` 时按 `0.1` 秒处理，避免空队列忙循环 |
 | `stale_job_timeout_seconds` | `300.0` | processing 超时回收阈值 |
 
 ### 4.26.5 `[cognitive.profile]`
@@ -1112,7 +1155,7 @@ Prompt caching 补充：
 | `path` | `data/cognitive/queues` | 队列目录 |
 | `failed_max_age_days` | `30` | failed 文件保留天数 |
 | `failed_max_files` | `500` | failed 文件上限 |
-| `failed_cleanup_interval` | `100` | 处理多少次后触发清理 |
+| `failed_cleanup_interval` | `100` | 每派发多少个任务后触发一次清理；`0` 禁用 |
 | `job_max_retries` | `3` | 单任务自动重试次数 |
 
 ---
@@ -1256,6 +1299,7 @@ Prompt caching 补充：
 - `render.browser_max_concurrency` 会在当前渲染任务空闲后重建渲染并发信号量。
 - `skills.intro_autogen_*`（Agent intro 生成器配置刷新）
 - `skills.tool_search_*`（主 AI 后续新 `ask()` 的按需工具加载配置刷新）
+- `lxmusic2api.base_url` / `lxmusic2api.api_key`（后续音乐请求与 `music.*` 工具可见性刷新）
 - `search.searxng_url`（搜索客户端刷新）
 - `search.priority` / `search.grok_search_enabled` / `search.firecrawl_search_enabled` / `search.firecrawl.*` 会随运行时配置更新，用于后续 `web_agent` 工具暴露和提示词优先级；无需重启。
 - `api.tool_invoke_callback_use_proxy` 会随运行时配置更新，用于后续 Runtime tool invoke 回调。
@@ -1403,6 +1447,7 @@ Prompt caching 补充：
 | `models.agent.thinking_budget_tokens` | `AGENT_MODEL_THINKING_BUDGET_TOKENS` |
 | `models.agent.thinking_enabled` | `AGENT_MODEL_THINKING_ENABLED` |
 | `models.agent.thinking_include_budget` | `AGENT_MODEL_THINKING_INCLUDE_BUDGET` |
+| `models.agent.thinking_param_enabled` | `AGENT_MODEL_THINKING_PARAM_ENABLED` |
 | `models.agent.thinking_tool_call_compat` | `AGENT_MODEL_THINKING_TOOL_CALL_COMPAT` |
 | `models.agent.use_proxy` | `AGENT_MODEL_USE_PROXY` |
 | `models.agent.reasoning_content_replay` | `AGENT_MODEL_REASONING_CONTENT_REPLAY` |
@@ -1428,6 +1473,7 @@ Prompt caching 补充：
 | `models.chat.thinking_budget_tokens` | `CHAT_MODEL_THINKING_BUDGET_TOKENS` |
 | `models.chat.thinking_enabled` | `CHAT_MODEL_THINKING_ENABLED` |
 | `models.chat.thinking_include_budget` | `CHAT_MODEL_THINKING_INCLUDE_BUDGET` |
+| `models.chat.thinking_param_enabled` | `CHAT_MODEL_THINKING_PARAM_ENABLED` |
 | `models.chat.thinking_tool_call_compat` | `CHAT_MODEL_THINKING_TOOL_CALL_COMPAT` |
 | `models.chat.use_proxy` | `CHAT_MODEL_USE_PROXY` |
 | `models.chat.reasoning_content_replay` | `CHAT_MODEL_REASONING_CONTENT_REPLAY` |
@@ -1467,6 +1513,7 @@ Prompt caching 补充：
 | `models.grok.thinking_budget_tokens` | `GROK_MODEL_THINKING_BUDGET_TOKENS` |
 | `models.grok.thinking_enabled` | `GROK_MODEL_THINKING_ENABLED` |
 | `models.grok.thinking_include_budget` | `GROK_MODEL_THINKING_INCLUDE_BUDGET` |
+| `models.grok.thinking_param_enabled` | `GROK_MODEL_THINKING_PARAM_ENABLED` |
 | `models.grok.thinking_tool_call_compat` | `GROK_MODEL_THINKING_TOOL_CALL_COMPAT` |
 | `models.grok.use_proxy` | `GROK_MODEL_USE_PROXY` |
 
@@ -1477,6 +1524,7 @@ Prompt caching 补充：
 | `models.historian.use_proxy` | `HISTORIAN_MODEL_USE_PROXY` |
 | `models.historian.reasoning_content_replay` | `HISTORIAN_MODEL_REASONING_CONTENT_REPLAY` |
 | `models.historian.system_prompt_as_user` | `HISTORIAN_MODEL_SYSTEM_PROMPT_AS_USER` |
+| `models.historian.thinking_param_enabled` | `HISTORIAN_MODEL_THINKING_PARAM_ENABLED` |
 
 #### `models.image_edit`
 
@@ -1508,6 +1556,7 @@ Prompt caching 补充：
 | `models.naga.thinking_budget_tokens` | `NAGA_MODEL_THINKING_BUDGET_TOKENS` |
 | `models.naga.thinking_enabled` | `NAGA_MODEL_THINKING_ENABLED` |
 | `models.naga.thinking_include_budget` | `NAGA_MODEL_THINKING_INCLUDE_BUDGET` |
+| `models.naga.thinking_param_enabled` | `NAGA_MODEL_THINKING_PARAM_ENABLED` |
 | `models.naga.thinking_tool_call_compat` | `NAGA_MODEL_THINKING_TOOL_CALL_COMPAT` |
 | `models.naga.use_proxy` | `NAGA_MODEL_USE_PROXY` |
 | `models.naga.reasoning_content_replay` | `NAGA_MODEL_REASONING_CONTENT_REPLAY` |
@@ -1543,6 +1592,7 @@ Prompt caching 补充：
 | `models.security.thinking_budget_tokens` | `SECURITY_MODEL_THINKING_BUDGET_TOKENS` |
 | `models.security.thinking_enabled` | `SECURITY_MODEL_THINKING_ENABLED` |
 | `models.security.thinking_include_budget` | `SECURITY_MODEL_THINKING_INCLUDE_BUDGET` |
+| `models.security.thinking_param_enabled` | `SECURITY_MODEL_THINKING_PARAM_ENABLED` |
 | `models.security.thinking_tool_call_compat` | `SECURITY_MODEL_THINKING_TOOL_CALL_COMPAT` |
 | `models.security.use_proxy` | `SECURITY_MODEL_USE_PROXY` |
 | `models.security.reasoning_content_replay` | `SECURITY_MODEL_REASONING_CONTENT_REPLAY` |
@@ -1568,6 +1618,7 @@ Prompt caching 补充：
 | `models.vision.thinking_budget_tokens` | `VISION_MODEL_THINKING_BUDGET_TOKENS` |
 | `models.vision.thinking_enabled` | `VISION_MODEL_THINKING_ENABLED` |
 | `models.vision.thinking_include_budget` | `VISION_MODEL_THINKING_INCLUDE_BUDGET` |
+| `models.vision.thinking_param_enabled` | `VISION_MODEL_THINKING_PARAM_ENABLED` |
 | `models.vision.thinking_tool_call_compat` | `VISION_MODEL_THINKING_TOOL_CALL_COMPAT` |
 | `models.vision.use_proxy` | `VISION_MODEL_USE_PROXY` |
 | `models.vision.reasoning_content_replay` | `VISION_MODEL_REASONING_CONTENT_REPLAY` |
@@ -1582,12 +1633,20 @@ Prompt caching 补充：
 | `models.summary.use_proxy` | `SUMMARY_MODEL_USE_PROXY` |
 | `models.summary.reasoning_content_replay` | `SUMMARY_MODEL_REASONING_CONTENT_REPLAY` |
 | `models.summary.system_prompt_as_user` | `SUMMARY_MODEL_SYSTEM_PROMPT_AS_USER` |
+| `models.summary.thinking_param_enabled` | `SUMMARY_MODEL_THINKING_PARAM_ENABLED` |
 
 #### `messages`
 
 | TOML 路径 | 环境变量 |
 |-----------|----------|
 | `messages.use_proxy` | `MESSAGES_USE_PROXY` |
+
+#### `lxmusic2api`
+
+| TOML 路径 | 环境变量 |
+|-----------|----------|
+| `lxmusic2api.api_key` | `LXMUSIC2API_API_KEY` |
+| `lxmusic2api.base_url` | `LXMUSIC2API_BASE_URL` |
 
 #### `naga`
 

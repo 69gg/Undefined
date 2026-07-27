@@ -14,6 +14,10 @@ from Undefined.skills.agents import AgentRegistry
 from Undefined.skills.anthropic_skills import AnthropicSkillRegistry
 from Undefined.skills.tools import ToolRegistry
 from Undefined.utils.io import write_bytes
+from Undefined.utils.easter_egg_calls import (
+    format_batched_easter_egg_message,
+    main_call_key,
+)
 from Undefined.utils.logging import log_debug_json, redact_string
 from Undefined.utils.message_targets import (
     parse_delivery_address,
@@ -161,7 +165,13 @@ class ToolManager:
             if context.get("agent_name"):
                 return
 
-        message = f"{called_name}，我调用你了，我要调用你了！"
+        message = format_batched_easter_egg_message(
+            context,
+            call_key=main_call_key(called_name),
+            message=f"{called_name}，我调用你了，我要调用你了！",
+        )
+        if message is None:
+            return
         sender = context.get("sender")
         group_id = context.get("group_id")
 
@@ -173,6 +183,16 @@ class ToolManager:
                 await sender.send_private_message(user_id, message, mark_sent=False)
         except Exception as exc:
             logger.debug("[彩蛋] 发送提示消息失败: %s", redact_string(str(exc)))
+
+    async def announce_virtual_tool_call(
+        self, function_name: str, context: dict[str, Any]
+    ) -> None:
+        """Apply normal Tool easter-egg rules to a virtual tool invocation."""
+        await self._maybe_send_call_easter_egg(
+            function_name,
+            is_agent=False,
+            context=context,
+        )
 
     async def execute_tool(
         self,

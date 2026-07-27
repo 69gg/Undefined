@@ -9,11 +9,13 @@ from typing import Any
 import pytest
 
 from Undefined.utils.tool_calls import (
+    TextToolCallParseError,
     _clean_json_string,
     _repair_json_like_string,
     _strip_code_fences,
     extract_required_tool_call_arguments,
     normalize_tool_arguments_json,
+    parse_text_tool_calls,
     parse_tool_arguments,
 )
 
@@ -133,6 +135,351 @@ class TestParseToolArguments:
     def test_unsupported_type_returns_empty(self, test_logger: logging.Logger) -> None:
         result = parse_tool_arguments(42, logger=test_logger, tool_name="t")
         assert result == {}
+
+
+# ---------------------------------------------------------------------------
+# parse_text_tool_calls
+# ---------------------------------------------------------------------------
+
+
+class TestParseTextToolCalls:
+    @staticmethod
+    def _names(tool_calls: list[dict[str, Any]]) -> list[str]:
+        return [str(tool_call["function"]["name"]) for tool_call in tool_calls]
+
+    @staticmethod
+    def _arguments(tool_call: dict[str, Any]) -> dict[str, Any]:
+        parsed = json.loads(str(tool_call["function"]["arguments"]))
+        assert isinstance(parsed, dict)
+        return parsed
+
+    def test_single_json_envelope(self) -> None:
+        tool_calls = parse_text_tool_calls(
+            '{"tool":"end","arguments":{"memo":"静默处理","observations":[]}}'
+        )
+
+        assert self._names(tool_calls) == ["end"]
+        assert self._arguments(tool_calls[0]) == {
+            "memo": "静默处理",
+            "observations": [],
+        }
+        assert tool_calls[0]["type"] == "function"
+        assert str(tool_calls[0]["id"]).startswith("call_txt_")
+
+    def test_consecutive_json_envelopes_preserve_order(self) -> None:
+        tool_calls = parse_text_tool_calls(
+            '{"tool":"send_message","arguments":{"message":"在做了"}}\n'
+            '{"tool":"end","arguments":{"memo":"已回应","observations":[]}}'
+        )
+
+        assert self._names(tool_calls) == ["send_message", "end"]
+        assert self._arguments(tool_calls[0]) == {"message": "在做了"}
+        assert len({str(tool_call["id"]) for tool_call in tool_calls}) == 2
+
+    def test_consecutive_named_json_envelopes_preserve_parallel_calls(self) -> None:
+        tool_calls = parse_text_tool_calls(
+            '{"name":"music.search_songs","arguments":'
+            '{"query":"君往何处 m2u","limit":5}}\n'
+            '{"name":"end","arguments":'
+            '{"memo":"搜索 m2u 的《君往何处》","observations":[]}}'
+        )
+
+        assert self._names(tool_calls) == ["music.search_songs", "end"]
+        assert self._arguments(tool_calls[0]) == {
+            "query": "君往何处 m2u",
+            "limit": 5,
+        }
+        assert self._arguments(tool_calls[1]) == {
+            "memo": "搜索 m2u 的《君往何处》",
+            "observations": [],
+        }
+        assert len({str(tool_call["id"]) for tool_call in tool_calls}) == 2
+
+    def test_tool_calls_json_envelope(self) -> None:
+        tool_calls = parse_text_tool_calls(
+            '{"tool_calls":[{"name":"end","arguments":'
+            '{"memo":"静默处理","observations":[]}}]}'
+        )
+
+        assert self._names(tool_calls) == ["end"]
+        assert self._arguments(tool_calls[0]) == {
+            "memo": "静默处理",
+            "observations": [],
+        }
+        assert tool_calls[0]["type"] == "function"
+        assert str(tool_calls[0]["id"]).startswith("call_txt_")
+
+    def test_tool_calls_json_envelope_preserves_optional_id(self) -> None:
+        tool_calls = parse_text_tool_calls(
+            '{"tool_calls":[{"id":"call_1","name":"end","arguments":'
+            '{"memo":"静默处理","observations":[]}}]}'
+        )
+
+        assert self._names(tool_calls) == ["end"]
+        assert tool_calls[0]["id"] == "call_1"
+        assert self._arguments(tool_calls[0]) == {
+            "memo": "静默处理",
+            "observations": [],
+        }
+
+    def test_tool_calls_json_envelope_preserves_parallel_calls(self) -> None:
+        tool_calls = parse_text_tool_calls(
+            '{"tool_calls":['
+            '{"name":"first","arguments":{"value":1}},'
+            '{"name":"second","arguments":"{\\"value\\":2}"}'
+            "]}"
+        )
+
+        assert self._names(tool_calls) == ["first", "second"]
+        assert self._arguments(tool_calls[0]) == {"value": 1}
+        assert self._arguments(tool_calls[1]) == {"value": 2}
+        assert len({str(tool_call["id"]) for tool_call in tool_calls}) == 2
+
+    def test_json_envelope_styles_can_be_mixed(self) -> None:
+        tool_calls = parse_text_tool_calls(
+            '{"tool":"first","arguments":{}}\n{"name":"second","arguments":{"value":2}}'
+        )
+
+        assert self._names(tool_calls) == ["first", "second"]
+        assert self._arguments(tool_calls[1]) == {"value": 2}
+
+    def test_json_envelope_accepts_encoded_arguments_object(self) -> None:
+        tool_calls = parse_text_tool_calls(
+            '{"tool":"send_message","arguments":"{\\"message\\":\\"在做了\\"}"}'
+        )
+
+        assert self._names(tool_calls) == ["send_message"]
+        assert self._arguments(tool_calls[0]) == {"message": "在做了"}
+
+    def test_escaped_parameters_attribute_and_paired_tag(self) -> None:
+        raw = (
+            r'<tool name="end" parameters="{\"force\": false, '
+            r'\"memo\": \"静默处理\", \"observations\": []}"></tool>'
+        )
+
+        tool_calls = parse_text_tool_calls(raw)
+
+        assert self._names(tool_calls) == ["end"]
+        assert self._arguments(tool_calls[0]) == {
+            "force": False,
+            "memo": "静默处理",
+            "observations": [],
+        }
+
+    def test_multiple_self_closing_params_tags(self) -> None:
+        raw = """<tool name="send_message" params='{"message": "在做了在做了"}' />
+<tool name="end" params='{"memo": "回应重试请求", "observations": ["一条观察"]}' />"""
+
+        tool_calls = parse_text_tool_calls(raw)
+
+        assert self._names(tool_calls) == ["send_message", "end"]
+        assert self._arguments(tool_calls[0]) == {"message": "在做了在做了"}
+        assert self._arguments(tool_calls[1]) == {
+            "memo": "回应重试请求",
+            "observations": ["一条观察"],
+        }
+
+    def test_arguments_attribute_alias(self) -> None:
+        tool_calls = parse_text_tool_calls("<tool name='end' arguments='{}' />")
+
+        assert self._names(tool_calls) == ["end"]
+        assert self._arguments(tool_calls[0]) == {}
+
+    def test_tool_execution_envelope(self) -> None:
+        raw = """<tool_execution>
+<tool_call name="music-_-search_songs" arguments='{"query": "克罗地亚狂想曲 Maksim", "limit": 10}'>
+</tool_call>
+</tool_execution>"""
+
+        tool_calls = parse_text_tool_calls(raw)
+
+        assert self._names(tool_calls) == ["music-_-search_songs"]
+        assert self._arguments(tool_calls[0]) == {
+            "query": "克罗地亚狂想曲 Maksim",
+            "limit": 10,
+        }
+        assert str(tool_calls[0]["id"]).startswith("call_txt_")
+
+    def test_tool_execution_accepts_multiple_and_self_closing_calls(self) -> None:
+        raw = r"""```text
+<tool_execution >
+  <tool_call name='first' />
+  <tool_call name="second" arguments="{\"value\": 2}"></tool_call>
+</tool_execution>
+```"""
+
+        tool_calls = parse_text_tool_calls(raw)
+
+        assert self._names(tool_calls) == ["first", "second"]
+        assert self._arguments(tool_calls[0]) == {}
+        assert self._arguments(tool_calls[1]) == {"value": 2}
+        assert len({str(tool_call["id"]) for tool_call in tool_calls}) == 2
+
+    def test_function_calls_envelope(self) -> None:
+        raw = """<function_calls>
+<invoke name="music.search_songs">
+<arguments>
+{"query": "童话镇 暗杠", "limit": 5}
+</arguments>
+</invoke>
+</function_calls>"""
+
+        tool_calls = parse_text_tool_calls(raw)
+
+        assert self._names(tool_calls) == ["music.search_songs"]
+        assert self._arguments(tool_calls[0]) == {
+            "query": "童话镇 暗杠",
+            "limit": 5,
+        }
+
+    def test_function_calls_envelope_preserves_multiple_invokes(self) -> None:
+        raw = """<function_calls>
+<invoke name="first"><arguments>{"value": 1}</arguments></invoke>
+<invoke name="second"><arguments>{"value": 2}</arguments></invoke>
+</function_calls>"""
+
+        tool_calls = parse_text_tool_calls(raw)
+
+        assert self._names(tool_calls) == ["first", "second"]
+        assert self._arguments(tool_calls[0]) == {"value": 1}
+        assert self._arguments(tool_calls[1]) == {"value": 2}
+        assert len({str(tool_call["id"]) for tool_call in tool_calls}) == 2
+
+    def test_function_calls_arguments_may_contain_closing_tag_text(self) -> None:
+        raw = """<function_calls>
+<invoke name="example"><arguments>{"value": "</arguments>"}</arguments></invoke>
+</function_calls>"""
+
+        tool_calls = parse_text_tool_calls(raw)
+
+        assert self._arguments(tool_calls[0]) == {"value": "</arguments>"}
+
+    def test_function_equals_envelope_parses_raw_and_json_parameters(self) -> None:
+        raw = """<function=end>
+<parameter=memo>
+静默处理这条消息
+</parameter>
+<parameter=observations>
+["观察一", "观察二"]
+</parameter>
+</function>"""
+
+        tool_calls = parse_text_tool_calls(raw)
+
+        assert self._names(tool_calls) == ["end"]
+        assert self._arguments(tool_calls[0]) == {
+            "memo": "静默处理这条消息",
+            "observations": ["观察一", "观察二"],
+        }
+
+    def test_function_equals_envelope_preserves_parallel_calls_and_types(self) -> None:
+        raw = """<function = send_message >
+<parameter=message>在做了</parameter>
+</function>
+<function=end>
+<parameter=force>false</parameter>
+<parameter=memo>已回应</parameter>
+<parameter=observations>[]</parameter>
+</function>"""
+
+        tool_calls = parse_text_tool_calls(raw)
+
+        assert self._names(tool_calls) == ["send_message", "end"]
+        assert self._arguments(tool_calls[0]) == {"message": "在做了"}
+        assert self._arguments(tool_calls[1]) == {
+            "force": False,
+            "memo": "已回应",
+            "observations": [],
+        }
+        assert len({str(tool_call["id"]) for tool_call in tool_calls}) == 2
+
+    def test_function_equals_json_may_contain_parameter_closing_tag_text(
+        self,
+    ) -> None:
+        raw = """<function=example>
+<parameter=values>["</parameter>", {"ok": true}]</parameter>
+</function>"""
+
+        tool_calls = parse_text_tool_calls(raw)
+
+        assert self._arguments(tool_calls[0]) == {
+            "values": ["</parameter>", {"ok": True}]
+        }
+
+    def test_json_code_fence_is_accepted(self) -> None:
+        tool_calls = parse_text_tool_calls(
+            '```json\n{"tool":"end","arguments":{}}\n```'
+        )
+
+        assert self._names(tool_calls) == ["end"]
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            '{"message":"普通 JSON"}',
+            '{"name":"普通 JSON"}',
+            "一段普通回复",
+        ],
+    )
+    def test_ordinary_text_is_not_treated_as_tool_protocol(self, raw: str) -> None:
+        assert parse_text_tool_calls(raw) == []
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            '{"tool":"end","arguments":{}} trailing',
+            '普通文本 {"tool":"end","arguments":{}}',
+            '{"tool":"end","arguments":[],"extra":true}',
+            '{"name":"end","arguments":[],"extra":true}',
+            '<tool name="end" params="[]" />',
+            '<tool name="end" params="{}" /> trailing',
+            '普通文本 <tool name="end" params="{}" />',
+            "<tool_execution></tool_execution>",
+            '<tool_execution mode="parallel"></tool_execution>',
+            '<tool_execution><tool_call name="end" extra="x" /></tool_execution>',
+            '<tool_execution><tool_call name="end" name="again" /></tool_execution>',
+            '<tool_execution><tool_call name="end" arguments="[]" /></tool_execution>',
+            '<tool_execution><tool_call name="end">text</tool_call></tool_execution>',
+            '<tool_call name="end" arguments="{}"></tool_call>',
+            '<tool_execution><tool_call name="end" /></tool_execution> trailing',
+            '普通文本 <tool_execution><tool_call name="end" /></tool_execution>',
+            "<function_calls></function_calls>",
+            '<function_calls mode="parallel"></function_calls>',
+            '<function_calls><invoke name="end" /></function_calls>',
+            '<function_calls><invoke name="end" extra="x"><arguments>{}</arguments></invoke></function_calls>',
+            '<function_calls><invoke name="end"><arguments>[]</arguments></invoke></function_calls>',
+            '<function_calls><invoke name="end"><arguments>{}</arguments>text</invoke></function_calls>',
+            '<function_calls><invoke name="end"><arguments>{}</invoke></function_calls>',
+            '<invoke name="end"><arguments>{}</arguments></invoke>',
+            '<function_calls><invoke name="end"><arguments>{}</arguments></invoke></function_calls> trailing',
+            '普通文本 <function_calls><invoke name="end"><arguments>{}</arguments></invoke></function_calls>',
+            "<function=end><parameter=memo>x</parameter>",
+            "<function=end><parameter=memo>x</parameter></function> trailing",
+            "普通文本 <function=end><parameter=memo>x</parameter></function>",
+            "<parameter=memo>x</parameter>",
+            '<function=end><parameter=memo>["broken"</parameter></function>',
+            "<function=end><parameter=memo>x</parameter><parameter=memo>y</parameter></function>",
+            "<function=end>text</function>",
+            '{"tool_calls":[]}',
+            '{"tool_calls":{}}',
+            '{"tool_calls":[null]}',
+            '{"tool_calls":[{"name":"end"}]}',
+            '{"tool_calls":[{"name":"end","arguments":[],"extra":true}]}',
+            '{"tool_calls":[{"id":null,"name":"end","arguments":{}}]}',
+            '{"tool_calls":[{"id":" ","name":"end","arguments":{}}]}',
+            '{"tool_calls":[{"id":" call_1 ","name":"end","arguments":{}}]}',
+            '{"tool_calls":[{"id":1,"name":"end","arguments":{}}]}',
+            '{"tool_calls":['
+            '{"id":"call_1","name":"first","arguments":{}},'
+            '{"id":"call_1","name":"second","arguments":{}}]}',
+            '{"tool_calls":[{"name":"end","arguments":{}}],"extra":true}',
+            '{"tool_calls":[{"name":"end","arguments":{}}]} '
+            '{"name":"second","arguments":{}}',
+        ],
+    )
+    def test_invalid_tool_protocol_is_rejected(self, raw: str) -> None:
+        with pytest.raises(TextToolCallParseError):
+            parse_text_tool_calls(raw)
 
 
 # ---------------------------------------------------------------------------

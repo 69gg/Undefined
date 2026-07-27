@@ -13,6 +13,8 @@ from Undefined.utils.message_targets import (
     resolve_delivery_address,
 )
 from Undefined.skills.toolsets.messages.context_utils import (
+    handle_delivery_uncertain,
+    is_delivery_uncertain_error,
     mark_message_sent,
     normalize_sent_message_id,
     parse_reply_to,
@@ -102,6 +104,10 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     message = rendered.delivery_text
     history_message = rendered.history_text
     history_attachments = list(rendered.attachments)
+    has_delivery_message = bool(message.strip())
+    pending_file_count = len(rendered.pending_file_sends)
+    if not has_delivery_message and pending_file_count == 0:
+        return "消息内容不能为空"
 
     runtime_config = context.get("runtime_config")
 
@@ -147,42 +153,68 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             }
             if history_attachments:
                 send_kwargs["attachments"] = history_attachments
-            send_address_message = getattr(sender, "send_address_message", None)
-            if callable(send_address_message):
-                sent_message_id = await send_address_message(
-                    target,
-                    message,
-                    **send_kwargs,
-                )
-            elif target.channel == "group":
-                group_kwargs = dict(send_kwargs)
-                group_kwargs.pop("preferred_temp_group_id", None)
-                sent_message_id = await sender.send_group_message(
-                    target_id,
-                    message,
-                    **group_kwargs,
-                )
-            elif target.channel == "qq":
-                sent_message_id = await sender.send_private_message(
-                    target_id,
-                    message,
-                    **send_kwargs,
-                )
-            else:
-                raise RuntimeError("当前 sender 不支持微信投递地址")
-            mark_message_sent(context)
-            await dispatch_pending_file_sends(
+            sent_message_id: Any = None
+            if has_delivery_message:
+                send_address_message = getattr(sender, "send_address_message", None)
+                if callable(send_address_message):
+                    sent_message_id = await send_address_message(
+                        target,
+                        message,
+                        **send_kwargs,
+                    )
+                elif target.channel == "group":
+                    group_kwargs = dict(send_kwargs)
+                    group_kwargs.pop("preferred_temp_group_id", None)
+                    sent_message_id = await sender.send_group_message(
+                        target_id,
+                        message,
+                        **group_kwargs,
+                    )
+                elif target.channel == "qq":
+                    sent_message_id = await sender.send_private_message(
+                        target_id,
+                        message,
+                        **send_kwargs,
+                    )
+                else:
+                    raise RuntimeError("当前 sender 不支持微信投递地址")
+                mark_message_sent(context)
+            dispatched_file_count = await dispatch_pending_file_sends(
                 rendered,
                 sender=sender,
                 target_type=target_type,
                 target_id=target_id,
                 registry=attachment_registry,
                 address=target,
+                auto_history=not has_delivery_message,
             )
+            if dispatched_file_count > 0:
+                mark_message_sent(context)
+            if dispatched_file_count < pending_file_count:
+                if has_delivery_message:
+                    return (
+                        "消息正文已发送，但仅成功发送 "
+                        f"{dispatched_file_count}/{pending_file_count} 个附件"
+                    )
+                if dispatched_file_count > 0:
+                    return (
+                        "仅成功发送 "
+                        f"{dispatched_file_count}/{pending_file_count} 个附件"
+                    )
+                return "发送失败：附件服务暂时不可用，请稍后重试"
             return _format_send_success(sent_message_id)
         except ValueError as exc:
             return f"发送失败：{exc}"
         except Exception as e:
+            if is_delivery_uncertain_error(e):
+                logger.warning(
+                    "[发送消息] 投递结果未确认，阻止自动重试: "
+                    "target_type=%s target_id=%s request_id=%s",
+                    target_type,
+                    target_id,
+                    request_id,
+                )
+                return handle_delivery_uncertain(context)
             logger.exception(
                 "[发送消息] 发送失败: target_type=%s target_id=%s request_id=%s err=%s",
                 target_type,
@@ -191,6 +223,9 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                 e,
             )
             return "发送失败：消息服务暂时不可用，请稍后重试"
+
+    if pending_file_count > 0:
+        return "发送失败：当前环境无法发送附件"
 
     # 无 sender 时只做兼容回调；仅允许发送到"当前会话"避免误投递
     if target_type == "group":

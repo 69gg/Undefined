@@ -19,7 +19,9 @@ from weixin_ilink_client import (
     UnsupportedCapabilityError,
 )
 
+from Undefined.attachments import AttachmentRegistry
 from Undefined.context import RequestContext
+from Undefined.onebot.client import OneBotDeliveryUncertainError
 from Undefined.utils import io as async_io
 from Undefined.utils.message_reply import ReplyContext
 from Undefined.utils.message_targets import DeliveryAddress
@@ -131,6 +133,172 @@ async def test_send_group_file_registers_attachment_in_history(
     kwargs = history_mock.await_args.kwargs
     assert kwargs["attachments"][0]["uid"] == "file_test"
     assert "uid=file_test" in kwargs["text_content"]
+
+
+@pytest.mark.asyncio
+async def test_send_group_file_copies_music_metadata_to_target_history(
+    tmp_path: Path,
+) -> None:
+    registry = AttachmentRegistry(
+        registry_path=tmp_path / "attachments.json",
+        cache_dir=tmp_path / "attachments",
+    )
+    source = await registry.register_bytes(
+        "group:11111",
+        b"music-bytes",
+        kind="audio",
+        display_name="测试歌曲 - 测试歌手.mp3",
+        source_kind="lxmusic2api_audio",
+        source_ref="lxmusic2api:wy:source-id",
+        mime_type="audio/mpeg",
+        segment_data={"resolved_source": "wy", "resolved_quality": "320k"},
+        semantic_kind="music",
+        description="[音乐] 名称：测试歌曲；歌手/作者：测试歌手；平台：网易云（wy）",
+    )
+    assert source.local_path is not None
+    onebot = MagicMock()
+    onebot.upload_group_file = AsyncMock()
+    history_manager = MagicMock()
+    history_manager.add_group_message = AsyncMock()
+    config = MagicMock()
+    config.is_group_allowed.return_value = True
+    config.access_control_enabled.return_value = False
+    config.group_access_denied_reason.return_value = None
+    message_sender = MessageSender(
+        onebot,
+        history_manager,
+        bot_qq=10000,
+        config=config,
+        attachment_registry=registry,
+    )
+
+    await message_sender.send_group_file(
+        22222,
+        source.local_path,
+        source.display_name,
+        history_attachment=source,
+    )
+
+    history_mock = cast(AsyncMock, history_manager.add_group_message)
+    assert history_mock.await_args is not None
+    attachment = history_mock.await_args.kwargs["attachments"][0]
+    assert attachment["uid"] != source.uid
+    assert attachment["kind"] == "audio"
+    assert attachment["source_kind"] == "lxmusic2api_audio"
+    assert attachment["semantic_kind"] == "music"
+    assert attachment["description"] == source.description
+    copied = registry.resolve(attachment["uid"], "group:22222")
+    assert copied is not None
+    assert copied.segment_data == source.segment_data
+
+
+@pytest.mark.asyncio
+async def test_send_group_voice_preserves_music_metadata(
+    tmp_path: Path,
+) -> None:
+    registry = AttachmentRegistry(
+        registry_path=tmp_path / "attachments.json",
+        cache_dir=tmp_path / "attachments",
+    )
+    source = await registry.register_bytes(
+        "group:12345",
+        b"voice-music",
+        kind="audio",
+        display_name="测试歌曲.mp3",
+        source_kind="lxmusic2api_audio",
+        mime_type="audio/mpeg",
+        segment_data={"resolved_source": "kw", "resolved_quality": "128k"},
+        semantic_kind="music",
+        description="[音乐] 名称：测试歌曲；平台：酷我（kw）",
+    )
+    assert source.local_path is not None
+    onebot = MagicMock()
+    onebot.send_group_message = AsyncMock(return_value={"message_id": 123})
+    history_manager = MagicMock()
+    history_manager.add_group_message = AsyncMock()
+    config = MagicMock()
+    config.is_group_allowed.return_value = True
+    config.access_control_enabled.return_value = False
+    config.group_access_denied_reason.return_value = None
+    message_sender = MessageSender(
+        onebot,
+        history_manager,
+        bot_qq=10000,
+        config=config,
+        attachment_registry=registry,
+    )
+
+    await message_sender.send_address_voice(
+        DeliveryAddress("group", 12345),
+        source.local_path,
+        name=source.display_name,
+        history_attachment=source,
+    )
+
+    history_mock = cast(AsyncMock, history_manager.add_group_message)
+    assert history_mock.await_args is not None
+    attachments = history_mock.await_args.kwargs["attachments"]
+    assert len(attachments) == 1
+    assert attachments[0]["kind"] == "record"
+    assert attachments[0]["semantic_kind"] == "music"
+    assert attachments[0]["description"] == source.description
+
+
+@pytest.mark.asyncio
+async def test_send_wechat_voice_preserves_music_metadata(
+    tmp_path: Path,
+) -> None:
+    registry = AttachmentRegistry(
+        registry_path=tmp_path / "attachments.json",
+        cache_dir=tmp_path / "attachments",
+    )
+    source = await registry.register_bytes(
+        "private:12345",
+        b"wechat-music",
+        kind="audio",
+        display_name="测试歌曲.mp3",
+        source_kind="lxmusic2api_audio",
+        mime_type="audio/mpeg",
+        semantic_kind="music",
+        description="[音乐] 名称：测试歌曲；音质：320 kbps",
+    )
+    assert source.local_path is not None
+    onebot = MagicMock()
+    history_manager = MagicMock()
+    history_manager.add_private_message = AsyncMock()
+    config = MagicMock()
+    config.is_private_allowed.return_value = True
+    config.access_control_enabled.return_value = False
+    config.private_access_denied_reason.return_value = None
+    message_sender = MessageSender(
+        onebot,
+        history_manager,
+        bot_qq=10000,
+        config=config,
+        attachment_registry=registry,
+    )
+    prepared = PreparedWeixinVoice(content=b"\x02#!SILK_V3voice", duration_ms=200)
+    service = SimpleNamespace(
+        prepare_voice=AsyncMock(return_value=prepared),
+        send_prepared_voice=AsyncMock(return_value="client-voice"),
+    )
+    message_sender.set_weixin_service(service)
+
+    result = await message_sender.send_address_voice(
+        DeliveryAddress("wechat", 12345),
+        source.local_path,
+        name=source.display_name,
+        history_attachment=source,
+    )
+
+    assert result == "client-voice"
+    history_mock = cast(AsyncMock, history_manager.add_private_message)
+    assert history_mock.await_args is not None
+    attachments = history_mock.await_args.kwargs["attachments"]
+    assert len(attachments) == 1
+    assert attachments[0]["kind"] == "record"
+    assert attachments[0]["semantic_kind"] == "music"
+    assert attachments[0]["description"] == source.description
 
 
 @pytest.mark.asyncio
@@ -372,6 +540,60 @@ async def test_send_private_message_falls_back_to_group_temp_session(
 
 
 @pytest.mark.asyncio
+async def test_send_private_message_does_not_fallback_after_uncertain_direct_send(
+    sender: MessageSender,
+) -> None:
+    sender.onebot.get_group_list = AsyncMock(  # type: ignore[method-assign]
+        return_value=[{"group_id": 11111}]
+    )
+    sender.onebot.send_private_message = AsyncMock(  # type: ignore[method-assign]
+        side_effect=OneBotDeliveryUncertainError(
+            "send_private_msg",
+            "Timeout while waiting for sendMsg",
+            retcode=1200,
+        )
+    )
+
+    with pytest.raises(OneBotDeliveryUncertainError):
+        await sender.send_private_message(54321, "possibly delivered")
+
+    sender.onebot.send_private_message.assert_awaited_once()
+    sender.onebot.get_group_list.assert_not_awaited()
+    history_mock = cast(AsyncMock, sender.history_manager.add_private_message)
+    history_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_temp_session_scan_stops_after_uncertain_delivery(
+    sender: MessageSender,
+) -> None:
+    sender.onebot.get_group_list = AsyncMock(  # type: ignore[method-assign]
+        return_value=[{"group_id": 11111}, {"group_id": 22222}]
+    )
+    sender.onebot.send_private_message = AsyncMock(  # type: ignore[method-assign]
+        side_effect=[
+            RuntimeError("direct failed"),
+            OneBotDeliveryUncertainError(
+                "send_private_msg",
+                "Timeout while waiting for sendMsg",
+                retcode=1200,
+            ),
+            {"data": {"message_id": 998877}},
+        ]
+    )
+
+    with pytest.raises(OneBotDeliveryUncertainError):
+        await sender.send_private_message(54321, "possibly delivered via temp session")
+
+    send_mock = sender.onebot.send_private_message
+    assert send_mock.await_count == 2
+    assert "group_id" not in send_mock.await_args_list[0].kwargs
+    assert send_mock.await_args_list[1].kwargs["group_id"] == 11111
+    history_mock = cast(AsyncMock, sender.history_manager.add_private_message)
+    history_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_send_private_message_prefers_context_group_before_group_scan(
     sender: MessageSender,
 ) -> None:
@@ -427,6 +649,40 @@ async def test_send_private_message_chunked_reuses_successful_temp_session_group
     assert history_mock.await_count == 1
     assert history_mock.await_args is not None
     assert history_mock.await_args.kwargs["message_id"] == 223344
+
+
+@pytest.mark.asyncio
+async def test_chunked_private_stops_after_uncertain_reused_temp_session(
+    sender: MessageSender,
+) -> None:
+    sender.onebot.get_group_list = AsyncMock(  # type: ignore[method-assign]
+        return_value=[{"group_id": 33333}, {"group_id": 44444}]
+    )
+    sender.onebot.send_private_message = AsyncMock(  # type: ignore[method-assign]
+        side_effect=[
+            RuntimeError("direct failed"),
+            {"data": {"message_id": "223344"}},
+            OneBotDeliveryUncertainError(
+                "send_private_msg",
+                "Timeout while waiting for sendMsg",
+                retcode=1200,
+            ),
+            {"data": {"message_id": "223346"}},
+        ]
+    )
+    long_message = f"{'a' * (MAX_MESSAGE_LENGTH - 500)}\n{'b' * 700}"
+
+    with pytest.raises(OneBotDeliveryUncertainError):
+        await sender.send_private_message(54321, long_message)
+
+    send_mock = sender.onebot.send_private_message
+    assert send_mock.await_count == 3
+    assert "group_id" not in send_mock.await_args_list[0].kwargs
+    assert send_mock.await_args_list[1].kwargs["group_id"] == 33333
+    assert send_mock.await_args_list[2].kwargs["group_id"] == 33333
+    sender.onebot.get_group_list.assert_awaited_once()
+    history_mock = cast(AsyncMock, sender.history_manager.add_private_message)
+    history_mock.assert_not_awaited()
 
 
 @pytest.mark.asyncio

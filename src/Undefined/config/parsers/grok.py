@@ -28,6 +28,7 @@ from ..resolvers import (
     _resolve_responses_force_stateless_replay,
     _resolve_responses_tool_choice_compat,
     _resolve_system_prompt_as_user,
+    _resolve_thinking_param_enabled,
 )
 
 logger = logging.getLogger(__name__)
@@ -67,6 +68,11 @@ def _parse_grok_model_config(data: dict[str, Any]) -> GrokModelConfig:
         context_window_tokens=context_window_tokens,
         queue_interval_seconds=queue_interval_seconds,
         api_mode=_resolve_api_mode(data, "grok", "GROK_MODEL_API_MODE"),
+        thinking_param_enabled=_resolve_thinking_param_enabled(
+            data,
+            "grok",
+            "GROK_MODEL_THINKING_PARAM_ENABLED",
+        ),
         thinking_enabled=_coerce_bool(
             _get_value(
                 data,

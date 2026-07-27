@@ -153,17 +153,18 @@ class QueueManager:
         max_retries: int = 2,
     ) -> None:
         if ai_request_interval < 0:
-            ai_request_interval = 1.0
+            ai_request_interval = 0.0
         self.ai_request_interval = ai_request_interval
         self._default_interval = ai_request_interval
         self._max_retries = max(0, max_retries)
         self._model_intervals: dict[str, float] = {}
+        self._model_queues: dict[str, ModelQueue] = {}
+        self._model_work_events: dict[str, asyncio.Event] = {}
+        self._processor_tasks: dict[str, asyncio.Task[None]] = {}
+        self._inflight_tasks: set[asyncio.Task[None]] = set()
         if model_intervals:
             self.update_model_intervals(model_intervals)
 
-        self._model_queues: dict[str, ModelQueue] = {}
-        self._processor_tasks: dict[str, asyncio.Task[None]] = {}
-        self._inflight_tasks: set[asyncio.Task[None]] = set()
         self._work_changed = asyncio.Event()
         self._work_changed.set()
         self._next_dispatch_at: dict[str, float] = {}
@@ -182,6 +183,8 @@ class QueueManager:
                 continue
             normalized[name] = self._normalize_interval(interval)
         self._model_intervals = normalized
+        for work_event in self._model_work_events.values():
+            work_event.set()
         logger.info(
             "[队列服务] 已更新模型发车节奏: count=%s default=%.2fs",
             len(self._model_intervals),
@@ -200,7 +203,7 @@ class QueueManager:
         except (TypeError, ValueError):
             return self._default_interval
         if value < 0:
-            return self._default_interval
+            return 0.0
         return value
 
     def start(
@@ -303,11 +306,37 @@ class QueueManager:
         """获取或创建指定模型的队列，并确保处理任务已启动"""
         if model_name not in self._model_queues:
             self._model_queues[model_name] = ModelQueue(model_name=model_name)
+            self._model_work_events[model_name] = asyncio.Event()
             if self._request_handler:
                 task = asyncio.create_task(self._process_model_loop(model_name))
                 self._processor_tasks[model_name] = task
                 logger.info("[队列服务] 已启动模型处理循环: model=%s", model_name)
+        else:
+            self._model_work_events.setdefault(model_name, asyncio.Event())
         return self._model_queues[model_name]
+
+    @staticmethod
+    def _has_pending_model_work(model_queue: ModelQueue) -> bool:
+        """判断指定模型是否还有等待发车的请求。"""
+
+        return any(not queue.empty() for queue in model_queue.lane_queues().values())
+
+    async def _wait_for_immediate_work(
+        self, model_name: str, model_queue: ModelQueue
+    ) -> None:
+        """在立即发车模式下阻塞到请求到达或调度配置改变。"""
+
+        work_event = self._model_work_events[model_name]
+        while self.get_interval(model_name) <= 0 and not self._has_pending_model_work(
+            model_queue
+        ):
+            work_event.clear()
+            # clear 与 wait 之间再次检查，避免入队通知丢失。
+            if self.get_interval(model_name) > 0 or self._has_pending_model_work(
+                model_queue
+            ):
+                return
+            await work_event.wait()
 
     def snapshot(self) -> dict[str, Any]:
         """返回当前队列状态快照。"""
@@ -389,6 +418,12 @@ class QueueManager:
             return lane_queue
         return model_queue.background_queue
 
+    def _notify_model_work(self, model_name: str) -> None:
+        """通知模型处理器和 drain 等待者队列状态已改变。"""
+
+        self._model_work_events[model_name].set()
+        self._work_changed.set()
+
     async def _enqueue_lane_request(
         self,
         request: dict[str, Any],
@@ -407,7 +442,7 @@ class QueueManager:
             await lane_queue.put_second(request)
         else:
             await lane_queue.put(request)
-        self._work_changed.set()
+        self._notify_model_work(model_name)
         logger.info(
             "[队列入队][%s] %s: size=%s %s",
             model_name,
@@ -537,8 +572,12 @@ class QueueManager:
 
         try:
             while True:
-                cycle_start_time = time.perf_counter()
                 interval = self.get_interval(model_name)
+                if interval <= 0:
+                    await self._wait_for_immediate_work(model_name, model_queue)
+                    interval = self.get_interval(model_name)
+
+                cycle_start_time = time.perf_counter()
                 self._next_dispatch_at[model_name] = cycle_start_time + interval
 
                 request: dict[str, Any] | None = None
@@ -597,9 +636,13 @@ class QueueManager:
                         )
                         self._track_inflight_task(inflight_task)
 
-                elapsed = time.perf_counter() - cycle_start_time
-                wait_time = max(0.0, interval - elapsed)
-                await asyncio.sleep(wait_time)
+                if interval <= 0:
+                    # 仅在确有积压时让出执行权；空队列会在下一轮阻塞等待事件。
+                    await asyncio.sleep(0)
+                else:
+                    elapsed = time.perf_counter() - cycle_start_time
+                    wait_time = max(0.0, interval - elapsed)
+                    await asyncio.sleep(wait_time)
 
         except asyncio.CancelledError:
             logger.info("[队列服务] 模型处理循环已取消: model=%s", model_name)
@@ -664,6 +707,7 @@ class QueueManager:
                     )
                     return
                 await self._get_lane_queue(model_queue, queue_lane).put_second(request)
+                self._notify_model_work(model_name)
                 logger.warning(
                     "[queued_llm_retry_requeue] model=%s lane=%s retry=%s/%s position=2 elapsed=%.2fs %s error=%s",
                     model_name,

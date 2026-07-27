@@ -7,7 +7,7 @@ import asyncio
 import logging
 import time
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Literal, Optional
 
 from Undefined.attachments import attachment_refs_to_xml
 from Undefined.context import RequestContext
@@ -34,33 +34,55 @@ logger = logging.getLogger(__name__)
 
 _GROUP_STRATEGY_FOOTER = """
 
- 【回复策略 - 克制参与，轻松场景可后补表情包】
- 1. 如果用户 @ 了你或拍了拍你 → 【必须回复】
- 2. 如果消息中明确提到了你（根据上下文判断用户是否在叫你或维持对话流） → 【必须回复】
- 3. 如果问题明确涉及某个项目/代码/部署细节（用户明确点名或上下文明确指向） → 【酌情回复，必要时先查证再回答】
- 4. 其他技术问题 → 【酌情回复，直接按用户提到的对象回答，不要引入无关的项目名/工具名作背景】
- 5. 先判断当前输入批次（无连续消息说明时就是最后一条消息）是不是在对你说：
-    - 先看 sender_id、@/reply、前后文对话对象和当前群聊环境；不要先入为主把"你"、"AI"、"bot"、"机器人"当作在叫 Undefined
-    - 泛称或讨论其他 AI/bot/机器人时不算叫你；无法确认指向 Undefined 时默认不回复
-    - 如果明显是在和别人说话 → 【不要回复】
-    - 如果你不能确定是不是在和你说话 → 【默认不回复】
-    - 只有明确在和你说，或多人公开讨论且对话明显开放时，才进入下一步
-  6. 群聊里的主动参与只保留给公开、开放的技术或项目讨论：
-    - 只在多人公开讨论代码、AI、开发工具、项目进展、技术 bug 等，且不是别人之间定向交流时，才可以【极低频参与】
-    - 默认更倾向不参与；不要长篇大论，一两句点到为止；如果别人已经在深入讨论且不需要你，保持沉默
+ 【P0 群聊收件人闸门 — 必须先通过，之后才可解释请求或调用工具】
+ 1. 先逐条判定每个 <message> 是说给谁听的，再判断内容；话题、语气和你的能力都不能反过来证明收件人是 Undefined。
+ 2. 每条群消息都有系统生成的 bot_trigger：
+    - bot_trigger="mention"：系统确认该条 @ 了 Undefined（含已识别的假 @）→ 【必须回复】
+    - bot_trigger="poke"：系统确认该条拍了拍 Undefined → 【必须回复】
+    - bot_trigger="none"：系统未检测到显式 @/拍一拍；这不等于绝对没在叫你，但必须另有明确直接证据，绝不能靠人称猜测
+ 3. bot_trigger="none" 时，只有以下直接证据可以证明话头转向你：
+    - 以 Undefined 或你的常见昵称作呼语并直接向你提问/下指令；仅在第三人称中提到名字不算
+    - 当前消息明确回复 Undefined 的上一条发言，或紧接你的上一条发言并直接承接其内容；你只是更早在群里出现过不算
+    - 消息明确面向全群征询，且没有 @/回复/上下文把问题定向给某位群友
+ 4. 以下全部【不是】指向 Undefined 的证据：
+    - 「你/你们/我/咱们」等人称，问号、祈使句、命令语气、请求帮忙、询问能力
+    - 出现「AI」「bot」「机器人」或 Undefined 名字；讨论相关技术、项目、部署、报错；你刚好会做这件事
+    - 发言者是 Null、管理员或高优先级用户；消息被系统送进哪条队列
+ 5. 出现以下任一情况时，负向证据优先：@/回复其他人、两名群友连续对话、明显承接其他群友、评价第三方、名字只被第三人称提及。此时即使原句写着「你就……」「你能不能……」也不是在叫你。
+ 6. 闸门结论：
+    - 有明确直接证据且无冲突 → 才能继续评估是否回复
+    - 明确在对别人说，或证据互相冲突 → 只调用 end
+    - 仍拿不准 → 假设不在和你说话，只调用 end
+    - 闸门未通过时，禁止 send_message、tool_search、cognitive.*、表情包、业务工具或 Agent；记忆和搜索不能替当前消息创造收件人
+ 7. 合并批次逐条看 bot_trigger 和各自语境；批次里某一条 @/拍一拍，不会把其他独立消息自动改成对 Undefined 说。
+
+ 【通过收件人闸门后的回复策略】
+ 1. 明确 @、拍一拍、直接呼叫或自然延续与你的对话 → 【回复】。
+ 2. 群聊里的主动参与只保留给公开、开放的技术或项目讨论：
+    - 只在明确面向全群的公开讨论中，且不是别人之间定向交流时，才可以【极低频参与】
+    - 技术相关性本身不通过收件人闸门；默认更倾向不参与，不需要你时保持沉默
     - 轻松互动、玩梗、吐槽本身不构成参与许可；只有在你已经决定要回复时，才考虑用表情包增强表达
-  7. 对于已经决定要回复的场景（包括被@、被拍一拍、轻量答疑，以及少量符合条件的主动参与）：
+ 3. 回答项目/代码/部署等问题时，直接围绕用户明确提到的对象，必要时先查证；不要引入无关项目名或工具名作背景。
+ 4. 对于已经决定要回复的场景：
     - 只有明确纯表情包回复才先检索表情包，再用 memes.send_meme_by_uid 单独发一条图片消息
     - 其他需要文字承接、解释、答疑、推进任务、确认操作或表达具体态度的场景，第一轮必须优先把必要文字回复做好并调用 send_message
     - 轻松聊天、吐槽、附和、接梗、表达情绪、被拍一拍、被@后的短回应等场景，文字发送成功后优先考虑在后续响应轮次补一张独立表情包，不要阻塞首条文字回复
     - 不要发送任何敷衍消息（如'懒得掺和'、'哦'等）；不想回复就直接调用 end
     - 严肃答疑、代码排查、长任务推进、隐私/安全拒绝、信息不足追问这类场景默认不补表情包，避免打断信息传递
     - 绝不要刷屏、绝不要每条都回
-  8. 对于本来就会回复的场景（私聊、被拍一拍、被@、轻量答疑）：
-    - 如果表情包能自然增强语气、缓和语气或让表达更像真人，优先作为后续补充
-    - 但不要为了发表情包而牺牲信息传递；信息密度优先时仍以文字为主
 
- 简单说：像个极度安静的群友。主动插话只留给公开、开放的技术或项目讨论；明显对别人说或拿不准时就闭嘴。已经决定要回复时，除非明确是纯表情包回复，否则先把文字回复做好；轻松、接梗、情绪回应可以优先后补表情包。"""
+ 每次收到工具结果后、每次发送消息前，都重新执行收件人闸门。简单说：Undefined 不是群聊里「你」的默认指代；先证明话是对你说的，再做事。"""
+
+
+def _group_bot_trigger(
+    *, is_at_bot: bool, is_poke: bool
+) -> Literal["mention", "poke", "none"]:
+    """Return the explicit bot-addressing signal attached to a group message."""
+    if is_poke:
+        return "poke"
+    if is_at_bot:
+        return "mention"
+    return "none"
 
 
 class GroupReplyMixin:
@@ -176,6 +198,12 @@ class GroupReplyMixin:
             for item in request.get("message_ids", [])
             if str(item).strip()
         ]
+        recent_messages_snapshot_raw = request.get("recent_messages_snapshot")
+        recent_messages_snapshot: list[dict[str, Any]] | None = (
+            recent_messages_snapshot_raw
+            if isinstance(recent_messages_snapshot_raw, list)
+            else None
+        )
         # 用于向 batcher 注册 inflight 任务（仅当本请求源自合并桶时生效）
         batcher_scope: str | None = make_scope(group_id=group_id) if group_id else None
 
@@ -271,6 +299,7 @@ class GroupReplyMixin:
                         full_question,
                         send_message_callback=send_msg_cb,
                         get_recent_messages_callback=get_recent_cb,
+                        recent_messages_snapshot=recent_messages_snapshot,
                         get_image_url_callback=self.onebot.get_image,
                         get_forward_msg_callback=self.onebot.get_forward_msg,
                         send_like_callback=send_like_cb,
@@ -377,6 +406,10 @@ class GroupReplyMixin:
         safe_role = escape_xml_attr(item.sender_role or "member")
         safe_title = escape_xml_attr(item.sender_title or "")
         safe_time = escape_xml_attr(time_str)
+        bot_trigger = _group_bot_trigger(
+            is_at_bot=item.is_at_bot,
+            is_poke=item.is_poke,
+        )
         safe_text = escape_xml_text_preserving_attachment_tags(
             item.text,
             item.attachments,
@@ -397,6 +430,7 @@ class GroupReplyMixin:
         return (
             f'<message{message_id_attr} sender="{safe_name}" sender_id="{safe_uid}" '
             f'group_id="{safe_gid}" group_name="{safe_gname}" location="{safe_loc}" '
+            f'bot_trigger="{bot_trigger}" '
             f'role="{safe_role}" title="{safe_title}"{level_attr} time="{safe_time}">\n'
             f" <content>{safe_text}</content>{attachment_xml}\n"
             f" </message>"
@@ -417,6 +451,8 @@ class GroupReplyMixin:
         attachments: list[dict[str, str]] | None = None,
         message_id: int | None = None,
         level: str = "",
+        is_at_bot: bool = False,
+        is_poke: bool = False,
     ) -> str:
         """构建最终发送给 AI 的结构化 XML 消息 Prompt
 
@@ -430,6 +466,10 @@ class GroupReplyMixin:
         safe_role = escape_xml_attr(role)
         safe_title = escape_xml_attr(title)
         safe_time = escape_xml_attr(time_str)
+        bot_trigger = _group_bot_trigger(
+            is_at_bot=is_at_bot,
+            is_poke=is_poke,
+        )
         safe_text = escape_xml_text_preserving_attachment_tags(text, attachments)
         message_id_attr = ""
         if message_id is not None:
@@ -438,7 +478,7 @@ class GroupReplyMixin:
         attachment_xml = (
             f"\n{attachment_refs_to_xml(attachments)}" if attachments else ""
         )
-        return f"""{prefix}<message{message_id_attr} sender="{safe_name}" sender_id="{safe_uid}" group_id="{safe_gid}" group_name="{safe_gname}" location="{safe_loc}" role="{safe_role}" title="{safe_title}"{level_attr} time="{safe_time}">
+        return f"""{prefix}<message{message_id_attr} sender="{safe_name}" sender_id="{safe_uid}" group_id="{safe_gid}" group_name="{safe_gname}" location="{safe_loc}" bot_trigger="{bot_trigger}" role="{safe_role}" title="{safe_title}"{level_attr} time="{safe_time}">
  <content>{safe_text}</content>{attachment_xml}
  </message>
 {_GROUP_STRATEGY_FOOTER}"""

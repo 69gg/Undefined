@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import copy
 from types import SimpleNamespace
 from typing import Any, cast
@@ -11,6 +12,14 @@ import pytest
 
 from Undefined.ai.client import AIClient
 from Undefined.config.models import ChatModelConfig
+from Undefined.skills.toolsets.music._track_refs import (
+    MUSIC_TRACK_STORE_CONTEXT_KEY,
+    MusicTrackReferenceStore,
+)
+from Undefined.utils.easter_egg_calls import (
+    format_batched_easter_egg_message,
+    main_call_key,
+)
 
 
 def _tool(name: str, description: str = "") -> dict[str, Any]:
@@ -88,11 +97,17 @@ def _build_client(
         Any,
         SimpleNamespace(build_messages=build_messages, end_summaries=[]),
     )
+    virtual_tool_announcements: list[str] = []
+
+    async def _announce_virtual_tool_call(name: str, _context: dict[str, Any]) -> None:
+        virtual_tool_announcements.append(name)
+
     client.tool_manager = cast(
         Any,
         SimpleNamespace(
             get_openai_tools=lambda: schemas,
             execute_tool=execute_tool,
+            announce_virtual_tool_call=_announce_virtual_tool_call,
         ),
     )
     client.agent_registry = cast(
@@ -139,7 +154,52 @@ def _build_client(
     client.submit_queued_llm_call = AsyncMock(side_effect=_submit_queued_llm_call)
     client._submit_calls = submit_calls
     client._build_messages_mock = build_messages
+    client._virtual_tool_announcements = virtual_tool_announcements
     return client
+
+
+@pytest.mark.asyncio
+async def test_music_track_reference_store_survives_tool_search_rounds() -> None:
+    stores: list[object] = []
+
+    async def _execute_tool(
+        name: str, args: dict[str, Any], context: dict[str, Any]
+    ) -> str:
+        _ = args
+        if name == "end":
+            context["conversation_ended"] = True
+            return "ended"
+        stores.append(context[MUSIC_TRACK_STORE_CONTEXT_KEY])
+        return "ok"
+
+    client = _build_client(
+        execute_tool=_execute_tool,
+        llm_responses=[
+            _llm_tool_calls(
+                _tool_call(
+                    "call_search_web",
+                    "tool_search",
+                    '{"query":"select:web_agent"}',
+                )
+            ),
+            _llm_tool_calls(_tool_call("call_web", "web_agent")),
+            _llm_tool_calls(
+                _tool_call(
+                    "call_search_info",
+                    "tool_search",
+                    '{"query":"select:info_agent"}',
+                )
+            ),
+            _llm_tool_calls(_tool_call("call_info", "info_agent")),
+            _llm_tool_calls(_tool_call("call_end", "end")),
+        ],
+    )
+
+    assert await AIClient.ask(client, "hello") == ""
+    assert len(stores) == 2
+    assert isinstance(stores[0], MusicTrackReferenceStore)
+    assert stores[0] is stores[1]
+    assert client._virtual_tool_announcements == ["tool_search", "tool_search"]
 
 
 @pytest.mark.asyncio
@@ -180,6 +240,7 @@ async def test_tool_search_loads_schema_only_for_the_next_model_round() -> None:
     assert second_names == {"send_message", "end", "tool_search", "web_agent"}
     assert third_names == second_names
     assert executed == ["web_agent", "end"]
+    assert client._virtual_tool_announcements == ["tool_search"]
 
     prompt_kwargs = client._build_messages_mock.await_args.kwargs
     assert prompt_kwargs["deferred_tool_names"] == ("info_agent", "web_agent")
@@ -338,6 +399,52 @@ async def test_disabled_tool_search_preserves_full_tool_list() -> None:
         "info_agent",
     }
     assert client._build_messages_mock.await_args.kwargs["deferred_tool_names"] is None
+
+
+@pytest.mark.asyncio
+async def test_main_parallel_duplicate_tools_prepare_shared_easter_egg_batch() -> None:
+    announcements: list[str] = []
+
+    async def _execute_tool(
+        name: str, args: dict[str, Any], context: dict[str, Any]
+    ) -> str:
+        _ = args
+        message = format_batched_easter_egg_message(
+            context,
+            call_key=main_call_key(name),
+            message=f"{name}，我调用你了，我要调用你了！",
+        )
+        if message is not None:
+            announcements.append(message)
+        await asyncio.sleep(0)
+        if name == "end":
+            context["conversation_ended"] = True
+        return "ok"
+
+    client = _build_client(
+        execute_tool=_execute_tool,
+        tool_search_enabled=False,
+        schemas=[_tool("crawl_webpage"), _tool("end")],
+        llm_responses=[
+            _llm_tool_calls(
+                *[
+                    _tool_call(
+                        f"call_{index}",
+                        "crawl_webpage",
+                        f'{{"url":"https://example.com/{index}"}}',
+                    )
+                    for index in range(4)
+                ]
+            ),
+            _llm_tool_calls(_tool_call("call_end", "end")),
+        ],
+    )
+
+    assert await AIClient.ask(client, "crawl") == ""
+    assert announcements == [
+        "crawl_webpage，我调用你了，我要调用你了！ x4",
+        "end，我调用你了，我要调用你了！",
+    ]
 
 
 @pytest.mark.asyncio

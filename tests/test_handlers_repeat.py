@@ -570,6 +570,41 @@ async def test_forward_meme_scan_enqueues_nested_images(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_forward_meme_scan_ignores_non_awaitable_resolver(
+    tmp_path: Path,
+) -> None:
+    handler = _build_handler(repeat_enabled=False)
+    handler.ai.attachment_registry = AttachmentRegistry(
+        registry_path=tmp_path / "attachment_registry.json",
+        cache_dir=tmp_path / "attachments",
+    )
+    enqueue = AsyncMock()
+    handler.ai._meme_service = SimpleNamespace(
+        enabled=True,
+        enqueue_incoming_attachments=enqueue,
+    )
+    requested: list[str] = []
+
+    def _get_forward_msg(forward_id: str) -> list[dict[str, Any]]:
+        requested.append(forward_id)
+        return []
+
+    handler.onebot.get_forward_msg = _get_forward_msg
+
+    await handler._scan_forward_memes_for_ingest(
+        message_content=[{"type": "forward", "data": {"id": "forward-raw"}}],
+        chat_type="group",
+        chat_id=30001,
+        sender_id=20001,
+        message_id=1,
+        scope_key="group:30001",
+    )
+
+    assert requested == ["forward-raw"]
+    enqueue.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_repeat_cooldown_allows_different_text() -> None:
     """复读 "草" 后，不同内容 "lol" 仍可正常复读。"""
     handler = _build_handler(repeat_enabled=True, repeat_cooldown_minutes=60)

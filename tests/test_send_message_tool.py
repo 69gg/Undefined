@@ -11,6 +11,8 @@ from jsonschema import Draft202012Validator
 
 from Undefined.attachments import AttachmentRecord, AttachmentRegistry
 from Undefined.context import RequestContext
+from Undefined.onebot.client import OneBotDeliveryUncertainError
+from Undefined.skills.toolsets.messages.context_utils import DELIVERY_UNCERTAIN_RESULT
 from Undefined.skills.toolsets.messages.send_message.handler import execute
 from Undefined.utils import io as async_io
 from Undefined.utils.coerce import was_message_sent
@@ -42,6 +44,8 @@ async def test_send_message_schema_rejects_mixed_address_parameters() -> None:
     assert "特殊符号和附件标签必须原样填写" in function["description"]
     assert "message 参数是 JSON 字符串而不是 XML/HTML" in function["description"]
     assert "错误的 &it;" in function["description"]
+    assert "工具仅返回附件标签或 UID 时并未发送" in function["description"]
+    assert "可发送已登记的图片或普通文件附件" in function["description"]
     assert (
         "<、>、& 等特殊符号须原样填写"
         not in parameters["properties"]["message"]["description"]
@@ -51,6 +55,10 @@ async def test_send_message_schema_rejects_mixed_address_parameters() -> None:
         in parameters["properties"]["message"]["description"]
     )
     assert "发送前检查并消除 &lt;" in parameters["properties"]["message"]["description"]
+    assert (
+        "把上游工具返回的 <attachment"
+        in parameters["properties"]["message"]["description"]
+    )
 
     assert validator.is_valid({"message": "hello", "address": "wechat:123"})
     assert validator.is_valid(
@@ -294,6 +302,140 @@ async def test_send_message_returns_sent_message_id_when_available() -> None:
     )
 
     assert result == "消息已发送（message_id=77777）"
+
+
+@pytest.mark.asyncio
+async def test_send_message_dispatches_file_only_without_empty_message(
+    tmp_path: Path,
+) -> None:
+    registry = AttachmentRegistry(
+        registry_path=tmp_path / "attachment_registry.json",
+        cache_dir=tmp_path / "attachments",
+    )
+    record = await registry.register_bytes(
+        "group:10001",
+        b"audio-bytes",
+        kind="audio",
+        display_name="song.mp3",
+        source_kind="test",
+        mime_type="audio/mpeg",
+    )
+    sender = SimpleNamespace(
+        send_address_message=AsyncMock(),
+        send_address_file=AsyncMock(),
+    )
+    context: dict[str, Any] = _tool_context(
+        request_type="group",
+        group_id=10001,
+        sender_id=20002,
+        request_id="req-file-only",
+        runtime_config=_build_runtime_config(),
+        sender=sender,
+        attachment_registry=registry,
+    )
+
+    result = await execute(
+        {"message": f'<attachment uid="{record.uid}"/>'},
+        context,
+    )
+
+    assert result == "消息已发送"
+    sender.send_address_message.assert_not_awaited()
+    sender.send_address_file.assert_awaited_once()
+    send_call = sender.send_address_file.await_args
+    assert send_call is not None
+    assert send_call.args[0].canonical == "group:10001"
+    assert send_call.args[1] == record.local_path
+    assert send_call.kwargs == {
+        "name": "song.mp3",
+        "auto_history": True,
+        "history_attachment": record,
+    }
+    assert context["message_sent_this_turn"] is True
+
+
+@pytest.mark.asyncio
+async def test_send_message_reports_file_only_dispatch_failure(tmp_path: Path) -> None:
+    registry = AttachmentRegistry(
+        registry_path=tmp_path / "attachment_registry.json",
+        cache_dir=tmp_path / "attachments",
+    )
+    record = await registry.register_bytes(
+        "group:10001",
+        b"document",
+        kind="file",
+        display_name="doc.txt",
+        source_kind="test",
+    )
+    sender = SimpleNamespace(
+        send_address_message=AsyncMock(),
+        send_address_file=AsyncMock(side_effect=RuntimeError("upload failed")),
+    )
+    context: dict[str, Any] = _tool_context(
+        request_type="group",
+        group_id=10001,
+        sender_id=20002,
+        request_id="req-file-failure",
+        runtime_config=_build_runtime_config(),
+        sender=sender,
+        attachment_registry=registry,
+    )
+
+    result = await execute(
+        {"message": f'<attachment uid="{record.uid}"/>'},
+        context,
+    )
+
+    assert result == "发送失败：附件服务暂时不可用，请稍后重试"
+    sender.send_address_message.assert_not_awaited()
+    assert "message_sent_this_turn" not in context
+
+
+@pytest.mark.asyncio
+async def test_send_message_does_not_invite_retry_for_uncertain_file_delivery(
+    tmp_path: Path,
+) -> None:
+    registry = AttachmentRegistry(
+        registry_path=tmp_path / "attachment_registry.json",
+        cache_dir=tmp_path / "attachments",
+    )
+    record = await registry.register_bytes(
+        "group:10001",
+        b"audio-bytes",
+        kind="audio",
+        display_name="song.mp3",
+        source_kind="test",
+        mime_type="audio/mpeg",
+    )
+    sender = SimpleNamespace(
+        send_address_message=AsyncMock(),
+        send_address_file=AsyncMock(
+            side_effect=OneBotDeliveryUncertainError(
+                "upload_group_file",
+                "Timeout while waiting for sendMsg",
+                retcode=1200,
+            )
+        ),
+    )
+    context: dict[str, Any] = _tool_context(
+        request_type="group",
+        group_id=10001,
+        sender_id=20002,
+        request_id="req-file-uncertain",
+        runtime_config=_build_runtime_config(),
+        sender=sender,
+        attachment_registry=registry,
+    )
+
+    result = await execute(
+        {"message": f'<attachment uid="{record.uid}"/>'},
+        context,
+    )
+
+    assert result == DELIVERY_UNCERTAIN_RESULT
+    assert "禁止自动重试" in result
+    assert context["message_sent_this_turn"] is True
+    sender.send_address_file.assert_awaited_once()
 
 
 @pytest.mark.asyncio

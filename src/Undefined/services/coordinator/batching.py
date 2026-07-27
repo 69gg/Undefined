@@ -13,12 +13,14 @@ from Undefined.services.coordinator.private import (
     _WECHAT_DELIVERY_CONSTRAINTS,
 )
 from Undefined.services.message_batcher import BufferedMessage
+from Undefined.utils.recent_messages import get_recent_messages_snapshot
 
 if TYPE_CHECKING:
     from Undefined.config import Config
     from Undefined.services.message_batcher import BufferedMessage as _BufferedMessage
     from Undefined.services.model_pool import ModelPoolService
     from Undefined.services.queue_manager import QueueManager
+    from Undefined.utils.history import MessageHistoryManager
 
 logger = logging.getLogger(__name__)
 
@@ -28,12 +30,58 @@ class BatchingMixin:
     """MessageBatcher 回调、合并 prompt 与队列路由。"""
 
     if TYPE_CHECKING:
+        ai: Any
         config: Config
+        history_manager: MessageHistoryManager
         queue_manager: QueueManager
         model_pool: ModelPoolService
 
         def _format_group_message_segment(self, item: _BufferedMessage) -> str: ...
         def _format_private_message_segment(self, item: _BufferedMessage) -> str: ...
+
+    async def _capture_recent_messages_snapshot(
+        self,
+        item: BufferedMessage,
+    ) -> list[dict[str, Any]]:
+        """在当前输入批次发车前冻结自动注入的历史消息。"""
+        get_limit = getattr(self.config, "get_context_recent_messages_limit", None)
+        if not callable(get_limit):
+            logger.debug("[上下文快照] 当前调用方未提供历史注入配置，使用空快照")
+            return []
+        try:
+            limit = int(get_limit())
+        except Exception as exc:
+            logger.warning("[上下文快照] 历史注入条数无效，使用空快照: %s", exc)
+            return []
+        if limit <= 0:
+            return []
+
+        if item.is_private:
+            chat_id = str(item.sender_id)
+            msg_type = "private"
+        else:
+            chat_id = str(item.group_id or 0)
+            msg_type = "group"
+
+        snapshot = await get_recent_messages_snapshot(
+            chat_id=chat_id,
+            msg_type=msg_type,
+            start=0,
+            end=limit,
+            history_manager=self.history_manager,
+            attachment_registry=getattr(
+                getattr(self, "ai", None),
+                "attachment_registry",
+                None,
+            ),
+        )
+        logger.debug(
+            "[上下文快照] 已冻结最近消息: scope=%s sender=%s count=%s",
+            item.scope,
+            item.sender_id,
+            len(snapshot),
+        )
+        return snapshot
 
     async def handle_batched_dispatch(self, items: list[BufferedMessage]) -> None:
         """:class:`MessageBatcher` 的 flush_callback：把一批消息组装为单次请求并入队。"""
@@ -73,9 +121,17 @@ class BatchingMixin:
         any_poke = any(it.is_poke for it in items)
         any_at_bot = any(it.is_at_bot for it in items)
         if any_poke:
-            prefix = "(用户拍了拍你) "
+            prefix = (
+                "(用户拍了拍你)"
+                "（仅表示当前输入批次至少有一条拍一拍；"
+                "逐条收件人以各 <message> 的 bot_trigger 为准）\n"
+            )
         elif any_at_bot:
-            prefix = "(用户 @ 了你) "
+            prefix = (
+                "(用户 @ 了你)"
+                "（仅表示当前输入批次至少有一条 @ Undefined；"
+                "逐条收件人以各 <message> 的 bot_trigger 为准）\n"
+            )
         else:
             prefix = ""
 
@@ -105,6 +161,7 @@ class BatchingMixin:
         last = items[-1]
         full_question = self._build_grouped_prompt(items)
         message_ids = collect_message_ids(items)
+        recent_messages_snapshot = await self._capture_recent_messages_snapshot(last)
         any_poke = any(it.is_poke for it in items)
         any_at_bot = any(it.is_at_bot for it in items)
 
@@ -119,6 +176,7 @@ class BatchingMixin:
                 "trigger_message_id": last.trigger_message_id,
                 "message_ids": message_ids,
                 "batched_count": len(items),
+                "recent_messages_snapshot": recent_messages_snapshot,
                 "channel": first.channel,
                 "address": first.address,
                 "batch_scope": first.scope,
@@ -161,6 +219,7 @@ class BatchingMixin:
             "trigger_message_id": last.trigger_message_id,
             "message_ids": message_ids,
             "batched_count": len(items),
+            "recent_messages_snapshot": recent_messages_snapshot,
         }
         if first.batch_token is not None:
             request_data["_message_batcher_token"] = first.batch_token

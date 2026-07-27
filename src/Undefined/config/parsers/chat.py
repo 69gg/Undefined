@@ -29,6 +29,7 @@ from ..resolvers import (
     _resolve_responses_tool_choice_compat,
     _resolve_system_prompt_as_user,
     _resolve_thinking_compat_flags,
+    _resolve_thinking_param_enabled,
 )
 from .pool import _parse_model_pool
 
@@ -37,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 # 解析 [models.chat]：主对话模型 API、thinking/reasoning、队列间隔与模型池
 def _parse_chat_model_config(data: dict[str, Any]) -> ChatModelConfig:
-    # 该模型独立的发车间隔（秒），0=立即发车
+    # 该模型独立的发车间隔（秒），非正数为事件驱动立即发车
     queue_interval_seconds = _normalize_queue_interval(
         _coerce_float(
             _get_value(
@@ -129,6 +130,11 @@ def _parse_chat_model_config(data: dict[str, Any]) -> ChatModelConfig:
         ),
         queue_interval_seconds=queue_interval_seconds,
         api_mode=api_mode,
+        thinking_param_enabled=_resolve_thinking_param_enabled(
+            data,
+            "chat",
+            "CHAT_MODEL_THINKING_PARAM_ENABLED",
+        ),
         thinking_enabled=_coerce_bool(
             _get_value(
                 data,

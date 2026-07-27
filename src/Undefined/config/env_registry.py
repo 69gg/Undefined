@@ -32,6 +32,7 @@ _GENERATION_MODEL_ENV_FIELDS: Final[dict[str, str]] = {
     "thinking_budget_tokens": "THINKING_BUDGET_TOKENS",
     "thinking_enabled": "THINKING_ENABLED",
     "thinking_include_budget": "THINKING_INCLUDE_BUDGET",
+    "thinking_param_enabled": "THINKING_PARAM_ENABLED",
     "thinking_tool_call_compat": "THINKING_TOOL_CALL_COMPAT",
     "use_proxy": "USE_PROXY",
 }
@@ -73,6 +74,8 @@ ENV_REGISTRY: Final[dict[tuple[str, ...], str]] = {
     ("logging", "log_thinking"): "LOG_THINKING",
     ("logging", "max_size_mb"): "LOG_MAX_SIZE_MB",
     ("logging", "tty_enabled"): "LOG_TTY_ENABLED",
+    ("lxmusic2api", "api_key"): "LXMUSIC2API_API_KEY",
+    ("lxmusic2api", "base_url"): "LXMUSIC2API_BASE_URL",
     ("mcp", "config_path"): "MCP_CONFIG_PATH",
     (
         "models",
@@ -94,6 +97,11 @@ ENV_REGISTRY: Final[dict[tuple[str, ...], str]] = {
         "historian",
         "system_prompt_as_user",
     ): "HISTORIAN_MODEL_SYSTEM_PROMPT_AS_USER",
+    (
+        "models",
+        "historian",
+        "thinking_param_enabled",
+    ): "HISTORIAN_MODEL_THINKING_PARAM_ENABLED",
     ("models", "image_edit", "use_proxy"): "IMAGE_EDIT_MODEL_USE_PROXY",
     ("models", "image_gen", "use_proxy"): "IMAGE_GEN_MODEL_USE_PROXY",
     ("models", "rerank", "api_key"): "RERANK_MODEL_API_KEY",
@@ -112,6 +120,11 @@ ENV_REGISTRY: Final[dict[tuple[str, ...], str]] = {
         "summary",
         "system_prompt_as_user",
     ): "SUMMARY_MODEL_SYSTEM_PROMPT_AS_USER",
+    (
+        "models",
+        "summary",
+        "thinking_param_enabled",
+    ): "SUMMARY_MODEL_THINKING_PARAM_ENABLED",
     ("messages", "use_proxy"): "MESSAGES_USE_PROXY",
     ("naga", "use_proxy"): "NAGA_USE_PROXY",
     ("onebot", "token"): "ONEBOT_TOKEN",

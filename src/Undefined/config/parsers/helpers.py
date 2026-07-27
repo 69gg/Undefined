@@ -108,13 +108,14 @@ def _log_debug_info(
     ]
     for name, cfg in configs:
         logger.debug(
-            "[配置] %s_model=%s api_url=%s api_key_set=%s api_mode=%s thinking=%s reasoning=%s/%s cot_compat=%s responses_tool_choice_compat=%s responses_force_stateless_replay=%s",
+            "[配置] %s_model=%s api_url=%s api_key_set=%s api_mode=%s thinking=%s thinking_param=%s reasoning=%s/%s cot_compat=%s responses_tool_choice_compat=%s responses_force_stateless_replay=%s",
             name,
             cfg.model_name,
             cfg.api_url,
             bool(cfg.api_key),
             getattr(cfg, "api_mode", API_MODE_OPENAI_CHAT_COMPLETIONS),
             cfg.thinking_enabled,
+            cfg.thinking_param_enabled,
             getattr(cfg, "reasoning_enabled", False),
             getattr(cfg, "reasoning_effort", "medium"),
             getattr(cfg, "thinking_tool_call_compat", False),

@@ -89,6 +89,7 @@ Console 和 Chat 都需要连接到已经运行的 Undefined 服务。首次部�
 - **Agent 私有 MCP**：可为单个 agent 提供独立 MCP 配置，按调用即时加载并释放，工具仅对该 agent 可见。
 - **Anthropic Skills**：支持 Anthropic Agent Skills（SKILL.md 格式），遵循 agentskills.io 开放标准，提供领域知识注入能力。
 - **Bilibili 视频提取与分析**：自动检测消息中的 B 站视频链接/BV 号/小程序分享，下载视频并通过 QQ 合并转发；`bilibili_video` 也可只返回附件 UID，供 `file_analysis_agent` 做视频内容分析。
+- **可选音乐工具集**：配置独立部署的 [lxmusic2api](https://github.com/69gg/lxmusic2api) 后，主 AI 可搜索歌曲/歌单、浏览热搜与排行榜、读取歌词/封面/评论、跨平台匹配并交付普通音频附件；完整 Track 通过任务内短引用流转，只暴露面向用户的高层 `music.*` 能力，不暴露下载作业生命周期接口。详见 [使用指南](docs/usage.md#音乐-music) 与 [配置说明](docs/configuration.md#4201-lxmusic2api-音乐服务)。
 - **arXiv 论文提取、搜索与分析**：自动检测消息中的 arXiv 链接/标识并发送论文信息与 PDF；`arxiv_paper` 也可只返回 PDF 附件 UID，供 `file_analysis_agent` 做文本提取或指定页视觉分析；`arxiv_search` 负责论文检索。
 - **GitHub 仓库卡片**：自动检测 GitHub 仓库链接或 `owner/repo` 仓库 ID，获取 public 仓库信息并发送简洁图片卡片，展示头像、简介、stars、forks、issues、contributors 等概览。
 - **自动处理管线**：Bilibili、arXiv、GitHub 等自动提取统一运行在 `skills/pipelines` 中，斜杠命令优先级更高；命令输入/输出会写入历史，非命令消息会并行检测和处理命中管线，结果通过统一发送层写入历史并登记附件 UID 后再进入 AI 回复。远程大附件超过 `[attachments].remote_download_max_size_mb` 时只登记 URL 引用，避免无界下载和缓存膨胀。
@@ -112,6 +113,7 @@ Undefined 的功能极为丰富，为了让本页面不过于臃肿，我们将�
 - 🖥️ **[WebUI 使用指南](docs/webui-guide.md)**：管理控制台功能一览——配置编辑、日志查看、认知记忆管理、表情包库、AI 对话与系统监控。
 - 🧭 **[Management API 与远程管理](docs/management-api.md)**：WebUI / App 共用的管理接口、认证、配置/日志/Bot 控制与引导探针说明。
 - 🛠️ **[配置与热更新说明](docs/configuration.md)**：从模型切换到 MCP 库挂载，全方位掌握 `config.toml` 的高阶配置；库嵌入见 [§2 库嵌入配置](docs/configuration.md#2-库嵌入配置)。
+- 🔌 **[模型 API 与兼容层](docs/model-compatibility.md)**：集中说明 OpenAI Chat Completions、Responses、Anthropic Messages SDK 适配，CoT / reasoning 续传，以及文本 Tool Call 后备解析。
 - 🔎 **[Tool Search 按需工具加载](docs/tool-search.md)**：减少主 AI 请求携带的 function schema，说明启用方式、检索语法、请求级生命周期、权限边界及 Chat Completions / Responses 兼容行为。
 - 😶 **[表情包系统 (Memes)](docs/memes.md)**：查看表情包两阶段判定管线、统一图片 `uid` 发送机制、检索模式及库存管理说明。
 - 💡 **[交互与使用手册](docs/usage.md)**：包含实用的对话示例、多模态解析用法，以及群管家必备的管理员`/指令`。

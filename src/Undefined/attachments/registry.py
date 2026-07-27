@@ -597,6 +597,8 @@ class AttachmentRegistry:
         source_ref: str = "",
         mime_type: str | None = None,
         segment_data: Mapping[str, str] | None = None,
+        semantic_kind: str = "",
+        description: str = "",
     ) -> AttachmentRecord:
         """将字节内容写入缓存并注册新附件（含 SHA-256 去重）。"""
         await self.load()
@@ -607,6 +609,13 @@ class AttachmentRegistry:
         normalized_mime = mime_type or _guess_mime_type(display_name, content)
         suffix = _guess_suffix(display_name, content, normalized_mime)
         prefix = self._uid_prefix_for_media_type(normalized_media_type)
+        normalized_segment_data = {
+            str(k): str(v)
+            for k, v in dict(segment_data or {}).items()
+            if str(k).strip() and str(v).strip()
+        }
+        normalized_semantic_kind = str(semantic_kind or "").strip()
+        normalized_description = str(description or "").strip()
 
         async with self._lock:
             digest = await asyncio.to_thread(hashlib.sha256, content)
@@ -614,8 +623,20 @@ class AttachmentRegistry:
 
             existing = self._find_by_sha256(scope_key, digest_hex, normalized_kind)
             if existing is not None:
-                # 同 scope+SHA256 去重，复用已有 UID
-                return existing
+                # 同 scope+SHA256 去重，复用已有 UID；显式提供的新语义信息
+                # 仍需写回，避免旧记录让后续历史丢失描述。
+                merged_segment_data = dict(existing.segment_data)
+                merged_segment_data.update(normalized_segment_data)
+                updated = replace(
+                    existing,
+                    segment_data=merged_segment_data,
+                    semantic_kind=normalized_semantic_kind or existing.semantic_kind,
+                    description=normalized_description or existing.description,
+                )
+                if updated != existing:
+                    self._records[existing.uid] = updated
+                    await self._persist()
+                return self._records.get(existing.uid, updated)
 
             uid = self._build_uid(prefix)
             file_name = f"{uid}{suffix}"
@@ -634,11 +655,9 @@ class AttachmentRegistry:
                 mime_type=normalized_mime,
                 sha256=digest_hex,
                 created_at=_now_iso(),
-                segment_data={
-                    str(k): str(v)
-                    for k, v in dict(segment_data or {}).items()
-                    if str(k).strip() and str(v).strip()
-                },
+                segment_data=normalized_segment_data,
+                semantic_kind=normalized_semantic_kind,
+                description=normalized_description,
             )
             self._records[uid] = record
             self._prune_records()
@@ -655,6 +674,8 @@ class AttachmentRegistry:
         source_kind: str = "local_file",
         source_ref: str = "",
         segment_data: Mapping[str, str] | None = None,
+        semantic_kind: str = "",
+        description: str = "",
     ) -> AttachmentRecord:
         """读取本地文件并注册为附件。"""
         path = Path(str(local_path)).expanduser()
@@ -678,6 +699,8 @@ class AttachmentRegistry:
             source_ref=source_ref or str(path),
             mime_type=mimetypes.guess_type(path.name)[0] or None,
             segment_data=segment_data,
+            semantic_kind=semantic_kind,
+            description=description,
         )
 
     async def register_data_url(

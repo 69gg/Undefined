@@ -322,6 +322,7 @@ class TestModelSelectorSelection:
                         model_name="pool-model",
                         max_tokens=2048,
                         api_mode="responses",
+                        thinking_param_enabled=False,
                         responses_tool_choice_compat=True,
                         responses_force_stateless_replay=True,
                         stream_enabled=True,
@@ -334,6 +335,7 @@ class TestModelSelectorSelection:
 
         assert result.model_name == "pool-model"
         assert result.api_mode == "openai.responses"
+        assert result.thinking_param_enabled is False
         assert result.responses_tool_choice_compat is True
         assert result.responses_force_stateless_replay is True
         assert result.stream_enabled is True
@@ -357,6 +359,7 @@ class TestModelSelectorSelection:
                         model_name="pool-agent",
                         max_tokens=2048,
                         api_mode="responses",
+                        thinking_param_enabled=False,
                         responses_tool_choice_compat=True,
                         responses_force_stateless_replay=True,
                         stream_enabled=True,
@@ -369,6 +372,7 @@ class TestModelSelectorSelection:
 
         assert result.model_name == "pool-agent"
         assert result.api_mode == "openai.responses"
+        assert result.thinking_param_enabled is False
         assert result.responses_tool_choice_compat is True
         assert result.responses_force_stateless_replay is True
         assert result.stream_enabled is True

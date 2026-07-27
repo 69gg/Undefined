@@ -18,13 +18,25 @@ from Undefined.ai.tooling import END_CO_CALL_REJECT_CONTENT
 from Undefined.context import RequestContext
 from Undefined.render import render_html_to_image, render_markdown_to_html
 from Undefined.skills.http_config import get_request_proxy
+from Undefined.skills.toolsets.music._track_refs import (
+    MUSIC_TRACK_STORE_CONTEXT_KEY,
+    MusicTrackReferenceStore,
+)
 from Undefined.services.message_summary_fetch import fetch_session_messages
 from Undefined.attachments import scope_from_context
 from Undefined.utils.io import write_bytes
+from Undefined.utils.easter_egg_calls import (
+    main_call_key,
+    prepare_easter_egg_call_batch,
+)
 from Undefined.utils.logging import log_debug_json, redact_string
 from Undefined.utils.message_turn import mark_message_sent_this_turn
 from Undefined.utils.paths import DOWNLOAD_CACHE_DIR, ensure_dir
-from Undefined.utils.tool_calls import parse_tool_arguments
+from Undefined.utils.tool_calls import (
+    TextToolCallParseError,
+    parse_text_tool_calls,
+    parse_tool_arguments,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +124,7 @@ class ClientAskLoopMixin(ClientQueueMixin):
             [str, str, int, int], Awaitable[list[dict[str, Any]]]
         ]
         | None = None,
+        recent_messages_snapshot: list[dict[str, Any]] | None = None,
         get_image_url_callback: Callable[[str], Awaitable[str | None]] | None = None,
         get_forward_msg_callback: Callable[[str], Awaitable[list[dict[str, Any]]]]
         | None = None,
@@ -129,6 +142,7 @@ class ClientAskLoopMixin(ClientQueueMixin):
             context: 额外的上下文背景
             send_message_callback: 发送消息的回调，支持可选的 reply_to
             get_recent_messages_callback: 获取上下文历史消息的回调
+            recent_messages_snapshot: 入队前冻结的上下文历史快照
             get_image_url_callback: 获取图片 URL 的回调
             get_forward_msg_callback: 获取合并转发内容的回调
             send_like_callback: 点赞回调
@@ -241,6 +255,7 @@ class ClientAskLoopMixin(ClientQueueMixin):
         messages = await self._prompt_builder.build_messages(
             question,
             get_recent_messages_callback=get_recent_messages_callback,
+            recent_messages_snapshot=recent_messages_snapshot,
             extra_context=pre_context if pre_context else extra_context,
             deferred_tool_names=deferred_tool_names,
         )
@@ -296,6 +311,11 @@ class ClientAskLoopMixin(ClientQueueMixin):
         # 注入常用资源（用于工具执行）
         tool_context.setdefault("ai_client", self)
         tool_context.setdefault("runtime_config", self._get_runtime_config())
+        if not isinstance(
+            tool_context.get(MUSIC_TRACK_STORE_CONTEXT_KEY),
+            MusicTrackReferenceStore,
+        ):
+            tool_context[MUSIC_TRACK_STORE_CONTEXT_KEY] = MusicTrackReferenceStore()
         tool_context.setdefault("search_wrapper", self._search_wrapper)
         tool_context.setdefault(
             "crawl4ai_available", self._crawl4ai_capabilities.available
@@ -479,7 +499,67 @@ class ClientAskLoopMixin(ClientQueueMixin):
                 message = choice.get("message", {})
                 content: str = message.get("content") or ""
                 reasoning_content = message.get("reasoning_content")
-                tool_calls = message.get("tool_calls", [])
+                raw_tool_calls = message.get("tool_calls", [])
+                tool_calls = raw_tool_calls if isinstance(raw_tool_calls, list) else []
+                recovered_text_tool_calls = False
+                if content.strip() and not tool_calls:
+                    try:
+                        recovered_tool_calls = parse_text_tool_calls(content)
+                    except TextToolCallParseError as exc:
+                        logger.warning(
+                            "[工具调用兼容] 文本工具封包解析失败，"
+                            "按普通未调用工具响应重试: reason=%s content_len=%s",
+                            exc,
+                            len(content),
+                        )
+                    else:
+                        if recovered_tool_calls:
+                            exposed_tool_names = iteration_exposed_tool_names
+                            if exposed_tool_names is None:
+                                exposed_tool_names = frozenset(
+                                    name
+                                    for schema in tools
+                                    if (name := _schema_name(schema))
+                                )
+                            recovered_api_names = [
+                                str(
+                                    tool_call.get("function", {}).get("name", "")
+                                ).strip()
+                                for tool_call in recovered_tool_calls
+                            ]
+                            recovered_internal_names = [
+                                api_to_internal.get(api_name, api_name)
+                                for api_name in recovered_api_names
+                            ]
+                            # 文本恢复的调用必须经过与 Tool Search 相同的本轮
+                            # 可见性校验；即使未启用 Tool Search，也不能借回退
+                            # 解析调用未实际暴露给模型的工具。
+                            iteration_exposed_tool_names = exposed_tool_names
+                            tool_calls = recovered_tool_calls
+                            recovered_text_tool_calls = True
+                            content = ""
+                            if isinstance(transport_state, dict) and (
+                                transport_state.get("previous_response_id")
+                            ):
+                                stateless_state: dict[str, Any] = {
+                                    "stateless_replay": True
+                                }
+                                api_mode = transport_state.get("api_mode")
+                                if api_mode:
+                                    stateless_state["api_mode"] = api_mode
+                                transport_state = stateless_state
+                            logger.warning(
+                                "[工具调用兼容] 已从模型纯文本恢复原生工具调用: "
+                                "count=%s names=%s",
+                                len(tool_calls),
+                                ", ".join(recovered_internal_names),
+                            )
+                # reasoning_content 仅供推理回放，不能作为可发送内容或可执行动作。
+                # 实际 content 为空白且没有工具调用时视为请求失败，由下方统一
+                # pre-tool failure 分支回滚状态并重试同一轮请求，避免向上下文追加
+                # 空 assistant 消息和“未调用工具”纠正提示。
+                if not content.strip() and not tool_calls:
+                    raise RuntimeError("模型返回空白响应且未调用工具")
                 if logger.isEnabledFor(logging.DEBUG):
                     logger.debug(
                         "[AI响应] content_len=%s tool_calls=%s",
@@ -567,11 +647,13 @@ class ClientAskLoopMixin(ClientQueueMixin):
                         return fallback_content
 
                     logger.warning(
-                        "[AI回复] 模型返回文本但未调用工具（iteration=%s retry=%s/%s content_len=%s），要求重试",
+                        "[AI回复未调用工具] 即将进入下一轮重试: "
+                        "iteration=%s retry=%s/%s content_len=%s raw_content=%r",
                         iteration,
                         missing_tool_call_count,
                         max_missing_tool_call_retries,
                         len(content),
+                        content,
                     )
                     assistant_retry_message: dict[str, Any] = {
                         "role": "assistant",
@@ -606,6 +688,7 @@ class ClientAskLoopMixin(ClientQueueMixin):
                     message,
                     assistant_message,
                     include_readable_reasoning=capture_reasoning,
+                    strip_text_content_blocks=recovered_text_tool_calls,
                 )
                 messages.append(assistant_message)
 
@@ -624,6 +707,25 @@ class ClientAskLoopMixin(ClientQueueMixin):
                 ] = []
                 tool_results: list[Any] = []
                 tool_response_messages: dict[int, dict[str, Any]] = {}
+
+                parallel_call_keys: list[str] = []
+                for pending_tool_call in tool_calls:
+                    if not isinstance(pending_tool_call, dict):
+                        continue
+                    pending_function = pending_tool_call.get("function")
+                    if not isinstance(pending_function, dict):
+                        continue
+                    pending_api_name = str(
+                        pending_function.get("name", "") or ""
+                    ).strip()
+                    if not pending_api_name:
+                        continue
+                    pending_internal_name = api_to_internal.get(
+                        pending_api_name,
+                        pending_api_name,
+                    )
+                    parallel_call_keys.append(main_call_key(pending_internal_name))
+                prepare_easter_egg_call_batch(tool_context, parallel_call_keys)
 
                 # 逐个处理模型返回的 tool_call
                 for tool_call_index, tool_call in enumerate(tool_calls):
@@ -798,6 +900,10 @@ class ClientAskLoopMixin(ClientQueueMixin):
                                 internal_name == "tool_search"
                                 and tool_search_session is not None
                             ):
+                                await self.tool_manager.announce_virtual_tool_call(
+                                    internal_name,
+                                    context,
+                                )
                                 result = tool_search_session.execute(args)
                             else:
                                 result = await self.tool_manager.execute_tool(

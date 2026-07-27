@@ -16,6 +16,7 @@ from Undefined.attachments import (
     render_message_with_attachments,
     render_message_with_pic_placeholders,
 )
+from Undefined.onebot.client import OneBotDeliveryUncertainError
 
 
 _PNG_BYTES = (
@@ -247,18 +248,29 @@ async def test_dispatch_pending_file_sends_group(tmp_path: Path) -> None:
 
     class FakeSender:
         async def send_group_file(
-            self, group_id: int, file_path: str, name: str | None = None
+            self,
+            group_id: int,
+            file_path: str,
+            name: str | None = None,
+            auto_history: bool = True,
+            **kwargs: Any,
         ) -> None:
             calls.append(("group", group_id, file_path, name))
 
         async def send_private_file(
-            self, user_id: int, file_path: str, name: str | None = None
+            self,
+            user_id: int,
+            file_path: str,
+            name: str | None = None,
+            auto_history: bool = True,
+            **kwargs: Any,
         ) -> None:
             calls.append(("private", user_id, file_path, name))
 
-    await dispatch_pending_file_sends(
+    dispatched = await dispatch_pending_file_sends(
         rendered, sender=FakeSender(), target_type="group", target_id=12345
     )
+    assert dispatched == 1
     assert len(calls) == 1
     assert calls[0][0] == "group"
     assert calls[0][1] == 12345
@@ -291,9 +303,10 @@ async def test_dispatch_pending_file_sends_private(tmp_path: Path) -> None:
         async def send_private_file(self, *a: Any, **kw: Any) -> None:
             calls.append(("private", *a))
 
-    await dispatch_pending_file_sends(
+    dispatched = await dispatch_pending_file_sends(
         rendered, sender=FakeSender(), target_type="private", target_id=99999
     )
+    assert dispatched == 1
     assert len(calls) == 1
     assert calls[0][0] == "private"
     assert calls[0][1] == 99999
@@ -321,9 +334,41 @@ async def test_dispatch_best_effort_on_failure(tmp_path: Path) -> None:
             raise RuntimeError("network error")
 
     # Should not raise
-    await dispatch_pending_file_sends(
+    dispatched = await dispatch_pending_file_sends(
         rendered, sender=FailingSender(), target_type="group", target_id=1
     )
+    assert dispatched == 0
+
+
+@pytest.mark.asyncio
+async def test_dispatch_propagates_uncertain_delivery(tmp_path: Path) -> None:
+    """Ambiguous delivery must reach the tool layer so it cannot be retried."""
+    reg = _make_registry(tmp_path)
+    rec = await reg.register_bytes(
+        "group:1", _PDF_BYTES, kind="file", display_name="doc.pdf", source_kind="test"
+    )
+    rendered = RenderedRichMessage(
+        delivery_text="",
+        history_text="[文件]",
+        attachments=[],
+        pending_file_sends=(rec,),
+    )
+
+    class UncertainSender:
+        async def send_group_file(self, *args: Any, **kwargs: Any) -> None:
+            raise OneBotDeliveryUncertainError(
+                "upload_group_file",
+                "Timeout while waiting for sendMsg",
+                retcode=1200,
+            )
+
+    with pytest.raises(OneBotDeliveryUncertainError):
+        await dispatch_pending_file_sends(
+            rendered,
+            sender=UncertainSender(),
+            target_type="group",
+            target_id=1,
+        )
 
 
 @pytest.mark.asyncio
@@ -332,9 +377,10 @@ async def test_dispatch_no_pending_is_noop() -> None:
     rendered = RenderedRichMessage(
         delivery_text="text", history_text="text", attachments=[]
     )
-    await dispatch_pending_file_sends(
+    dispatched = await dispatch_pending_file_sends(
         rendered, sender=None, target_type="group", target_id=1
     )
+    assert dispatched == 0
 
 
 @pytest.mark.asyncio
@@ -359,7 +405,12 @@ async def test_dispatch_pending_file_sends_redownloads_with_registry(
 
     class FakeSender:
         async def send_group_file(
-            self, group_id: int, file_path: str, name: str | None = None
+            self,
+            group_id: int,
+            file_path: str,
+            name: str | None = None,
+            auto_history: bool = True,
+            **kwargs: Any,
         ) -> None:
             calls.append((group_id, file_path, name))
 

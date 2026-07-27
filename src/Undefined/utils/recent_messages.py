@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Pattern, cast
+from typing import TYPE_CHECKING, Any, Pattern, cast
 
 from Undefined.attachments import build_attachment_scope
 from Undefined.onebot import get_message_content, parse_message_time
 from Undefined.utils.common import extract_text
 from Undefined.utils.message_utils import fetch_group_messages
+
+if TYPE_CHECKING:
+    from Undefined.utils.history import MessageHistoryManager
 
 logger = logging.getLogger(__name__)
 
@@ -309,6 +312,53 @@ async def get_recent_messages_prefer_local(
             logger.warning("从 OneBot 获取群历史失败: %s", exc)
 
     return []
+
+
+async def get_recent_messages_snapshot(
+    *,
+    chat_id: str,
+    msg_type: str,
+    start: int,
+    end: int,
+    history_manager: MessageHistoryManager,
+    attachment_registry: Any | None = None,
+) -> list[dict[str, Any]]:
+    """从本地 history 冻结成员集合，再补全不影响成员边界的附件信息。"""
+    norm_start, norm_end = _normalize_range(start, end)
+    if norm_end <= 0:
+        return []
+
+    try:
+        messages = await history_manager.get_recent_snapshot(
+            chat_id,
+            msg_type,
+            norm_start,
+            norm_end,
+        )
+    except Exception as exc:
+        logger.warning(
+            "冻结最近消息快照失败，当前请求将使用空历史: chat_id=%s type=%s err=%s",
+            chat_id,
+            msg_type,
+            exc,
+        )
+        return []
+
+    try:
+        return await _augment_local_messages_with_meme_attachments(
+            messages,
+            chat_id=chat_id,
+            msg_type=msg_type,
+            attachment_registry=attachment_registry,
+        )
+    except Exception as exc:
+        logger.warning(
+            "补全历史快照附件失败，将保留已冻结的原始历史: chat_id=%s type=%s err=%s",
+            chat_id,
+            msg_type,
+            exc,
+        )
+        return messages
 
 
 async def get_recent_messages_prefer_onebot(

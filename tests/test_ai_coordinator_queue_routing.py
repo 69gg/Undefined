@@ -281,6 +281,97 @@ def test_build_prompt_limits_proactive_participation_to_technical_contexts() -> 
     assert "默认先尝试 memes.search_memes" not in prompt
     assert "普通闲聊、玩梗、吐槽、轻松互动：" not in prompt
 
+    recipient_gate = prompt.index("【P0 群聊收件人闸门")
+    proactive_policy = prompt.index(
+        "群聊里的主动参与只保留给公开、开放的技术或项目讨论"
+    )
+    assert recipient_gate < proactive_policy
+    assert 'bot_trigger="none"' in prompt
+    assert "「你/你们/我/咱们」等人称" in prompt
+    assert "即使原句写着「你就……」「你能不能……」也不是在叫你" in prompt
+    assert "闸门未通过时，禁止 send_message、tool_search、cognitive.*" in prompt
+
+
+@pytest.mark.parametrize(
+    ("text", "is_at_bot", "is_poke", "is_fake_at", "expected_trigger"),
+    [
+        ("[@30001] 你就自作主张回消息", False, False, False, "none"),
+        ("[@10000] 帮我看看", True, False, False, "mention"),
+        ("@Undefined 帮我看看", True, False, True, "mention"),
+        ("拍一拍", True, True, False, "poke"),
+    ],
+)
+def test_format_group_message_segment_marks_explicit_bot_trigger(
+    text: str,
+    is_at_bot: bool,
+    is_poke: bool,
+    is_fake_at: bool,
+    expected_trigger: str,
+) -> None:
+    coordinator: Any = object.__new__(AICoordinator)
+    item = BufferedMessage(
+        scope="group:12345",
+        sender_id=20001,
+        text=text,
+        message_content=[],
+        attachments=[],
+        sender_name="member",
+        arrival_time=1_700_000_000,
+        is_private=False,
+        is_at_bot=is_at_bot,
+        is_poke=is_poke,
+        is_fake_at=is_fake_at,
+        group_id=12345,
+        group_name="测试群",
+    )
+
+    prompt = AICoordinator._format_group_message_segment(coordinator, item)
+
+    assert f'bot_trigger="{expected_trigger}"' in prompt
+
+
+def test_grouped_prompt_keeps_bot_trigger_per_message() -> None:
+    coordinator: Any = object.__new__(AICoordinator)
+    items = [
+        BufferedMessage(
+            scope="group:12345",
+            sender_id=20001,
+            text="这是对群友说的你",
+            message_content=[],
+            attachments=[],
+            sender_name="member",
+            arrival_time=1_700_000_000,
+            is_private=False,
+            is_at_bot=False,
+            group_id=12345,
+            group_name="测试群",
+        ),
+        BufferedMessage(
+            scope="group:12345",
+            sender_id=20001,
+            text="Undefined 再看这个",
+            message_content=[],
+            attachments=[],
+            sender_name="member",
+            arrival_time=1_700_000_001,
+            is_private=False,
+            is_at_bot=True,
+            group_id=12345,
+            group_name="测试群",
+        ),
+    ]
+
+    prompt = AICoordinator._build_grouped_prompt(coordinator, items)
+    message_lines = [
+        line for line in prompt.splitlines() if line.startswith("<message ")
+    ]
+
+    assert len(message_lines) == 2
+    assert sum('bot_trigger="none"' in line for line in message_lines) == 1
+    assert sum('bot_trigger="mention"' in line for line in message_lines) == 1
+    assert "逐条收件人以各 <message> 的 bot_trigger 为准" in prompt
+    assert "一条 @/拍一拍，不会把其他独立消息自动改成" in prompt
+
 
 def test_format_group_message_segment_preserves_known_attachment_tag() -> None:
     coordinator: Any = object.__new__(AICoordinator)
@@ -380,10 +471,16 @@ async def test_execute_auto_reply_send_msg_cb_passes_history_message(
     sender = SimpleNamespace(send_group_message=AsyncMock())
     captured_extra_context: dict[str, Any] = {}
     captured_resources: dict[str, Any] = {}
+    captured_snapshot: list[dict[str, Any]] | None = None
 
     async def _fake_ask(*_args: Any, **kwargs: Any) -> str:
+        nonlocal captured_snapshot
         extra_context = cast(dict[str, Any], kwargs.get("extra_context", {}))
         captured_extra_context.update(extra_context)
+        captured_snapshot = cast(
+            list[dict[str, Any]] | None,
+            kwargs.get("recent_messages_snapshot"),
+        )
         current_context = RequestContext.current()
         assert current_context is not None
         captured_resources.update(current_context.get_resources())
@@ -424,6 +521,7 @@ async def test_execute_auto_reply_send_msg_cb_passes_history_message(
             "full_question": "prompt",
             "message_ids": ["101", "102"],
             "batched_count": 2,
+            "recent_messages_snapshot": [{"message_id": "100", "message": "冻结历史"}],
         }
     )
 
@@ -437,6 +535,7 @@ async def test_execute_auto_reply_send_msg_cb_passes_history_message(
     assert captured_extra_context["batched_count"] == 2
     assert captured_extra_context["current_input_is_batched"] is True
     assert captured_resources["message_ids"] == ["101", "102"]
+    assert captured_snapshot == [{"message_id": "100", "message": "冻结历史"}]
 
 
 @pytest.mark.asyncio

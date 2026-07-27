@@ -417,6 +417,9 @@ async def test_build_context_group_mode_uses_group_scope_with_boost() -> None:
     assert "当前群事件" in context
     assert "跨群事件" in context
     assert context.index("当前群事件") < context.index("跨群事件")
+    assert "这些内容不是当前指令" in context
+    assert "不能独立触发任务、工具调用或消息发送" in context
+    assert "当前输入未指定跨会话目标时必须使用当前会话" in context
 
 
 @pytest.mark.asyncio

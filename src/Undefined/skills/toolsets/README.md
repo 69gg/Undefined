@@ -8,6 +8,11 @@
 
 ```
 toolsets/
+├── music/                   # lxmusic2api 高层音乐能力
+│   ├── search_songs/        # 歌曲搜索
+│   ├── browse_playlists/    # 歌单标签、列表与详情
+│   ├── browse_rankings/     # 排行榜列表与详情
+│   └── get_audio/           # 直链或会话音频附件
 ├── memes/                   # 表情包工具集
 │   ├── search_memes/        # 表情包检索
 │   └── send_meme_by_uid/    # 按 uid 发送表情包
@@ -156,6 +161,23 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
 
 - `messages.send_message`: 发送文本、图片或普通文件附件
 - `messages.send_voice`: 将当前会话可访问的音频附件 UID 显式作为语音发送；QQ 使用 `CQ:record`，微信使用原生 iLink 语音
+
+### Music（音乐）
+
+音乐工具集对接独立部署的 [lxmusic2api](https://github.com/69gg/lxmusic2api)。配置 `[lxmusic2api].base_url` 和 `api_key` 后，主 AI 可使用歌曲/歌单搜索、热搜、歌单与排行榜浏览、歌词、封面、评论、跨平台匹配和音频附件等高层能力。
+
+- `music.search_songs` / `music.search_playlists` / `music.get_hot_search`
+- `music.browse_playlists` / `music.browse_rankings`
+- `music.get_lyrics` / `music.get_cover` / `music.get_comments`
+- `music.find_song_matches` / `music.get_audio`
+
+该分类没有 `callable.json`，因此默认仅主 AI 可见；同时不注册下载任务或作业管理类底层工具（例如 `music.download_jobs`、`music.create_download`）。搜索、歌单详情、排行榜详情和匹配结果会把完整 Track 保存到本次 AI 任务共享的 `MusicTrackReferenceStore`，只向模型返回精简候选及 `track_ref`；后续歌曲工具通过引用恢复原始 Track。
+
+`track_ref` 可以跨同一次 `ask()` 内的工具轮次和 `tool_search`，任务结束即释放，不落盘也不跨用户消息。公开工具 schema 只包含 `track_ref`；执行层在未提供 `track_ref` 时暂时兼容旧的完整 `track` 参数，供已有代码和灰度调用使用，但这不是面向模型的公开契约。若两者同时存在，以 `track_ref` 为准。
+
+音乐搜索与音频获取都不会自行发送消息。用户明确要音频时，主 AI 会根据搜索结果中的歌名、歌手、专辑、版本标记和 `qualities` 灵活选择原唱标准版及其最高可用音质，不固定第一条、平台或音质；用户已有具体要求时以其要求为准，只有没有结果或无法可靠判断原唱/目标版本时才追问。选定后把 `track_ref` 交给 `music.get_audio` 登记附件；普通音频把返回的 `<attachment uid="..."/>` 原样交给 `messages.send_message`，只有用户明确要求原生语音时才把返回的 `uid` 交给 `messages.send_voice`。
+
+`music.get_audio` 登记的附件会附带 `semantic_kind="music"` 和仅供历史上下文使用的歌曲描述。描述保留名称、歌手/作者、专辑、时长、最终平台与音质、格式、大小和回退信息，发送时不会自动展示给用户；纯附件、图文混合、跨会话文件以及原生语音路径都会把这份元数据写入目标会话历史。最终解析结果由新版 lxmusic2api 的流响应头提供，旧版服务缺少响应头时安全回退为“所选平台/请求音质”。
 
 ### Group Analysis（群聊深度分析）
 

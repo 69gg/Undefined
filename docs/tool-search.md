@@ -35,6 +35,10 @@ tool_search_max_results = 5
 
 已加载集合在一次 `ask()` 内只增不减；新的用户请求会重新创建最小集合。工具注册表或 MCP 热重载也只影响下一次 `ask()`。
 
+`tool_search` 只是 schema 加载器，不会代替目标工具执行任何业务操作，也不会查询业务数据、下载文件、登记附件或发送消息。返回值中的 `loaded` 仅表示对应工具会在下一轮可调用；模型仍须在后续轮次调用目标工具完成用户请求，不能把“加载成功”当成任务成功并直接结束。
+
+当 `[easter_egg].agent_call_message_enabled` 启用调用提示时，虚拟 `tool_search` 按普通 Tool 处理：`tools`、`clean`、`all` 模式会发送“tool_search，我调用你了”提示，`none`、`agent` 模式不发送。加载 schema 和下一轮真正执行目标工具是两个独立调用，因此启用对应模式时两者会分别提示；`clean` 模式下的 `easter_egg_silent` 上下文仍会抑制提示。
+
 ## 查询语法
 
 虚拟工具接口为：
@@ -49,10 +53,11 @@ tool_search(query: string, max_results?: integer)
 |---|---|
 | `select:web_agent,info_agent` | 按规范名称精确加载多个工具；优先匹配目录中的精确拼写，再按大小写不敏感方式解析并去重 |
 | `group.get_member_info` | 完整名称精确匹配，优先于关键词搜索 |
+| `member_info` | 关键词中的点号、下划线和连字符会与工具名使用相同规则拆分，可匹配 `group.get_member_info` |
 | `member avatar` | 按空格分词，在工具名、参数名、工具描述和参数描述中搜索 |
 | `member +user` | `+user` 为必需词；名称、参数名或描述均不包含该词的候选会先被排除 |
 
-关键词结果按名称命中优先，其次考虑参数名和描述；最终按得分降序、规范名称升序稳定排序。`max_results` 只能缩小配置上限，不能扩大单次加载数量，`select:` 也受同一上限约束。
+关键词中的 `.`、`_`、`-` 与工具名索引使用一致的分隔规则，例如 `search_songs` 可以匹配 `music.search_songs`，不会误命中仅在描述中引用该名称的工具。结果按名称命中优先，其次考虑参数名和描述；最终按得分降序、规范名称升序稳定排序。`max_results` 只能缩小配置上限，不能扩大单次加载数量，`select:` 也受同一上限约束。
 
 工具返回固定 JSON 字段：
 
@@ -74,6 +79,7 @@ tool_search(query: string, max_results?: integer)
 - 如果完整注册表已经存在名为 `tool_search` 的真实工具，该请求记录错误并回退全量工具，且因不生成 `<available_deferred_tools>` 目录而禁用 Tool Search Prompt 规则，避免模型把真实工具误当作虚拟加载器。
 - 当权限过滤后没有延迟工具时，请求直接使用全量可用工具，不额外保留无意义的搜索会话。
 - Chat Completions 与 Responses 使用同一套普通 function tool 逐轮扩展逻辑，不依赖服务商专属 Tool Search 协议。
+- 主 AI 从模型普通文本中兼容恢复工具调用时，仍只接受本轮已经暴露的工具名；延迟工具必须先经 `tool_search` 加载并等到下一轮，文本封包不能绕过 schema 投影。支持格式与失败回退规则见 [模型 API 与兼容层](model-compatibility.md#文本-tool-call-后备解析)。
 
 ## 与 handler 延迟导入的区别
 

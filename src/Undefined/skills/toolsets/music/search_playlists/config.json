@@ -1,0 +1,18 @@
+{
+  "type": "function",
+  "function": {
+    "name": "search_playlists",
+    "description": "按关键词跨平台搜索歌单。先从结果取得歌单的平台和 ID，再用 music.browse_playlists 的 detail 动作读取歌曲；详情内每首歌曲会提供当前任务有效的 track_ref，后续歌曲能力只需传递该引用。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": { "type": "string", "minLength": 1, "maxLength": 200, "description": "歌单名称或主题关键词" },
+        "source": { "type": "string", "enum": ["all", "kw", "kg", "tx", "wy", "mg"], "default": "all", "description": "搜索平台" },
+        "page": { "type": "integer", "minimum": 1, "maximum": 100000, "default": 1, "description": "页码" },
+        "limit": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20, "description": "每页数量" }
+      },
+      "required": ["query"],
+      "additionalProperties": false
+    }
+  }
+}

@@ -66,8 +66,7 @@ def _parse_model_pool(
                     _coerce_float(
                         item.get("queue_interval_seconds"),
                         primary_config.queue_interval_seconds,
-                    ),
-                    primary_config.queue_interval_seconds,
+                    )
                 ),
                 api_mode=normalize_api_mode(
                     item.get("api_mode"),
@@ -75,6 +74,10 @@ def _parse_model_pool(
                 ),
                 thinking_enabled=_coerce_bool(
                     item.get("thinking_enabled"), primary_config.thinking_enabled
+                ),
+                thinking_param_enabled=_coerce_bool(
+                    item.get("thinking_param_enabled"),
+                    primary_config.thinking_param_enabled,
                 ),
                 thinking_budget_tokens=_coerce_int(
                     item.get("thinking_budget_tokens"),

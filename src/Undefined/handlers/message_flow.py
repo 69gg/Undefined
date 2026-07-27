@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import os
 from pathlib import Path
@@ -424,7 +425,14 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
                     continue
                 visited.add(forward_id)
                 try:
-                    raw_nodes = await get_forward_messages(forward_id)
+                    pending_nodes: object = get_forward_messages(forward_id)
+                    if not inspect.isawaitable(pending_nodes):
+                        logger.debug(
+                            "[memes] 合并转发表情包扫描回调返回非 awaitable: id=%s",
+                            forward_id,
+                        )
+                        continue
+                    raw_nodes = await pending_nodes
                 except Exception:
                     logger.debug(
                         "[memes] 合并转发表情包扫描拉取失败: id=%s",

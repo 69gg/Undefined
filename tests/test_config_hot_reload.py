@@ -415,6 +415,37 @@ def test_apply_config_updates_hot_reloads_tool_search_config() -> None:
     assert ai_client.runtime_updates == [updated]
 
 
+def test_apply_config_updates_hot_reloads_lxmusic2api_config() -> None:
+    updated = cast(
+        Any,
+        SimpleNamespace(
+            lxmusic2api_base_url="https://music.example.test",
+            lxmusic2api_api_key="music-key",
+        ),
+    )
+    ai_client = _FakeAIClient()
+    context = HotReloadContext(
+        ai_client=cast(Any, ai_client),
+        queue_manager=cast(Any, _FakeQueueManager()),
+        config_manager=cast(Any, SimpleNamespace()),
+        security_service=cast(Any, _FakeSecurityService()),
+    )
+
+    apply_config_updates(
+        updated,
+        {
+            "lxmusic2api_base_url": (
+                "http://127.0.0.1:3000",
+                "https://music.example.test",
+            ),
+            "lxmusic2api_api_key": ("", "music-key"),
+        },
+        context,
+    )
+
+    assert ai_client.runtime_updates == [updated]
+
+
 def test_apply_config_updates_hot_reloads_long_image_defaults() -> None:
     updated = cast(
         Any,
