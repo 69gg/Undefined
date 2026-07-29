@@ -166,6 +166,20 @@ class TestParseTextToolCalls:
         assert tool_calls[0]["type"] == "function"
         assert str(tool_calls[0]["id"]).startswith("call_txt_")
 
+    def test_flattened_json_envelope_uses_top_level_tool_arguments(self) -> None:
+        tool_calls = parse_text_tool_calls('{"tool":"end","memo":"","observations":[]}')
+
+        assert self._names(tool_calls) == ["end"]
+        assert self._arguments(tool_calls[0]) == {"memo": "", "observations": []}
+
+    def test_flattened_json_envelope_accepts_arbitrary_tool_arguments(self) -> None:
+        tool_calls = parse_text_tool_calls(
+            '{"tool":"weather.lookup","city":"上海","days":3}'
+        )
+
+        assert self._names(tool_calls) == ["weather.lookup"]
+        assert self._arguments(tool_calls[0]) == {"city": "上海", "days": 3}
+
     def test_consecutive_json_envelopes_preserve_order(self) -> None:
         tool_calls = parse_text_tool_calls(
             '{"tool":"send_message","arguments":{"message":"在做了"}}\n'
@@ -430,6 +444,7 @@ class TestParseTextToolCalls:
             '{"tool":"end","arguments":{}} trailing',
             '普通文本 {"tool":"end","arguments":{}}',
             '{"tool":"end","arguments":[],"extra":true}',
+            '{"tool":"end","arguments":{},"memo":"歧义参数"}',
             '{"name":"end","arguments":[],"extra":true}',
             '<tool name="end" params="[]" />',
             '<tool name="end" params="{}" /> trailing',

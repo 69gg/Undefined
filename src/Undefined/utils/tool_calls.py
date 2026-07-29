@@ -99,10 +99,18 @@ def _tool_call_from_json_envelope(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise TextToolCallParseError("连续 JSON 中包含非工具封包")
     if "tool" in value:
-        unexpected_keys = set(value) - _TOOL_ENVELOPE_KEYS
-        if unexpected_keys:
-            raise TextToolCallParseError("JSON 工具封包含有不支持的字段")
-        return _build_text_tool_call(value.get("tool"), value.get("arguments", {}))
+        if "arguments" in value:
+            unexpected_keys = set(value) - _TOOL_ENVELOPE_KEYS
+            if unexpected_keys:
+                raise TextToolCallParseError(
+                    "JSON 工具封包不能混用 arguments 与顶层工具参数"
+                )
+            raw_arguments: Any = value.get("arguments")
+        else:
+            raw_arguments = {
+                key: argument for key, argument in value.items() if key != "tool"
+            }
+        return _build_text_tool_call(value.get("tool"), raw_arguments)
     if "name" in value and "arguments" in value:
         unexpected_keys = set(value) - _NAMED_TOOL_ENVELOPE_KEYS
         if unexpected_keys:

@@ -79,6 +79,14 @@ Undefined 将“是否请求模型思考”和“是否在下一轮回放已有�
 {"tool":"end","arguments":{"memo":"已回应","observations":[]}}
 ```
 
+`tool` 形式也兼容将工具参数直接平铺在顶层：
+
+```text
+{"tool":"end","memo":"","observations":[]}
+```
+
+平铺形式中，除 `tool` 外的所有顶层字段都会作为工具参数。同一封包不能同时使用 `arguments` 与平铺参数，避免产生参数优先级歧义。
+
 也兼容原生函数字段名形式：
 
 ```text
@@ -86,7 +94,7 @@ Undefined 将“是否请求模型思考”和“是否在下一轮回放已有�
 {"name":"end","arguments":{"memo":"搜索 m2u 的《君往何处》","observations":[]}}
 ```
 
-JSON 对象可以单独出现，也可以由空白分隔后连续出现；`tool` 与 `name` 两种封包允许混排。`arguments` 可以是对象或编码该对象的 JSON 字符串；`name` 形式要求显式提供 `arguments`，避免把普通的名称 JSON 误判为工具调用。
+JSON 对象可以单独出现，也可以由空白分隔后连续出现；`tool` 的嵌套参数形式、平铺参数形式与 `name` 封包允许混排。`arguments` 可以是对象或编码该对象的 JSON 字符串；`name` 形式要求显式提供 `arguments`，避免把普通的名称 JSON 误判为工具调用。
 
 ### `tool_calls` JSON 封包
 

@@ -103,9 +103,7 @@ async def test_text_tool_calls_use_normal_execution_and_stateless_replay() -> No
 
     first_content = """<tool name="send_message" params='{"message": "在做了在做了"}' />
 <tool name="end" params='{"memo": "回应重试请求", "observations": ["一条观察"]}' />"""
-    second_content = (
-        '{"tool":"end","arguments":{"memo":"已回应","observations":["一条观察"]}}'
-    )
+    second_content = '{"tool":"end","memo":"已回应","observations":["一条观察"]}'
     client = _build_client(
         responses=[
             {
@@ -127,6 +125,10 @@ async def test_text_tool_calls_use_normal_execution_and_stateless_replay() -> No
 
     assert result == ""
     assert [name for name, _arguments in executed] == ["send_message", "end"]
+    assert executed[1] == (
+        "end",
+        {"memo": "已回应", "observations": ["一条观察"]},
+    )
     send_message.assert_awaited_once_with("在做了在做了")
     submit = cast(AsyncMock, client.submit_queued_llm_call)
     assert submit.await_count == 2
