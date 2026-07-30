@@ -193,6 +193,14 @@ class TestParseTextToolCalls:
             "observations": [],
         }
 
+    def test_malformed_function_envelope_with_parameters_first_is_rejected(
+        self,
+    ) -> None:
+        raw = '{"parameters":{"memo":"","observations":[]},"function":"end"'
+
+        with pytest.raises(TextToolCallParseError):
+            parse_text_tool_calls(raw)
+
     def test_flattened_json_envelope_uses_top_level_tool_arguments(self) -> None:
         tool_calls = parse_text_tool_calls('{"tool":"end","memo":"","observations":[]}')
 

@@ -232,6 +232,11 @@ async def get_file_size(file_path: Path | str) -> int:
     return await asyncio.to_thread(lambda: Path(file_path).stat().st_size)
 
 
+async def get_file_mtime_ns(file_path: Path | str) -> int:
+    """异步读取文件的纳秒级修改时间。"""
+    return await asyncio.to_thread(lambda: Path(file_path).stat().st_mtime_ns)
+
+
 async def is_dir(file_path: Path | str) -> bool:
     """异步检查路径是否为目录。"""
     return await asyncio.to_thread(Path(file_path).is_dir)

@@ -270,6 +270,11 @@ def _parse_prompt_file_includes(data: dict[str, Any]) -> dict[str, str]:
     prompt_raw = data.get("prompt", {})
     prompt_section = prompt_raw if isinstance(prompt_raw, dict) else {}
     includes_raw = prompt_section.get("file_includes", {})
+    if "file_includes" in prompt_section and not isinstance(includes_raw, dict):
+        logger.warning(
+            "[配置] prompt.file_includes 必须是表，实际类型=%s，已忽略",
+            type(includes_raw).__name__,
+        )
     section = includes_raw if isinstance(includes_raw, dict) else {}
 
     includes: dict[str, str] = {}

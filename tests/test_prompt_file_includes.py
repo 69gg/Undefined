@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import AsyncMock
 
 import pytest
 
+import Undefined.ai.prompts.file_includes as file_includes_module
 from Undefined.ai.prompts import PromptBuilder
 from Undefined.ai.prompts.file_includes import apply_prompt_file_includes
 from Undefined.end_summary_storage import EndSummaryRecord
+from Undefined.utils.io import read_text
 
 
 class _FakeEndSummaryStorage:
@@ -49,6 +53,55 @@ async def test_apply_prompt_file_includes_replaces_multiple_slots_once(
     assert result.index("<middle") < result.index('level="P2"')
     assert "prompt-file-include:p1" not in result
     assert result.count("<!-- undefined:prompt-file-include:p2 -->") == 1
+
+
+@pytest.mark.asyncio
+async def test_apply_prompt_file_includes_caches_by_path_and_mtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    include_path = tmp_path / "cached.xml"
+    include_path.write_text("<private>first</private>", encoding="utf-8")
+    prompt = "<system>\n<!-- undefined:prompt-file-include:p0 -->\n</system>"
+    read_text_mock = AsyncMock(wraps=read_text)
+    monkeypatch.setattr(file_includes_module, "read_text", read_text_mock)
+
+    first = await apply_prompt_file_includes(prompt, {"p0": str(include_path)})
+    second = await apply_prompt_file_includes(prompt, {"p0": str(include_path)})
+
+    assert "<private>first</private>" in first
+    assert second == first
+    assert read_text_mock.await_count == 1
+
+    previous_mtime_ns = include_path.stat().st_mtime_ns
+    include_path.write_text("<private>updated</private>", encoding="utf-8")
+    changed_mtime_ns = previous_mtime_ns + 1_000_000_000
+    os.utime(include_path, ns=(changed_mtime_ns, changed_mtime_ns))
+
+    updated = await apply_prompt_file_includes(prompt, {"p0": str(include_path)})
+
+    assert "<private>updated</private>" in updated
+    assert "<private>first</private>" not in updated
+    assert read_text_mock.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_apply_prompt_file_includes_warns_for_unknown_slots(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    include_path = tmp_path / "p0.xml"
+    include_path.write_text("<private>configured</private>", encoding="utf-8")
+    prompt = "<system>\n<!-- undefined:prompt-file-include:p0 -->\n</system>"
+
+    with caplog.at_level(logging.WARNING):
+        result = await apply_prompt_file_includes(
+            prompt,
+            {"p0": str(include_path), "custom": "ignored.xml"},
+        )
+
+    assert "<private>configured</private>" in result
+    assert "未知的文件插槽已忽略: custom" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -114,7 +167,10 @@ async def test_prompt_builder_hot_reloads_include_content_and_path(
     first_messages = await builder.build_messages("<message>first</message>")
     assert "<private>first</private>" in str(first_messages[0]["content"])
 
+    previous_mtime_ns = first_path.stat().st_mtime_ns
     first_path.write_text("<private>updated-content</private>", encoding="utf-8")
+    changed_mtime_ns = previous_mtime_ns + 1_000_000_000
+    os.utime(first_path, ns=(changed_mtime_ns, changed_mtime_ns))
     updated_messages = await builder.build_messages("<message>updated</message>")
     assert "<private>updated-content</private>" in str(updated_messages[0]["content"])
     assert "<private>first</private>" not in str(updated_messages[0]["content"])
