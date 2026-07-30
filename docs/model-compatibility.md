@@ -94,7 +94,13 @@ Undefined 将“是否请求模型思考”和“是否在下一轮回放已有�
 {"name":"end","arguments":{"memo":"搜索 m2u 的《君往何处》","observations":[]}}
 ```
 
-JSON 对象可以单独出现，也可以由空白分隔后连续出现；`tool` 的嵌套参数形式、平铺参数形式与 `name` 封包允许混排。`arguments` 可以是对象或编码该对象的 JSON 字符串；`name` 形式要求显式提供 `arguments`，避免把普通的名称 JSON 误判为工具调用。
+还兼容部分模型输出的 `function` + `parameters` 字段形式：
+
+```text
+{"function":"end","parameters":{"memo":"已回应","observations":[]}}
+```
+
+JSON 对象可以单独出现，也可以由空白分隔后连续出现；`tool` 的嵌套参数形式、平铺参数形式、`name` 封包与 `function` 封包允许混排。`arguments` / `parameters` 可以是对象或编码该对象的 JSON 字符串；`name` 形式要求显式提供 `arguments`，`function` 形式要求显式提供 `parameters`，避免把普通 JSON 误判为工具调用。`function` 封包只能包含这两个字段。
 
 ### `tool_calls` JSON 封包
 
