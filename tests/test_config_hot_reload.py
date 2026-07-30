@@ -415,6 +415,35 @@ def test_apply_config_updates_hot_reloads_tool_search_config() -> None:
     assert ai_client.runtime_updates == [updated]
 
 
+def test_apply_config_updates_hot_reloads_prompt_file_includes() -> None:
+    updated = cast(
+        Any,
+        SimpleNamespace(
+            prompt_file_includes={"p0": "config/prompts/creator.local.xml"},
+        ),
+    )
+    ai_client = _FakeAIClient()
+    context = HotReloadContext(
+        ai_client=cast(Any, ai_client),
+        queue_manager=cast(Any, _FakeQueueManager()),
+        config_manager=cast(Any, SimpleNamespace()),
+        security_service=cast(Any, _FakeSecurityService()),
+    )
+
+    apply_config_updates(
+        updated,
+        {
+            "prompt_file_includes": (
+                {},
+                {"p0": "config/prompts/creator.local.xml"},
+            )
+        },
+        context,
+    )
+
+    assert ai_client.runtime_updates == [updated]
+
+
 def test_apply_config_updates_hot_reloads_lxmusic2api_config() -> None:
     updated = cast(
         Any,

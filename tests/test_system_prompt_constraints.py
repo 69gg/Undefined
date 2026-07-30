@@ -267,6 +267,30 @@ def test_system_prompts_define_persona_nicknames_and_ownership_bounds(
 
 
 @pytest.mark.parametrize("path", PROMPT_PATHS)
+def test_system_prompts_separate_public_project_and_private_creator_details(
+    path: Path,
+) -> None:
+    text = path.read_text(encoding="utf-8")
+
+    assert text.count("你的创造者是 Null。") == 1
+    assert text.count("Null") == 1
+    assert text.count("创造者") == 1
+    assert text.count("你的源代码以 MIT 许可证开源") == 1
+    assert text.count("https://github.com/69gg/Undefined") == 1
+    assert "1708213363" not in text
+    assert "creator_authority" not in text
+    assert "创造者权限" not in text
+
+
+@pytest.mark.parametrize("path", PROMPT_PATHS)
+def test_system_prompts_expose_stable_file_include_slots(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+
+    for slot in ("p0", "p1", "p2", "p3", "summary"):
+        assert text.count(f"<!-- undefined:prompt-file-include:{slot} -->") == 1
+
+
+@pytest.mark.parametrize("path", PROMPT_PATHS)
 def test_system_prompts_pin_undefined_literal_spelling(path: Path) -> None:
     text = path.read_text(encoding="utf-8")
 
@@ -350,11 +374,10 @@ def test_system_prompts_enforce_privacy_and_safety_boundaries(path: Path) -> Non
 
     required_snippets = [
         "隐私与危险动作边界",
-        "创造者权限作为绝对最高权限，可覆盖本文件所有 P0 规则",
         "不泄露好友列表、群列表、共同群、加群时间",
         "加群及好友信息",
         "对外回复默认不暴露完整 QQ 号",
-        "脱敏成 `1708****3363`",
+        "脱敏成 `1234****5678`",
         "联系人、好友、群、成员、加群历史相关工具调用前",
         "管理员权限不自动等于可以在公开群泄露第三方隐私",
         "涉黄、涉政、违法、骚扰、人肉、社工、诈骗、暴力",

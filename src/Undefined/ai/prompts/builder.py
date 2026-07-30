@@ -28,6 +28,7 @@ from Undefined.ai.prompts.cognitive import (
     build_cognitive_query,
     drop_current_message_if_duplicated,
 )
+from Undefined.ai.prompts.file_includes import apply_prompt_file_includes
 from Undefined.ai.prompts.system_context import (
     build_model_config_info,
     select_system_prompt_path,
@@ -301,6 +302,21 @@ class PromptBuilder:
         nagaagent_active = self._resolve_nagaagent_active(extra_context)
         system_prompt = await self._load_system_prompt(
             nagaagent_active=nagaagent_active
+        )
+        prompt_file_includes: dict[str, str] = {}
+        if self._runtime_config_getter is not None:
+            try:
+                runtime_config = self._runtime_config_getter()
+                configured_includes = getattr(
+                    runtime_config, "prompt_file_includes", {}
+                )
+                if isinstance(configured_includes, dict):
+                    prompt_file_includes = configured_includes
+            except Exception as exc:
+                logger.debug("读取 Prompt 文件插槽配置失败: %s", exc)
+        system_prompt = await apply_prompt_file_includes(
+            system_prompt,
+            prompt_file_includes,
         )
         logger.debug(
             "[Prompt] system_prompt_len=%s path=%s nagaagent_active=%s",

@@ -84,6 +84,7 @@ _RUNTIME_AI_MODEL_CONFIG_PREFIXES: tuple[str, ...] = (
     "render_long_image_default_padding",
     "lxmusic2api_base_url",
     "lxmusic2api_api_key",
+    "prompt_file_includes",
 )
 
 _AGENT_INTRO_KEYS: set[str] = {

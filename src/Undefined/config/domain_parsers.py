@@ -22,6 +22,7 @@ from .models import (
     MemeConfig,
     MessageBatcherConfig,
     NagaConfig,
+    PROMPT_FILE_INCLUDE_SLOTS,
     PromptSystemInfoConfig,
     RenderCacheConfig,
     WeixinConfig,
@@ -262,6 +263,37 @@ def _parse_prompt_system_info_config(data: dict[str, Any]) -> PromptSystemInfoCo
         show_process=_coerce_bool(section.get("show_process"), True),
         show_uptime=_coerce_bool(section.get("show_uptime"), True),
     )
+
+
+def _parse_prompt_file_includes(data: dict[str, Any]) -> dict[str, str]:
+    """解析主 Prompt 中固定插槽与本地 UTF-8 文件的一对一映射。"""
+    prompt_raw = data.get("prompt", {})
+    prompt_section = prompt_raw if isinstance(prompt_raw, dict) else {}
+    includes_raw = prompt_section.get("file_includes", {})
+    section = includes_raw if isinstance(includes_raw, dict) else {}
+
+    includes: dict[str, str] = {}
+    for slot in PROMPT_FILE_INCLUDE_SLOTS:
+        raw_path = section.get(slot)
+        if raw_path is None:
+            continue
+        if not isinstance(raw_path, str):
+            logger.warning(
+                "[配置] prompt.file_includes.%s 必须是字符串路径，已忽略",
+                slot,
+            )
+            continue
+        path = raw_path.strip()
+        if path:
+            includes[slot] = path
+
+    unknown_slots = sorted(set(section) - set(PROMPT_FILE_INCLUDE_SLOTS))
+    if unknown_slots:
+        logger.warning(
+            "[配置] 未知的 Prompt 文件插槽已忽略: %s",
+            ", ".join(str(slot) for slot in unknown_slots),
+        )
+    return includes
 
 
 def _parse_render_cache_config(data: dict[str, Any]) -> RenderCacheConfig:

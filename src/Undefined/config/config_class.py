@@ -233,6 +233,8 @@ class Config:
     message_batcher: MessageBatcherConfig
     # Prompt 系统信息注入
     prompt_system_info: PromptSystemInfoConfig
+    # 主 Prompt 命名插槽对应的本地文件
+    prompt_file_includes: dict[str, str]
     # HTML 渲染结果缓存
     render_cache: RenderCacheConfig
     # Naga 集成

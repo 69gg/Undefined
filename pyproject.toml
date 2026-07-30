@@ -90,6 +90,9 @@ only-include = [
     "config",
     "config.toml.example",
 ]
+exclude = [
+    "/config/prompts/*.local.*",
+]
 sources = ["src"]
 
 [tool.hatch.build.targets.wheel.force-include]
@@ -107,6 +110,9 @@ include = [
     "/README.md",
     "/ARCHITECTURE.md",
     "/LICENSE",
+]
+exclude = [
+    "/config/prompts/*.local.*",
 ]
 
 [tool.mypy]

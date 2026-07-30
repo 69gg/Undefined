@@ -14,7 +14,7 @@ src/Undefined/
 ├── ai/            # AI 运行时核心
 │   ├── client/    # AIClient 组合：setup / queue / ask_loop
 │   ├── llm/       # ModelRequester、streaming、thinking、sanitize
-│   ├── prompts/   # PromptBuilder、system_context、cognitive 片段
+│   ├── prompts/   # PromptBuilder、system_context、文件插槽与 cognitive 片段
 │   └── multimodal/# 多模态检测、解析与分析
 ├── attachments/   # 附件注册、渲染、作用域隔离
 ├── arxiv/         # arXiv 论文解析、元信息获取、PDF 下载与发送

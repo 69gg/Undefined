@@ -67,6 +67,33 @@ document_instruction = """文档前缀
     assert parsed["models"]["embedding"]["document_instruction"] == "文档前缀\n第二行"
 
 
+def test_sync_config_text_preserves_prompt_file_include_paths() -> None:
+    current = """
+[prompt.file_includes]
+p0 = "config/prompts/creator.local.xml"
+"""
+    example = """
+[prompt.file_includes]
+p0 = ""
+p1 = ""
+p2 = ""
+p3 = ""
+summary = ""
+"""
+
+    result = sync_config_text(current, example, prune=True)
+    parsed = tomllib.loads(result.content)
+
+    assert parsed["prompt"]["file_includes"] == {
+        "p0": "config/prompts/creator.local.xml",
+        "p1": "",
+        "p2": "",
+        "p3": "",
+        "summary": "",
+    }
+    assert result.removed_paths == []
+
+
 def test_sync_config_text_merges_new_fields_into_existing_pool_model_entries() -> None:
     current = """
 [models.chat]

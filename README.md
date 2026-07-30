@@ -61,6 +61,7 @@ Console 和 Chat 都需要连接到已经运行的 Undefined 服务。首次部�
 - **Tool Search 按需工具加载**：可在 `[skills]` 下设置 `tool_search_enabled = true`，让主 AI 首轮只接收基础工具、虚拟 `tool_search` 和已检索工具的完整 schema，其余能力仅以名称目录提示，并在检索后的下一模型轮加载。该功能默认关闭，只减少模型上下文中的工具声明，不改变本地注册表、会话权限或子 Agent 的私有工具集。详见 [Tool Search 按需工具加载](docs/tool-search.md)。
 - **可嵌入 Python 库**：`pip install Undefined-bot` 后可 import 配置、`AIClient`、Skills 与认知记忆等组件，无需启动 Bot CLI。详见 [Python 库 API 参考](docs/python-api.md)。
 - **Skills 热重载**：自动扫描 `skills/` 目录，检测到变更后即时重载工具与 Agent，无需重启服务。
+- **主 Prompt 本地自定义**：通过 `[prompt.file_includes]` 将身份、权限或人格补充文件插入 `p0`、`p1`、`p2`、`p3`、`summary` 五个稳定位置，无需修改仓库内的主提示词；配置路径和文件内容均支持热更新，推荐使用受 Git 与构建忽略规则保护的 `config/prompts/*.local.*` 文件。详见 [Prompt 本地文件插槽](docs/configuration.md#4112-promptfile_includes-主-prompt-本地文件插槽)。
 - **三层分层记忆架构**：创新的分层记忆系统，模拟人类记忆机制——
   - **短期记忆**（`end.memo`）：每轮对话结束自动记录便签备忘，最近 N 条始终注入，保持短期连续性，零配置开箱即用
   - **认知记忆**（`end.observations` + `cognitive.*`）：核心层，AI 在每轮对话中主动观察并提取用户/群聊事实及有价值的自身行为，经后台史官异步改写后存入向量数据库；支持语义检索、时间衰减加权排序、MMR 多样性去重、跨群记忆联动与用户/群聊自动侧写（合并时注入历史事件防止特征丢失），前台零延迟
