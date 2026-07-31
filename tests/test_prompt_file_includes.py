@@ -16,6 +16,7 @@ from Undefined.utils.io import (
     get_file_mtime_ns,
     read_text,
     set_file_mtime_ns,
+    write_bytes,
     write_text,
 )
 
@@ -114,7 +115,7 @@ async def test_apply_prompt_file_includes_warns_and_skips_unreadable_files(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     invalid_path = tmp_path / "invalid.xml"
-    invalid_path.write_bytes(b"\xff")
+    await write_bytes(invalid_path, b"\xff")
     missing_path = tmp_path / "missing.xml"
     prompt = (
         "<system>\n"
