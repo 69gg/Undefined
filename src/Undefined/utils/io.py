@@ -237,6 +237,15 @@ async def get_file_mtime_ns(file_path: Path | str) -> int:
     return await asyncio.to_thread(lambda: Path(file_path).stat().st_mtime_ns)
 
 
+async def set_file_mtime_ns(file_path: Path | str, mtime_ns: int) -> None:
+    """异步设置文件的访问和修改时间为同一个纳秒级时间。"""
+    await asyncio.to_thread(
+        os.utime,
+        Path(file_path),
+        ns=(mtime_ns, mtime_ns),
+    )
+
+
 async def is_dir(file_path: Path | str) -> bool:
     """异步检查路径是否为目录。"""
     return await asyncio.to_thread(Path(file_path).is_dir)

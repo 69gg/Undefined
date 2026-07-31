@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -13,7 +12,12 @@ import Undefined.ai.prompts.file_includes as file_includes_module
 from Undefined.ai.prompts import PromptBuilder
 from Undefined.ai.prompts.file_includes import apply_prompt_file_includes
 from Undefined.end_summary_storage import EndSummaryRecord
-from Undefined.utils.io import read_text
+from Undefined.utils.io import (
+    get_file_mtime_ns,
+    read_text,
+    set_file_mtime_ns,
+    write_text,
+)
 
 
 class _FakeEndSummaryStorage:
@@ -61,7 +65,7 @@ async def test_apply_prompt_file_includes_caches_by_path_and_mtime(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     include_path = tmp_path / "cached.xml"
-    include_path.write_text("<private>first</private>", encoding="utf-8")
+    await write_text(include_path, "<private>first</private>")
     prompt = "<system>\n<!-- undefined:prompt-file-include:p0 -->\n</system>"
     read_text_mock = AsyncMock(wraps=read_text)
     monkeypatch.setattr(file_includes_module, "read_text", read_text_mock)
@@ -73,10 +77,10 @@ async def test_apply_prompt_file_includes_caches_by_path_and_mtime(
     assert second == first
     assert read_text_mock.await_count == 1
 
-    previous_mtime_ns = include_path.stat().st_mtime_ns
-    include_path.write_text("<private>updated</private>", encoding="utf-8")
+    previous_mtime_ns = await get_file_mtime_ns(include_path)
+    await write_text(include_path, "<private>updated</private>")
     changed_mtime_ns = previous_mtime_ns + 1_000_000_000
-    os.utime(include_path, ns=(changed_mtime_ns, changed_mtime_ns))
+    await set_file_mtime_ns(include_path, changed_mtime_ns)
 
     updated = await apply_prompt_file_includes(prompt, {"p0": str(include_path)})
 
@@ -138,8 +142,8 @@ async def test_prompt_builder_hot_reloads_include_content_and_path(
 ) -> None:
     first_path = tmp_path / "first.xml"
     second_path = tmp_path / "second.xml"
-    first_path.write_text("<private>first</private>", encoding="utf-8")
-    second_path.write_text("<private>second-path</private>", encoding="utf-8")
+    await write_text(first_path, "<private>first</private>")
+    await write_text(second_path, "<private>second-path</private>")
     runtime_config = SimpleNamespace(
         prompt_file_includes={"p0": str(first_path)},
         keyword_reply_enabled=False,
@@ -167,10 +171,10 @@ async def test_prompt_builder_hot_reloads_include_content_and_path(
     first_messages = await builder.build_messages("<message>first</message>")
     assert "<private>first</private>" in str(first_messages[0]["content"])
 
-    previous_mtime_ns = first_path.stat().st_mtime_ns
-    first_path.write_text("<private>updated-content</private>", encoding="utf-8")
+    previous_mtime_ns = await get_file_mtime_ns(first_path)
+    await write_text(first_path, "<private>updated-content</private>")
     changed_mtime_ns = previous_mtime_ns + 1_000_000_000
-    os.utime(first_path, ns=(changed_mtime_ns, changed_mtime_ns))
+    await set_file_mtime_ns(first_path, changed_mtime_ns)
     updated_messages = await builder.build_messages("<message>updated</message>")
     assert "<private>updated-content</private>" in str(updated_messages[0]["content"])
     assert "<private>first</private>" not in str(updated_messages[0]["content"])

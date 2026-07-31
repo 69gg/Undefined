@@ -201,6 +201,11 @@ class TestParseTextToolCalls:
         with pytest.raises(TextToolCallParseError):
             parse_text_tool_calls(raw)
 
+    def test_prose_with_function_and_parameters_markers_is_not_rejected(self) -> None:
+        raw = 'The fields "function": and "parameters": are required.'
+
+        assert parse_text_tool_calls(raw) == []
+
     def test_flattened_json_envelope_uses_top_level_tool_arguments(self) -> None:
         tool_calls = parse_text_tool_calls('{"tool":"end","memo":"","observations":[]}')
 
