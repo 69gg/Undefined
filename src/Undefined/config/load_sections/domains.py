@@ -14,6 +14,7 @@ from ..domain_parsers import (
     _parse_memes_config,
     _parse_message_batcher_config,
     _parse_naga_config,
+    _parse_prompt_file_includes,
     _parse_prompt_system_info_config,
     _parse_render_cache_config,
     _parse_weixin_config,
@@ -39,6 +40,7 @@ def load_domains(
     memes = _parse_memes_config(data)
     message_batcher = _parse_message_batcher_config(data)
     prompt_system_info = _parse_prompt_system_info_config(data)
+    prompt_file_includes = _parse_prompt_file_includes(data)
     render_cache = _parse_render_cache_config(data)
     naga = _parse_naga_config(data)
     weixin = _parse_weixin_config(data)
@@ -57,6 +59,7 @@ def load_domains(
         "memes": memes,
         "message_batcher": message_batcher,
         "prompt_system_info": prompt_system_info,
+        "prompt_file_includes": prompt_file_includes,
         "render_cache": render_cache,
         "naga": naga,
         "weixin": weixin,

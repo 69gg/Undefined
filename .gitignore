@@ -67,6 +67,9 @@ local.properties
 # MCP 配置
 config/mcp.json
 
+# Local Prompt include files (may contain private identity/authority data)
+config/prompts/*.local.*
+
 # Agent intro auto generation
 src/Undefined/skills/agents/**/intro.generated.md
 

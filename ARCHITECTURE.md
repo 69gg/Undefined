@@ -910,6 +910,7 @@ description: 从 PDF 文件中提取文本和表格，填写表单。当用户�
 ### 资源加载与提示词安全
 
 -   **资源加载**：提示词与预置文案通过 `src/Undefined/utils/resources.py` 读取，优先从运行目录加载同名 `res/...`（便于覆盖），若不存在再回退到安装包自带资源，并提供仓库结构兜底，避免依赖启动时的工作目录。
+-   **本地 Prompt 插槽**：两份主 Prompt 提供 P0/P1/P2/P3/summary 稳定插槽；`[prompt.file_includes]` 指向的 UTF-8 文件在每次请求构建时检查修改时间，未变化时复用缓存、变化时重新读取，支持内容与配置路径热更新。推荐的 `config/prompts/*.local.*` 同时从 Git 与构建产物排除。
 -   **提示词结构安全**：结构化 Prompt/历史消息注入使用 `src/Undefined/utils/xml.py` 做必要的 XML 转义，降低用户输入破坏结构或干扰解析的风险。
 
 ---

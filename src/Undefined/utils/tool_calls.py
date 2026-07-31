@@ -25,6 +25,8 @@ _JSON_TOOL_CALLS_MARKER_RE = re.compile(r'"tool_calls"\s*:', re.DOTALL)
 _JSON_TOOL_MARKER_RE = re.compile(r'\{\s*"tool"\s*:', re.DOTALL)
 _JSON_NAME_MARKER_RE = re.compile(r'\{\s*"name"\s*:', re.DOTALL)
 _JSON_ARGUMENTS_MARKER_RE = re.compile(r'"arguments"\s*:', re.DOTALL)
+_JSON_FUNCTION_MARKER_RE: re.Pattern[str] = re.compile(r'"function"\s*:', re.DOTALL)
+_JSON_PARAMETERS_MARKER_RE = re.compile(r'"parameters"\s*:', re.DOTALL)
 _TOOL_TAG_PREFIX_RE = re.compile(r"^<tool(?:\s|/?>)", re.IGNORECASE)
 _TOOL_TAG_MARKER_RE = re.compile(r"<tool(?:\s|/?>)", re.IGNORECASE)
 _TOOL_EXECUTION_PREFIX_RE = re.compile(r"^<tool_execution(?:\s|>)", re.IGNORECASE)
@@ -44,6 +46,7 @@ _TOOL_ATTRIBUTE_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_.:-]*")
 _TOOL_CALLS_ENVELOPE_KEYS = frozenset({"tool_calls"})
 _TOOL_ENVELOPE_KEYS = frozenset({"tool", "arguments"})
 _NAMED_TOOL_ENVELOPE_KEYS = frozenset({"name", "arguments"})
+_FUNCTION_TOOL_ENVELOPE_KEYS: frozenset[str] = frozenset({"function", "parameters"})
 _TOOL_CALLS_ITEM_KEYS = frozenset({"id", "name", "arguments"})
 _TOOL_TAG_ATTRIBUTE_KEYS = frozenset({"name", "params", "parameters", "arguments"})
 _TOOL_TAG_ARGUMENT_KEYS = ("params", "parameters", "arguments")
@@ -116,12 +119,22 @@ def _tool_call_from_json_envelope(value: Any) -> dict[str, Any]:
         if unexpected_keys:
             raise TextToolCallParseError("JSON 工具封包含有不支持的字段")
         return _build_text_tool_call(value.get("name"), value.get("arguments"))
+    if "function" in value and "parameters" in value:
+        unexpected_keys = set(value) - _FUNCTION_TOOL_ENVELOPE_KEYS
+        if unexpected_keys:
+            raise TextToolCallParseError("JSON function 工具封包含有不支持的字段")
+        return _build_text_tool_call(
+            value.get("function"),
+            value.get("parameters"),
+        )
     raise TextToolCallParseError("连续 JSON 中包含非工具封包")
 
 
 def _is_json_tool_envelope(value: Any) -> bool:
     return isinstance(value, dict) and (
-        "tool" in value or ("name" in value and "arguments" in value)
+        "tool" in value
+        or ("name" in value and "arguments" in value)
+        or ("function" in value and "parameters" in value)
     )
 
 
@@ -181,12 +194,42 @@ def _tool_calls_from_json_envelope(value: Any) -> list[dict[str, Any]]:
     return tool_calls
 
 
+def _is_json_object_context(text: str, position: int) -> bool:
+    depth = 0
+    in_string = False
+    escaped = False
+    for character in text[:position]:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+            continue
+        if character == '"':
+            in_string = True
+        elif character == "{":
+            depth += 1
+        elif character == "}" and depth:
+            depth -= 1
+    return depth > 0 and not in_string
+
+
 def _has_json_tool_marker(text: str) -> bool:
+    function_marker = _JSON_FUNCTION_MARKER_RE.search(text)
+    parameters_marker = _JSON_PARAMETERS_MARKER_RE.search(text)
     return bool(
         _JSON_TOOL_CALLS_MARKER_RE.search(text)
         or _JSON_TOOL_MARKER_RE.search(text)
         or (
             _JSON_NAME_MARKER_RE.search(text) and _JSON_ARGUMENTS_MARKER_RE.search(text)
+        )
+        or (
+            function_marker is not None
+            and parameters_marker is not None
+            and _is_json_object_context(text, function_marker.start())
+            and _is_json_object_context(text, parameters_marker.start())
         )
     )
 

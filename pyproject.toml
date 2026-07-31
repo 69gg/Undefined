@@ -1,6 +1,6 @@
 [project]
 name = "Undefined-bot"
-version = "3.10.1"
+version = "3.11.0"
 description = "QQ bot platform with cognitive memory architecture and multi-agent Skills, via OneBot V11."
 readme = "README.md"
 authors = [
@@ -90,6 +90,9 @@ only-include = [
     "config",
     "config.toml.example",
 ]
+exclude = [
+    "/config/prompts/*.local.*",
+]
 sources = ["src"]
 
 [tool.hatch.build.targets.wheel.force-include]
@@ -107,6 +110,9 @@ include = [
     "/README.md",
     "/ARCHITECTURE.md",
     "/LICENSE",
+]
+exclude = [
+    "/config/prompts/*.local.*",
 ]
 
 [tool.mypy]

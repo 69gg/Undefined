@@ -9,6 +9,7 @@ from typing import Any
 from .api_modes import API_MODE_OPENAI_CHAT_COMPLETIONS, normalize_api_mode
 
 HISTORIAN_MIN_POLL_INTERVAL_SECONDS: float = 0.1
+PROMPT_FILE_INCLUDE_SLOTS: tuple[str, ...] = ("p0", "p1", "p2", "p3", "summary")
 
 
 def format_netloc(host: str, port: int) -> str:

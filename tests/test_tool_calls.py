@@ -166,6 +166,46 @@ class TestParseTextToolCalls:
         assert tool_calls[0]["type"] == "function"
         assert str(tool_calls[0]["id"]).startswith("call_txt_")
 
+    def test_function_parameters_json_envelope(self) -> None:
+        tool_calls = parse_text_tool_calls(
+            '{"function":"end","parameters":{"memo":"静默处理","observations":[]}}'
+        )
+
+        assert self._names(tool_calls) == ["end"]
+        assert self._arguments(tool_calls[0]) == {
+            "memo": "静默处理",
+            "observations": [],
+        }
+        assert tool_calls[0]["type"] == "function"
+        assert str(tool_calls[0]["id"]).startswith("call_txt_")
+
+    def test_function_parameters_json_envelope_accepts_encoded_parameters(
+        self,
+    ) -> None:
+        tool_calls = parse_text_tool_calls(
+            '{"function":"end","parameters":'
+            '"{\\"memo\\":\\"已回应\\",\\"observations\\":[]}"}'
+        )
+
+        assert self._names(tool_calls) == ["end"]
+        assert self._arguments(tool_calls[0]) == {
+            "memo": "已回应",
+            "observations": [],
+        }
+
+    def test_malformed_function_envelope_with_parameters_first_is_rejected(
+        self,
+    ) -> None:
+        raw = '{"parameters":{"memo":"","observations":[]},"function":"end"'
+
+        with pytest.raises(TextToolCallParseError):
+            parse_text_tool_calls(raw)
+
+    def test_prose_with_function_and_parameters_markers_is_not_rejected(self) -> None:
+        raw = 'The fields "function": and "parameters": are required.'
+
+        assert parse_text_tool_calls(raw) == []
+
     def test_flattened_json_envelope_uses_top_level_tool_arguments(self) -> None:
         tool_calls = parse_text_tool_calls('{"tool":"end","memo":"","observations":[]}')
 
@@ -251,11 +291,14 @@ class TestParseTextToolCalls:
 
     def test_json_envelope_styles_can_be_mixed(self) -> None:
         tool_calls = parse_text_tool_calls(
-            '{"tool":"first","arguments":{}}\n{"name":"second","arguments":{"value":2}}'
+            '{"tool":"first","arguments":{}}\n'
+            '{"name":"second","arguments":{"value":2}}\n'
+            '{"function":"third","parameters":{"value":3}}'
         )
 
-        assert self._names(tool_calls) == ["first", "second"]
+        assert self._names(tool_calls) == ["first", "second", "third"]
         assert self._arguments(tool_calls[1]) == {"value": 2}
+        assert self._arguments(tool_calls[2]) == {"value": 3}
 
     def test_json_envelope_accepts_encoded_arguments_object(self) -> None:
         tool_calls = parse_text_tool_calls(
@@ -446,6 +489,8 @@ class TestParseTextToolCalls:
             '{"tool":"end","arguments":[],"extra":true}',
             '{"tool":"end","arguments":{},"memo":"歧义参数"}',
             '{"name":"end","arguments":[],"extra":true}',
+            '{"function":"end","parameters":[]}',
+            '{"function":"end","parameters":{},"extra":true}',
             '<tool name="end" params="[]" />',
             '<tool name="end" params="{}" /> trailing',
             '普通文本 <tool name="end" params="{}" />',

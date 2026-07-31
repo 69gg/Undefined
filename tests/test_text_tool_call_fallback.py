@@ -103,7 +103,9 @@ async def test_text_tool_calls_use_normal_execution_and_stateless_replay() -> No
 
     first_content = """<tool name="send_message" params='{"message": "在做了在做了"}' />
 <tool name="end" params='{"memo": "回应重试请求", "observations": ["一条观察"]}' />"""
-    second_content = '{"tool":"end","memo":"已回应","observations":["一条观察"]}'
+    second_content = (
+        '{"function":"end","parameters":{"memo":"已回应","observations":["一条观察"]}}'
+    )
     client = _build_client(
         responses=[
             {

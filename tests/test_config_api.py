@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+
+import pytest
 
 from Undefined.config.loader import Config
 
@@ -231,6 +234,48 @@ def test_prompt_system_info_defaults_to_disabled(tmp_path: Path) -> None:
     assert cfg.prompt_system_info.show_os is True
     assert cfg.prompt_system_info.show_network is True
     assert cfg.prompt_system_info.show_process is True
+
+
+def test_prompt_file_includes_default_to_empty(tmp_path: Path) -> None:
+    cfg = _load_config(tmp_path / "config.toml", "")
+
+    assert cfg.prompt_file_includes == {}
+
+
+def test_prompt_file_includes_parse_stable_slots(tmp_path: Path) -> None:
+    cfg = _load_config(
+        tmp_path / "config.toml",
+        """
+[prompt.file_includes]
+p0 = "config/prompts/creator.local.xml"
+p1 = ""
+p2 = "  config/prompts/style.local.md  "
+unknown = "config/prompts/ignored.local.md"
+""",
+    )
+
+    assert cfg.prompt_file_includes == {
+        "p0": "config/prompts/creator.local.xml",
+        "p2": "config/prompts/style.local.md",
+    }
+
+
+def test_prompt_file_includes_invalid_section_warns_and_falls_back(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level(logging.WARNING):
+        cfg = _load_config(
+            tmp_path / "config.toml",
+            """
+[prompt]
+file_includes = ["config/prompts/creator.local.xml"]
+""",
+        )
+
+    assert cfg.prompt_file_includes == {}
+    assert "prompt.file_includes 必须是表" in caplog.text
+    assert "实际类型=list" in caplog.text
 
 
 def test_prompt_system_info_custom_switches(tmp_path: Path) -> None:

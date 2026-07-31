@@ -1026,6 +1026,17 @@ tool_search_always_loaded = ["send_message", "end"]
 # en: Maximum matches loaded by one tool search (minimum 1).
 tool_search_max_results = 5
 
+# zh: 主 Prompt 固定插槽对应的本地 UTF-8 文件。路径为空时不注入。
+# en: Local UTF-8 files mapped to stable main-Prompt slots. Empty paths disable injection.
+[prompt.file_includes]
+# zh: P0 / P1 / P2 / P3 分别位于对应优先级区块开头；summary 位于总结区块开头。
+# en: P0-P3 are placed at the start of their priority sections; summary is placed at the start of the summary section.
+p0 = ""
+p1 = ""
+p2 = ""
+p3 = ""
+summary = ""
+
 # zh: Prompt 系统信息注入。总开关默认关闭；开启后各子项默认展示，可逐项关闭。
 # en: Prompt system information injection. The master switch is disabled by default; enabled sub-items are shown by default and can be disabled individually.
 [prompt.system_info]
