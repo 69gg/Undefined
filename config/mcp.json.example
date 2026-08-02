@@ -7,6 +7,10 @@
         "howtocook-mcp": {
             "command": "npx",
             "args": ["-y", "howtocook-mcp"]
+        },
+        "parallel-search": {
+            "url": "https://search.parallel.ai/mcp",
+            "transport": "http"
         }
     }
 }
