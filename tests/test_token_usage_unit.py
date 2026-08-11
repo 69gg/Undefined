@@ -64,6 +64,40 @@ class TestTokenUsageFromDictDefaults:
         assert usage.duration_seconds == 0.0
         assert usage.call_type == "unknown"
         assert usage.success is True  # 默认为 True
+        assert usage.ttft_seconds is None
+        assert usage.tokens_per_second is None
+
+    def test_stream_metrics_roundtrip(self) -> None:
+        usage = TokenUsage(
+            timestamp="ts",
+            model_name="m",
+            prompt_tokens=10,
+            completion_tokens=20,
+            total_tokens=30,
+            duration_seconds=1.5,
+            call_type="chat",
+            success=True,
+            ttft_seconds=0.35,
+            tokens_per_second=42.1,
+        )
+        restored = TokenUsage.from_dict(usage.to_dict())
+        assert restored.ttft_seconds == pytest.approx(0.35)
+        assert restored.tokens_per_second == pytest.approx(42.1)
+        assert "ttft_seconds" in usage.to_dict()
+        assert "tokens_per_second" in usage.to_dict()
+
+    def test_stream_metrics_omitted_when_none(self) -> None:
+        usage = TokenUsage.from_dict(_sample_dict())
+        data = usage.to_dict()
+        assert "ttft_seconds" not in data
+        assert "tokens_per_second" not in data
+
+    def test_stream_metrics_null_in_jsonl(self) -> None:
+        usage = TokenUsage.from_dict(
+            {**_sample_dict(), "ttft_seconds": None, "tokens_per_second": None}
+        )
+        assert usage.ttft_seconds is None
+        assert usage.tokens_per_second is None
 
     def test_timestamp_fallback_to_time(self) -> None:
         usage = TokenUsage.from_dict({"time": "2025-01-01"})

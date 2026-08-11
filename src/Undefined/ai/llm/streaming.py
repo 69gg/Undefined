@@ -197,6 +197,116 @@ def stringify_stream_delta(value: Any) -> str:
     return str(value)
 
 
+_RESPONSES_TTFT_EVENT_TYPES = frozenset(
+    {
+        "response.output_text.delta",
+        "response.function_call_arguments.delta",
+        "response.reasoning_summary_text.delta",
+        "response.reasoning_text.delta",
+    }
+)
+
+_ANTHROPIC_TTFT_DELTA_TYPES = frozenset(
+    {
+        "text_delta",
+        "thinking_delta",
+        "input_json_delta",
+        "citations_delta",
+    }
+)
+
+
+def chat_chunk_marks_ttft(chunk: dict[str, Any]) -> bool:
+    """Chat Completions 流式 chunk 是否包含首字/首工具片段。"""
+    choices = chunk.get("choices")
+    if not isinstance(choices, list):
+        return False
+    for choice in choices:
+        if not isinstance(choice, dict):
+            continue
+        delta = choice.get("delta")
+        if not isinstance(delta, dict):
+            continue
+        if stringify_stream_delta(delta.get("content")):
+            return True
+        for field_name in CHAT_REASONING_WIRE_FIELDS:
+            if field_name not in delta or delta[field_name] is None:
+                continue
+            if stringify_stream_delta(delta[field_name]):
+                return True
+            # 非纯字符串 reasoning 结构也算已开始输出
+            if delta[field_name] not in ("", [], {}):
+                return True
+        raw_tool_calls = delta.get("tool_calls")
+        if isinstance(raw_tool_calls, list) and raw_tool_calls:
+            return True
+    return False
+
+
+def responses_event_marks_ttft(event: dict[str, Any]) -> bool:
+    """Responses 流式事件是否包含首字/首工具片段。"""
+    event_type = str(event.get("type") or "").strip().lower()
+    if event_type in _RESPONSES_TTFT_EVENT_TYPES:
+        if event_type == "response.function_call_arguments.delta":
+            return True
+        return bool(stringify_stream_delta(event.get("delta")))
+    for source in (event, event.get("delta")):
+        if not isinstance(source, dict):
+            continue
+        for field_name in CHAT_REASONING_WIRE_FIELDS:
+            if field_name == "reasoning":
+                # Responses root `reasoning` is configuration, not output CoT.
+                continue
+            if field_name not in source or source[field_name] is None:
+                continue
+            if stringify_stream_delta(source[field_name]):
+                return True
+            if source[field_name] not in ("", [], {}):
+                return True
+    return False
+
+
+def anthropic_event_marks_ttft(event: dict[str, Any]) -> bool:
+    """Anthropic Messages 流式事件是否包含首字/首工具片段。"""
+    event_type = str(event.get("type") or "").strip().lower()
+    if event_type != "content_block_delta":
+        return False
+    delta = event.get("delta")
+    if not isinstance(delta, dict):
+        return False
+    delta_type = str(delta.get("type") or "").strip().lower()
+    if delta_type not in _ANTHROPIC_TTFT_DELTA_TYPES:
+        return False
+    if delta_type == "text_delta":
+        return bool(stringify_stream_delta(delta.get("text")))
+    if delta_type == "thinking_delta":
+        return bool(stringify_stream_delta(delta.get("thinking")))
+    if delta_type == "input_json_delta":
+        return bool(stringify_stream_delta(delta.get("partial_json")))
+    return True
+
+
+def compute_stream_generation_metrics(
+    *,
+    duration_seconds: float,
+    start_perf: float,
+    first_token_at: float | None,
+    completion_tokens: int,
+) -> tuple[float | None, float | None]:
+    """由流式首字时刻计算 TTFT 与 TPS。
+
+    TPS = completion_tokens / (duration - ttft)。
+    无首字时刻、分母过小或无输出 token 时对应字段为 None。
+    """
+    if first_token_at is None:
+        return None, None
+    ttft_seconds = max(0.0, first_token_at - start_perf)
+    generation_seconds = duration_seconds - ttft_seconds
+    if completion_tokens <= 0 or generation_seconds < 1e-6:
+        return ttft_seconds, None
+    return ttft_seconds, completion_tokens / generation_seconds
+
+
 def extract_stream_response_item(event: dict[str, Any]) -> dict[str, Any] | None:
     """从 Responses 流式事件中提取 output item。"""
     for key in ("item", "output_item", "data"):

@@ -14,6 +14,7 @@ import re
 import time
 from collections.abc import AsyncIterator, Callable, Iterable
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 from urllib.parse import parse_qsl, urlsplit, urlunsplit
@@ -48,7 +49,11 @@ from Undefined.ai.llm.sanitize import (
 from Undefined.ai.llm.streaming import (
     aggregate_chat_completions_stream,
     aggregate_responses_stream,
+    anthropic_event_marks_ttft,
+    chat_chunk_marks_ttft,
+    compute_stream_generation_metrics,
     ensure_chat_stream_usage_options,
+    responses_event_marks_ttft,
     should_fallback_from_stream,
     split_chat_completion_params,
     split_responses_params,
@@ -93,6 +98,17 @@ __all__ = ["ModelRequester", "build_request_body", "ModelConfig"]
 _SDK_REQUEST_OPTION_FIELDS: frozenset[str] = frozenset(
     {"extra_headers", "extra_query", "extra_body", "timeout"}
 )
+
+
+@dataclass
+class _StreamTiming:
+    """流式请求的首字时刻采样（仅流式路径写入）。"""
+
+    first_token_at: float | None = None
+
+    def mark_first_token(self) -> None:
+        if self.first_token_at is None:
+            self.first_token_at = time.perf_counter()
 
 
 def _prepare_anthropic_sdk_params(request_body: dict[str, Any]) -> dict[str, Any]:
@@ -446,6 +462,7 @@ class ModelRequester:
     ) -> dict[str, Any]:
         """发送请求到模型 API。"""
         start_time = time.perf_counter()
+        stream_timing = _StreamTiming()
         cot_compat = getattr(model_config, "thinking_tool_call_compat", False)
         reasoning_replay = bool(getattr(model_config, "reasoning_content_replay", True))
         api_mode = get_api_mode(model_config)
@@ -598,6 +615,7 @@ class ModelRequester:
                 raw_result = await self._request_with_provider(
                     model_config,
                     request_body,
+                    stream_timing=stream_timing,
                 )
             except (OpenAIAPIStatusError, AnthropicAPIStatusError) as exc:
                 # Responses 续轮失败：自动切换 stateless replay 重发全量 input
@@ -636,6 +654,7 @@ class ModelRequester:
                     raw_result = await self._request_with_provider(
                         model_config,
                         request_body,
+                        stream_timing=stream_timing,
                     )
                 else:
                     raise
@@ -686,8 +705,21 @@ class ModelRequester:
                     model_config.model_name, messages_for_api, result
                 )
 
+            ttft_seconds, tokens_per_second = compute_stream_generation_metrics(
+                duration_seconds=duration,
+                start_perf=start_time,
+                first_token_at=stream_timing.first_token_at,
+                completion_tokens=completion_tokens,
+            )
+            timing_suffix = ""
+            if ttft_seconds is not None:
+                timing_suffix = f", TTFT={ttft_seconds:.2f}s"
+                if tokens_per_second is not None:
+                    timing_suffix += f", TPS={tokens_per_second:.1f}"
+
             logger.info(
-                f"[API响应] {call_type} 完成: 耗时={duration:.2f}s, "
+                f"[API响应] {call_type} 完成: 耗时={duration:.2f}s"
+                f"{timing_suffix}, "
                 f"Tokens={total_tokens} (P:{prompt_tokens} + C:{completion_tokens}), "
                 f"模型={model_config.model_name}"
             )
@@ -704,6 +736,8 @@ class ModelRequester:
                 total_tokens=total_tokens,
                 duration_seconds=duration,
                 call_type=call_type,
+                ttft_seconds=ttft_seconds,
+                tokens_per_second=tokens_per_second,
             )
 
             return result
@@ -803,15 +837,27 @@ class ModelRequester:
         self,
         model_config: ModelConfig,
         request_body: dict[str, Any],
+        *,
+        stream_timing: _StreamTiming | None = None,
     ) -> dict[str, Any]:
         if get_api_mode(model_config) == API_MODE_ANTHROPIC_MESSAGES:
-            return await self._request_with_anthropic(model_config, request_body)
-        return await self._request_with_openai(model_config, request_body)
+            return await self._request_with_anthropic(
+                model_config,
+                request_body,
+                stream_timing=stream_timing,
+            )
+        return await self._request_with_openai(
+            model_config,
+            request_body,
+            stream_timing=stream_timing,
+        )
 
     async def _request_with_openai(
         self,
         model_config: ModelConfig,
         request_body: dict[str, Any],
+        *,
+        stream_timing: _StreamTiming | None = None,
     ) -> dict[str, Any]:
         client = self._get_openai_client_for_model(model_config)
         async with self._track_openai_client_use(client):
@@ -821,6 +867,7 @@ class ModelRequester:
                         client,
                         model_config,
                         request_body,
+                        stream_timing=stream_timing,
                     )
                 except Exception as exc:
                     # 上游不支持流式时，剥离 stream 字段后降级为非流式重试
@@ -832,6 +879,8 @@ class ModelRequester:
                         get_api_mode(model_config),
                         type(exc).__name__,
                     )
+                    if stream_timing is not None:
+                        stream_timing.first_token_at = None
                     request_body = without_stream_request_fields(request_body)
             if get_api_mode(model_config) == API_MODE_RESPONSES:
                 params, extra_body = split_responses_params(request_body)
@@ -849,6 +898,8 @@ class ModelRequester:
         self,
         model_config: ModelConfig,
         request_body: dict[str, Any],
+        *,
+        stream_timing: _StreamTiming | None = None,
     ) -> dict[str, Any]:
         client = self._get_anthropic_client_for_model(model_config)
         async with self._track_openai_client_use(client):
@@ -857,6 +908,7 @@ class ModelRequester:
                     return await self._request_with_anthropic_streaming(
                         client,
                         request_body,
+                        stream_timing=stream_timing,
                     )
                 except Exception as exc:
                     if not should_fallback_from_stream(exc):
@@ -867,6 +919,8 @@ class ModelRequester:
                         get_api_mode(model_config),
                         type(exc).__name__,
                     )
+                    if stream_timing is not None:
+                        stream_timing.first_token_at = None
             params = _prepare_anthropic_sdk_params(request_body)
             response = await client.messages.create(**params)
             return self._response_to_dict(response)
@@ -875,11 +929,16 @@ class ModelRequester:
         self,
         client: AsyncAnthropic,
         request_body: dict[str, Any],
+        *,
+        stream_timing: _StreamTiming | None = None,
     ) -> dict[str, Any]:
         params = _prepare_anthropic_sdk_params(request_body)
         async with client.messages.stream(**params) as stream:
-            async for _event in stream:
-                pass
+            async for event in stream:
+                if stream_timing is not None and stream_timing.first_token_at is None:
+                    event_dict = self._response_to_dict(event)
+                    if anthropic_event_marks_ttft(event_dict):
+                        stream_timing.mark_first_token()
             response = await stream.get_final_message()
         return self._response_to_dict(response)
 
@@ -888,6 +947,8 @@ class ModelRequester:
         client: AsyncOpenAI,
         model_config: ModelConfig,
         request_body: dict[str, Any],
+        *,
+        stream_timing: _StreamTiming | None = None,
     ) -> dict[str, Any]:
         api_mode = get_api_mode(model_config)
         stream_body = dict(request_body)
@@ -896,17 +957,21 @@ class ModelRequester:
             return await self._stream_responses_request(
                 client,
                 stream_body,
+                stream_timing=stream_timing,
             )
         ensure_chat_stream_usage_options(stream_body)
         return await self._stream_chat_completions_request(
             client,
             stream_body,
+            stream_timing=stream_timing,
         )
 
     async def _stream_chat_completions_request(
         self,
         client: AsyncOpenAI,
         request_body: dict[str, Any],
+        *,
+        stream_timing: _StreamTiming | None = None,
     ) -> dict[str, Any]:
         params, extra_body = split_chat_completion_params(request_body)
         if extra_body:
@@ -917,12 +982,17 @@ class ModelRequester:
         async for chunk in response:
             chunk_dict = self._response_to_dict(chunk)
             chunks.append(chunk_dict)
+            if stream_timing is not None and stream_timing.first_token_at is None:
+                if chat_chunk_marks_ttft(chunk_dict):
+                    stream_timing.mark_first_token()
         return aggregate_chat_completions_stream(chunks)
 
     async def _stream_responses_request(
         self,
         client: AsyncOpenAI,
         request_body: dict[str, Any],
+        *,
+        stream_timing: _StreamTiming | None = None,
     ) -> dict[str, Any]:
         params, extra_body = split_responses_params(request_body)
         if extra_body:
@@ -933,6 +1003,9 @@ class ModelRequester:
         async for event in stream:
             event_dict = self._response_to_dict(event)
             events.append(event_dict)
+            if stream_timing is not None and stream_timing.first_token_at is None:
+                if responses_event_marks_ttft(event_dict):
+                    stream_timing.mark_first_token()
         return aggregate_responses_stream(events)
 
     async def embed(
@@ -1103,6 +1176,8 @@ class ModelRequester:
         total_tokens: int,
         duration_seconds: float,
         call_type: str,
+        ttft_seconds: float | None = None,
+        tokens_per_second: float | None = None,
     ) -> None:
         task = asyncio.create_task(
             self._token_usage_storage.record(
@@ -1115,6 +1190,8 @@ class ModelRequester:
                     duration_seconds=duration_seconds,
                     call_type=call_type,
                     success=True,
+                    ttft_seconds=ttft_seconds,
+                    tokens_per_second=tokens_per_second,
                 )
             )
         )
