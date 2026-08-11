@@ -445,11 +445,14 @@ def test_system_prompts_tell_end_to_record_whole_current_input_batch(
 ) -> None:
     text = path.read_text(encoding="utf-8")
 
-    assert "memo / observations 必须覆盖整个【当前输入批次】" in text
+    assert "memo / observations 在有实质可记内容时必须覆盖整个【当前输入批次】" in text
     assert "不要只根据最后一条消息记录" in text
-    assert "end.observations 必须覆盖整批消息中有价值的信息" in text
+    assert "end.observations 必须覆盖整批中的这些信息" in text
     assert "不要求与 bot 相关，也不要求长期稳定" in text
-    assert "当前批次中有价值即可记录" in text
+    assert "写实 / 宁缺毋滥" in text
+    assert "值得日后检索" in text
+    assert "否定清单" in text
+    assert "静默处理" in text
     assert "不能作为 observations 的新事实来源" in text
     assert "系统会围绕当前输入批次自动检索相关内容" in text
     assert "何时应该填写 memo" in text
@@ -486,10 +489,13 @@ def test_end_tool_schema_mentions_current_input_batch() -> None:
     assert "当前输入批次" in function["description"]
     assert "不要求与 bot 相关" in function["description"]
     assert "不要求长期稳定" in function["description"]
+    assert "宁缺毋滥" in function["description"]
     assert "项目名/主名必须逐字写作 Undefined" in function["description"]
     assert "必须覆盖整批消息内容" in observations["description"]
     assert "不能只记录最后一条" in observations["description"]
-    assert "当前批次中有价值即可记录" in observations["description"]
+    assert "值得日后检索" in observations["description"]
+    assert "宁缺毋滥" in observations["description"]
+    assert "否定清单" in observations["description"]
     assert "禁止从其中摘取新事实写入 observations" in observations["description"]
     assert "禁止写成 Unfined、Undefind、undefind" in observations["description"]
     assert "summary" not in properties
