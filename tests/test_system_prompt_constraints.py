@@ -512,6 +512,8 @@ def test_historian_prompts_reference_current_input_batch_source() -> None:
     assert "禁止作为本轮新事实来源" in merge
     assert "当前时刻" in merge
     assert "最新优先" in merge
+    assert "合并去冗" in merge
+    assert "克制扩写" in merge
 
 
 @pytest.mark.parametrize("path", PROMPT_PATHS)

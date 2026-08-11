@@ -378,6 +378,10 @@ def test_historian_profile_merge_prompt_profile_only_constraints() -> None:
     assert "最新优先" in merge
     assert "以当前输入批次为准覆盖" in merge
     assert "时间只用于判断取舍" in merge
+    assert "克制扩写 / 合并去冗" in merge
+    assert "能并入现有条目就不新增条目" in merge
+    assert "宁可多写" not in merge
+    assert "信息密度优先于表达精炼" not in merge
 
 
 def test_extract_frontmatter_updated_at() -> None:
