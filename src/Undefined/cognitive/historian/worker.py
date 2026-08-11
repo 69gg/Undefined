@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Callable
 
 from Undefined.ai.transports.openai_transport import RESPONSES_OUTPUT_ITEMS_KEY
@@ -21,6 +21,7 @@ from Undefined.cognitive.historian.helpers import (
     _coerce_bool,
     _escape_braces,
     _extract_frontmatter_name,
+    _extract_frontmatter_updated_at,
     _preview_text,
     _resolve_timestamp_epoch,
 )
@@ -676,6 +677,32 @@ class HistorianWorker:
             or "（暂无历史事件）"
         )
 
+        now_local_dt = datetime.now().astimezone()
+        now_utc_dt = datetime.now(timezone.utc)
+        now_local = now_local_dt.isoformat()
+        now_utc = now_utc_dt.isoformat()
+        timezone_label = str(job.get("timezone") or now_local_dt.tzinfo or "").strip()
+
+        profile_updated_at = "（暂无/未知）"
+        try:
+            existing_profile = await self._profile_storage.read_profile(
+                entity_type, entity_id
+            )
+        except Exception as exc:
+            logger.warning(
+                "[史官] 任务 %s 预读侧写失败: entity_type=%s entity_id=%s error=%s",
+                event_id,
+                entity_type,
+                entity_id,
+                exc,
+            )
+            existing_profile = ""
+        if str(existing_profile or "").strip():
+            extracted_updated_at = _extract_frontmatter_updated_at(
+                str(existing_profile)
+            )
+            profile_updated_at = extracted_updated_at or "（暂无/未知）"
+
         from Undefined.utils.resources import read_text_resource
 
         template = read_text_resource("res/prompts/historian_profile_merge.md")
@@ -702,8 +729,11 @@ class HistorianWorker:
             sender_id=_escape_braces(str(job.get("sender_id", ""))),
             sender_name=_escape_braces(str(job.get("sender_name", ""))),
             group_name=_escape_braces(str(job.get("group_name", ""))),
+            now_local=_escape_braces(now_local),
+            now_utc=_escape_braces(now_utc),
+            profile_updated_at=_escape_braces(profile_updated_at),
             timestamp_local=_escape_braces(str(job.get("timestamp_local", ""))),
-            timezone=_escape_braces(str(job.get("timezone", ""))),
+            timezone=_escape_braces(timezone_label),
             event_id=_escape_braces(event_id),
             request_id=_escape_braces(str(job.get("request_id", ""))),
             end_seq=_escape_braces(str(job.get("end_seq", 0))),

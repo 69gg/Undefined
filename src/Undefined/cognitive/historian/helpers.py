@@ -19,23 +19,38 @@ def _preview_text(text: str, max_len: int = _MAX_LOG_PREVIEW_LEN) -> str:
     return f"{compact[:max_len]}..."
 
 
-def _extract_frontmatter_name(markdown: str) -> str:
+def _extract_frontmatter_dict(markdown: str) -> dict[str, Any]:
     text = str(markdown or "")
     if not text.startswith("---"):
-        return ""
+        return {}
     try:
         import yaml
 
         parts = text[3:].split("---", 1)
         if len(parts) != 2:
-            return ""
+            return {}
         frontmatter = yaml.safe_load(parts[0])
         if not isinstance(frontmatter, dict):
-            return ""
-        value = frontmatter.get("name")
-        return str(value).strip() if value is not None else ""
+            return {}
+        return frontmatter
     except Exception:
+        return {}
+
+
+def _extract_frontmatter_name(markdown: str) -> str:
+    frontmatter = _extract_frontmatter_dict(markdown)
+    value = frontmatter.get("name")
+    return str(value).strip() if value is not None else ""
+
+
+def _extract_frontmatter_updated_at(markdown: str) -> str:
+    frontmatter = _extract_frontmatter_dict(markdown)
+    value = frontmatter.get("updated_at")
+    if value is None:
         return ""
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return str(value).strip()
 
 
 def _escape_braces(text: str) -> str:

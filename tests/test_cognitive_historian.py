@@ -10,6 +10,7 @@ import pytest
 
 from Undefined.cognitive.chroma_scheduler import CHROMA_PRIORITY_MAINTENANCE
 from Undefined.cognitive.historian import HistorianWorker
+from Undefined.cognitive.historian.helpers import _extract_frontmatter_updated_at
 from Undefined.cognitive.historian.tools import _PROFILE_TOOL
 
 
@@ -136,19 +137,35 @@ async def test_merge_profile_target_user_queries_history_with_sender_or_user_id(
             self.priority_calls.append(str(kwargs.get("priority", "")))
             return []
 
+    class _FakeProfileStorage:
+        async def read_profile(self, _entity_type: str, _entity_id: str) -> str:
+            return (
+                "---\nname: 测试用户\n"
+                "updated_at: 2026-02-01T10:00:00+08:00\n"
+                "---\n- 旧侧写"
+            )
+
     class _FakeAIClient:
         agent_config = object()
 
+        def __init__(self) -> None:
+            self.prompts: list[str] = []
+
         async def submit_background_llm_call(self, **kwargs: Any) -> dict[str, Any]:
-            _ = kwargs
+            messages = kwargs.get("messages") or []
+            if messages and isinstance(messages[0], dict):
+                content = messages[0].get("content")
+                if isinstance(content, str):
+                    self.prompts.append(content)
             return {"choices": []}
 
     vector_store = _FakeVectorStore()
+    ai_client = _FakeAIClient()
     worker = HistorianWorker(
         job_queue=None,
         vector_store=vector_store,
-        profile_storage=SimpleNamespace(read_profile=None),
-        ai_client=_FakeAIClient(),
+        profile_storage=_FakeProfileStorage(),
+        ai_client=ai_client,
         config_getter=lambda: SimpleNamespace(),
     )
     job: dict[str, Any] = {
@@ -191,6 +208,12 @@ async def test_merge_profile_target_user_queries_history_with_sender_or_user_id(
         CHROMA_PRIORITY_MAINTENANCE,
         CHROMA_PRIORITY_MAINTENANCE,
     ]
+    assert ai_client.prompts
+    prompt = ai_client.prompts[0]
+    assert "当前时刻:" in prompt
+    assert "本轮事件时间: 2026-03-01T12:00:00+08:00" in prompt
+    assert "目标侧写上次更新: 2026-02-01T10:00:00+08:00" in prompt
+    assert "最新优先" in prompt
 
 
 @pytest.mark.asyncio
@@ -349,6 +372,23 @@ def test_historian_profile_merge_prompt_profile_only_constraints() -> None:
     assert "skip=true" in merge
     assert "具体事件" in merge
     assert "曾/刚/最近" in merge
+    assert "当前时刻" in merge
+    assert "{now_local}" in merge
+    assert "{profile_updated_at}" in merge
+    assert "最新优先" in merge
+    assert "以当前输入批次为准覆盖" in merge
+    assert "时间只用于判断取舍" in merge
+
+
+def test_extract_frontmatter_updated_at() -> None:
+    assert (
+        _extract_frontmatter_updated_at(
+            "---\nname: A\nupdated_at: 2026-08-11T10:00:00+08:00\n---\n- body"
+        )
+        == "2026-08-11T10:00:00+08:00"
+    )
+    assert _extract_frontmatter_updated_at("---\nname: A\n---\n- body") == ""
+    assert _extract_frontmatter_updated_at("no frontmatter") == ""
 
 
 def test_profile_update_tool_does_not_cap_tags() -> None:

@@ -19,7 +19,7 @@
 上下文信息：
 - request_id: {request_id}
 - end_seq: {end_seq}
-- 时间：{timestamp_local}（{timezone}）
+- 本轮事件时间（相对时间绝对化的参考锚点）：{timestamp_local}（{timezone}）
 - bot: {bot_name}
 - 用户：{sender_name}({sender_id})
 - 群聊：{group_name}({group_id})（如有）

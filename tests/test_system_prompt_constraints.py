@@ -504,8 +504,11 @@ def test_historian_prompts_reference_current_input_batch_source() -> None:
     assert "当前输入批次提取到的一条有价值新观察" in rewrite
     assert "最近消息参考只能消歧，禁止作为新事实来源" in rewrite
     assert "当前输入批次原文（触发本轮；连续消息会按时间顺序列出多条）" in rewrite
+    assert "本轮事件时间" in rewrite
     assert "当前输入批次原文" in merge
     assert "禁止作为本轮新事实来源" in merge
+    assert "当前时刻" in merge
+    assert "最新优先" in merge
 
 
 @pytest.mark.parametrize("path", PROMPT_PATHS)
