@@ -505,6 +505,9 @@ def test_historian_prompts_reference_current_input_batch_source() -> None:
     assert "最近消息参考只能消歧，禁止作为新事实来源" in rewrite
     assert "当前输入批次原文（触发本轮；连续消息会按时间顺序列出多条）" in rewrite
     assert "本轮事件时间" in rewrite
+    assert "轻量独立事实" in rewrite
+    assert "按上下文灵活判断，不要机械套用固定改写模板" in rewrite
+    assert "张三(123)在 2026-08-11 10:00 改用了 Rust" in rewrite
     assert "当前输入批次原文" in merge
     assert "禁止作为本轮新事实来源" in merge
     assert "当前时刻" in merge

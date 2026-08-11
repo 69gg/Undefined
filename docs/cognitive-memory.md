@@ -79,7 +79,7 @@ pending/{job_id}.json
     ▼ dequeue（原子 os.replace）
 processing/{job_id}.json
     │
-    ▼ LLM 绝对化改写（消灭代词/相对时间/相对地点；结合“当前输入批次原文 + 最近消息参考”做实体消歧）
+    ▼ LLM 绝对化改写（消灭代词/相对时间/相对地点；尽量提炼为带时间锚点的独立事实；结合“当前输入批次原文 + 最近消息参考”做实体消歧）
     │
     ▼ 正则闸门检查
     │   通过 → is_absolute=true
