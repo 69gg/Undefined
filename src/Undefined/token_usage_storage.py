@@ -7,6 +7,7 @@ import asyncio
 import gzip
 import json
 import logging
+import math
 import re
 import shutil
 import time
@@ -43,10 +44,17 @@ class TokenUsage:
     duration_seconds: float  # 调用耗时（秒）
     call_type: str  # 调用类型（如 "chat", "vision", "agent", "security" 等）
     success: bool  # 是否成功
+    ttft_seconds: float | None = None  # 首字延迟（秒，仅流式）
+    tokens_per_second: float | None = None  # 生成吞吐（completion / (duration - ttft)）
 
     def to_dict(self) -> dict[str, Any]:
-        """转换为字典"""
-        return asdict(self)
+        """转换为字典；缺省的流式指标字段不落盘。"""
+        data = asdict(self)
+        if data.get("ttft_seconds") is None:
+            data.pop("ttft_seconds", None)
+        if data.get("tokens_per_second") is None:
+            data.pop("tokens_per_second", None)
+        return data
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "TokenUsage":
@@ -72,6 +80,17 @@ class TokenUsage:
                 return float(value or 0.0)
             except (TypeError, ValueError):
                 return 0.0
+
+        def to_optional_float(value: Any) -> float | None:
+            if value is None:
+                return None
+            try:
+                parsed = float(value)
+            except (TypeError, ValueError):
+                return None
+            if not math.isfinite(parsed) or parsed < 0:
+                return None
+            return parsed
 
         prompt_tokens = to_int(
             data.get("prompt_tokens")
@@ -114,6 +133,8 @@ class TokenUsage:
             duration_seconds=duration_seconds,
             call_type=call_type,
             success=success,
+            ttft_seconds=to_optional_float(data.get("ttft_seconds")),
+            tokens_per_second=to_optional_float(data.get("tokens_per_second")),
         )
 
 

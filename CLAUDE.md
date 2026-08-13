@@ -137,7 +137,7 @@ Management / Runtime 请求 → webui/app.py 或 api/app.py → routes/*
 - `data/end_summaries.json` — 短期总结存储
 - `data/scheduled_tasks.json` — 定时任务存储
 - `data/faq/` — FAQ 存储
-- `data/token_usage.jsonl` — Token 统计（自动 gzip 归档）
+- `data/token_usage.jsonl` — Token 统计（自动 gzip 归档；流式调用可含可选 `ttft_seconds` / `tokens_per_second`）
 - `knowledge/` — 本地知识库数据目录（`texts/`、`intro.md`、`chroma/` 等）
 - `res/prompts/` — 系统提示词模板
 
@@ -146,7 +146,7 @@ Management / Runtime 请求 → webui/app.py 或 api/app.py → routes/*
 系统提示词（`res/prompts/undefined.xml`）包含用户识别规则：
 - 以 QQ 号（`sender_id`）为用户唯一标识，昵称可能随时变动
 - 称呼用户时使用当前最新昵称，不确定时可调用 `group.get_member_info(brief=true)` 查询
-- 认知记忆（observations）必须包含 QQ 号，格式如：“QQ号12345678（昵称张三）做了某事”
+- 认知记忆（`end.observations`）只写值得日后检索的写实实质事实（宁缺毋滥）；必须含稳定实体标识，用户观察格式如：“QQ号12345678（昵称张三）做了某事”
 
 ## 配置系统
 

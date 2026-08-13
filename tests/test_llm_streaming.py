@@ -7,14 +7,20 @@ from typing import Any
 import httpx
 from openai import APIStatusError
 
+import pytest
+
 from Undefined.ai.llm.streaming import (
     aggregate_chat_completions_stream,
     aggregate_responses_stream,
+    anthropic_event_marks_ttft,
+    chat_chunk_marks_ttft,
+    compute_stream_generation_metrics,
     ensure_chat_stream_usage_options,
     ensure_tool_call_slot,
     extract_stream_response_item,
     extract_stream_usage,
     merge_tool_call_delta,
+    responses_event_marks_ttft,
     should_fallback_from_stream,
     split_chat_completion_params,
     split_responses_params,
@@ -560,3 +566,150 @@ class TestAggregateResponsesStream:
         ]
         result = aggregate_responses_stream(events)
         assert len(result.get("output", [])) == 2
+
+
+# ---------------------------------------------------------------------------
+# TTFT markers + generation metrics
+# ---------------------------------------------------------------------------
+
+
+class TestChatChunkMarksTtft:
+    def test_role_only_chunk_does_not_mark(self) -> None:
+        chunk = {"choices": [{"delta": {"role": "assistant"}}]}
+        assert chat_chunk_marks_ttft(chunk) is False
+
+    def test_content_delta_marks(self) -> None:
+        chunk = {"choices": [{"delta": {"content": "Hi"}}]}
+        assert chat_chunk_marks_ttft(chunk) is True
+
+    def test_reasoning_delta_marks(self) -> None:
+        chunk = {"choices": [{"delta": {"reasoning_content": "think"}}]}
+        assert chat_chunk_marks_ttft(chunk) is True
+
+    def test_tool_calls_delta_marks(self) -> None:
+        chunk = {
+            "choices": [
+                {
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "id": "call_1",
+                                "function": {"name": "end", "arguments": ""},
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+        assert chat_chunk_marks_ttft(chunk) is True
+
+
+class TestResponsesEventMarksTtft:
+    def test_output_text_delta_marks(self) -> None:
+        assert (
+            responses_event_marks_ttft(
+                {"type": "response.output_text.delta", "delta": "a"}
+            )
+            is True
+        )
+
+    def test_empty_output_text_delta_does_not_mark(self) -> None:
+        assert (
+            responses_event_marks_ttft(
+                {"type": "response.output_text.delta", "delta": ""}
+            )
+            is False
+        )
+
+    def test_function_call_arguments_delta_marks(self) -> None:
+        assert (
+            responses_event_marks_ttft(
+                {"type": "response.function_call_arguments.delta", "delta": "{"}
+            )
+            is True
+        )
+
+    def test_empty_function_call_arguments_delta_does_not_mark(self) -> None:
+        assert (
+            responses_event_marks_ttft(
+                {"type": "response.function_call_arguments.delta", "delta": ""}
+            )
+            is False
+        )
+
+    def test_completed_event_does_not_mark(self) -> None:
+        assert (
+            responses_event_marks_ttft({"type": "response.completed", "response": {}})
+            is False
+        )
+
+
+class TestAnthropicEventMarksTtft:
+    def test_text_delta_marks(self) -> None:
+        assert (
+            anthropic_event_marks_ttft(
+                {
+                    "type": "content_block_delta",
+                    "delta": {"type": "text_delta", "text": "hi"},
+                }
+            )
+            is True
+        )
+
+    def test_thinking_delta_marks(self) -> None:
+        assert (
+            anthropic_event_marks_ttft(
+                {
+                    "type": "content_block_delta",
+                    "delta": {"type": "thinking_delta", "thinking": "plan"},
+                }
+            )
+            is True
+        )
+
+    def test_message_start_does_not_mark(self) -> None:
+        assert anthropic_event_marks_ttft({"type": "message_start"}) is False
+
+
+class TestComputeStreamGenerationMetrics:
+    def test_no_first_token_returns_none(self) -> None:
+        ttft, tps = compute_stream_generation_metrics(
+            duration_seconds=1.2,
+            start_perf=100.0,
+            first_token_at=None,
+            completion_tokens=40,
+        )
+        assert ttft is None
+        assert tps is None
+
+    def test_normal_stream_tps(self) -> None:
+        # start=100, first=100.3 -> ttft=0.3; duration=1.2 -> gen=0.9; 45/0.9=50
+        ttft, tps = compute_stream_generation_metrics(
+            duration_seconds=1.2,
+            start_perf=100.0,
+            first_token_at=100.3,
+            completion_tokens=45,
+        )
+        assert ttft == pytest.approx(0.3)
+        assert tps == pytest.approx(50.0)
+
+    def test_tiny_generation_window_omits_tps(self) -> None:
+        ttft, tps = compute_stream_generation_metrics(
+            duration_seconds=0.2,
+            start_perf=10.0,
+            first_token_at=10.2,
+            completion_tokens=10,
+        )
+        assert ttft == pytest.approx(0.2)
+        assert tps is None
+
+    def test_zero_completion_tokens_omits_tps(self) -> None:
+        ttft, tps = compute_stream_generation_metrics(
+            duration_seconds=1.0,
+            start_perf=0.0,
+            first_token_at=0.2,
+            completion_tokens=0,
+        )
+        assert ttft == pytest.approx(0.2)
+        assert tps is None

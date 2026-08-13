@@ -883,6 +883,8 @@ summary = ""
 - `merge` 兼容 `repack/lossless`
 - `none` 兼容 `keep/off/disable`
 
+每次生成模型调用会向 `data/token_usage.jsonl` 追加一条记录（含 `duration_seconds`、token 计数、`call_type` 等）。流式调用在可计算时额外写入可选字段 `ttft_seconds`（首字延迟）与 `tokens_per_second`（`completion_tokens / (duration_seconds − ttft_seconds)`）；非流式或不具备首字采样点时省略这两项，不写 `null`。指标语义见[模型 API 与兼容层](model-compatibility.md#sdk-与-api-mode)。
+
 ---
 
 ### 4.19 `[mcp]`

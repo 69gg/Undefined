@@ -40,6 +40,7 @@
 - Responses 默认使用官方对象型 `tool_choice`。仅当兼容网关明确不支持时，才启用 `responses_tool_choice_compat` 降级为字符串 `"required"`。
 - Responses 默认使用 `previous_response_id + function_call_output` 增量续轮；`responses_force_stateless_replay` 会强制回放完整历史。检测到上游缺失前序工具调用状态时，运行时也可自动降级到 stateless replay。
 - 启用流式请求时，三种模式分别使用对应 SDK 的流式接口并聚合为统一响应；只有明确的流式参数不兼容或 SDK 未实现才回退非流式请求。
+- 流式调用会额外计量 **TTFT**（首字延迟：请求发起到首个有意义输出增量）与 **TPS**（`completion_tokens / (总耗时 − TTFT)`），写入 `[API响应]` 日志，并在可计算时落入 `data/token_usage.jsonl` 的可选字段 `ttft_seconds` / `tokens_per_second`。非流式调用只记录总耗时，不计算、不落盘 TTFT/TPS。
 - OpenAI 模式可以生成按模型、调用类型和会话作用域稳定隔离的 `prompt_cache_key`；Anthropic 不发送该字段，其缓存扩展通过 `request_params.cache_control` 配置。
 
 精确字段、默认值和 `request_params` 保留字段规则见[生成模型通用字段](configuration.md#441-生成模型通用字段)。

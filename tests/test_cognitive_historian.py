@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
+from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -10,6 +12,10 @@ import pytest
 
 from Undefined.cognitive.chroma_scheduler import CHROMA_PRIORITY_MAINTENANCE
 from Undefined.cognitive.historian import HistorianWorker
+from Undefined.cognitive.historian.helpers import (
+    _extract_frontmatter_updated_at,
+    _now_in_job_timezone,
+)
 from Undefined.cognitive.historian.tools import _PROFILE_TOOL
 
 
@@ -136,19 +142,35 @@ async def test_merge_profile_target_user_queries_history_with_sender_or_user_id(
             self.priority_calls.append(str(kwargs.get("priority", "")))
             return []
 
+    class _FakeProfileStorage:
+        async def read_profile(self, _entity_type: str, _entity_id: str) -> str:
+            return (
+                "---\nname: 测试用户\n"
+                "updated_at: 2026-02-01T10:00:00+08:00\n"
+                "---\n- 旧侧写"
+            )
+
     class _FakeAIClient:
         agent_config = object()
 
+        def __init__(self) -> None:
+            self.prompts: list[str] = []
+
         async def submit_background_llm_call(self, **kwargs: Any) -> dict[str, Any]:
-            _ = kwargs
+            messages = kwargs.get("messages") or []
+            if messages and isinstance(messages[0], dict):
+                content = messages[0].get("content")
+                if isinstance(content, str):
+                    self.prompts.append(content)
             return {"choices": []}
 
     vector_store = _FakeVectorStore()
+    ai_client = _FakeAIClient()
     worker = HistorianWorker(
         job_queue=None,
         vector_store=vector_store,
-        profile_storage=SimpleNamespace(read_profile=None),
-        ai_client=_FakeAIClient(),
+        profile_storage=_FakeProfileStorage(),
+        ai_client=ai_client,
         config_getter=lambda: SimpleNamespace(),
     )
     job: dict[str, Any] = {
@@ -191,6 +213,22 @@ async def test_merge_profile_target_user_queries_history_with_sender_or_user_id(
         CHROMA_PRIORITY_MAINTENANCE,
         CHROMA_PRIORITY_MAINTENANCE,
     ]
+    assert ai_client.prompts
+    prompt = ai_client.prompts[0]
+    assert "当前时刻:" in prompt
+    assert "本轮事件时间: 2026-03-01T12:00:00+08:00" in prompt
+    assert "目标侧写上次更新: 2026-02-01T10:00:00+08:00" in prompt
+    assert "最新优先" in prompt
+    utc_match = re.search(r"UTC:\s*([0-9T:.+-]+)", prompt)
+    assert utc_match is not None
+    utc_dt = datetime.fromisoformat(utc_match.group(1))
+    assert utc_dt.tzinfo is not None
+    assert utc_dt.utcoffset() == timedelta(0)
+    local_match = re.search(r"当前时刻:\s*([0-9T:.+-]+)", prompt)
+    assert local_match is not None
+    local_dt = datetime.fromisoformat(local_match.group(1))
+    assert local_dt.tzinfo is not None
+    assert local_dt.utcoffset() == timedelta(hours=8)
 
 
 @pytest.mark.asyncio
@@ -349,6 +387,48 @@ def test_historian_profile_merge_prompt_profile_only_constraints() -> None:
     assert "skip=true" in merge
     assert "具体事件" in merge
     assert "曾/刚/最近" in merge
+    assert "当前时刻" in merge
+    assert "{now_local}" in merge
+    assert "{now_utc}" in merge
+    assert "{profile_updated_at}" in merge
+    assert "最新优先" in merge
+    assert "以当前输入批次为准覆盖" in merge
+    assert "时间只用于判断取舍" in merge
+    assert "克制扩写 / 合并去冗" in merge
+    assert "能并入现有条目就不新增条目" in merge
+    assert "宁可多写" not in merge
+    assert "信息密度优先于表达精炼" not in merge
+
+
+def test_extract_frontmatter_updated_at() -> None:
+    assert (
+        _extract_frontmatter_updated_at(
+            "---\nname: A\nupdated_at: 2026-08-11T10:00:00+08:00\n---\n- body"
+        )
+        == "2026-08-11T10:00:00+08:00"
+    )
+    assert _extract_frontmatter_updated_at("---\nname: A\n---\n- body") == ""
+    assert _extract_frontmatter_updated_at("no frontmatter") == ""
+    assert _extract_frontmatter_updated_at("---\nfoo: [unclosed\n---\n- body") == ""
+    assert _extract_frontmatter_updated_at("---\n- not a mapping\n---\n- body") == ""
+
+
+def test_now_in_job_timezone_uses_zoneinfo_and_same_instant() -> None:
+    now_local, now_utc, label = _now_in_job_timezone({"timezone": "Asia/Shanghai"})
+    assert label == "Asia/Shanghai"
+    assert now_local.utcoffset() == timedelta(hours=8)
+    assert now_utc.tzinfo is not None
+    assert now_utc.utcoffset() == timedelta(0)
+    assert abs((now_local - now_utc).total_seconds()) < 0.001
+
+
+def test_now_in_job_timezone_invalid_falls_back() -> None:
+    system_now = datetime.now().astimezone()
+    now_local, now_utc, _label = _now_in_job_timezone({"timezone": "Not/AZone"})
+    assert now_local.utcoffset() == system_now.utcoffset()
+    assert now_local.tzname() == system_now.tzname()
+    assert now_utc.utcoffset() == timedelta(0)
+    assert abs((now_local - now_utc).total_seconds()) < 0.001
 
 
 def test_profile_update_tool_does_not_cap_tags() -> None:
@@ -488,3 +568,8 @@ async def test_merge_profile_target_preserves_more_than_ten_tags() -> None:
     assert len(written_profiles) == 1
     for index in range(12):
         assert f"- 标签{index}" in written_profiles[0]
+    updated_match = re.search(r"updated_at:\s*['\"]?([0-9T:.+-]+)", written_profiles[0])
+    assert updated_match is not None
+    updated_at = datetime.fromisoformat(updated_match.group(1).strip("'\""))
+    assert updated_at.tzinfo is not None
+    assert updated_at.utcoffset() == timedelta(hours=8)

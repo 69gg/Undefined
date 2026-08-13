@@ -445,16 +445,21 @@ def test_system_prompts_tell_end_to_record_whole_current_input_batch(
 ) -> None:
     text = path.read_text(encoding="utf-8")
 
-    assert "memo / observations 必须覆盖整个【当前输入批次】" in text
+    assert "memo / observations 在有实质可记内容时必须覆盖整个【当前输入批次】" in text
     assert "不要只根据最后一条消息记录" in text
-    assert "end.observations 必须覆盖整批消息中有价值的信息" in text
+    assert "end.observations 必须覆盖整批中的这些信息" in text
     assert "不要求与 bot 相关，也不要求长期稳定" in text
-    assert "当前批次中有价值即可记录" in text
+    assert "写实 / 宁缺毋滥" in text
+    assert "值得日后检索" in text
+    assert "否定清单" in text
+    assert "静默处理" in text
     assert "不能作为 observations 的新事实来源" in text
     assert "系统会围绕当前输入批次自动检索相关内容" in text
     assert "何时应该填写 memo" in text
     assert "何时应该填写 summary" not in text
     assert "summary 应该是对未来有帮助的信息" not in text
+    assert "QQ号12345678（昵称张三）" in text
+    assert "可核验" in text
 
 
 @pytest.mark.parametrize("path", PROMPT_PATHS)
@@ -486,12 +491,17 @@ def test_end_tool_schema_mentions_current_input_batch() -> None:
     assert "当前输入批次" in function["description"]
     assert "不要求与 bot 相关" in function["description"]
     assert "不要求长期稳定" in function["description"]
+    assert "宁缺毋滥" in function["description"]
     assert "项目名/主名必须逐字写作 Undefined" in function["description"]
     assert "必须覆盖整批消息内容" in observations["description"]
     assert "不能只记录最后一条" in observations["description"]
-    assert "当前批次中有价值即可记录" in observations["description"]
+    assert "值得日后检索" in observations["description"]
+    assert "宁缺毋滥" in observations["description"]
+    assert "否定清单" in observations["description"]
     assert "禁止从其中摘取新事实写入 observations" in observations["description"]
     assert "禁止写成 Unfined、Undefind、undefind" in observations["description"]
+    assert "QQ号<sender_id>（昵称<name>）" in function["description"]
+    assert "QQ号<sender_id>（昵称<name>）" in observations["description"]
     assert "summary" not in properties
     assert "action_summary" not in properties
     assert "new_info" not in properties
@@ -504,8 +514,17 @@ def test_historian_prompts_reference_current_input_batch_source() -> None:
     assert "当前输入批次提取到的一条有价值新观察" in rewrite
     assert "最近消息参考只能消歧，禁止作为新事实来源" in rewrite
     assert "当前输入批次原文（触发本轮；连续消息会按时间顺序列出多条）" in rewrite
+    assert "本轮事件时间" in rewrite
+    assert "轻量独立事实" in rewrite
+    assert "按上下文灵活判断，不要机械套用固定改写模板" in rewrite
+    assert "QQ号123（昵称张三）在 2026-08-11 10:00 改用了 Rust" in rewrite
+    assert "QQ号<user_id>（昵称<name>）" in rewrite
     assert "当前输入批次原文" in merge
     assert "禁止作为本轮新事实来源" in merge
+    assert "当前时刻" in merge
+    assert "最新优先" in merge
+    assert "合并去冗" in merge
+    assert "克制扩写" in merge
 
 
 @pytest.mark.parametrize("path", PROMPT_PATHS)
