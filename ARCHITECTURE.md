@@ -158,13 +158,13 @@ graph TB
             EndSummaryStorage["EndSummaryStorage<br/>短期总结存储<br/>[end_summary_storage.py]"]
             CognitiveService["CognitiveService<br/>认知记忆服务<br/>[cognitive/service/]<br/>• 事件检索 • 侧写读取<br/>• 入队 memory job"]
             CognitiveJobQueue["JobQueue<br/>认知任务队列<br/>[cognitive/job_queue.py]<br/>• pending/processing/failed"]
-            CognitiveHistorian["HistorianWorker<br/>后台史官<br/>[cognitive/historian/]<br/>• 绝对化改写 • 闸门重试<br/>• 侧写合并（含历史事件注入）"]
+            CognitiveHistorian["HistorianWorker<br/>后台史官<br/>[cognitive/historian/]<br/>• 独立事实改写 • 闸门重试<br/>• 侧写合并（最新优先/去冗）"]
             CognitiveVectorStore["CognitiveVectorStore<br/>向量存储<br/>[cognitive/vector_store.py]<br/>• events/profiles<br/>• 时间衰减加权排序<br/>• MMR 去重"]
             CognitiveProfileStorage["ProfileStorage<br/>侧写存储<br/>[cognitive/profile_storage.py]<br/>• users/groups Markdown<br/>• 历史快照"]
             MemeSystem["MemeSystem<br/>表情包存储<br/>[memes/]<br/>• worker.py (两阶段识别)<br/>• sqlite+chromadb<br/>• blob 持久化"]
             FAQStorage["FAQStorage<br/>FAQ 存储<br/>[faq.py]<br/>• data/faq/{group_id}/"]
             ScheduledTaskStorage["ScheduledTaskStorage<br/>定时任务存储<br/>[scheduled_task_storage.py]"]
-            TokenUsageStorage["TokenUsageStorage<br/>Token 使用统计<br/>[token_usage_storage.py]<br/>• 自动归档<br/>• gzip 压缩"]
+            TokenUsageStorage["TokenUsageStorage<br/>Token 使用统计<br/>[token_usage_storage.py]<br/>• 自动归档<br/>• gzip 压缩<br/>• 流式可选 TTFT/TPS"]
         end
         
         subgraph IOLayer["异步 IO 层 (src/Undefined/utils/)"]
@@ -573,7 +573,7 @@ graph LR
             CognitiveProfile["ProfileStorage<br/>data/cognitive/profiles/"]
             FAQ["FAQStorage<br/>data/faq/{group_id}/<br/>• ID: YYYYMMDD-NNN"]
             Tasks["ScheduledTaskStorage<br/>data/scheduled_tasks.json<br/>• Cron 格式"]
-            TokenUsage["TokenUsageStorage<br/>data/token_usage.jsonl<br/>• 自动归档<br/>• gzip 压缩"]
+            TokenUsage["TokenUsageStorage<br/>data/token_usage.jsonl<br/>• 自动归档<br/>• gzip 压缩<br/>• 流式可选 TTFT/TPS"]
         end
         
         subgraph Persistence["持久化"]
