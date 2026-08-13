@@ -409,6 +409,8 @@ def test_extract_frontmatter_updated_at() -> None:
     )
     assert _extract_frontmatter_updated_at("---\nname: A\n---\n- body") == ""
     assert _extract_frontmatter_updated_at("no frontmatter") == ""
+    assert _extract_frontmatter_updated_at("---\nfoo: [unclosed\n---\n- body") == ""
+    assert _extract_frontmatter_updated_at("---\n- not a mapping\n---\n- body") == ""
 
 
 def test_now_in_job_timezone_uses_zoneinfo_and_same_instant() -> None:
@@ -421,9 +423,10 @@ def test_now_in_job_timezone_uses_zoneinfo_and_same_instant() -> None:
 
 
 def test_now_in_job_timezone_invalid_falls_back() -> None:
-    now_local, now_utc, label = _now_in_job_timezone({"timezone": "Not/AZone"})
-    assert label != "Not/AZone"
-    assert now_local.tzinfo is not None
+    system_now = datetime.now().astimezone()
+    now_local, now_utc, _label = _now_in_job_timezone({"timezone": "Not/AZone"})
+    assert now_local.utcoffset() == system_now.utcoffset()
+    assert now_local.tzname() == system_now.tzname()
     assert now_utc.utcoffset() == timedelta(0)
     assert abs((now_local - now_utc).total_seconds()) < 0.001
 
