@@ -458,6 +458,8 @@ def test_system_prompts_tell_end_to_record_whole_current_input_batch(
     assert "何时应该填写 memo" in text
     assert "何时应该填写 summary" not in text
     assert "summary 应该是对未来有帮助的信息" not in text
+    assert "QQ号12345678（昵称张三）" in text
+    assert "可核验" in text
 
 
 @pytest.mark.parametrize("path", PROMPT_PATHS)
@@ -498,6 +500,8 @@ def test_end_tool_schema_mentions_current_input_batch() -> None:
     assert "否定清单" in observations["description"]
     assert "禁止从其中摘取新事实写入 observations" in observations["description"]
     assert "禁止写成 Unfined、Undefind、undefind" in observations["description"]
+    assert "QQ号<sender_id>（昵称<name>）" in function["description"]
+    assert "QQ号<sender_id>（昵称<name>）" in observations["description"]
     assert "summary" not in properties
     assert "action_summary" not in properties
     assert "new_info" not in properties
@@ -513,7 +517,8 @@ def test_historian_prompts_reference_current_input_batch_source() -> None:
     assert "本轮事件时间" in rewrite
     assert "轻量独立事实" in rewrite
     assert "按上下文灵活判断，不要机械套用固定改写模板" in rewrite
-    assert "张三(123)在 2026-08-11 10:00 改用了 Rust" in rewrite
+    assert "QQ号123（昵称张三）在 2026-08-11 10:00 改用了 Rust" in rewrite
+    assert "QQ号<user_id>（昵称<name>）" in rewrite
     assert "当前输入批次原文" in merge
     assert "禁止作为本轮新事实来源" in merge
     assert "当前时刻" in merge

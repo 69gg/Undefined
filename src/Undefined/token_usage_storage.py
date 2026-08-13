@@ -7,6 +7,7 @@ import asyncio
 import gzip
 import json
 import logging
+import math
 import re
 import shutil
 import time
@@ -84,9 +85,12 @@ class TokenUsage:
             if value is None:
                 return None
             try:
-                return float(value)
+                parsed = float(value)
             except (TypeError, ValueError):
                 return None
+            if not math.isfinite(parsed) or parsed < 0:
+                return None
+            return parsed
 
         prompt_tokens = to_int(
             data.get("prompt_tokens")

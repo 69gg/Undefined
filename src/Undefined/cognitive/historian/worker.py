@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, tzinfo
 from typing import Any, Callable
 
 from Undefined.ai.transports.openai_transport import RESPONSES_OUTPUT_ITEMS_KEY
@@ -22,6 +22,7 @@ from Undefined.cognitive.historian.helpers import (
     _escape_braces,
     _extract_frontmatter_name,
     _extract_frontmatter_updated_at,
+    _now_in_job_timezone,
     _preview_text,
     _resolve_timestamp_epoch,
 )
@@ -479,15 +480,21 @@ class HistorianWorker:
         summary: str,
         event_id: str,
         perspective: str,
+        now_timezone: tzinfo | None = None,
     ) -> None:
         import yaml
 
+        instant = datetime.now(timezone.utc)
+        if now_timezone is not None:
+            stamped = instant.astimezone(now_timezone)
+        else:
+            stamped = instant.astimezone()
         frontmatter: dict[str, Any] = {
             "entity_type": entity_type,
             "entity_id": entity_id,
             "name": effective_name,
             "tags": tags,
-            "updated_at": datetime.now().isoformat(),
+            "updated_at": stamped.isoformat(),
             "source_event_id": event_id,
         }
         if entity_type == "user":
@@ -677,11 +684,9 @@ class HistorianWorker:
             or "（暂无历史事件）"
         )
 
-        now_local_dt = datetime.now().astimezone()
-        now_utc_dt = datetime.now(timezone.utc)
+        now_local_dt, now_utc_dt, timezone_label = _now_in_job_timezone(job)
         now_local = now_local_dt.isoformat()
         now_utc = now_utc_dt.isoformat()
-        timezone_label = str(job.get("timezone") or now_local_dt.tzinfo or "").strip()
 
         profile_updated_at = "（暂无/未知）"
         try:
@@ -931,6 +936,7 @@ class HistorianWorker:
                         summary=summary,
                         event_id=event_id,
                         perspective=perspective,
+                        now_timezone=now_local_dt.tzinfo,
                     )
                     tool_results.append(
                         {"role": "tool", "tool_call_id": tc_id, "content": "侧写已更新"}

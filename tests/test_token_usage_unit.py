@@ -99,6 +99,21 @@ class TestTokenUsageFromDictDefaults:
         assert usage.ttft_seconds is None
         assert usage.tokens_per_second is None
 
+    def test_stream_metrics_reject_nan_infinity_and_negative(self) -> None:
+        for raw in ("NaN", "Infinity", -1.0):
+            usage = TokenUsage.from_dict(
+                {**_sample_dict(), "ttft_seconds": raw, "tokens_per_second": raw}
+            )
+            assert usage.ttft_seconds is None
+            assert usage.tokens_per_second is None
+
+    def test_stream_metrics_keep_non_negative_finite(self) -> None:
+        usage = TokenUsage.from_dict(
+            {**_sample_dict(), "ttft_seconds": 0.0, "tokens_per_second": 12.5}
+        )
+        assert usage.ttft_seconds == pytest.approx(0.0)
+        assert usage.tokens_per_second == pytest.approx(12.5)
+
     def test_timestamp_fallback_to_time(self) -> None:
         usage = TokenUsage.from_dict({"time": "2025-01-01"})
         assert usage.timestamp == "2025-01-01"

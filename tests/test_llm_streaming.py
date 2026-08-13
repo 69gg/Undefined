@@ -630,6 +630,14 @@ class TestResponsesEventMarksTtft:
             is True
         )
 
+    def test_empty_function_call_arguments_delta_does_not_mark(self) -> None:
+        assert (
+            responses_event_marks_ttft(
+                {"type": "response.function_call_arguments.delta", "delta": ""}
+            )
+            is False
+        )
+
     def test_completed_event_does_not_mark(self) -> None:
         assert (
             responses_event_marks_ttft({"type": "response.completed", "response": {}})

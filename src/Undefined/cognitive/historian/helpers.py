@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timezone, tzinfo
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +57,28 @@ def _extract_frontmatter_updated_at(markdown: str) -> str:
 def _escape_braces(text: str) -> str:
     value = str(text or "")
     return value.replace("{", "{{").replace("}", "}}")
+
+
+def _resolve_job_timezone(job: dict[str, Any]) -> tuple[tzinfo, str]:
+    """用 ZoneInfo 解析 job 时区；无效或缺失时回退到系统本地时区。"""
+    raw = str(job.get("timezone") or "").strip()
+    if raw:
+        try:
+            return ZoneInfo(raw), raw
+        except (ZoneInfoNotFoundError, ValueError, OSError):
+            pass
+    fallback = datetime.now().astimezone()
+    fallback_tz = fallback.tzinfo or timezone.utc
+    label = getattr(fallback_tz, "key", None) or str(fallback_tz) or "UTC"
+    return fallback_tz, str(label)
+
+
+def _now_in_job_timezone(job: dict[str, Any]) -> tuple[datetime, datetime, str]:
+    """同一瞬间的本地时刻、UTC 时刻与时区标签。"""
+    tz, label = _resolve_job_timezone(job)
+    now_utc = datetime.now(timezone.utc)
+    now_local = now_utc.astimezone(tz)
+    return now_local, now_utc, label
 
 
 def _resolve_timestamp_epoch(job: dict[str, Any]) -> int:

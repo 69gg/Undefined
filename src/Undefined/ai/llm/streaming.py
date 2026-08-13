@@ -247,8 +247,6 @@ def responses_event_marks_ttft(event: dict[str, Any]) -> bool:
     """Responses 流式事件是否包含首字/首工具片段。"""
     event_type = str(event.get("type") or "").strip().lower()
     if event_type in _RESPONSES_TTFT_EVENT_TYPES:
-        if event_type == "response.function_call_arguments.delta":
-            return True
         return bool(stringify_stream_delta(event.get("delta")))
     for source in (event, event.get("delta")):
         if not isinstance(source, dict):
