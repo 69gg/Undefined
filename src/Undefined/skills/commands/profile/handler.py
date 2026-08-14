@@ -164,12 +164,12 @@ def _render_meta_rows(
 
 def _split_profile_for_render(
     profile_text: str,
-) -> tuple[dict[str, Any] | None, str, str]:
+) -> tuple[dict[str, Any] | None, str, str, str]:
     parsed = _parse_profile_markdown(profile_text)
     if parsed is None:
-        return None, "", profile_text
-    frontmatter, evaluation, body = parsed
-    return frontmatter, evaluation, body or ""
+        return None, "", profile_text, ""
+    frontmatter, evaluation, body, roast = parsed
+    return frontmatter, evaluation, body or "", roast
 
 
 # ── 发送方法 ──────────────────────────────────────────────────
@@ -217,10 +217,10 @@ async def _send_render(
     context: CommandContext,
     profile_text: str,
 ) -> None:
-    """渲染为图片发送：YAML 键值表、独立评价区、Markdown 正文。"""
+    """渲染为图片发送：YAML 键值表、独立评价区、Markdown 正文、锐评在最后。"""
     from Undefined.render import render_html_to_image
 
-    frontmatter, evaluation, body = _split_profile_for_render(profile_text)
+    frontmatter, evaluation, body, roast = _split_profile_for_render(profile_text)
     meta_rows_html = ""
     for key, val in _render_meta_rows(frontmatter, len(profile_text)):
         meta_rows_html += (
@@ -238,6 +238,15 @@ async def _send_render(
         )
 
     body_html = _markdown_to_html(body) if body.strip() else ""
+
+    roast_html = ""
+    if roast.strip():
+        roast_html = (
+            '<div class="roast">'
+            '<div class="roast-title">锐评</div>'
+            f"<p>{html.escape(roast.strip())}</p>"
+            "</div>"
+        )
 
     html_content = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>
@@ -280,6 +289,20 @@ body {{
   padding: 18px; line-height: 1.8; font-size: 15px;
   overflow-wrap: anywhere;
 }}
+.roast {{
+  padding: 14px 18px 16px;
+  border-top: 1px solid #e6e0d8;
+  border-left: 4px solid #c4a484;
+  background: #f9f5f1;
+}}
+.roast-title {{
+  font-size: 13px; font-weight: 700; color: #6e675f;
+  margin-bottom: 6px;
+}}
+.roast p {{
+  font-size: 15px; line-height: 1.7; color: #3d3935;
+  font-style: italic;
+}}
 .doc-body > :first-child {{ margin-top: 0; }}
 .doc-body > :last-child {{ margin-bottom: 0; }}
 .doc-body p {{ margin: 8px 0; }}
@@ -318,6 +341,7 @@ body {{
   <div class="meta"><table>{meta_rows_html}</table></div>
   {eval_html}
   <div class="body"><article class="doc-body">{body_html}</article></div>
+  {roast_html}
 </div>
 </body></html>"""
 

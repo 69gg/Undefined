@@ -106,13 +106,29 @@ def _has_standalone_delimiter(text: str) -> bool:
     return any(line.strip() == "---" for line in str(text).splitlines())
 
 
+def _profile_section_error(
+    value: str,
+    *,
+    empty_reason: str,
+    empty_content: str,
+    delimiter_reason: str,
+    delimiter_content: str,
+) -> tuple[str, str] | None:
+    if not value:
+        return empty_reason, empty_content
+    if _has_standalone_delimiter(value):
+        return delimiter_reason, delimiter_content
+    return None
+
+
 def _parse_profile_markdown(
     markdown: str,
-) -> tuple[dict[str, Any], str, str] | None:
+) -> tuple[dict[str, Any], str, str, str] | None:
     """解析侧写 Markdown。
 
-    返回 ``(frontmatter, evaluation, body)``。旧文件只有一对 ``---`` 时
-    ``evaluation`` 为空，其后全部当作 body。
+    返回 ``(frontmatter, evaluation, body, roast)``。
+    旧文件只有一对 ``---`` 时评价与锐评为空，其后全部当作 body；
+    只有两对 ``---`` 时锐评为空，中间段为评价、末段为 body。
     """
     text = str(markdown or "")
     if not text.startswith("---"):
@@ -123,7 +139,7 @@ def _parse_profile_markdown(
         rest = text[3:]
         if rest.startswith("\n"):
             rest = rest[1:]
-        parts = _PROFILE_SECTION_SPLIT.split(rest, maxsplit=2)
+        parts = _PROFILE_SECTION_SPLIT.split(rest, maxsplit=3)
         if len(parts) < 2:
             return None
         frontmatter = yaml.safe_load(parts[0])
@@ -132,10 +148,16 @@ def _parse_profile_markdown(
         if len(parts) == 2:
             evaluation = ""
             body = parts[1].lstrip("\n")
+            roast = ""
+        elif len(parts) == 3:
+            evaluation = parts[1].strip()
+            body = parts[2].lstrip("\n")
+            roast = ""
         else:
             evaluation = parts[1].strip()
             body = parts[2].lstrip("\n")
-        return frontmatter, evaluation, body
+            roast = parts[3].strip()
+        return frontmatter, evaluation, body, roast
     except Exception:
         return None
 
@@ -144,11 +166,18 @@ def _serialize_profile_markdown(
     frontmatter: dict[str, Any],
     body: str,
     evaluation: str = "",
+    roast: str = "",
 ) -> str:
     import yaml
 
     yaml_text = yaml.dump(frontmatter, allow_unicode=True)
     eval_text = str(evaluation or "").strip()
+    roast_text = str(roast or "").strip()
+    body_text = str(body or "")
+    if roast_text:
+        if body_text and not body_text.endswith("\n"):
+            body_text += "\n"
+        return f"---\n{yaml_text}---\n{eval_text}\n---\n{body_text}---\n{roast_text}\n"
     if eval_text:
         return f"---\n{yaml_text}---\n{eval_text}\n---\n{body}"
     return f"---\n{yaml_text}---\n{body}"
@@ -174,6 +203,7 @@ def _build_profile_vector_payload(
     tags: list[str],
     summary: str,
     evaluation: str = "",
+    roast: str = "",
 ) -> tuple[str, dict[str, Any]]:
     profile_doc_lines: list[str] = []
     if entity_type == "user":
@@ -187,6 +217,9 @@ def _build_profile_vector_payload(
     eval_text = str(evaluation or "").strip()
     if eval_text:
         profile_doc_lines.append(f"评价: {eval_text}")
+    roast_text = str(roast or "").strip()
+    if roast_text:
+        profile_doc_lines.append(f"锐评: {roast_text}")
     profile_doc_lines.append(summary)
     profile_doc = "\n".join(line for line in profile_doc_lines if line.strip())
 

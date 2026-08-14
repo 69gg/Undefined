@@ -73,13 +73,25 @@ _PROFILE_TOOL = {
                     "type": "string",
                     "description": (
                         "YAML 与正文之间的独立客观评价（约 40–150 字 / 2–5 句）。"
-                        "不写入 YAML，也不并入 summary。更新时必填非空；"
+                        "不写入 YAML，也不并入 summary 或 roast。更新时必填非空；"
                         "禁止单独成行的 ---。"
                     ),
                 },
                 "summary": {
                     "type": "string",
-                    "description": "侧写正文（Markdown 画像条目，不含评价段）",
+                    "description": (
+                        "侧写正文（Markdown 画像条目，不含评价段与锐评）。"
+                        "更新时必填非空；禁止单独成行的 ---。"
+                    ),
+                },
+                "roast": {
+                    "type": "string",
+                    "description": (
+                        "正文之后的独立锐评（约 20–80 字 / 1–3 句）。"
+                        "尖锐、调侃、一针见血，可带刺；禁止辱骂、泄愤、人身攻击或隐私。"
+                        "群侧写只锐评群氛围/文化。不写入 YAML，也不并入 evaluation 或 summary。"
+                        "更新时必填非空；禁止单独成行的 ---。"
+                    ),
                 },
             },
             "required": ["entity_type", "entity_id", "skip", "name", "tags", "summary"],

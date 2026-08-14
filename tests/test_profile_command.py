@@ -653,6 +653,8 @@ source_event_id: hidden-event
 ---
 - 喜欢 **Python**
 - 做技术取舍会权衡时间
+---
+把配置当信仰，把别人的「差不多」当人身攻击。
 """
 
 
@@ -682,6 +684,11 @@ async def test_profile_render_html_uses_yaml_eval_and_markdown(
     assert "技术判断扎实、沟通直接" in html
     assert "<li>" in html
     assert "<strong>Python</strong>" in html
+    assert 'class="roast-title">锐评</div>' in html
+    assert "把配置当信仰" in html
+    assert html.index("<strong>Python</strong>") < html.index(
+        'class="roast-title">锐评</div>'
+    )
     assert "名称" in html
     assert "张三" in html
     assert "标签" in html
@@ -724,6 +731,7 @@ async def test_profile_render_html_plain_body_still_shows_length(
     assert " 字" in html
     assert "这是一个用户侧写" in html
     assert 'class="eval-title">评价</div>' not in html
+    assert 'class="roast-title">锐评</div>' not in html
     assert "类型:" not in html
     assert "ID:" not in html
     assert "更新:" not in html

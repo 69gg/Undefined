@@ -15,7 +15,7 @@ from Undefined.cognitive.chroma_scheduler import (
 )
 from Undefined.cognitive.service.helpers import (
     _build_profile_vector_payload,
-    _has_standalone_delimiter,
+    _profile_section_error,
     _serialize_profile_markdown,
 )
 from Undefined.cognitive.vector_store_compat import call_vector_store_method
@@ -484,6 +484,7 @@ class HistorianWorker:
         tags: list[str],
         summary: str,
         evaluation: str,
+        roast: str,
         event_id: str,
         perspective: str,
         now_timezone: tzinfo | None = None,
@@ -508,7 +509,7 @@ class HistorianWorker:
             frontmatter["group_name"] = effective_name
             frontmatter["group_id"] = entity_id
         content = _serialize_profile_markdown(
-            frontmatter, summary, evaluation=evaluation
+            frontmatter, summary, evaluation=evaluation, roast=roast
         )
 
         await self._profile_storage.write_profile(entity_type, entity_id, content)
@@ -528,6 +529,7 @@ class HistorianWorker:
             tags=tags,
             summary=summary,
             evaluation=evaluation,
+            roast=roast,
         )
 
         await call_vector_store_method(
@@ -882,49 +884,45 @@ class HistorianWorker:
                         continue
 
                     summary = str(tc_args.get("summary", "")).strip()
-                    if not summary:
-                        logger.info(
-                            "[史官] 任务 %s 侧写更新跳过: target=%s:%s reason=empty_summary",
-                            event_id,
-                            up_et,
-                            up_eid,
-                        )
-                        tool_results.append(
-                            {
-                                "role": "tool",
-                                "tool_call_id": tc_id,
-                                "content": "错误：summary 为空",
-                            }
-                        )
-                        continue
                     evaluation = str(tc_args.get("evaluation", "")).strip()
-                    if not evaluation:
+                    roast = str(tc_args.get("roast", "")).strip()
+                    section_error = (
+                        _profile_section_error(
+                            summary,
+                            empty_reason="empty_summary",
+                            empty_content="错误：summary 为空",
+                            delimiter_reason="summary_delimiter",
+                            delimiter_content="错误：正文不能包含单独成行的 ---",
+                        )
+                        or _profile_section_error(
+                            evaluation,
+                            empty_reason="empty_evaluation",
+                            empty_content="错误：evaluation 为空",
+                            delimiter_reason="evaluation_delimiter",
+                            delimiter_content="错误：评价段不能包含单独成行的 ---",
+                        )
+                        or _profile_section_error(
+                            roast,
+                            empty_reason="empty_roast",
+                            empty_content="错误：roast 为空",
+                            delimiter_reason="roast_delimiter",
+                            delimiter_content="错误：锐评不能包含单独成行的 ---",
+                        )
+                    )
+                    if section_error is not None:
+                        skip_reason, error_content = section_error
                         logger.info(
-                            "[史官] 任务 %s 侧写更新跳过: target=%s:%s reason=empty_evaluation",
+                            "[史官] 任务 %s 侧写更新跳过: target=%s:%s reason=%s",
                             event_id,
                             up_et,
                             up_eid,
+                            skip_reason,
                         )
                         tool_results.append(
                             {
                                 "role": "tool",
                                 "tool_call_id": tc_id,
-                                "content": "错误：evaluation 为空",
-                            }
-                        )
-                        continue
-                    if _has_standalone_delimiter(evaluation):
-                        logger.info(
-                            "[史官] 任务 %s 侧写更新跳过: target=%s:%s reason=evaluation_delimiter",
-                            event_id,
-                            up_et,
-                            up_eid,
-                        )
-                        tool_results.append(
-                            {
-                                "role": "tool",
-                                "tool_call_id": tc_id,
-                                "content": "错误：评价段不能包含单独成行的 ---",
+                                "content": error_content,
                             }
                         )
                         continue
@@ -957,6 +955,7 @@ class HistorianWorker:
                         tags=up_tags,
                         summary=summary,
                         evaluation=evaluation,
+                        roast=roast,
                         event_id=event_id,
                         perspective=perspective,
                         now_timezone=now_local_dt.tzinfo,

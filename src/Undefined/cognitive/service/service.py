@@ -120,7 +120,7 @@ class CognitiveService:
         parsed = _parse_profile_markdown(existing)
         if parsed is None:
             return False
-        frontmatter, evaluation, summary = parsed
+        frontmatter, evaluation, summary, roast = parsed
         current_name = _current_profile_name(normalized_entity_type, frontmatter)
         if current_name == normalized_name:
             return False
@@ -135,7 +135,7 @@ class CognitiveService:
             frontmatter["group_id"] = normalized_entity_id
 
         updated_markdown = _serialize_profile_markdown(
-            frontmatter, summary, evaluation=evaluation
+            frontmatter, summary, evaluation=evaluation, roast=roast
         )
         await self._profile_storage.write_profile(
             normalized_entity_type,
@@ -150,6 +150,7 @@ class CognitiveService:
             tags=_normalize_profile_tags(frontmatter.get("tags")),
             summary=summary,
             evaluation=evaluation,
+            roast=roast,
         )
         await call_vector_store_method(
             self._vector_store.upsert_profile,
