@@ -1,0 +1,17 @@
+{
+    "type": "function",
+    "function": {
+        "name": "search",
+        "description": "按文本匹配查询当前发送者可用的斜杠命令。匹配命令名、别名、说明、用法、示例和帮助文档；不使用语义检索。用于回答“有哪些命令/某个命令大概干什么”。需要完整限流、权限、用法或文档时改用 commands.get。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "查询词，如 help、侧写、profile、限流"
+                }
+            },
+            "required": ["query"]
+        }
+    }
+}

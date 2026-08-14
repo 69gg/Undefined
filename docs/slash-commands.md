@@ -434,7 +434,7 @@ async def execute(args: list[str], context: CommandContext) -> None:
 - `"admin"`: 超级管理员 + `config.local.json` 动态添加的管理员均可执行。
 - `"public"`: 群内或私聊中的任何用户均可执行。（注意风控和被滥用刷屏的风险）
 
-> **可见性**：`/help` 会根据当前用户的权限级别过滤命令列表。`superadmin` 权限的命令不会对普通用户显示；`admin` 权限的命令不会对非管理员显示。
+> **可见性**：`/help` 会根据当前用户的权限级别过滤命令列表。`superadmin` 权限的命令不会对普通用户显示；`admin` 权限的命令不会对非管理员显示。主 AI 的系统提示会注入同一套可见命令摘要；需要限流、权限、用法或 README 时调用 `commands.search` / `commands.get`（纯文本匹配，不接 RAG）。无权或不存在时工具不返回文档。AI 只应介绍命令，不要代替用户发送斜杠命令。
 
 ### 4. 子命令声明式注册与自动推断
 

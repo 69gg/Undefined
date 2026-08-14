@@ -84,6 +84,7 @@ class PromptBuilder:
         self._cognitive_service = cognitive_service
         self._end_summaries: deque[EndSummaryRecord] = deque(maxlen=MAX_END_SUMMARIES)
         self._summaries_loaded = False
+        self._command_registry: Any = None
 
     def set_cognitive_service(self, service: Any = None) -> None:
         """更新认知记忆服务引用（支持运行时注入/替换）。"""
@@ -91,6 +92,14 @@ class PromptBuilder:
         logger.info(
             "[Prompt] 认知服务引用已更新: enabled=%s",
             bool(getattr(service, "enabled", False)) if service is not None else False,
+        )
+
+    def set_command_registry(self, registry: Any = None) -> None:
+        """更新斜杠命令注册表引用，供注入当前发送者可用命令。"""
+        self._command_registry = registry
+        logger.info(
+            "[Prompt] 命令注册表引用已更新: enabled=%s",
+            registry is not None,
         )
 
     def _build_cognitive_query(
@@ -682,6 +691,14 @@ class PromptBuilder:
             except Exception as exc:
                 logger.debug("读取当前系统信息失败: %s", exc)
 
+        commands_prompt = self._build_available_commands_prompt(extra_context)
+        if commands_prompt:
+            messages.append({"role": "system", "content": commands_prompt})
+            logger.debug(
+                "[Prompt] 已注入当前发送者可用斜杠命令，长度=%s",
+                len(commands_prompt),
+            )
+
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         messages.append(
             {
@@ -706,6 +723,53 @@ class PromptBuilder:
         runtime_config = self._runtime_config_getter()
         system_info_config = getattr(runtime_config, "prompt_system_info", None)
         return build_prompt_system_info(system_info_config)
+
+    def _build_available_commands_prompt(
+        self, extra_context: dict[str, Any] | None
+    ) -> str:
+        registry = self._command_registry
+        if registry is None or self._runtime_config_getter is None:
+            return ""
+        try:
+            runtime_config = self._runtime_config_getter()
+        except Exception:
+            return ""
+        if runtime_config is None:
+            return ""
+        mapping: dict[str, Any] = {}
+        ctx = RequestContext.current()
+        if ctx is not None:
+            mapping["request_type"] = ctx.request_type
+            if ctx.group_id is not None:
+                mapping["group_id"] = ctx.group_id
+            if ctx.user_id is not None:
+                mapping["user_id"] = ctx.user_id
+            if ctx.sender_id is not None:
+                mapping["sender_id"] = ctx.sender_id
+            mapping["webui_session"] = bool(ctx.get_resource("webui_session"))
+        if isinstance(extra_context, dict):
+            for key in (
+                "request_type",
+                "group_id",
+                "user_id",
+                "sender_id",
+                "is_private_chat",
+                "webui_session",
+            ):
+                if (
+                    mapping.get(key) in (None, "", False)
+                    and extra_context.get(key) is not None
+                ):
+                    mapping[key] = extra_context.get(key)
+        try:
+            from Undefined.services.commands.catalog import CommandCatalog
+
+            catalog = CommandCatalog(registry, runtime_config)
+            viewer = catalog.viewer_from_mapping(mapping)
+            return catalog.format_prompt_block(viewer)
+        except Exception as exc:
+            logger.debug("注入当前发送者可用斜杠命令失败: %s", exc)
+            return ""
 
     def _resolve_chat_scope(
         self, extra_context: dict[str, Any] | None

@@ -16,6 +16,9 @@ toolsets/
 ├── memes/                   # 表情包工具集
 │   ├── search_memes/        # 表情包检索
 │   └── send_meme_by_uid/    # 按 uid 发送表情包
+├── commands/                # 斜杠命令查询（文本匹配，不接 RAG）
+│   ├── search/              # 按名称/别名/说明/文档检索可见命令
+│   └── get/                 # 取单条命令的权限、限流、用法和 README
 ├── render/                  # 渲染工具集
 │   ├── render_html/         # HTML 渲染
 │   ├── render_latex/        # LaTeX 渲染

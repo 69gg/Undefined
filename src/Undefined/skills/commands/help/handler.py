@@ -7,6 +7,11 @@ from pathlib import Path
 
 import markdown
 
+from Undefined.services.commands.catalog import (
+    can_see_command,
+    list_visible_commands,
+    sender_permission_label,
+)
 from Undefined.services.commands.context import CommandContext
 from Undefined.services.commands.registry import CommandMeta, SubcommandMeta
 
@@ -27,18 +32,7 @@ def _permission_label(permission: str) -> str:
 
 
 def _sender_permission_label(context: CommandContext) -> str:
-    config = context.config
-    try:
-        if config.is_superadmin(context.sender_id):
-            return "超管"
-    except Exception:
-        pass
-    try:
-        if config.is_admin(context.sender_id):
-            return "管理员"
-    except Exception:
-        pass
-    return "普通用户"
+    return sender_permission_label(context)
 
 
 def _scope_label(allow_in_private: bool) -> str:
@@ -64,15 +58,7 @@ async def _send_message(context: CommandContext, message: str) -> None:
 
 def _can_see_command(permission: str, sender_id: int, context: CommandContext) -> bool:
     """根据命令权限判断用户是否可见该命令。"""
-    if permission in ("public", ""):
-        return True
-    if permission == "superadmin":
-        return context.config.is_superadmin(sender_id)
-    if permission == "admin":
-        return context.config.is_admin(sender_id) or context.config.is_superadmin(
-            sender_id
-        )
-    return True
+    return can_see_command(permission, sender_id, context)
 
 
 def _format_usage_with_alias(item: CommandMeta) -> str:
@@ -87,19 +73,7 @@ def _format_usage_with_alias(item: CommandMeta) -> str:
 
 
 def _visible_commands(context: CommandContext) -> list[CommandMeta]:
-    commands = context.registry.list_commands(include_hidden=False)
-    in_private = _is_private_scope(context)
-    if in_private:
-        commands = [item for item in commands if item.allow_in_private]
-    commands = [item for item in commands if context.registry.is_visible(item, context)]
-
-    # 按权限过滤：非管理员看不到管理命令
-    commands = [
-        item
-        for item in commands
-        if _can_see_command(item.permission, context.sender_id, context)
-    ]
-    return commands
+    return list_visible_commands(context)
 
 
 def _format_command_list(context: CommandContext) -> str:

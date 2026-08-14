@@ -194,6 +194,7 @@ class ClientSetupMixin:
         self._token_counter = TokenCounter()
         self._knowledge_manager: Any = None
         self._cognitive_service: Any = cognitive_service
+        self._command_registry: Any = None
         self._meme_service: Any = None
         if self.runtime_config is not None:
             self.attachment_registry = AttachmentRegistry(
@@ -532,6 +533,15 @@ class ClientSetupMixin:
         logger.info(
             "[AI客户端] 认知记忆服务已挂载并同步到 PromptBuilder: enabled=%s",
             bool(getattr(service, "enabled", False)) if service is not None else False,
+        )
+
+    def set_command_registry(self, registry: Any) -> None:
+        self._command_registry = registry
+        if hasattr(self, "_prompt_builder") and self._prompt_builder is not None:
+            self._prompt_builder.set_command_registry(registry)
+        logger.info(
+            "[AI客户端] 斜杠命令注册表已挂载: enabled=%s",
+            registry is not None,
         )
 
     def set_meme_service(self, service: Any) -> None:

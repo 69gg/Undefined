@@ -57,6 +57,20 @@ def test_system_prompts_include_info_gate_and_style_constraints(path: Path) -> N
 
 
 @pytest.mark.parametrize("path", PROMPT_PATHS)
+def test_system_prompts_explain_slash_command_lookup_tools(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+
+    required_snippets = [
+        "当前发送者可用的斜杠命令会另以系统块注入",
+        "需要限流、权限、用法或文档时调用 commands.search / commands.get",
+        "不要编造不存在的命令",
+        "也不要代替用户发送斜杠命令",
+    ]
+    for snippet in required_snippets:
+        assert snippet in text
+
+
+@pytest.mark.parametrize("path", PROMPT_PATHS)
 def test_system_prompts_define_conditional_tool_search_sequence(path: Path) -> None:
     text = path.read_text(encoding="utf-8")
 
