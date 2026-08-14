@@ -8,6 +8,7 @@ import time
 from typing import Any
 
 from Undefined.ai.llm import ModelRequester
+from Undefined.ai.llm.retry import request_with_http_retries
 from Undefined.ai.transports import API_MODE_CHAT_COMPLETIONS, get_api_mode
 from Undefined.ai.parsing import extract_choices_content
 from Undefined.config import SecurityModelConfig
@@ -39,7 +40,10 @@ class InjectionResponseAgent:
     """注入攻击回复生成器"""
 
     def __init__(
-        self, security_config: SecurityModelConfig, requester: ModelRequester
+        self,
+        security_config: SecurityModelConfig,
+        requester: ModelRequester,
+        max_retries: int = 0,
     ) -> None:
         """初始化回复生成器
 
@@ -48,6 +52,7 @@ class InjectionResponseAgent:
         """
         self.security_config = security_config
         self._requester = requester
+        self._max_retries = max(0, int(max_retries or 0))
         self._system_prompt = _get_injection_response_prompt()
 
     async def generate_response(self, user_message: str) -> str:
@@ -68,7 +73,8 @@ class InjectionResponseAgent:
             ):
                 request_kwargs["thinking"] = {"enabled": False, "budget_tokens": 0}
 
-            result = await self._requester.request(
+            result = await request_with_http_retries(
+                self._requester.request,
                 model_config=self.security_config,
                 messages=[
                     {"role": "system", "content": self._system_prompt},
@@ -79,6 +85,9 @@ class InjectionResponseAgent:
                 ],
                 max_tokens=self.security_config.max_tokens,
                 call_type="injection_response",
+                max_retries=self._max_retries,
+                log_prefix="[注入回复]",
+                log=logger,
                 **request_kwargs,
             )
             duration = time.perf_counter() - start_time

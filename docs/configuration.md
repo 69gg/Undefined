@@ -194,7 +194,7 @@ model_name = "gpt-4o-mini"
 | `process_private_message` | `true` | 是否处理私聊回复 | 关闭后私聊只记录历史，不回复 |
 | `process_poke_message` | `true` | 是否响应拍一拍 | 关闭后忽略 poke |
 | `context_recent_messages_limit` | `20` | 注入到提示词的最近历史条数；当前输入批次发车入队前冻结为请求级快照 | `<0` 视为 `0`（关闭注入）；无固定上限，受 `max_records` 与存储约束；已入队请求不受后续消息或配置热更新影响 |
-| `ai_request_max_retries` | `2` | 单次 LLM 请求失败重试次数；无工具调用且实际 `assistant.content` 为空白时也走此路径，原样重试同一轮请求 | `<0` 自动回退到 `0`；支持热更新 |
+| `ai_request_max_retries` | `2` | 单次 LLM 请求失败重试次数；无工具调用且实际 `assistant.content` 为空白时也走此路径，原样重试同一轮请求。安全模型注入检测、Naga 审核与注入回复在遇到可重试 HTTP 错误（429 / 5xx）时同样使用该次数 | `<0` 自动回退到 `0`；支持热更新 |
 | `missing_tool_call_retries` | `3` | 模型返回非空纯文本且无法恢复为本轮可用工具调用时的纠正重试次数（保留 assistant 纯文本 + 通用纠正提示，不写死具体 tool）；空白响应不计入此项；每次进入下一轮纠正重试前，warning 日志会以 `raw_content=repr(...)` 完整记录该轮原始响应；格式与失败回退规则见 [模型 API 与兼容层](model-compatibility.md#文本-tool-call-后备解析) | `<0` 自动回退到 `0`；支持热更新 |
 
 ---
@@ -361,6 +361,7 @@ Prompt caching 补充：
 关键回退逻辑：
 - 若 `api_url/api_key/model_name` 任一缺失，会自动回退为 chat 模型（并告警）。
 - 回退时会继承 chat 的 `api_mode`、`reasoning_*`、`thinking_param_enabled`、`responses_tool_choice_compat`、`responses_force_stateless_replay` 与 `request_params`；其余旧 `thinking_*` 仍保持安全模型自身默认值；`use_proxy` 仍只读取 `[models.security]` 自身配置，默认 `false`。
+- 注入检测、Naga 审核与注入回复遇到可重试 HTTP 错误（429 / 5xx）时，按 `[core].ai_request_max_retries` 重试；注入检测在重试耗尽后仍失败则按检测到注入处理。
 
 ### 4.4.5 `[models.naga]` Naga 审核模型
 
