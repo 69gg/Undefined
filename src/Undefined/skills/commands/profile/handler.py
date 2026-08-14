@@ -7,12 +7,39 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import markdown
+
+from Undefined.cognitive.service.helpers import _parse_profile_markdown
 from Undefined.services.commands.context import CommandContext
 from Undefined.utils.paths import COGNITIVE_PROFILES_DIR, RENDER_CACHE_DIR, ensure_dir
 
 logger = logging.getLogger("profile")
 
 _MAX_PROFILE_LENGTH = 5000
+_MARKDOWN_EXTENSIONS = ["tables", "fenced_code", "sane_lists"]
+_HIDDEN_FRONTMATTER_KEYS = {"source_event_id"}
+_FRONTMATTER_LABELS = {
+    "name": "名称",
+    "tags": "标签",
+    "updated_at": "更新时间",
+    "entity_type": "实体类型",
+    "entity_id": "编号",
+    "nickname": "昵称",
+    "qq": "QQ",
+    "group_name": "群名",
+    "group_id": "群号",
+}
+_FRONTMATTER_ORDER = [
+    "name",
+    "tags",
+    "updated_at",
+    "entity_type",
+    "entity_id",
+    "nickname",
+    "qq",
+    "group_name",
+    "group_id",
+]
 
 _MODE_TEXT = "text"
 _MODE_FORWARD = "forward"
@@ -81,6 +108,70 @@ def _build_metadata(
     return "\n".join(lines)
 
 
+def _markdown_to_html(markdown_text: str) -> str:
+    return str(markdown.markdown(markdown_text, extensions=_MARKDOWN_EXTENSIONS))
+
+
+def _format_frontmatter_value(key: str, value: Any) -> str:
+    if key == "entity_type":
+        mapping = {"user": "用户", "group": "群聊"}
+        text = str(value or "").strip().lower()
+        return mapping.get(text, str(value).strip())
+    if key == "tags":
+        if isinstance(value, list):
+            return "、".join(str(item).strip() for item in value if str(item).strip())
+        return str(value or "").strip()
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _render_meta_rows(
+    frontmatter: dict[str, Any] | None, profile_len: int
+) -> list[tuple[str, str]]:
+    rows: list[tuple[str, str]] = []
+    if frontmatter:
+        name = str(frontmatter.get("name") or "").strip()
+        entity_id = str(frontmatter.get("entity_id") or "").strip()
+        seen: set[str] = set()
+        ordered_keys = [key for key in _FRONTMATTER_ORDER if key in frontmatter]
+        ordered_keys.extend(
+            str(key)
+            for key in frontmatter
+            if str(key) not in _FRONTMATTER_ORDER and str(key) not in seen
+        )
+        for key in ordered_keys:
+            key_text = str(key)
+            if key_text in _HIDDEN_FRONTMATTER_KEYS or key_text in seen:
+                continue
+            seen.add(key_text)
+            raw_value = frontmatter.get(key)
+            if key_text == "nickname" and str(raw_value or "").strip() == name:
+                continue
+            if key_text == "group_name" and str(raw_value or "").strip() == name:
+                continue
+            if key_text == "qq" and str(raw_value or "").strip() == entity_id:
+                continue
+            if key_text == "group_id" and str(raw_value or "").strip() == entity_id:
+                continue
+            formatted = _format_frontmatter_value(key_text, raw_value)
+            if not formatted:
+                continue
+            rows.append((_FRONTMATTER_LABELS.get(key_text, key_text), formatted))
+    rows.append(("长度", f"{profile_len} 字"))
+    return rows
+
+
+def _split_profile_for_render(
+    profile_text: str,
+) -> tuple[dict[str, Any] | None, str, str]:
+    parsed = _parse_profile_markdown(profile_text)
+    if parsed is None:
+        return None, "", profile_text
+    frontmatter, evaluation, body = parsed
+    return frontmatter, evaluation, body or ""
+
+
 # ── 发送方法 ──────────────────────────────────────────────────
 
 
@@ -124,22 +215,29 @@ async def _send_forward(
 
 async def _send_render(
     context: CommandContext,
-    metadata: str,
     profile_text: str,
 ) -> None:
-    """渲染为图片发送——元数据区 + 侧写正文区。"""
+    """渲染为图片发送：YAML 键值表、独立评价区、Markdown 正文。"""
     from Undefined.render import render_html_to_image
 
-    safe_meta = html.escape(metadata)
-    safe_body = html.escape(profile_text)
+    frontmatter, evaluation, body = _split_profile_for_render(profile_text)
+    meta_rows_html = ""
+    for key, val in _render_meta_rows(frontmatter, len(profile_text)):
+        meta_rows_html += (
+            f'<tr><td class="mk">{html.escape(key)}</td>'
+            f'<td class="mv">{html.escape(val)}</td></tr>\n'
+        )
 
-    meta_rows = ""
-    for line in safe_meta.split("\n"):
-        if ": " in line:
-            key, _, val = line.partition(": ")
-            meta_rows += (
-                f'<tr><td class="mk">{key}</td><td class="mv">{val}</td></tr>\n'
-            )
+    eval_html = ""
+    if evaluation.strip():
+        eval_html = (
+            '<div class="eval">'
+            '<div class="eval-title">评价</div>'
+            f"<p>{html.escape(evaluation.strip())}</p>"
+            "</div>"
+        )
+
+    body_html = _markdown_to_html(body) if body.strip() else ""
 
     html_content = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>
@@ -158,23 +256,68 @@ body {{
   background: #f9f5f1; border-bottom: 1px solid #e6e0d8;
   padding: 14px 18px;
 }}
-.meta table {{ border-collapse: collapse; }}
+.meta table {{ border-collapse: collapse; width: 100%; }}
 .mk {{
   font-size: 14px; color: #6e675f; padding: 3px 12px 3px 0;
   white-space: nowrap; vertical-align: top; font-weight: 600;
 }}
 .mv {{
   font-size: 14px; color: #3d3935; padding: 3px 0;
+  overflow-wrap: anywhere;
+}}
+.eval {{
+  padding: 14px 18px 6px;
+  border-bottom: 1px solid #e6e0d8;
+}}
+.eval-title {{
+  font-size: 13px; font-weight: 700; color: #6e675f;
+  margin-bottom: 6px;
+}}
+.eval p {{
+  font-size: 15px; line-height: 1.7; color: #3d3935;
 }}
 .body {{
   padding: 18px; line-height: 1.8; font-size: 15px;
-  white-space: pre-wrap; word-wrap: break-word;
+  overflow-wrap: anywhere;
+}}
+.doc-body > :first-child {{ margin-top: 0; }}
+.doc-body > :last-child {{ margin-bottom: 0; }}
+.doc-body p {{ margin: 8px 0; }}
+.doc-body ul, .doc-body ol {{ margin: 8px 0; padding-left: 22px; }}
+.doc-body li + li {{ margin-top: 4px; }}
+.doc-body pre {{
+  margin: 10px 0;
+  padding: 10px 12px;
+  border: 1px solid #e6e0d8;
+  border-radius: 6px;
+  background: #3d3935;
+  color: #f9f5f1;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}}
+.doc-body pre code {{
+  padding: 0; border: 0; background: transparent; color: inherit;
+}}
+.doc-body table {{ width: 100%; border-collapse: collapse; margin: 10px 0; }}
+.doc-body th, .doc-body td {{
+  padding: 7px 8px;
+  border: 1px solid #e6e0d8;
+  text-align: left;
+  vertical-align: top;
+}}
+.doc-body th {{ background: #f3ece4; color: #3d3935; }}
+.doc-body blockquote {{
+  margin: 10px 0;
+  padding: 8px 12px;
+  border-left: 4px solid #c4a484;
+  background: #f9f5f1;
 }}
 </style></head>
 <body>
 <div class="card">
-  <div class="meta"><table>{meta_rows}</table></div>
-  <div class="body">{safe_body}</div>
+  <div class="meta"><table>{meta_rows_html}</table></div>
+  {eval_html}
+  <div class="body"><article class="doc-body">{body_html}</article></div>
 </div>
 </body></html>"""
 
@@ -262,7 +405,7 @@ async def execute(args: list[str], context: CommandContext) -> None:
         await _send_text(context, profile)
     elif mode == _MODE_RENDER:
         try:
-            await _send_render(context, metadata, profile)
+            await _send_render(context, profile)
         except Exception:
             logger.exception("渲染侧写图片失败，回退到合并转发")
             await _handle_render_fallback(context, metadata, profile)
