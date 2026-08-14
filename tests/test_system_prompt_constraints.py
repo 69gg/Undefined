@@ -61,8 +61,8 @@ def test_system_prompts_explain_slash_command_lookup_tools(path: Path) -> None:
     text = path.read_text(encoding="utf-8")
 
     required_snippets = [
-        "当前发送者可用的斜杠命令会另以系统块注入",
-        "需要限流、权限、用法或文档时调用 commands.search / commands.get",
+        "当前消息发送者可用的斜杠命令会另以系统块注入（只含该发送者能用的，不是完整目录）",
+        "查询全部命令或详情时调用 commands.search / commands.get",
         "不要编造不存在的命令",
         "也不要代替用户发送斜杠命令",
     ]

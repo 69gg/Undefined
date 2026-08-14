@@ -240,6 +240,8 @@ def test_catalog_search_ranks_name_alias_description_then_doc(tmp_path: Path) ->
 
     public_search = catalog.search(viewer, "机密")
     assert public_search == []
+    all_secret = {item.name for item in catalog.search_all("机密")}
+    assert all_secret == {"admincmd", "super"}
 
 
 def test_catalog_get_hides_unauthorized_docs(tmp_path: Path) -> None:
@@ -249,7 +251,9 @@ def test_catalog_get_hides_unauthorized_docs(tmp_path: Path) -> None:
 
     assert catalog.get(public_viewer, "/p") is not None
     assert catalog.get(public_viewer, "admincmd") is None
+    assert catalog.get_any("admincmd") is not None
     assert catalog.get(public_viewer, "missing") is None
+    assert catalog.get_any("missing") is None
 
     admin_meta = catalog.get(admin_viewer, "ac")
     assert admin_meta is not None
@@ -260,7 +264,7 @@ def test_catalog_get_hides_unauthorized_docs(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_commands_search_and_get_tools_respect_visibility(
+async def test_commands_search_and_get_tools_query_all_commands(
     tmp_path: Path,
 ) -> None:
     catalog = _make_catalog(tmp_path)
@@ -270,37 +274,96 @@ async def test_commands_search_and_get_tools_respect_visibility(
         "request_type": "group",
         "group_id": 10001,
     }
-    admin_context: dict[str, Any] = {
-        "command_catalog": catalog,
-        "sender_id": ADMIN_USER,
-        "request_type": "group",
-        "group_id": 10001,
-    }
 
     empty = await commands_search_execute({"query": ""}, public_context)
     assert empty == "请提供查询关键词"
 
-    none = await commands_search_execute({"query": "机密"}, public_context)
-    assert "没有匹配" in none
-
-    listed = await commands_search_execute({"query": "侧写"}, public_context)
-    assert "/profile(/p)" in listed
-    assert "admincmd" not in listed
-
-    denied = await commands_get_execute({"name": "admincmd"}, public_context)
-    assert denied == "未找到命令，或当前发送者无权查看"
-    assert "机密" not in denied
+    listed = await commands_search_execute({"query": "机密"}, public_context)
+    assert "/admincmd(/ac)" in listed
+    assert "权限：管理员" in listed
 
     missing = await commands_get_execute({"name": "nope"}, public_context)
-    assert missing == "未找到命令，或当前发送者无权查看"
+    assert missing == "未找到命令"
+
+    admin_detail = await commands_get_execute({"name": "admincmd"}, public_context)
+    assert "管理员机密文档，禁止泄露。" in admin_detail
+    assert "权限：管理员" in admin_detail
 
     allowed = await commands_get_execute({"name": "/p"}, public_context)
     assert "/profile(/p)" in allowed
     assert "查看用户或群侧写。" in allowed
     assert "子命令：" in allowed
 
-    admin_detail = await commands_get_execute({"name": "admincmd"}, admin_context)
-    assert "管理员机密文档，禁止泄露。" in admin_detail
+
+@pytest.mark.asyncio
+async def test_commands_tools_filter_by_optional_group_and_user(
+    tmp_path: Path,
+) -> None:
+    catalog = _make_catalog(tmp_path)
+    public_context: dict[str, Any] = {
+        "command_catalog": catalog,
+        "sender_id": PUBLIC_USER,
+        "request_type": "group",
+        "group_id": 10001,
+    }
+
+    assert catalog.viewer_for_tool_args({}) is None
+    assert catalog.viewer_for_tool_args({"query": "help"}) is None
+
+    group_only = catalog.viewer_for_tool_args({"group_id": "10001"})
+    assert group_only is not None
+    assert group_only.scope == "group"
+    assert group_only.group_id == 10001
+    assert group_only.sender_id == 0
+
+    user_only = catalog.viewer_for_tool_args({"user_id": str(ADMIN_USER)})
+    assert user_only is not None
+    assert user_only.scope == "private"
+    assert user_only.sender_id == ADMIN_USER
+
+    both = catalog.viewer_for_tool_args({"group_id": 10001, "qq": PUBLIC_USER})
+    assert both is not None
+    assert both.scope == "group"
+    assert both.sender_id == PUBLIC_USER
+
+    public_group = await commands_search_execute(
+        {"query": "命令", "group_id": 10001, "user_id": PUBLIC_USER},
+        public_context,
+    )
+    assert "视角：会话：群聊 10001 | 用户：10001 | 权限：普通用户" in public_group
+    assert "/help(/h)" in public_group
+    assert "grouponly" in public_group
+    assert "admincmd" not in public_group
+
+    public_private = await commands_search_execute(
+        {"query": "命令", "user_id": PUBLIC_USER},
+        public_context,
+    )
+    assert "视角：会话：私聊 | 用户：10001 | 权限：普通用户" in public_private
+    assert "grouponly" not in public_private
+    assert "/help(/h)" in public_private
+
+    admin_group = await commands_search_execute(
+        {"query": "机密", "group_id": 10001, "user_id": ADMIN_USER},
+        public_context,
+    )
+    assert "/admincmd(/ac)" in admin_group
+    assert "super" not in admin_group
+
+    denied = await commands_get_execute(
+        {"name": "admincmd", "group_id": 10001, "user_id": PUBLIC_USER},
+        public_context,
+    )
+    assert "该视角无权使用该命令。" in denied
+    assert "管理员机密文档，禁止泄露。" in denied
+    assert "会话：群聊 10001" in denied
+
+    allowed = await commands_get_execute(
+        {"name": "grouponly", "group_id": 10001, "user_id": PUBLIC_USER},
+        public_context,
+    )
+    assert "该视角可以使用该命令。" in allowed
+    assert "仅群聊可用的命令" in allowed
 
 
 def test_format_prompt_block_lists_visible_commands_only(tmp_path: Path) -> None:
@@ -313,7 +376,9 @@ def test_format_prompt_block_lists_visible_commands_only(tmp_path: Path) -> None
     assert "/help(/h) — 显示命令列表或详细帮助" in public_block
     assert "/profile(/p) — 查看认知侧写（1个子命令）" in public_block
     assert "admincmd" not in public_block
-    assert "不要编造命令，也不要代替用户发送斜杠命令。" in public_block
+    assert "不要代替用户发送斜杠命令。" in public_block
+    assert "不是完整命令目录" in public_block
+    assert "查询全部命令" in public_block
 
     admin_block = catalog.format_prompt_block(
         _viewer(catalog, sender_id=ADMIN_USER, scope="private")

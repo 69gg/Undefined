@@ -10,8 +10,14 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
     name = str(args.get("name") or "").strip()
     if not name:
         return "请提供命令名"
-    viewer = catalog.viewer_from_mapping(context)
-    meta = catalog.get(viewer, name)
+    meta = catalog.get_any(name)
     if meta is None:
-        return "未找到命令，或当前发送者无权查看"
-    return str(catalog.format_detail(meta))
+        return "未找到命令"
+    detail = str(catalog.format_detail(meta))
+    viewer = catalog.viewer_for_tool_args(args)
+    if viewer is None:
+        return detail
+    hint = catalog.format_viewer_hint(viewer)
+    if catalog.get(viewer, name) is None:
+        return f"视角：{hint}\n该视角无权使用该命令。\n\n{detail}"
+    return f"视角：{hint}\n该视角可以使用该命令。\n\n{detail}"

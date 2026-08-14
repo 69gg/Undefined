@@ -2,13 +2,21 @@
     "type": "function",
     "function": {
         "name": "search",
-        "description": "按文本匹配查询当前发送者可用的斜杠命令。匹配命令名、别名、说明、用法、示例和帮助文档；不使用语义检索。用于回答“有哪些命令/某个命令大概干什么”。需要完整限流、权限、用法或文档时改用 commands.get。",
+        "description": "按文本匹配查询斜杠命令。默认查完整目录（不限当前发送者权限）。可传入 group_id、user_id（QQ）或两者，改为查询该用户在该群/私聊视角下可用的命令。匹配命令名、别名、说明、用法、示例和帮助文档；不使用语义检索。需要完整限流、权限、用法或文档时改用 commands.get。",
         "parameters": {
             "type": "object",
             "properties": {
                 "query": {
                     "type": "string",
                     "description": "查询词，如 help、侧写、profile、限流"
+                },
+                "group_id": {
+                    "type": "integer",
+                    "description": "可选。群号。传入后按该群会话过滤可用命令（含仅群聊命令）。可与 user_id 一起传；都不传则查完整目录。"
+                },
+                "user_id": {
+                    "type": "integer",
+                    "description": "可选。用户 QQ 号。传入后按该用户权限过滤可用命令。只传本参数时按私聊作用域。可与 group_id 一起传；都不传则查完整目录。"
                 }
             },
             "required": ["query"]

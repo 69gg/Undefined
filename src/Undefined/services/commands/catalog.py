@@ -19,6 +19,21 @@ _MATCH_RANK = {
 }
 
 
+def coerce_optional_id(value: Any) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        parsed = int(text)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
 def permission_label(permission: str) -> str:
     labels = {
         "public": "公开",
@@ -151,13 +166,17 @@ def format_available_commands_prompt(context: CommandContext) -> str:
     commands = list_visible_commands(context)
     scope_hint = "私聊" if is_private_scope(context) else "群聊"
     perm_hint = sender_permission_label(context)
+    footer = (
+        "以上仅为当前消息发送者在本会话里能用的斜杠命令，不是完整命令目录。"
+        "查询全部命令（含当前发送者无权执行的）时调用 commands.search / commands.get；"
+        "介绍时注明权限与作用域。不要代替用户发送斜杠命令。"
+    )
     if not commands:
         return (
             "【当前发送者可用斜杠命令】\n"
             f"会话：{scope_hint} | 权限：{perm_hint}\n"
             "当前没有可展示的斜杠命令。\n"
-            "需要限流、权限、用法或文档时调用 commands.search / commands.get；"
-            "不要编造命令，也不要代替用户发送斜杠命令。"
+            f"{footer}"
         )
     command_lines: list[str] = []
     for item in commands:
@@ -170,8 +189,7 @@ def format_available_commands_prompt(context: CommandContext) -> str:
             "【当前发送者可用斜杠命令】",
             f"会话：{scope_hint} | 权限：{perm_hint}",
             *command_lines,
-            "需要限流、权限、用法或文档时调用 commands.search / commands.get；"
-            "不要编造命令，也不要代替用户发送斜杠命令。",
+            footer,
         ]
     )
 
@@ -206,11 +224,19 @@ def _match_rank(meta: CommandMeta, query: str) -> int | None:
 
 
 def search_visible_commands(context: CommandContext, query: str) -> list[CommandMeta]:
+    return _search_commands(list_visible_commands(context), query)
+
+
+def search_all_commands(registry: CommandRegistry, query: str) -> list[CommandMeta]:
+    return _search_commands(registry.list_commands(include_hidden=True), query)
+
+
+def _search_commands(commands: list[CommandMeta], query: str) -> list[CommandMeta]:
     needle = _normalize_query(query)
     if not needle:
         return []
     scored: list[tuple[int, int, str, CommandMeta]] = []
-    for meta in list_visible_commands(context):
+    for meta in commands:
         rank = _match_rank(meta, needle)
         if rank is None:
             continue
@@ -222,16 +248,22 @@ def search_visible_commands(context: CommandContext, query: str) -> list[Command
 def resolve_visible_command(
     context: CommandContext, command_name: str
 ) -> CommandMeta | None:
-    normalized = _normalize_query(command_name)
-    if not normalized:
-        return None
-    meta = context.registry.resolve(normalized)
+    meta = resolve_any_command(context.registry, command_name)
     if meta is None:
         return None
     visible = {item.name for item in list_visible_commands(context)}
     if meta.name not in visible:
         return None
     return meta
+
+
+def resolve_any_command(
+    registry: CommandRegistry, command_name: str
+) -> CommandMeta | None:
+    normalized = _normalize_query(command_name)
+    if not normalized:
+        return None
+    return registry.resolve(normalized)
 
 
 def make_viewer_context(
@@ -265,7 +297,7 @@ def make_viewer_context(
 
 
 class CommandCatalog:
-    """面向 Prompt 与工具的可见命令查询入口。"""
+    """面向 Prompt 与工具的命令查询入口。"""
 
     def __init__(self, registry: CommandRegistry, config: Any) -> None:
         self.registry = registry
@@ -324,11 +356,58 @@ class CommandCatalog:
     def search(self, context: CommandContext, query: str) -> list[CommandMeta]:
         return search_visible_commands(context, query)
 
+    def search_all(self, query: str) -> list[CommandMeta]:
+        return search_all_commands(self.registry, query)
+
     def get(self, context: CommandContext, command_name: str) -> CommandMeta | None:
         return resolve_visible_command(context, command_name)
+
+    def get_any(self, command_name: str) -> CommandMeta | None:
+        return resolve_any_command(self.registry, command_name)
 
     def format_detail(self, meta: CommandMeta) -> str:
         return format_command_detail(meta)
 
     def format_name(self, meta: CommandMeta) -> str:
         return format_command_name(meta)
+
+    def format_permission(self, meta: CommandMeta) -> str:
+        return permission_label(meta.permission)
+
+    def viewer_for_tool_args(
+        self, args: dict[str, Any] | None
+    ) -> CommandContext | None:
+        data = args if isinstance(args, dict) else {}
+        group_id = coerce_optional_id(data.get("group_id"))
+        user_id = coerce_optional_id(data.get("user_id"))
+        if user_id is None:
+            user_id = coerce_optional_id(data.get("qq"))
+        if group_id is None and user_id is None:
+            return None
+        if group_id is not None:
+            scope = "group"
+            resolved_group_id = group_id
+        else:
+            scope = "private"
+            resolved_group_id = 0
+        return make_viewer_context(
+            self.registry,
+            self.config,
+            sender_id=user_id or 0,
+            scope=scope,
+            group_id=resolved_group_id,
+            user_id=user_id,
+        )
+
+    def format_viewer_hint(self, context: CommandContext) -> str:
+        parts: list[str] = []
+        if is_private_scope(context):
+            parts.append("会话：私聊")
+        else:
+            parts.append(f"会话：群聊 {context.group_id}")
+        if context.sender_id:
+            parts.append(f"用户：{context.sender_id}")
+        else:
+            parts.append("用户：未指定")
+        parts.append(f"权限：{sender_permission_label(context)}")
+        return " | ".join(parts)
