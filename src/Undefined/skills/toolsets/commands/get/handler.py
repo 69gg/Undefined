@@ -13,7 +13,7 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
     meta = catalog.get_any(name)
     if meta is None:
         return "未找到命令"
-    detail = str(catalog.format_detail(meta))
+    detail = str(await catalog.format_detail(meta))
     viewer = catalog.viewer_for_tool_args(args)
     if viewer is None:
         return detail

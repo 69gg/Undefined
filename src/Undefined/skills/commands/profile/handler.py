@@ -4,8 +4,10 @@ import html
 import logging
 import uuid
 from datetime import datetime, timezone
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import markdown
 
@@ -108,8 +110,160 @@ def _build_metadata(
     return "\n".join(lines)
 
 
+_SAFE_HREF_SCHEMES = frozenset({"http", "https", "mailto"})
+_ALLOWED_HTML_TAGS = frozenset(
+    {
+        "a",
+        "blockquote",
+        "br",
+        "code",
+        "em",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "hr",
+        "li",
+        "ol",
+        "p",
+        "pre",
+        "strong",
+        "table",
+        "tbody",
+        "td",
+        "th",
+        "thead",
+        "tr",
+        "ul",
+    }
+)
+_VOID_HTML_TAGS = frozenset({"br", "hr"})
+_DROP_HTML_WITH_CONTENTS = frozenset(
+    {"iframe", "noscript", "object", "embed", "script", "style"}
+)
+_ALLOWED_HTML_ATTRS: dict[str, frozenset[str]] = {
+    "a": frozenset({"href", "title"}),
+    "code": frozenset({"class"}),
+    "td": frozenset({"colspan", "rowspan"}),
+    "th": frozenset({"colspan", "rowspan"}),
+}
+
+
+def _is_safe_href(url: str) -> bool:
+    text = str(url or "").strip()
+    if not text:
+        return False
+    parsed = urlparse(text)
+    scheme = parsed.scheme.lower()
+    if scheme not in _SAFE_HREF_SCHEMES:
+        return False
+    if scheme in {"http", "https"} and not parsed.netloc:
+        return False
+    return True
+
+
+class _ProfileHtmlSanitizer(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._chunks: list[str] = []
+        self._open: list[str] = []
+        self._skip_depth = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self._start(tag, attrs, self_closing=tag.lower() in _VOID_HTML_TAGS)
+
+    def handle_endtag(self, tag: str) -> None:
+        name = tag.lower()
+        if self._skip_depth:
+            if name in _DROP_HTML_WITH_CONTENTS:
+                self._skip_depth = max(0, self._skip_depth - 1)
+            return
+        if name not in self._open:
+            return
+        while self._open:
+            opened = self._open.pop()
+            self._chunks.append(f"</{opened}>")
+            if opened == name:
+                break
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self._start(tag, attrs, self_closing=True)
+
+    def handle_data(self, data: str) -> None:
+        if self._skip_depth or not data:
+            return
+        self._chunks.append(html.escape(data, quote=False))
+
+    def handle_comment(self, data: str) -> None:
+        _ = data
+
+    def handle_decl(self, decl: str) -> None:
+        _ = decl
+
+    def handle_pi(self, data: str) -> None:
+        _ = data
+
+    def get_html(self) -> str:
+        while self._open:
+            self._chunks.append(f"</{self._open.pop()}>")
+        return "".join(self._chunks)
+
+    def _start(
+        self,
+        tag: str,
+        attrs: list[tuple[str, str | None]],
+        *,
+        self_closing: bool,
+    ) -> None:
+        name = tag.lower()
+        if self._skip_depth:
+            if name in _DROP_HTML_WITH_CONTENTS and not self_closing:
+                self._skip_depth += 1
+            return
+        if name in _DROP_HTML_WITH_CONTENTS:
+            if not self_closing:
+                self._skip_depth = 1
+            return
+        if name not in _ALLOWED_HTML_TAGS:
+            return
+        if name == "a":
+            href = next(
+                (value for attr, value in attrs if attr.lower() == "href"),
+                None,
+            )
+            if href is None or not _is_safe_href(href):
+                return
+        pieces = [f"<{name}"]
+        allowed_attrs = _ALLOWED_HTML_ATTRS.get(name, frozenset())
+        for attr_name, attr_value in attrs:
+            attr = attr_name.lower()
+            if attr not in allowed_attrs or attr_value is None:
+                continue
+            if attr == "href" and not _is_safe_href(attr_value):
+                continue
+            pieces.append(f' {attr}="{html.escape(attr_value, quote=True)}"')
+        pieces.append(">")
+        self._chunks.append("".join(pieces))
+        if name in _VOID_HTML_TAGS:
+            return
+        if self_closing:
+            self._chunks.append(f"</{name}>")
+            return
+        self._open.append(name)
+
+
+def _sanitize_rendered_html(rendered_html: str) -> str:
+    sanitizer = _ProfileHtmlSanitizer()
+    sanitizer.feed(rendered_html)
+    sanitizer.close()
+    return sanitizer.get_html()
+
+
 def _markdown_to_html(markdown_text: str) -> str:
-    return str(markdown.markdown(markdown_text, extensions=_MARKDOWN_EXTENSIONS))
+    rendered = str(markdown.markdown(markdown_text, extensions=_MARKDOWN_EXTENSIONS))
+    return _sanitize_rendered_html(rendered)
 
 
 def _format_frontmatter_value(key: str, value: Any) -> str:

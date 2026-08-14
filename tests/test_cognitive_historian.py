@@ -450,6 +450,8 @@ def test_profile_update_tool_does_not_cap_tags() -> None:
 
     assert "maxItems" not in tags_schema
     assert "最多 10 个" not in str(tags_schema)
+    assert "evaluation" in parameters["required"]
+    assert "roast" in parameters["required"]
     evaluation_schema: Any = parameters["properties"]["evaluation"]
     assert evaluation_schema["type"] == "string"
     assert "不写入 YAML" in evaluation_schema["description"]

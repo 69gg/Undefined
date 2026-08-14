@@ -756,11 +756,10 @@ class PromptBuilder:
                 "is_private_chat",
                 "webui_session",
             ):
-                if (
-                    mapping.get(key) in (None, "", False)
-                    and extra_context.get(key) is not None
-                ):
-                    mapping[key] = extra_context.get(key)
+                if key not in mapping or mapping[key] is None:
+                    extra_value = extra_context.get(key)
+                    if extra_value is not None:
+                        mapping[key] = extra_value
         try:
             from Undefined.services.commands.catalog import CommandCatalog
 

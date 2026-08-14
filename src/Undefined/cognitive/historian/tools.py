@@ -96,7 +96,16 @@ _PROFILE_TOOL = {
                     ),
                 },
             },
-            "required": ["entity_type", "entity_id", "skip", "name", "tags", "summary"],
+            "required": [
+                "entity_type",
+                "entity_id",
+                "skip",
+                "name",
+                "tags",
+                "summary",
+                "evaluation",
+                "roast",
+            ],
         },
     },
 }

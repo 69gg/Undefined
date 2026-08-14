@@ -8,7 +8,10 @@ from unittest.mock import AsyncMock
 import pytest
 
 from Undefined.services.commands.context import CommandContext
-from Undefined.skills.commands.profile.handler import execute as profile_execute
+from Undefined.skills.commands.profile.handler import (
+    _markdown_to_html,
+    execute as profile_execute,
+)
 
 
 class _DummySender:
@@ -757,3 +760,69 @@ async def test_profile_text_mode_keeps_raw_markdown_source() -> None:
     assert message == _THREE_PART_PROFILE
     assert "---" in message
     assert "source_event_id: hidden-event" in message
+
+
+def test_markdown_to_html_strips_script_img_and_unsafe_links() -> None:
+    rendered = _markdown_to_html(
+        "正常 **Markdown**\n\n"
+        "<script>alert(1)</script>\n"
+        '<img src="http://evil.test/x.png" onerror="alert(1)">\n'
+        "[坏链接](javascript:alert(1))\n"
+        "[好链接](https://example.com/docs)\n"
+    )
+    lowered = rendered.lower()
+    assert "<script" not in lowered
+    assert "alert(1)" not in rendered
+    assert "<img" not in lowered
+    assert "javascript:" not in lowered
+    assert "<strong>Markdown</strong>" in rendered
+    assert 'href="https://example.com/docs"' in rendered
+    assert "好链接" in rendered
+    assert "坏链接" in rendered
+
+
+@pytest.mark.asyncio
+async def test_profile_render_html_sanitizes_raw_html_in_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+    _patch_profile_render(monkeypatch, captured)
+    sender = _DummySender()
+    cognitive_service = AsyncMock()
+    cognitive_service.get_profile = AsyncMock(
+        return_value="""---
+entity_type: user
+entity_id: "1"
+name: 测
+---
+评价保持原样
+---
+- 正常 **Markdown**
+<script>alert(1)</script>
+<img src="http://evil.test/x.png">
+[坏链接](javascript:alert(1))
+[好链接](https://example.com/docs)
+---
+锐评保持原样
+"""
+    )
+    context = _build_context(
+        sender=sender,
+        cognitive_service=cognitive_service,
+        scope="group",
+        group_id=123456,
+        sender_id=55555,
+    )
+
+    await profile_execute([], context)
+
+    html = str(captured.get("html") or "")
+    lowered = html.lower()
+    assert "<strong>Markdown</strong>" in html
+    assert "<script" not in lowered
+    assert "alert(1)" not in html
+    assert "<img" not in lowered
+    assert "javascript:" not in lowered
+    assert 'href="https://example.com/docs"' in html
+    assert "评价保持原样" in html
+    assert "锐评保持原样" in html

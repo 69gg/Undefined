@@ -7,8 +7,13 @@ from typing import Any, cast
 import pytest
 
 from Undefined.ai.prompts import PromptBuilder
+from Undefined.context import RequestContext
 from Undefined.end_summary_storage import EndSummaryRecord
-from Undefined.services.commands.catalog import CommandCatalog
+from Undefined.services.commands.catalog import (
+    CommandCatalog,
+    can_see_command,
+    load_command_doc,
+)
 from Undefined.services.commands.context import CommandContext
 from Undefined.services.commands.registry import CommandRegistry
 from Undefined.skills.toolsets.commands.get.handler import (
@@ -222,29 +227,34 @@ def test_catalog_filters_by_permission_and_private_scope(tmp_path: Path) -> None
     assert "gated" not in super_names
 
 
-def test_catalog_search_ranks_name_alias_description_then_doc(tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_catalog_search_ranks_name_alias_description_then_doc(
+    tmp_path: Path,
+) -> None:
     catalog = _make_catalog(tmp_path)
     viewer = _viewer(catalog, sender_id=PUBLIC_USER, scope="group")
+    admin_viewer = _viewer(catalog, sender_id=ADMIN_USER, scope="group")
 
-    by_name = catalog.search(viewer, "profile")
+    by_name = await catalog.search(viewer, "profile")
     assert [item.name for item in by_name] == ["profile"]
 
-    by_alias = catalog.search(viewer, "h")
-    assert by_alias[0].name == "help"
+    by_alias = await catalog.search(admin_viewer, "ac")
+    assert by_alias[0].name == "admincmd"
 
-    by_desc = catalog.search(viewer, "认知侧写")
+    by_desc = await catalog.search(viewer, "认知侧写")
     assert [item.name for item in by_desc] == ["profile"]
 
-    by_doc = catalog.search(viewer, "公开帮助")
+    by_doc = await catalog.search(viewer, "公开帮助")
     assert [item.name for item in by_doc] == ["help"]
 
-    public_search = catalog.search(viewer, "机密")
+    public_search = await catalog.search(viewer, "机密")
     assert public_search == []
-    all_secret = {item.name for item in catalog.search_all("机密")}
+    all_secret = {item.name for item in await catalog.search_all("机密")}
     assert all_secret == {"admincmd", "super"}
 
 
-def test_catalog_get_hides_unauthorized_docs(tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_catalog_get_hides_unauthorized_docs(tmp_path: Path) -> None:
     catalog = _make_catalog(tmp_path)
     public_viewer = _viewer(catalog, sender_id=PUBLIC_USER, scope="group")
     admin_viewer = _viewer(catalog, sender_id=ADMIN_USER, scope="group")
@@ -257,7 +267,7 @@ def test_catalog_get_hides_unauthorized_docs(tmp_path: Path) -> None:
 
     admin_meta = catalog.get(admin_viewer, "ac")
     assert admin_meta is not None
-    detail = catalog.format_detail(admin_meta)
+    detail = await catalog.format_detail(admin_meta)
     assert "管理员机密文档，禁止泄露。" in detail
     assert "限流：普通60s / 管理员10s / 超管无限制" in detail
     assert "权限：管理员" in detail
@@ -476,3 +486,87 @@ async def test_build_messages_injects_commands_before_current_time(
     )
     assert commands_idx < time_idx
     assert "/help(/h)" in contents[commands_idx]
+
+
+def test_can_see_command_unknown_permission_is_denied(tmp_path: Path) -> None:
+    catalog = _make_catalog(tmp_path)
+    super_viewer = _viewer(catalog, sender_id=SUPERADMIN_USER, scope="group")
+    assert can_see_command("public", PUBLIC_USER, super_viewer) is True
+    assert can_see_command("admin", ADMIN_USER, super_viewer) is True
+    assert can_see_command("superadmin", SUPERADMIN_USER, super_viewer) is True
+    assert can_see_command("mystery", SUPERADMIN_USER, super_viewer) is False
+    assert can_see_command("owner", PUBLIC_USER, super_viewer) is False
+
+
+@pytest.mark.asyncio
+async def test_prompt_builder_keeps_request_context_false_webui_session(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    catalog = _make_catalog(tmp_path)
+    builder = _make_prompt_builder(catalog.config)
+    builder.set_command_registry(catalog.registry)
+    captured: dict[str, Any] = {}
+    original = CommandCatalog.viewer_from_mapping
+
+    def _capture(
+        self: CommandCatalog, mapping: dict[str, Any] | None
+    ) -> CommandContext:
+        captured["mapping"] = dict(mapping or {})
+        return original(self, mapping)
+
+    monkeypatch.setattr(CommandCatalog, "viewer_from_mapping", _capture)
+
+    async with RequestContext(
+        request_type="private",
+        user_id=PUBLIC_USER,
+        sender_id=PUBLIC_USER,
+    ) as ctx:
+        ctx.set_resource("webui_session", False)
+        prompt = builder._build_available_commands_prompt(
+            {
+                "webui_session": True,
+                "sender_id": PUBLIC_USER,
+                "request_type": "group",
+            }
+        )
+
+    assert prompt
+    assert captured["mapping"]["webui_session"] is False
+    assert captured["mapping"]["request_type"] == "private"
+
+
+@pytest.mark.asyncio
+async def test_load_command_doc_caches_until_mtime_changes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from Undefined.utils.io import get_file_mtime_ns, read_text, set_file_mtime_ns
+
+    catalog = _make_catalog(tmp_path)
+    help_meta = catalog.get_any("help")
+    assert help_meta is not None
+    assert help_meta.doc_path is not None
+
+    reads = {"n": 0}
+
+    async def _counting_read(
+        file_path: str | Path, use_lock: bool = False
+    ) -> str | None:
+        reads["n"] += 1
+        return await read_text(file_path, use_lock=use_lock)
+
+    monkeypatch.setattr("Undefined.services.commands.catalog.read_text", _counting_read)
+
+    first = await load_command_doc(help_meta)
+    second = await load_command_doc(help_meta)
+    assert "公开帮助" in first
+    assert first == second
+    assert reads["n"] == 1
+
+    help_meta.doc_path.write_text("# Help 文档\n\n这是更新后的帮助。", encoding="utf-8")
+    mtime_ns = await get_file_mtime_ns(help_meta.doc_path)
+    await set_file_mtime_ns(help_meta.doc_path, mtime_ns + 1_000_000)
+    third = await load_command_doc(help_meta)
+    assert "更新后的帮助" in third
+    assert reads["n"] == 2

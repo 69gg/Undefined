@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from typing import Any, cast
 
 from Undefined.services.commands.context import CommandContext
 from Undefined.services.commands.registry import CommandMeta, CommandRegistry
+from Undefined.utils.io import get_file_mtime_ns, read_text
 
 _DOC_MAX_CHARS = 6000
 _MATCH_RANK = {
@@ -77,7 +79,7 @@ def can_see_command(permission: str, sender_id: int, context: CommandContext) ->
             context.config.is_admin(sender_id)
             or context.config.is_superadmin(sender_id)
         )
-    return True
+    return False
 
 
 def list_visible_commands(context: CommandContext) -> list[CommandMeta]:
@@ -119,17 +121,42 @@ def format_rate_limit(meta: CommandMeta) -> str:
     )
 
 
-def load_command_doc(meta: CommandMeta, *, max_chars: int = _DOC_MAX_CHARS) -> str:
-    if meta.doc_path is None or not meta.doc_path.exists():
-        return ""
-    content = meta.doc_path.read_text(encoding="utf-8").strip()
-    if len(content) <= max_chars:
-        return content
-    trimmed = content[: max_chars - 32].rstrip()
+_DOC_CACHE: dict[tuple[str, int], tuple[int, str]] = {}
+
+
+def _truncate_command_doc(content: str, max_chars: int) -> str:
+    stripped = content.strip()
+    if len(stripped) <= max_chars:
+        return stripped
+    trimmed = stripped[: max_chars - 32].rstrip()
     return f"{trimmed}\n\n[文档过长，已截断]"
 
 
-def format_command_detail(meta: CommandMeta) -> str:
+async def load_command_doc(
+    meta: CommandMeta, *, max_chars: int = _DOC_MAX_CHARS
+) -> str:
+    if meta.doc_path is None:
+        return ""
+    path = meta.doc_path
+    cache_key = (str(path), max_chars)
+    try:
+        mtime_ns = await get_file_mtime_ns(path)
+    except OSError:
+        _DOC_CACHE.pop(cache_key, None)
+        return ""
+    cached = _DOC_CACHE.get(cache_key)
+    if cached is not None and cached[0] == mtime_ns:
+        return cached[1]
+    raw = await read_text(path, use_lock=True)
+    if raw is None:
+        _DOC_CACHE.pop(cache_key, None)
+        return ""
+    content = _truncate_command_doc(raw, max_chars)
+    _DOC_CACHE[cache_key] = (mtime_ns, content)
+    return content
+
+
+async def format_command_detail(meta: CommandMeta) -> str:
     aliases = "、".join(f"/{alias}" for alias in meta.aliases) if meta.aliases else "无"
     lines = [
         f"{format_command_name(meta)} — {meta.description or '暂无说明'}",
@@ -156,7 +183,7 @@ def format_command_detail(meta: CommandMeta) -> str:
             lines.append(
                 f"  {subcmd.name}{args_str}  —  {subcmd.description}{perm_mark}"
             )
-    doc_content = load_command_doc(meta)
+    doc_content = await load_command_doc(meta)
     if doc_content:
         lines.extend(["", "说明文档：", doc_content])
     return "\n".join(lines)
@@ -198,7 +225,7 @@ def _normalize_query(text: str) -> str:
     return text.strip().lstrip("/").lower()
 
 
-def _match_rank(meta: CommandMeta, query: str) -> int | None:
+async def _match_rank(meta: CommandMeta, query: str) -> int | None:
     needle = _normalize_query(query)
     if not needle:
         return None
@@ -217,27 +244,33 @@ def _match_rank(meta: CommandMeta, query: str) -> int | None:
         haystack = " ".join([subcmd.name, subcmd.description, subcmd.args]).lower()
         if needle in haystack:
             return _MATCH_RANK["description"]
-    doc = load_command_doc(meta)
+    doc = await load_command_doc(meta)
     if needle in doc.lower():
         return _MATCH_RANK["doc"]
     return None
 
 
-def search_visible_commands(context: CommandContext, query: str) -> list[CommandMeta]:
-    return _search_commands(list_visible_commands(context), query)
+async def search_visible_commands(
+    context: CommandContext, query: str
+) -> list[CommandMeta]:
+    return await _search_commands(list_visible_commands(context), query)
 
 
-def search_all_commands(registry: CommandRegistry, query: str) -> list[CommandMeta]:
-    return _search_commands(registry.list_commands(include_hidden=True), query)
+async def search_all_commands(
+    registry: CommandRegistry, query: str
+) -> list[CommandMeta]:
+    return await _search_commands(registry.list_commands(include_hidden=True), query)
 
 
-def _search_commands(commands: list[CommandMeta], query: str) -> list[CommandMeta]:
+async def _search_commands(
+    commands: list[CommandMeta], query: str
+) -> list[CommandMeta]:
     needle = _normalize_query(query)
     if not needle:
         return []
+    ranks = await asyncio.gather(*[_match_rank(meta, needle) for meta in commands])
     scored: list[tuple[int, int, str, CommandMeta]] = []
-    for meta in commands:
-        rank = _match_rank(meta, needle)
+    for meta, rank in zip(commands, ranks, strict=True):
         if rank is None:
             continue
         scored.append((rank, meta.order, meta.name, meta))
@@ -353,11 +386,11 @@ class CommandCatalog:
     def format_prompt_block(self, context: CommandContext) -> str:
         return format_available_commands_prompt(context)
 
-    def search(self, context: CommandContext, query: str) -> list[CommandMeta]:
-        return search_visible_commands(context, query)
+    async def search(self, context: CommandContext, query: str) -> list[CommandMeta]:
+        return await search_visible_commands(context, query)
 
-    def search_all(self, query: str) -> list[CommandMeta]:
-        return search_all_commands(self.registry, query)
+    async def search_all(self, query: str) -> list[CommandMeta]:
+        return await search_all_commands(self.registry, query)
 
     def get(self, context: CommandContext, command_name: str) -> CommandMeta | None:
         return resolve_visible_command(context, command_name)
@@ -365,8 +398,8 @@ class CommandCatalog:
     def get_any(self, command_name: str) -> CommandMeta | None:
         return resolve_any_command(self.registry, command_name)
 
-    def format_detail(self, meta: CommandMeta) -> str:
-        return format_command_detail(meta)
+    async def format_detail(self, meta: CommandMeta) -> str:
+        return await format_command_detail(meta)
 
     def format_name(self, meta: CommandMeta) -> str:
         return format_command_name(meta)
