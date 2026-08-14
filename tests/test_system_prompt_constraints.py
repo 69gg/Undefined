@@ -44,6 +44,7 @@ def test_system_prompts_include_info_gate_and_style_constraints(path: Path) -> N
         "禁止因为历史里存在更完整的旧任务，就借它补齐参数后直接启动",
         "客服尾巴也算客服腔",
         "<name>结尾收住</name>",
+        "具体想怎么做我直接按你的要求改",
         '<case id="info_gap_requires_clarification"',
         '<case id="latest_message_cannot_revive_old_task"',
         "需求明确 / 输入补全 / 权限请求（三者必须分清）",
@@ -280,6 +281,9 @@ def test_system_prompts_define_persona_nicknames_and_ownership_bounds(
     assert "上下文明显是在叫你" in text
     assert "不要冒领任何项目、代码、产品或成果" in text
     assert "不要说自己是任何项目的开发者、维护者或成员" in text
+    assert "创造者同时是项目核心与公开仓库所有者" in text
+    assert "开源协作所以代码不一定全是仓库所有者写的" in text
+    assert "一般情况下不主动提起创造者或仓库所有者" in text
     assert "活在数字空间里的自由开发者" not in text
     assert "资深开发者" not in text
 
@@ -292,7 +296,9 @@ def test_system_prompts_separate_public_project_and_private_creator_details(
 
     assert text.count("你的创造者是 Null。") == 1
     assert text.count("Null") == 1
-    assert text.count("创造者") == 1
+    assert text.count("创造者") >= 3
+    assert "一般情况下不主动提起创造者或仓库所有者" in text
+    assert "开源项目的代码不一定全是仓库所有者写的" in text
     assert text.count("你的源代码以 MIT 许可证开源") == 1
     assert text.count("https://github.com/69gg/Undefined") == 1
     assert "1708213363" not in text
@@ -334,6 +340,31 @@ def test_system_prompts_forbid_leaking_internal_decisions(path: Path) -> None:
         '<case id="forbidden_silent_gate_narration"',
         "把闸门结论、静默处理、拼写自检或「本条无提及」写进 send_message",
         "禁止用 send_message 发送闸门结论、静默原因、规则自检或拼写声明",
+        "不要把内部工具名、分层手册、参数说明发给用户",
+        "闲聊默认不提起创造者或仓库所有者",
+    ]
+    for snippet in required_snippets:
+        assert snippet in text
+
+
+@pytest.mark.parametrize("path", PROMPT_PATHS)
+def test_system_prompts_speak_like_qq_user_about_own_tools(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+
+    required_snippets = [
+        "同一条 send_message 里尽量不要空行",
+        "要换行只换一次",
+        "日常 QQ/群聊可用空格代替部分逗号、句号",
+        "具体想怎么做我直接按你的要求改",
+        "<name>自身工具怎么对外说</name>",
+        "参数由你填；实现来自开源仓库",
+        "禁止把用户说成这些工具的操作者",
+        "对方没先说出内部工具名时，不要主动抛",
+        "禁止承诺当场改频率、改机制、改工具",
+        "不要默认点名创造者或仓库所有者",
+        '<case id="explain_own_memory_without_api_docs"',
+        "QQ/群聊短句、单换行，同一条消息不要空行；不抛内部工具名，不假装能改工具",
+        "一般情况下不主动提起创造者或仓库所有者",
     ]
     for snippet in required_snippets:
         assert snippet in text
@@ -405,6 +436,8 @@ def test_each_rules_gate_group_actions_by_recipient_evidence() -> None:
         "不回复时只调用 `end`",
         "禁止用 `send_message` 发送闸门结论、静默原因、规则自检或拼写声明",
         "对外发言边界",
+        "不要把内部工具名、分层手册、参数说明发给用户",
+        "闲聊默认不提起创造者或仓库所有者",
         "需求明确 / 输入补全 / 权限请求（三者必须分清）",
         "权限请求：禁止",
     ]
