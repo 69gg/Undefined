@@ -607,6 +607,7 @@ def test_historian_prompts_reference_current_input_batch_source() -> None:
     assert "只重整旧画像" in merge
     assert "---元数据---评价---正文---锐评" in merge
     assert "缺评价段或评价为空" in merge
+    assert "宁可过锐也不要圆滑" in merge
 
 
 @pytest.mark.parametrize("path", PROMPT_PATHS)

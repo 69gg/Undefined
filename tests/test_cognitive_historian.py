@@ -404,7 +404,9 @@ def test_historian_profile_merge_prompt_profile_only_constraints() -> None:
     assert "---元数据---评价---正文---锐评" in merge
     assert "不写入 YAML frontmatter" in merge
     assert "缺评价段或评价为空" in merge
-    assert "缺锐评段或为空" in merge
+    assert "缺锐评段或锐评为空" in merge
+    assert "宁可过锐也不要圆滑" in merge
+    assert "禁止温吞点评" in merge
     assert "禁止单独成行的 `---`" in merge
     assert "可直接整体重写" not in merge
     assert "宁可多写" not in merge
@@ -454,7 +456,9 @@ def test_profile_update_tool_does_not_cap_tags() -> None:
     roast_schema: Any = parameters["properties"]["roast"]
     assert roast_schema["type"] == "string"
     assert "不写入 YAML" in roast_schema["description"]
-    assert "尖锐" in roast_schema["description"]
+    assert "尖锐" not in roast_schema["description"]
+    assert "宁可过锐也不要圆滑" in roast_schema["description"]
+    assert "温吞点评" in roast_schema["description"]
 
 
 @pytest.mark.asyncio
