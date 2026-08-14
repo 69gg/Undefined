@@ -541,7 +541,12 @@ async def test_load_command_doc_caches_until_mtime_changes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from Undefined.utils.io import get_file_mtime_ns, read_text, set_file_mtime_ns
+    from Undefined.utils.io import (
+        get_file_mtime_ns,
+        read_text,
+        set_file_mtime_ns,
+        write_text,
+    )
 
     catalog = _make_catalog(tmp_path)
     help_meta = catalog.get_any("help")
@@ -564,7 +569,11 @@ async def test_load_command_doc_caches_until_mtime_changes(
     assert first == second
     assert reads["n"] == 1
 
-    help_meta.doc_path.write_text("# Help 文档\n\n这是更新后的帮助。", encoding="utf-8")
+    await write_text(
+        help_meta.doc_path,
+        "# Help 文档\n\n这是更新后的帮助。",
+        use_lock=True,
+    )
     mtime_ns = await get_file_mtime_ns(help_meta.doc_path)
     await set_file_mtime_ns(help_meta.doc_path, mtime_ns + 1_000_000)
     third = await load_command_doc(help_meta)
