@@ -298,6 +298,27 @@ def test_system_prompts_pin_undefined_literal_spelling(path: Path) -> None:
     assert "必须使用字面量 Undefined" in text
     assert "公开回复、工具参数、memo、observations" in text
     assert "禁止在 observations 中写成 Unfined、Undefind、undefind" in text
+    assert "禁止为遵守本规则而主动提起项目名" in text
+    assert "本条无提及" in text
+
+
+@pytest.mark.parametrize("path", PROMPT_PATHS)
+def test_system_prompts_forbid_leaking_internal_decisions(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+
+    required_snippets = [
+        "不是审计日志、运行时或规则复读器",
+        "公开回复只说给人听的话",
+        "不得写进 send_message",
+        "不回复时只调用 end",
+        "禁止用 send_message 解释为何沉默",
+        "闸门结论、bot_trigger 分析、静默处理说明",
+        '<case id="forbidden_silent_gate_narration"',
+        "把闸门结论、静默处理、拼写自检或「本条无提及」写进 send_message",
+        "禁止用 send_message 发送闸门结论、静默原因、规则自检或拼写声明",
+    ]
+    for snippet in required_snippets:
+        assert snippet in text
 
 
 def test_naga_prompt_keeps_relationship_contextual_and_non_claiming() -> None:
@@ -363,6 +384,9 @@ def test_each_rules_gate_group_actions_by_recipient_evidence() -> None:
         "一条 @/拍一拍不自动改变其它独立消息的收件人",
         "每次收到搜索、Agent 或其它工具结果后",
         "规则不否定明确证据",
+        "不回复时只调用 `end`",
+        "禁止用 `send_message` 发送闸门结论、静默原因、规则自检或拼写声明",
+        "对外发言边界",
     ]
     for snippet in required_snippets:
         assert snippet in text

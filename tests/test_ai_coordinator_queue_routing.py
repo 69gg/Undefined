@@ -290,6 +290,7 @@ def test_build_prompt_limits_proactive_participation_to_technical_contexts() -> 
     assert "「你/你们/我/咱们」等人称" in prompt
     assert "即使原句写着「你就……」「你能不能……」也不是在叫你" in prompt
     assert "闸门未通过时，禁止 send_message、tool_search、cognitive.*" in prompt
+    assert "不回复时禁止把闸门结论、静默原因、规则自检或拼写声明发到聊天里" in prompt
 
 
 @pytest.mark.parametrize(
