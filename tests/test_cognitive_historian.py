@@ -396,6 +396,12 @@ def test_historian_profile_merge_prompt_profile_only_constraints() -> None:
     assert "时间只用于判断取舍" in merge
     assert "克制扩写 / 合并去冗" in merge
     assert "能并入现有条目就不新增条目" in merge
+    assert "对照当前撰写规范自检" in merge
+    assert "不合规则必须重写" in merge
+    assert "`skip=true` 仅当" in merge
+    assert "只重整旧画像" in merge
+    assert "不得以“没有新事实”为由跳过格式修复" in merge
+    assert "可直接整体重写" not in merge
     assert "宁可多写" not in merge
     assert "信息密度优先于表达精炼" not in merge
 

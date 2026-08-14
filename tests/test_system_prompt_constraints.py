@@ -569,6 +569,9 @@ def test_historian_prompts_reference_current_input_batch_source() -> None:
     assert "最新优先" in merge
     assert "合并去冗" in merge
     assert "克制扩写" in merge
+    assert "对照当前撰写规范自检" in merge
+    assert "`skip=true` 仅当" in merge
+    assert "只重整旧画像" in merge
 
 
 @pytest.mark.parametrize("path", PROMPT_PATHS)
