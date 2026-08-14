@@ -46,6 +46,10 @@ def test_system_prompts_include_info_gate_and_style_constraints(path: Path) -> N
         "<name>结尾收住</name>",
         '<case id="info_gap_requires_clarification"',
         '<case id="latest_message_cannot_revive_old_task"',
+        "需求明确 / 输入补全 / 权限请求（三者必须分清）",
+        "权限请求：禁止",
+        "禁止问「要不要我调用工具」",
+        "需求明确时直接调用工具；禁止征求工具调用同意",
     ]
 
     for snippet in required_snippets:
@@ -387,6 +391,8 @@ def test_each_rules_gate_group_actions_by_recipient_evidence() -> None:
         "不回复时只调用 `end`",
         "禁止用 `send_message` 发送闸门结论、静默原因、规则自检或拼写声明",
         "对外发言边界",
+        "需求明确 / 输入补全 / 权限请求（三者必须分清）",
+        "权限请求：禁止",
     ]
     for snippet in required_snippets:
         assert snippet in text
