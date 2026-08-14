@@ -401,6 +401,10 @@ def test_historian_profile_merge_prompt_profile_only_constraints() -> None:
     assert "`skip=true` 仅当" in merge
     assert "只重整旧画像" in merge
     assert "不得以“没有新事实”为由跳过格式修复" in merge
+    assert "---元数据---评价---正文" in merge
+    assert "不写入 YAML frontmatter" in merge
+    assert "缺评价段或评价为空" in merge
+    assert "禁止单独成行的 `---`" in merge
     assert "可直接整体重写" not in merge
     assert "宁可多写" not in merge
     assert "信息密度优先于表达精炼" not in merge
@@ -443,6 +447,9 @@ def test_profile_update_tool_does_not_cap_tags() -> None:
 
     assert "maxItems" not in tags_schema
     assert "最多 10 个" not in str(tags_schema)
+    evaluation_schema: Any = parameters["properties"]["evaluation"]
+    assert evaluation_schema["type"] == "string"
+    assert "不写入 YAML" in evaluation_schema["description"]
 
 
 @pytest.mark.asyncio
@@ -457,9 +464,14 @@ async def test_merge_profile_target_preserves_more_than_ten_tags() -> None:
             return []
 
         async def upsert_profile(
-            self, _profile_id: str, _document: str, metadata: dict[str, Any]
+            self,
+            _profile_id: str,
+            document: str,
+            metadata: dict[str, Any],
+            **_kwargs: Any,
         ) -> None:
             upserted_metadata.append(metadata)
+            upserted_documents.append(document)
 
     class _FakeProfileStorage:
         async def read_profile(self, _entity_type: str, _entity_id: str) -> str:
@@ -505,6 +517,10 @@ async def test_merge_profile_target_preserves_more_than_ten_tags() -> None:
                 "skip": False,
                 "name": "测试用户",
                 "tags": tags,
+                "evaluation": (
+                    "技术判断扎实、沟通直接，对配置细节近乎偏执；"
+                    "偶尔把讨论拖进实现细节。"
+                ),
                 "summary": "- 新侧写",
             }
 
@@ -530,6 +546,7 @@ async def test_merge_profile_target_preserves_more_than_ten_tags() -> None:
 
     written_profiles: list[str] = []
     upserted_metadata: list[dict[str, Any]] = []
+    upserted_documents: list[str] = []
     ai_client = _FakeAIClient()
     worker = HistorianWorker(
         job_queue=None,
@@ -572,10 +589,120 @@ async def test_merge_profile_target_preserves_more_than_ten_tags() -> None:
 
     assert result is True
     assert len(written_profiles) == 1
+    written = written_profiles[0]
     for index in range(12):
-        assert f"- 标签{index}" in written_profiles[0]
-    updated_match = re.search(r"updated_at:\s*['\"]?([0-9T:.+-]+)", written_profiles[0])
+        assert f"- 标签{index}" in written
+    assert "技术判断扎实、沟通直接" in written
+    assert "evaluation:" not in written.split("---")[1]
+    assert written.strip().startswith("---")
+    sections = [part.strip() for part in written.split("\n---\n") if part.strip()]
+    assert len(sections) >= 3
+    assert "- 新侧写" in sections[-1]
+    assert upserted_documents
+    assert "评价: 技术判断扎实、沟通直接" in upserted_documents[0]
+    updated_match = re.search(r"updated_at:\s*['\"]?([0-9T:.+-]+)", written)
     assert updated_match is not None
     updated_at = datetime.fromisoformat(updated_match.group(1).strip("'\""))
     assert updated_at.tzinfo is not None
     assert updated_at.utcoffset() == timedelta(hours=8)
+
+
+@pytest.mark.asyncio
+async def test_merge_profile_target_rejects_empty_evaluation() -> None:
+    class _FakeVectorStore:
+        async def embed_query(self, _query: str) -> list[float]:
+            return [0.1, 0.2]
+
+        async def query_events(
+            self, _query: str, **_kwargs: Any
+        ) -> list[dict[str, Any]]:
+            return []
+
+        async def upsert_profile(self, *_args: Any, **_kwargs: Any) -> None:
+            raise AssertionError("empty evaluation must not upsert")
+
+    class _FakeProfileStorage:
+        async def read_profile(self, _entity_type: str, _entity_id: str) -> str:
+            return "---\nname: 测试用户\n---\n- 旧侧写"
+
+        async def write_profile(
+            self, _entity_type: str, _entity_id: str, _content: str
+        ) -> None:
+            raise AssertionError("empty evaluation must not write")
+
+    class _FakeAIClient:
+        agent_config = object()
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def submit_background_llm_call(self, **_kwargs: Any) -> dict[str, Any]:
+            self.calls += 1
+            if self.calls > 1:
+                return {"choices": [{"message": {}}]}
+            args = {
+                "entity_type": "user",
+                "entity_id": "123456",
+                "skip": False,
+                "name": "测试用户",
+                "tags": ["开发者"],
+                "evaluation": "   ",
+                "summary": "- 新侧写",
+            }
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "tool_calls": [
+                                {
+                                    "id": "update-1",
+                                    "function": {
+                                        "name": "update_profile",
+                                        "arguments": json.dumps(
+                                            args, ensure_ascii=False
+                                        ),
+                                    },
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+
+    worker = HistorianWorker(
+        job_queue=None,
+        vector_store=_FakeVectorStore(),
+        profile_storage=_FakeProfileStorage(),
+        ai_client=_FakeAIClient(),
+        config_getter=lambda: SimpleNamespace(),
+    )
+    result = await worker._merge_profile_target(
+        job={
+            "observations": ["测试"],
+            "request_type": "private",
+            "user_id": "123456",
+            "group_id": "",
+            "sender_id": "123456",
+            "sender_name": "测试用户",
+            "group_name": "",
+            "timestamp_local": "2026-06-07T12:00:00+08:00",
+            "timezone": "Asia/Shanghai",
+            "request_id": "req-eval",
+            "end_seq": 1,
+            "message_ids": [],
+            "memo": "",
+            "source_message": "测试",
+            "recent_messages": [],
+        },
+        canonical="测试",
+        event_id="job-eval",
+        target={
+            "entity_type": "user",
+            "entity_id": "123456",
+            "perspective": "sender",
+            "preferred_name": "测试用户",
+        },
+        target_index=1,
+        target_count=1,
+    )
+    assert result is False

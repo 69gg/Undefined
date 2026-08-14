@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -98,29 +99,59 @@ def _resolve_auto_request_type(
     return ""
 
 
-def _parse_profile_markdown(markdown: str) -> tuple[dict[str, Any], str] | None:
+_PROFILE_SECTION_SPLIT = re.compile(r"(?m)^---\s*$")
+
+
+def _has_standalone_delimiter(text: str) -> bool:
+    return any(line.strip() == "---" for line in str(text).splitlines())
+
+
+def _parse_profile_markdown(
+    markdown: str,
+) -> tuple[dict[str, Any], str, str] | None:
+    """解析侧写 Markdown。
+
+    返回 ``(frontmatter, evaluation, body)``。旧文件只有一对 ``---`` 时
+    ``evaluation`` 为空，其后全部当作 body。
+    """
     text = str(markdown or "")
     if not text.startswith("---"):
         return None
     try:
         import yaml
 
-        parts = text[3:].split("---", 1)
-        if len(parts) != 2:
+        rest = text[3:]
+        if rest.startswith("\n"):
+            rest = rest[1:]
+        parts = _PROFILE_SECTION_SPLIT.split(rest, maxsplit=2)
+        if len(parts) < 2:
             return None
         frontmatter = yaml.safe_load(parts[0])
         if not isinstance(frontmatter, dict):
             return None
-        body = parts[1].lstrip("\n")
-        return frontmatter, body
+        if len(parts) == 2:
+            evaluation = ""
+            body = parts[1].lstrip("\n")
+        else:
+            evaluation = parts[1].strip()
+            body = parts[2].lstrip("\n")
+        return frontmatter, evaluation, body
     except Exception:
         return None
 
 
-def _serialize_profile_markdown(frontmatter: dict[str, Any], body: str) -> str:
+def _serialize_profile_markdown(
+    frontmatter: dict[str, Any],
+    body: str,
+    evaluation: str = "",
+) -> str:
     import yaml
 
-    return f"---\n{yaml.dump(frontmatter, allow_unicode=True)}---\n{body}"
+    yaml_text = yaml.dump(frontmatter, allow_unicode=True)
+    eval_text = str(evaluation or "").strip()
+    if eval_text:
+        return f"---\n{yaml_text}---\n{eval_text}\n---\n{body}"
+    return f"---\n{yaml_text}---\n{body}"
 
 
 def _normalize_profile_tags(value: Any) -> list[str]:
@@ -142,6 +173,7 @@ def _build_profile_vector_payload(
     effective_name: str,
     tags: list[str],
     summary: str,
+    evaluation: str = "",
 ) -> tuple[str, dict[str, Any]]:
     profile_doc_lines: list[str] = []
     if entity_type == "user":
@@ -152,6 +184,9 @@ def _build_profile_vector_payload(
         profile_doc_lines.append(f"群号: {entity_id}")
     if tags:
         profile_doc_lines.append(f"标签: {', '.join(tags)}")
+    eval_text = str(evaluation or "").strip()
+    if eval_text:
+        profile_doc_lines.append(f"评价: {eval_text}")
     profile_doc_lines.append(summary)
     profile_doc = "\n".join(line for line in profile_doc_lines if line.strip())
 

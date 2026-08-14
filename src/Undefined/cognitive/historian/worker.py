@@ -13,6 +13,11 @@ from Undefined.cognitive.chroma_scheduler import (
     CHROMA_PRIORITY_BACKGROUND,
     CHROMA_PRIORITY_MAINTENANCE,
 )
+from Undefined.cognitive.service.helpers import (
+    _build_profile_vector_payload,
+    _has_standalone_delimiter,
+    _serialize_profile_markdown,
+)
 from Undefined.cognitive.vector_store_compat import call_vector_store_method
 from Undefined.config.models import HISTORIAN_MIN_POLL_INTERVAL_SECONDS
 from Undefined.utils.tool_calls import extract_required_tool_call_arguments
@@ -478,12 +483,11 @@ class HistorianWorker:
         effective_name: str,
         tags: list[str],
         summary: str,
+        evaluation: str,
         event_id: str,
         perspective: str,
         now_timezone: tzinfo | None = None,
     ) -> None:
-        import yaml
-
         instant = datetime.now(timezone.utc)
         if now_timezone is not None:
             stamped = instant.astimezone(now_timezone)
@@ -503,7 +507,9 @@ class HistorianWorker:
         else:
             frontmatter["group_name"] = effective_name
             frontmatter["group_id"] = entity_id
-        content = f"---\n{yaml.dump(frontmatter, allow_unicode=True)}---\n{summary}"
+        content = _serialize_profile_markdown(
+            frontmatter, summary, evaluation=evaluation
+        )
 
         await self._profile_storage.write_profile(entity_type, entity_id, content)
         logger.info(
@@ -515,29 +521,14 @@ class HistorianWorker:
             perspective,
         )
 
-        profile_doc_lines: list[str] = []
-        if entity_type == "user":
-            profile_doc_lines.append(f"昵称: {effective_name}")
-            profile_doc_lines.append(f"QQ号: {entity_id}")
-        else:
-            profile_doc_lines.append(f"群名: {effective_name}")
-            profile_doc_lines.append(f"群号: {entity_id}")
-        if tags:
-            profile_doc_lines.append(f"标签: {', '.join(tags)}")
-        profile_doc_lines.append(summary)
-        profile_doc = "\n".join(line for line in profile_doc_lines if line.strip())
-
-        profile_metadata: dict[str, Any] = {
-            "entity_type": entity_type,
-            "entity_id": entity_id,
-            "name": effective_name,
-        }
-        if entity_type == "user":
-            profile_metadata["nickname"] = effective_name
-            profile_metadata["qq"] = entity_id
-        else:
-            profile_metadata["group_name"] = effective_name
-            profile_metadata["group_id"] = entity_id
+        profile_doc, profile_metadata = _build_profile_vector_payload(
+            entity_type=entity_type,
+            entity_id=entity_id,
+            effective_name=effective_name,
+            tags=tags,
+            summary=summary,
+            evaluation=evaluation,
+        )
 
         await call_vector_store_method(
             self._vector_store.upsert_profile,
@@ -906,6 +897,37 @@ class HistorianWorker:
                             }
                         )
                         continue
+                    evaluation = str(tc_args.get("evaluation", "")).strip()
+                    if not evaluation:
+                        logger.info(
+                            "[史官] 任务 %s 侧写更新跳过: target=%s:%s reason=empty_evaluation",
+                            event_id,
+                            up_et,
+                            up_eid,
+                        )
+                        tool_results.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tc_id,
+                                "content": "错误：evaluation 为空",
+                            }
+                        )
+                        continue
+                    if _has_standalone_delimiter(evaluation):
+                        logger.info(
+                            "[史官] 任务 %s 侧写更新跳过: target=%s:%s reason=evaluation_delimiter",
+                            event_id,
+                            up_et,
+                            up_eid,
+                        )
+                        tool_results.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tc_id,
+                                "content": "错误：评价段不能包含单独成行的 ---",
+                            }
+                        )
+                        continue
                     raw_tags = tc_args.get("tags", [])
                     up_tags: list[str] = []
                     if isinstance(raw_tags, list):
@@ -934,6 +956,7 @@ class HistorianWorker:
                         effective_name=effective_name,
                         tags=up_tags,
                         summary=summary,
+                        evaluation=evaluation,
                         event_id=event_id,
                         perspective=perspective,
                         now_timezone=now_local_dt.tzinfo,
