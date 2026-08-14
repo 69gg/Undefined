@@ -33,6 +33,9 @@ async def test_end_rejects_when_force_string_false_and_no_message_sent() -> None
     )
 
     assert result.startswith("拒绝结束对话")
+    assert "force=true" in result
+    assert "请先发送消息给用户" not in result
+    assert "不要为了通过这项检查去给用户发消息" in result
     assert context.get("conversation_ended") is not True
 
 
