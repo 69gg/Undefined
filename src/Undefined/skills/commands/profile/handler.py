@@ -371,7 +371,7 @@ async def _send_render(
     context: CommandContext,
     profile_text: str,
 ) -> None:
-    """渲染为图片发送：YAML 键值表、独立评价区、Markdown 正文、锐评在最后。"""
+    """渲染为图片发送：YAML 键值表、评价、锐评、Markdown 正文。"""
     from Undefined.render import render_html_to_image
 
     frontmatter, evaluation, body, roast = _split_profile_for_render(profile_text)
@@ -429,7 +429,7 @@ body {{
   overflow-wrap: anywhere;
 }}
 .eval {{
-  padding: 14px 18px 6px;
+  padding: 14px 18px 12px;
   border-bottom: 1px solid #e6e0d8;
 }}
 .eval-title {{
@@ -439,13 +439,9 @@ body {{
 .eval p {{
   font-size: 15px; line-height: 1.7; color: #3d3935;
 }}
-.body {{
-  padding: 18px; line-height: 1.8; font-size: 15px;
-  overflow-wrap: anywhere;
-}}
 .roast {{
-  padding: 14px 18px 16px;
-  border-top: 1px solid #e6e0d8;
+  padding: 14px 18px;
+  border-bottom: 1px solid #e6e0d8;
   border-left: 4px solid #c4a484;
   background: #f9f5f1;
 }}
@@ -456,6 +452,10 @@ body {{
 .roast p {{
   font-size: 15px; line-height: 1.7; color: #3d3935;
   font-style: italic;
+}}
+.body {{
+  padding: 18px; line-height: 1.8; font-size: 15px;
+  overflow-wrap: anywhere;
 }}
 .doc-body > :first-child {{ margin-top: 0; }}
 .doc-body > :last-child {{ margin-bottom: 0; }}
@@ -494,8 +494,8 @@ body {{
 <div class="card">
   <div class="meta"><table>{meta_rows_html}</table></div>
   {eval_html}
-  <div class="body"><article class="doc-body">{body_html}</article></div>
   {roast_html}
+  <div class="body"><article class="doc-body">{body_html}</article></div>
 </div>
 </body></html>"""
 

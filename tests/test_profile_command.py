@@ -689,8 +689,11 @@ async def test_profile_render_html_uses_yaml_eval_and_markdown(
     assert "<strong>Python</strong>" in html
     assert 'class="roast-title">锐评</div>' in html
     assert "把配置当信仰" in html
-    assert html.index("<strong>Python</strong>") < html.index(
+    assert html.index('class="eval-title">评价</div>') < html.index(
         'class="roast-title">锐评</div>'
+    )
+    assert html.index('class="roast-title">锐评</div>') < html.index(
+        "<strong>Python</strong>"
     )
     assert "名称" in html
     assert "张三" in html
