@@ -46,6 +46,8 @@ async def test_send_message_schema_rejects_mixed_address_parameters() -> None:
     assert "错误的 &it;" in function["description"]
     assert "工具仅返回附件标签或 UID 时并未发送" in function["description"]
     assert "可发送已登记的图片或普通文件附件" in function["description"]
+    assert "单条内不要空行" in function["description"]
+    assert "不要客服腔，也不要承诺改工具实现" in function["description"]
     assert (
         "<、>、& 等特殊符号须原样填写"
         not in parameters["properties"]["message"]["description"]

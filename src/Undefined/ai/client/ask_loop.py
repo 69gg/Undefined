@@ -389,6 +389,14 @@ class ClientAskLoopMixin(ClientQueueMixin):
         tool_context.setdefault("knowledge_manager", self._knowledge_manager)
         tool_context.setdefault("cognitive_service", self._cognitive_service)
         tool_context.setdefault("meme_service", self._meme_service)
+        command_registry = getattr(self, "_command_registry", None)
+        if command_registry is not None:
+            from Undefined.services.commands.catalog import CommandCatalog
+
+            tool_context.setdefault(
+                "command_catalog",
+                CommandCatalog(command_registry, runtime_config),
+            )
         tool_context.setdefault("current_question", question)
         message_ids = tool_context.get("message_ids")
         if not isinstance(message_ids, list):

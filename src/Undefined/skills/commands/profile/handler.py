@@ -4,15 +4,44 @@ import html
 import logging
 import uuid
 from datetime import datetime, timezone
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
+import markdown
+
+from Undefined.cognitive.service.helpers import _parse_profile_markdown
 from Undefined.services.commands.context import CommandContext
 from Undefined.utils.paths import COGNITIVE_PROFILES_DIR, RENDER_CACHE_DIR, ensure_dir
 
 logger = logging.getLogger("profile")
 
 _MAX_PROFILE_LENGTH = 5000
+_MARKDOWN_EXTENSIONS = ["tables", "fenced_code", "sane_lists"]
+_HIDDEN_FRONTMATTER_KEYS = {"source_event_id"}
+_FRONTMATTER_LABELS = {
+    "name": "名称",
+    "tags": "标签",
+    "updated_at": "更新时间",
+    "entity_type": "实体类型",
+    "entity_id": "编号",
+    "nickname": "昵称",
+    "qq": "QQ",
+    "group_name": "群名",
+    "group_id": "群号",
+}
+_FRONTMATTER_ORDER = [
+    "name",
+    "tags",
+    "updated_at",
+    "entity_type",
+    "entity_id",
+    "nickname",
+    "qq",
+    "group_name",
+    "group_id",
+]
 
 _MODE_TEXT = "text"
 _MODE_FORWARD = "forward"
@@ -81,6 +110,222 @@ def _build_metadata(
     return "\n".join(lines)
 
 
+_SAFE_HREF_SCHEMES = frozenset({"http", "https", "mailto"})
+_ALLOWED_HTML_TAGS = frozenset(
+    {
+        "a",
+        "blockquote",
+        "br",
+        "code",
+        "em",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "hr",
+        "li",
+        "ol",
+        "p",
+        "pre",
+        "strong",
+        "table",
+        "tbody",
+        "td",
+        "th",
+        "thead",
+        "tr",
+        "ul",
+    }
+)
+_VOID_HTML_TAGS = frozenset({"br", "hr"})
+_DROP_HTML_WITH_CONTENTS = frozenset(
+    {"iframe", "noscript", "object", "embed", "script", "style"}
+)
+_ALLOWED_HTML_ATTRS: dict[str, frozenset[str]] = {
+    "a": frozenset({"href", "title"}),
+    "code": frozenset({"class"}),
+    "td": frozenset({"colspan", "rowspan"}),
+    "th": frozenset({"colspan", "rowspan"}),
+}
+
+
+def _is_safe_href(url: str) -> bool:
+    text = str(url or "").strip()
+    if not text:
+        return False
+    parsed = urlparse(text)
+    scheme = parsed.scheme.lower()
+    if scheme not in _SAFE_HREF_SCHEMES:
+        return False
+    if scheme in {"http", "https"} and not parsed.netloc:
+        return False
+    return True
+
+
+class _ProfileHtmlSanitizer(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._chunks: list[str] = []
+        self._open: list[str] = []
+        self._skip_depth = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self._start(tag, attrs, self_closing=tag.lower() in _VOID_HTML_TAGS)
+
+    def handle_endtag(self, tag: str) -> None:
+        name = tag.lower()
+        if self._skip_depth:
+            if name in _DROP_HTML_WITH_CONTENTS:
+                self._skip_depth = max(0, self._skip_depth - 1)
+            return
+        if name not in self._open:
+            return
+        while self._open:
+            opened = self._open.pop()
+            self._chunks.append(f"</{opened}>")
+            if opened == name:
+                break
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self._start(tag, attrs, self_closing=True)
+
+    def handle_data(self, data: str) -> None:
+        if self._skip_depth or not data:
+            return
+        self._chunks.append(html.escape(data, quote=False))
+
+    def handle_comment(self, data: str) -> None:
+        _ = data
+
+    def handle_decl(self, decl: str) -> None:
+        _ = decl
+
+    def handle_pi(self, data: str) -> None:
+        _ = data
+
+    def get_html(self) -> str:
+        while self._open:
+            self._chunks.append(f"</{self._open.pop()}>")
+        return "".join(self._chunks)
+
+    def _start(
+        self,
+        tag: str,
+        attrs: list[tuple[str, str | None]],
+        *,
+        self_closing: bool,
+    ) -> None:
+        name = tag.lower()
+        if self._skip_depth:
+            if name in _DROP_HTML_WITH_CONTENTS and not self_closing:
+                self._skip_depth += 1
+            return
+        if name in _DROP_HTML_WITH_CONTENTS:
+            if not self_closing:
+                self._skip_depth = 1
+            return
+        if name not in _ALLOWED_HTML_TAGS:
+            return
+        if name == "a":
+            href = next(
+                (value for attr, value in attrs if attr.lower() == "href"),
+                None,
+            )
+            if href is None or not _is_safe_href(href):
+                return
+        pieces = [f"<{name}"]
+        allowed_attrs = _ALLOWED_HTML_ATTRS.get(name, frozenset())
+        for attr_name, attr_value in attrs:
+            attr = attr_name.lower()
+            if attr not in allowed_attrs or attr_value is None:
+                continue
+            if attr == "href" and not _is_safe_href(attr_value):
+                continue
+            pieces.append(f' {attr}="{html.escape(attr_value, quote=True)}"')
+        pieces.append(">")
+        self._chunks.append("".join(pieces))
+        if name in _VOID_HTML_TAGS:
+            return
+        if self_closing:
+            self._chunks.append(f"</{name}>")
+            return
+        self._open.append(name)
+
+
+def _sanitize_rendered_html(rendered_html: str) -> str:
+    sanitizer = _ProfileHtmlSanitizer()
+    sanitizer.feed(rendered_html)
+    sanitizer.close()
+    return sanitizer.get_html()
+
+
+def _markdown_to_html(markdown_text: str) -> str:
+    rendered = str(markdown.markdown(markdown_text, extensions=_MARKDOWN_EXTENSIONS))
+    return _sanitize_rendered_html(rendered)
+
+
+def _format_frontmatter_value(key: str, value: Any) -> str:
+    if key == "entity_type":
+        mapping = {"user": "用户", "group": "群聊"}
+        text = str(value or "").strip().lower()
+        return mapping.get(text, str(value).strip())
+    if key == "tags":
+        if isinstance(value, list):
+            return "、".join(str(item).strip() for item in value if str(item).strip())
+        return str(value or "").strip()
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _render_meta_rows(
+    frontmatter: dict[str, Any] | None, profile_len: int
+) -> list[tuple[str, str]]:
+    rows: list[tuple[str, str]] = []
+    if frontmatter:
+        name = str(frontmatter.get("name") or "").strip()
+        entity_id = str(frontmatter.get("entity_id") or "").strip()
+        seen: set[str] = set()
+        ordered_keys = [key for key in _FRONTMATTER_ORDER if key in frontmatter]
+        ordered_keys.extend(
+            str(key)
+            for key in frontmatter
+            if str(key) not in _FRONTMATTER_ORDER and str(key) not in seen
+        )
+        for key in ordered_keys:
+            key_text = str(key)
+            if key_text in _HIDDEN_FRONTMATTER_KEYS or key_text in seen:
+                continue
+            seen.add(key_text)
+            raw_value = frontmatter.get(key)
+            if key_text == "nickname" and str(raw_value or "").strip() == name:
+                continue
+            if key_text == "group_name" and str(raw_value or "").strip() == name:
+                continue
+            if key_text == "qq" and str(raw_value or "").strip() == entity_id:
+                continue
+            if key_text == "group_id" and str(raw_value or "").strip() == entity_id:
+                continue
+            formatted = _format_frontmatter_value(key_text, raw_value)
+            if not formatted:
+                continue
+            rows.append((_FRONTMATTER_LABELS.get(key_text, key_text), formatted))
+    rows.append(("长度", f"{profile_len} 字"))
+    return rows
+
+
+def _split_profile_for_render(
+    profile_text: str,
+) -> tuple[dict[str, Any] | None, str, str, str]:
+    parsed = _parse_profile_markdown(profile_text)
+    if parsed is None:
+        return None, "", profile_text, ""
+    frontmatter, evaluation, body, roast = parsed
+    return frontmatter, evaluation, body or "", roast
+
+
 # ── 发送方法 ──────────────────────────────────────────────────
 
 
@@ -124,22 +369,38 @@ async def _send_forward(
 
 async def _send_render(
     context: CommandContext,
-    metadata: str,
     profile_text: str,
 ) -> None:
-    """渲染为图片发送——元数据区 + 侧写正文区。"""
+    """渲染为图片发送：YAML 键值表、评价、锐评、Markdown 正文。"""
     from Undefined.render import render_html_to_image
 
-    safe_meta = html.escape(metadata)
-    safe_body = html.escape(profile_text)
+    frontmatter, evaluation, body, roast = _split_profile_for_render(profile_text)
+    meta_rows_html = ""
+    for key, val in _render_meta_rows(frontmatter, len(profile_text)):
+        meta_rows_html += (
+            f'<tr><td class="mk">{html.escape(key)}</td>'
+            f'<td class="mv">{html.escape(val)}</td></tr>\n'
+        )
 
-    meta_rows = ""
-    for line in safe_meta.split("\n"):
-        if ": " in line:
-            key, _, val = line.partition(": ")
-            meta_rows += (
-                f'<tr><td class="mk">{key}</td><td class="mv">{val}</td></tr>\n'
-            )
+    eval_html = ""
+    if evaluation.strip():
+        eval_html = (
+            '<div class="eval">'
+            '<div class="eval-title">评价</div>'
+            f"<p>{html.escape(evaluation.strip())}</p>"
+            "</div>"
+        )
+
+    body_html = _markdown_to_html(body) if body.strip() else ""
+
+    roast_html = ""
+    if roast.strip():
+        roast_html = (
+            '<div class="roast">'
+            '<div class="roast-title">锐评</div>'
+            f"<p>{html.escape(roast.strip())}</p>"
+            "</div>"
+        )
 
     html_content = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>
@@ -158,23 +419,83 @@ body {{
   background: #f9f5f1; border-bottom: 1px solid #e6e0d8;
   padding: 14px 18px;
 }}
-.meta table {{ border-collapse: collapse; }}
+.meta table {{ border-collapse: collapse; width: 100%; }}
 .mk {{
   font-size: 14px; color: #6e675f; padding: 3px 12px 3px 0;
   white-space: nowrap; vertical-align: top; font-weight: 600;
 }}
 .mv {{
   font-size: 14px; color: #3d3935; padding: 3px 0;
+  overflow-wrap: anywhere;
+}}
+.eval {{
+  padding: 14px 18px 12px;
+  border-bottom: 1px solid #e6e0d8;
+}}
+.eval-title {{
+  font-size: 13px; font-weight: 700; color: #6e675f;
+  margin-bottom: 6px;
+}}
+.eval p {{
+  font-size: 15px; line-height: 1.7; color: #3d3935;
+}}
+.roast {{
+  padding: 14px 18px;
+  border-bottom: 1px solid #e6e0d8;
+  border-left: 4px solid #c4a484;
+  background: #f9f5f1;
+}}
+.roast-title {{
+  font-size: 13px; font-weight: 700; color: #6e675f;
+  margin-bottom: 6px;
+}}
+.roast p {{
+  font-size: 15px; line-height: 1.7; color: #3d3935;
+  font-style: italic;
 }}
 .body {{
   padding: 18px; line-height: 1.8; font-size: 15px;
-  white-space: pre-wrap; word-wrap: break-word;
+  overflow-wrap: anywhere;
+}}
+.doc-body > :first-child {{ margin-top: 0; }}
+.doc-body > :last-child {{ margin-bottom: 0; }}
+.doc-body p {{ margin: 8px 0; }}
+.doc-body ul, .doc-body ol {{ margin: 8px 0; padding-left: 22px; }}
+.doc-body li + li {{ margin-top: 4px; }}
+.doc-body pre {{
+  margin: 10px 0;
+  padding: 10px 12px;
+  border: 1px solid #e6e0d8;
+  border-radius: 6px;
+  background: #3d3935;
+  color: #f9f5f1;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}}
+.doc-body pre code {{
+  padding: 0; border: 0; background: transparent; color: inherit;
+}}
+.doc-body table {{ width: 100%; border-collapse: collapse; margin: 10px 0; }}
+.doc-body th, .doc-body td {{
+  padding: 7px 8px;
+  border: 1px solid #e6e0d8;
+  text-align: left;
+  vertical-align: top;
+}}
+.doc-body th {{ background: #f3ece4; color: #3d3935; }}
+.doc-body blockquote {{
+  margin: 10px 0;
+  padding: 8px 12px;
+  border-left: 4px solid #c4a484;
+  background: #f9f5f1;
 }}
 </style></head>
 <body>
 <div class="card">
-  <div class="meta"><table>{meta_rows}</table></div>
-  <div class="body">{safe_body}</div>
+  <div class="meta"><table>{meta_rows_html}</table></div>
+  {eval_html}
+  {roast_html}
+  <div class="body"><article class="doc-body">{body_html}</article></div>
 </div>
 </body></html>"""
 
@@ -262,7 +583,7 @@ async def execute(args: list[str], context: CommandContext) -> None:
         await _send_text(context, profile)
     elif mode == _MODE_RENDER:
         try:
-            await _send_render(context, metadata, profile)
+            await _send_render(context, profile)
         except Exception:
             logger.exception("渲染侧写图片失败，回退到合并转发")
             await _handle_render_fallback(context, metadata, profile)

@@ -13,6 +13,7 @@ from Undefined.rate_limit import RateLimiter
 from Undefined.injection_response_agent import InjectionResponseAgent
 from Undefined.token_usage_storage import TokenUsageStorage
 from Undefined.ai.llm import ModelRequester
+from Undefined.ai.llm.retry import request_with_http_retries
 from Undefined.ai.transports import (
     API_MODE_CHAT_COMPLETIONS,
     API_MODE_RESPONSES,
@@ -161,7 +162,9 @@ class SecurityService:
         self._token_usage_storage = TokenUsageStorage()
         self._requester = ModelRequester(self.http_client, self._token_usage_storage)
         self.injection_response_agent = InjectionResponseAgent(
-            config.security_model, self._requester
+            config.security_model,
+            self._requester,
+            max_retries=config.ai_request_max_retries,
         )
 
     def apply_config(self, config: Config) -> None:
@@ -169,8 +172,13 @@ class SecurityService:
         self.config = config
         self.rate_limiter.config = config
         self.injection_response_agent = InjectionResponseAgent(
-            config.security_model, self._requester
+            config.security_model,
+            self._requester,
+            max_retries=config.ai_request_max_retries,
         )
+
+    def _ai_request_max_retries(self) -> int:
+        return max(0, int(getattr(self.config, "ai_request_max_retries", 0) or 0))
 
     async def detect_injection(
         self, text: str, message_content: Optional[list[dict[str, Any]]] = None
@@ -235,7 +243,8 @@ class SecurityService:
             ):
                 request_kwargs["thinking"] = {"enabled": False, "budget_tokens": 0}
 
-            result = await self._requester.request(
+            result = await request_with_http_retries(
+                self._requester.request,
                 model_config=security_config,
                 messages=[
                     {
@@ -246,6 +255,9 @@ class SecurityService:
                 ],
                 max_tokens=10,  # 注入检测只需要少量token来返回简单结果
                 call_type="security_check",
+                max_retries=self._ai_request_max_retries(),
+                log_prefix="[安全] 注入检测",
+                log=logger,
                 **request_kwargs,
             )
             duration = time.perf_counter() - start_time
@@ -326,7 +338,8 @@ class SecurityService:
                 "</message>"
             )
 
-            result = await self._requester.request(
+            result = await request_with_http_retries(
+                self._requester.request,
                 model_config=model_config,
                 messages=[
                     {
@@ -349,6 +362,9 @@ class SecurityService:
                 ),
                 max_tokens=160,
                 call_type="naga_message_moderation",
+                max_retries=self._ai_request_max_retries(),
+                log_prefix="[安全] Naga 审核",
+                log=logger,
                 **request_kwargs,
             )
             parsed = extract_required_tool_call_arguments(

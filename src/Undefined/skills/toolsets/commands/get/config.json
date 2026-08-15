@@ -1,0 +1,25 @@
+{
+    "type": "function",
+    "function": {
+        "name": "get",
+        "description": "获取斜杠命令的详细说明，包括用法、示例、别名、权限（谁可用）、作用域、限流和帮助文档。默认查完整目录。可传入 group_id、user_id（QQ）或两者，额外说明该用户在该群/私聊视角下能否使用。命令名支持别名。不存在时不返回文档。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "命令名或别名，可带或不带前导 /，如 profile 或 /p"
+                },
+                "group_id": {
+                    "type": "integer",
+                    "description": "可选。群号。传入后同时判断该群会话下指定用户能否使用该命令。可与 user_id 一起传。"
+                },
+                "user_id": {
+                    "type": "integer",
+                    "description": "可选。用户 QQ 号。传入后同时判断该用户能否使用该命令。只传本参数时按私聊作用域。可与 group_id 一起传。"
+                }
+            },
+            "required": ["name"]
+        }
+    }
+}

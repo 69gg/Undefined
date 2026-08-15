@@ -57,7 +57,7 @@ _PROFILE_TOOL = {
                 },
                 "skip": {
                     "type": "boolean",
-                    "description": "是否跳过更新；当新信息不稳定/不足时为 true",
+                    "description": "是否跳过更新；仅当现有侧写已合规且本轮无新稳定特征时为 true",
                 },
                 "skip_reason": {
                     "type": "string",
@@ -69,9 +69,43 @@ _PROFILE_TOOL = {
                     "items": {"type": "string"},
                     "description": "身份级标签（角色/核心领域），不写话题",
                 },
-                "summary": {"type": "string", "description": "侧写正文（Markdown）"},
+                "evaluation": {
+                    "type": "string",
+                    "description": (
+                        "YAML 与正文之间的独立客观评价（约 40–150 字 / 2–5 句）。"
+                        "不写入 YAML，也不并入 summary 或 roast。更新时必填非空；"
+                        "禁止单独成行的 ---。"
+                    ),
+                },
+                "summary": {
+                    "type": "string",
+                    "description": (
+                        "侧写正文（Markdown 画像条目，不含评价段与锐评）。"
+                        "更新时必填非空；禁止单独成行的 ---。"
+                    ),
+                },
+                "roast": {
+                    "type": "string",
+                    "description": (
+                        "正文之后的独立锐评（约 20–80 字 / 1–3 句）。"
+                        "必须刻薄、毒舌、一针见血，宁可过锐也不要圆滑；"
+                        "禁止写成第二条评价或温吞点评。"
+                        "允许阴阳挖苦；禁止脏话辱骂、外貌羞辱、歧视、诅咒或隐私。"
+                        "群侧写只锐评群氛围/文化。不写入 YAML，也不并入 evaluation 或 summary。"
+                        "更新时必填非空；禁止单独成行的 ---。"
+                    ),
+                },
             },
-            "required": ["entity_type", "entity_id", "skip", "name", "tags", "summary"],
+            "required": [
+                "entity_type",
+                "entity_id",
+                "skip",
+                "name",
+                "tags",
+                "summary",
+                "evaluation",
+                "roast",
+            ],
         },
     },
 }

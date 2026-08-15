@@ -13,6 +13,11 @@ from Undefined.cognitive.chroma_scheduler import (
     CHROMA_PRIORITY_BACKGROUND,
     CHROMA_PRIORITY_MAINTENANCE,
 )
+from Undefined.cognitive.service.helpers import (
+    _build_profile_vector_payload,
+    _profile_section_error,
+    _serialize_profile_markdown,
+)
 from Undefined.cognitive.vector_store_compat import call_vector_store_method
 from Undefined.config.models import HISTORIAN_MIN_POLL_INTERVAL_SECONDS
 from Undefined.utils.tool_calls import extract_required_tool_call_arguments
@@ -478,12 +483,12 @@ class HistorianWorker:
         effective_name: str,
         tags: list[str],
         summary: str,
+        evaluation: str,
+        roast: str,
         event_id: str,
         perspective: str,
         now_timezone: tzinfo | None = None,
     ) -> None:
-        import yaml
-
         instant = datetime.now(timezone.utc)
         if now_timezone is not None:
             stamped = instant.astimezone(now_timezone)
@@ -503,7 +508,9 @@ class HistorianWorker:
         else:
             frontmatter["group_name"] = effective_name
             frontmatter["group_id"] = entity_id
-        content = f"---\n{yaml.dump(frontmatter, allow_unicode=True)}---\n{summary}"
+        content = _serialize_profile_markdown(
+            frontmatter, summary, evaluation=evaluation, roast=roast
+        )
 
         await self._profile_storage.write_profile(entity_type, entity_id, content)
         logger.info(
@@ -515,29 +522,15 @@ class HistorianWorker:
             perspective,
         )
 
-        profile_doc_lines: list[str] = []
-        if entity_type == "user":
-            profile_doc_lines.append(f"昵称: {effective_name}")
-            profile_doc_lines.append(f"QQ号: {entity_id}")
-        else:
-            profile_doc_lines.append(f"群名: {effective_name}")
-            profile_doc_lines.append(f"群号: {entity_id}")
-        if tags:
-            profile_doc_lines.append(f"标签: {', '.join(tags)}")
-        profile_doc_lines.append(summary)
-        profile_doc = "\n".join(line for line in profile_doc_lines if line.strip())
-
-        profile_metadata: dict[str, Any] = {
-            "entity_type": entity_type,
-            "entity_id": entity_id,
-            "name": effective_name,
-        }
-        if entity_type == "user":
-            profile_metadata["nickname"] = effective_name
-            profile_metadata["qq"] = entity_id
-        else:
-            profile_metadata["group_name"] = effective_name
-            profile_metadata["group_id"] = entity_id
+        profile_doc, profile_metadata = _build_profile_vector_payload(
+            entity_type=entity_type,
+            entity_id=entity_id,
+            effective_name=effective_name,
+            tags=tags,
+            summary=summary,
+            evaluation=evaluation,
+            roast=roast,
+        )
 
         await call_vector_store_method(
             self._vector_store.upsert_profile,
@@ -891,18 +884,45 @@ class HistorianWorker:
                         continue
 
                     summary = str(tc_args.get("summary", "")).strip()
-                    if not summary:
+                    evaluation = str(tc_args.get("evaluation", "")).strip()
+                    roast = str(tc_args.get("roast", "")).strip()
+                    section_error = (
+                        _profile_section_error(
+                            summary,
+                            empty_reason="empty_summary",
+                            empty_content="错误：summary 为空",
+                            delimiter_reason="summary_delimiter",
+                            delimiter_content="错误：正文不能包含单独成行的 ---",
+                        )
+                        or _profile_section_error(
+                            evaluation,
+                            empty_reason="empty_evaluation",
+                            empty_content="错误：evaluation 为空",
+                            delimiter_reason="evaluation_delimiter",
+                            delimiter_content="错误：评价段不能包含单独成行的 ---",
+                        )
+                        or _profile_section_error(
+                            roast,
+                            empty_reason="empty_roast",
+                            empty_content="错误：roast 为空",
+                            delimiter_reason="roast_delimiter",
+                            delimiter_content="错误：锐评不能包含单独成行的 ---",
+                        )
+                    )
+                    if section_error is not None:
+                        skip_reason, error_content = section_error
                         logger.info(
-                            "[史官] 任务 %s 侧写更新跳过: target=%s:%s reason=empty_summary",
+                            "[史官] 任务 %s 侧写更新跳过: target=%s:%s reason=%s",
                             event_id,
                             up_et,
                             up_eid,
+                            skip_reason,
                         )
                         tool_results.append(
                             {
                                 "role": "tool",
                                 "tool_call_id": tc_id,
-                                "content": "错误：summary 为空",
+                                "content": error_content,
                             }
                         )
                         continue
@@ -934,6 +954,8 @@ class HistorianWorker:
                         effective_name=effective_name,
                         tags=up_tags,
                         summary=summary,
+                        evaluation=evaluation,
+                        roast=roast,
                         event_id=event_id,
                         perspective=perspective,
                         now_timezone=now_local_dt.tzinfo,

@@ -137,6 +137,7 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
             rate_limiter=self.rate_limiter,
             history_manager=self.history_manager,
         )
+        ai.set_command_registry(self.command_dispatcher.command_registry)
         self.ai_coordinator = AICoordinator(
             config,
             ai,

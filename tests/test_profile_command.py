@@ -8,7 +8,10 @@ from unittest.mock import AsyncMock
 import pytest
 
 from Undefined.services.commands.context import CommandContext
-from Undefined.skills.commands.profile.handler import execute as profile_execute
+from Undefined.skills.commands.profile.handler import (
+    _markdown_to_html,
+    execute as profile_execute,
+)
 
 
 class _DummySender:
@@ -85,16 +88,22 @@ def _build_context(
     )
 
 
-def _patch_profile_render(monkeypatch: pytest.MonkeyPatch) -> None:
+def _patch_profile_render(
+    monkeypatch: pytest.MonkeyPatch,
+    captured: dict[str, Any] | None = None,
+) -> None:
     import Undefined.render as render_module
 
     async def fake_render_html_to_image(
-        _html_content: str,
+        html_content: str,
         output_path: str,
         *,
         viewport_width: int = 1280,
     ) -> None:
         assert viewport_width == 480
+        if captured is not None:
+            captured["html"] = html_content
+            captured["viewport_width"] = viewport_width
         Path(output_path).write_bytes(b"png")
 
     monkeypatch.setattr(
@@ -631,3 +640,192 @@ async def test_profile_superadmin_target_not_found() -> None:
 
     assert len(sender.group_messages) == 1
     assert "📭 暂无侧写数据" in sender.group_messages[0][1]
+
+
+_THREE_PART_PROFILE = """---
+entity_type: user
+entity_id: "12345"
+name: 张三
+nickname: 张三
+tags:
+  - 开发者
+updated_at: "2026-04-01T00:00:00"
+source_event_id: hidden-event
+---
+技术判断扎实、沟通直接，对配置细节近乎偏执。
+---
+- 喜欢 **Python**
+- 做技术取舍会权衡时间
+---
+把配置当信仰，把别人的「差不多」当人身攻击。
+"""
+
+
+@pytest.mark.asyncio
+async def test_profile_render_html_uses_yaml_eval_and_markdown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+    _patch_profile_render(monkeypatch, captured)
+    sender = _DummySender()
+    cognitive_service = AsyncMock()
+    cognitive_service.get_profile = AsyncMock(return_value=_THREE_PART_PROFILE)
+
+    context = _build_context(
+        sender=sender,
+        cognitive_service=cognitive_service,
+        scope="group",
+        group_id=123456,
+        sender_id=55555,
+    )
+
+    await profile_execute([], context)
+
+    html = str(captured.get("html") or "")
+    assert sender.group_messages[0][1].startswith("[CQ:image,file=file://")
+    assert 'class="eval-title">评价</div>' in html
+    assert "技术判断扎实、沟通直接" in html
+    assert "<li>" in html
+    assert "<strong>Python</strong>" in html
+    assert 'class="roast-title">锐评</div>' in html
+    assert "把配置当信仰" in html
+    assert html.index('class="eval-title">评价</div>') < html.index(
+        'class="roast-title">锐评</div>'
+    )
+    assert html.index('class="roast-title">锐评</div>') < html.index(
+        "<strong>Python</strong>"
+    )
+    assert "名称" in html
+    assert "张三" in html
+    assert "标签" in html
+    assert "开发者" in html
+    assert "更新时间" in html
+    assert "长度" in html
+    assert " 字" in html
+    assert "类型:" not in html
+    assert "ID:" not in html
+    assert "更新:" not in html
+    assert "---" not in html
+    assert "source_event_id" not in html
+    assert "hidden-event" not in html
+    assert "white-space: pre-wrap; word-wrap: break-word" not in html
+
+
+@pytest.mark.asyncio
+async def test_profile_render_html_plain_body_still_shows_length(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+    _patch_profile_render(monkeypatch, captured)
+    sender = _DummySender()
+    cognitive_service = AsyncMock()
+    cognitive_service.get_profile = AsyncMock(return_value="这是一个用户侧写")
+
+    context = _build_context(
+        sender=sender,
+        cognitive_service=cognitive_service,
+        scope="private",
+        group_id=0,
+        sender_id=99999,
+        user_id=99999,
+    )
+
+    await profile_execute([], context)
+
+    html = str(captured.get("html") or "")
+    assert "长度" in html
+    assert " 字" in html
+    assert "这是一个用户侧写" in html
+    assert 'class="eval-title">评价</div>' not in html
+    assert 'class="roast-title">锐评</div>' not in html
+    assert "类型:" not in html
+    assert "ID:" not in html
+    assert "更新:" not in html
+
+
+@pytest.mark.asyncio
+async def test_profile_text_mode_keeps_raw_markdown_source() -> None:
+    sender = _DummySender()
+    cognitive_service = AsyncMock()
+    cognitive_service.get_profile = AsyncMock(return_value=_THREE_PART_PROFILE)
+
+    context = _build_context(
+        sender=sender,
+        cognitive_service=cognitive_service,
+        scope="group",
+        group_id=123456,
+        sender_id=55555,
+    )
+
+    await profile_execute(["-t"], context)
+
+    message = sender.group_messages[0][1]
+    assert message == _THREE_PART_PROFILE
+    assert "---" in message
+    assert "source_event_id: hidden-event" in message
+
+
+def test_markdown_to_html_strips_script_img_and_unsafe_links() -> None:
+    rendered = _markdown_to_html(
+        "正常 **Markdown**\n\n"
+        "<script>alert(1)</script>\n"
+        '<img src="http://evil.test/x.png" onerror="alert(1)">\n'
+        "[坏链接](javascript:alert(1))\n"
+        "[好链接](https://example.com/docs)\n"
+    )
+    lowered = rendered.lower()
+    assert "<script" not in lowered
+    assert "alert(1)" not in rendered
+    assert "<img" not in lowered
+    assert "javascript:" not in lowered
+    assert "<strong>Markdown</strong>" in rendered
+    assert 'href="https://example.com/docs"' in rendered
+    assert "好链接" in rendered
+    assert "坏链接" in rendered
+
+
+@pytest.mark.asyncio
+async def test_profile_render_html_sanitizes_raw_html_in_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+    _patch_profile_render(monkeypatch, captured)
+    sender = _DummySender()
+    cognitive_service = AsyncMock()
+    cognitive_service.get_profile = AsyncMock(
+        return_value="""---
+entity_type: user
+entity_id: "1"
+name: 测
+---
+评价保持原样
+---
+- 正常 **Markdown**
+<script>alert(1)</script>
+<img src="http://evil.test/x.png">
+[坏链接](javascript:alert(1))
+[好链接](https://example.com/docs)
+---
+锐评保持原样
+"""
+    )
+    context = _build_context(
+        sender=sender,
+        cognitive_service=cognitive_service,
+        scope="group",
+        group_id=123456,
+        sender_id=55555,
+    )
+
+    await profile_execute([], context)
+
+    html = str(captured.get("html") or "")
+    lowered = html.lower()
+    assert "<strong>Markdown</strong>" in html
+    assert "<script" not in lowered
+    assert "alert(1)" not in html
+    assert "<img" not in lowered
+    assert "javascript:" not in lowered
+    assert 'href="https://example.com/docs"' in html
+    assert "评价保持原样" in html
+    assert "锐评保持原样" in html

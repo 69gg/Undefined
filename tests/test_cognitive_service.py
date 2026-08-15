@@ -855,3 +855,140 @@ updated_at: "2026-04-01T00:00:00"
     assert updated is False
     assert profile_storage.last_write is None
     assert vector_store.last_upsert_profile is None
+
+
+def test_parse_profile_markdown_old_two_part_has_empty_evaluation() -> None:
+    from Undefined.cognitive.service.helpers import _parse_profile_markdown
+
+    parsed = _parse_profile_markdown(
+        "---\nentity_type: user\nname: 张三\n---\n- 喜欢 Python\n"
+    )
+    assert parsed is not None
+    frontmatter, evaluation, body, roast = parsed
+    assert frontmatter["name"] == "张三"
+    assert evaluation == ""
+    assert roast == ""
+    assert body.startswith("- 喜欢 Python")
+
+
+def test_parse_and_serialize_profile_evaluation_section() -> None:
+    from Undefined.cognitive.service.helpers import (
+        _build_profile_vector_payload,
+        _parse_profile_markdown,
+        _serialize_profile_markdown,
+    )
+
+    markdown = _serialize_profile_markdown(
+        {
+            "entity_type": "user",
+            "entity_id": "12345678",
+            "name": "张三",
+            "tags": ["开发者"],
+        },
+        "- 在校学生/业余开发者，做技术取舍会权衡时间、算力与预算。\n",
+        evaluation="技术判断扎实、沟通直接，对配置细节近乎偏执；偶尔把讨论拖进实现细节。",
+    )
+    parsed = _parse_profile_markdown(markdown)
+    assert parsed is not None
+    frontmatter, evaluation, body, roast = parsed
+    assert "evaluation" not in frontmatter
+    assert evaluation.startswith("技术判断扎实")
+    assert roast == ""
+    assert body.startswith("- 在校学生")
+    document, _metadata = _build_profile_vector_payload(
+        entity_type="user",
+        entity_id="12345678",
+        effective_name="张三",
+        tags=["开发者"],
+        summary=body,
+        evaluation=evaluation,
+    )
+    assert "评价: 技术判断扎实" in document
+    assert "锐评:" not in document
+
+
+def test_parse_and_serialize_profile_roast_section() -> None:
+    from Undefined.cognitive.service.helpers import (
+        _build_profile_vector_payload,
+        _parse_profile_markdown,
+        _serialize_profile_markdown,
+    )
+
+    markdown = _serialize_profile_markdown(
+        {
+            "entity_type": "user",
+            "entity_id": "12345678",
+            "name": "张三",
+            "tags": ["开发者"],
+        },
+        "- 在校学生/业余开发者，做技术取舍会权衡时间、算力与预算。\n",
+        evaluation="技术判断扎实、沟通直接，对配置细节近乎偏执；偶尔把讨论拖进实现细节。",
+        roast="把配置当信仰，把别人的「差不多」当人身攻击。",
+    )
+    parsed = _parse_profile_markdown(markdown)
+    assert parsed is not None
+    frontmatter, evaluation, body, roast = parsed
+    assert "roast" not in frontmatter
+    assert "evaluation" not in frontmatter
+    assert evaluation.startswith("技术判断扎实")
+    assert body.startswith("- 在校学生")
+    assert roast.startswith("把配置当信仰")
+    document, _metadata = _build_profile_vector_payload(
+        entity_type="user",
+        entity_id="12345678",
+        effective_name="张三",
+        tags=["开发者"],
+        summary=body,
+        evaluation=evaluation,
+        roast=roast,
+    )
+    assert "评价: 技术判断扎实" in document
+    assert "锐评: 把配置当信仰" in document
+
+
+@pytest.mark.asyncio
+async def test_sync_profile_display_name_preserves_evaluation() -> None:
+    existing_profile = """---
+entity_type: user
+entity_id: "12345"
+name: 旧昵称
+nickname: 旧昵称
+tags:
+  - 开发者
+updated_at: "2026-04-01T00:00:00"
+---
+技术判断扎实、沟通直接，对配置细节近乎偏执。
+---
+- 喜欢 Python
+---
+把配置当信仰，把别人的「差不多」当人身攻击。
+"""
+    vector_store = _FakeVectorStore()
+    profile_storage = _FakeProfileStorage(existing_profile)
+    service = CognitiveService(
+        config_getter=lambda: SimpleNamespace(enabled=True),
+        vector_store=vector_store,
+        job_queue=_FakeJobQueue(),
+        profile_storage=profile_storage,
+        reranker=None,
+    )
+
+    updated = await service.sync_profile_display_name(
+        entity_type="user",
+        entity_id="12345",
+        preferred_name="新昵称",
+    )
+
+    assert updated is True
+    assert profile_storage.last_write is not None
+    written = profile_storage.last_write[2]
+    assert "技术判断扎实、沟通直接" in written
+    assert "- 喜欢 Python" in written
+    assert "把配置当信仰" in written
+    assert "name: 新昵称" in written
+    assert vector_store.last_upsert_profile is not None
+    _profile_id, document, metadata, _kwargs = vector_store.last_upsert_profile
+    assert "评价: 技术判断扎实、沟通直接" in document
+    assert "锐评: 把配置当信仰" in document
+    assert "- 喜欢 Python" in document
+    assert metadata["name"] == "新昵称"
