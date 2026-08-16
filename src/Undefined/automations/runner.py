@@ -22,7 +22,11 @@ from Undefined.automations.constants import (
 )
 from Undefined.automations.logutil import preview_text
 from Undefined.automations.match import AutomationEvent, match_condition_on_text
-from Undefined.automations.template import render_template, render_value
+from Undefined.automations.template import (
+    assign_node_output,
+    render_template,
+    render_value,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -230,6 +234,7 @@ class WorkflowRunner:
                 "time": datetime.now().isoformat(timespec="seconds"),
             },
             "nodes": {},
+            "vars": {},
             "index": 0,
             "item": "",
         }
@@ -410,10 +415,7 @@ class WorkflowRunner:
                 node_id, output, case = item
                 completed[node_id] = output
                 last_output = output
-                nodes_vars = variables.setdefault("nodes", {})
-                if isinstance(nodes_vars, dict):
-                    nodes_vars[node_id] = {"output": output}
-                variables[node_id] = output
+                assign_node_output(variables, nodes.get(node_id) or {}, output)
                 activate_from(node_id, case)
         return last_output
 

@@ -9,6 +9,7 @@
 - 群聊 / QQ 私聊 / 微信 / 拍一拍 / 入退群在 pipeline 之后、对应 AI loop 之前 `await` 工作流；成功或失败且 `consume_ai_loop` 时拦截该入口 AI。
 - 新增 `automation.*` 工具、`GET /api/v1/automations/catalog` 与 CRUD；WebUI 自动化页改为 Dify 式画布（节点盘、点选连线、类型化检查器），列表与画布上下两屏滚动切换，布局写入任务 `ui`；`POST /api/v1/automations/validate` 返回全部 issues。配置节 `[automations]`。
 - 空白 LLM 白名单改为搜索点选；画布连线改为先点出点再点目标，能连则连上。
+- 工具与三种 LLM 节点支持把输出存成指定名称的变量（`store_output` / `output_var`），下游用 `{{名称}}` 引用；可关闭存储。
 
 ---
 

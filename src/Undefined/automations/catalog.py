@@ -24,7 +24,7 @@ NODE_TYPE_META: tuple[dict[str, str], ...] = (
         "id": "tool",
         "group": "action",
         "label": "Tool",
-        "description": "Call a registered tool or agent name with interpolated args.",
+        "description": "Call a registered tool or agent name with interpolated args. Output can be stored as a named variable.",
     },
     {
         "id": "template",
@@ -36,19 +36,19 @@ NODE_TYPE_META: tuple[dict[str, str], ...] = (
         "id": "llm.blank",
         "group": "llm",
         "label": "Blank LLM",
-        "description": "Agent model with a whitelist of tools, toolsets, and agents.",
+        "description": "Agent model with a whitelist of tools, toolsets, and agents. Output can be stored as a named variable.",
     },
     {
         "id": "llm.agent",
         "group": "llm",
         "label": "Agent",
-        "description": "Run a registered Agent.",
+        "description": "Run a registered Agent. Output can be stored as a named variable.",
     },
     {
         "id": "llm.main",
         "group": "llm",
         "label": "Main AI",
-        "description": "Call the main AIClient.ask() loop.",
+        "description": "Call the main AIClient.ask() loop. Output can be stored as a named variable.",
     },
     {
         "id": "branch.if",

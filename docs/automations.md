@@ -61,15 +61,15 @@
 
 ## 节点
 
-多上游 AND join；无相互依赖的分支并行。输出 `{{id}}`。禁止 loop 外回边。循环硬顶 **25** 次。
+多上游 AND join；无相互依赖的分支并行。默认可用 `{{节点id}}` 引用上游输出。工具与三种 LLM 节点还可设置 `store_output` + `output_var`：勾选存储后，下游用 `{{名称}}`（或 `{{vars.名称}}`）读取；关掉则不写入变量。未填名称时仍按节点 ID 存储。禁止占用 `trigger` / `nodes` / `index` / `item` / `vars` / `start` / `else`。循环硬顶 **25** 次。禁止 loop 外回边。
 
 | 类型 | 作用 |
 |---|---|
-| `tool` | 工具或主注册表 agent 名；args 做 `{{ }}` |
+| `tool` | 工具或主注册表 agent 名；args 做 `{{ }}`；可命名存储输出 |
 | `template` | 无模型整形 |
-| `llm.blank` | agent 模型 + 白名单 tools/toolsets/agents |
-| `llm.agent` | 现成 Agent |
-| `llm.main` | `AIClient.ask()`，原自我督办 |
+| `llm.blank` | agent 模型 + 白名单 tools/toolsets/agents；可命名存储输出 |
+| `llm.agent` | 现成 Agent；可命名存储输出 |
+| `llm.main` | `AIClient.ask()`，原自我督办；可命名存储输出 |
 | `branch.if` | if / else if + 必填 else 出边 |
 | `branch.llm` | 选项做成强制 tool `choose_<id>`，用选中 tool 走出边 |
 | `loop.times` / `loop.each` | 体为子节点 id 列表；`{{index}}` / `{{item}}` |
@@ -84,4 +84,4 @@ LLM/template 默认不发群，`emit: true` 才发。图级 `auto_send_final` �
 
 `automation.list` / `get` / `create` / `update` / `delete` / `set_enabled`。短命令能表达 channels、group_ids、user_ids、mentions、text、pass_text。
 
-WebUI「自动化」页把列表与画布做成上下两屏：上面是总数与选择，滚下去是节点盘 / 画布 / 检查器。点选卡片会滚到画布，不把列表藏掉。连线是先点出点再点目标；空白 LLM 白名单用搜索点选。图数据仍读写 `nodes` / `edges`，布局存在任务顶层 `ui`。
+WebUI「自动化」页把列表与画布做成上下两屏：上面是总数与选择，滚下去是节点盘 / 画布 / 检查器。点选卡片会滚到画布，不把列表藏掉。连线是先点出点再点目标；空白 LLM 白名单用搜索点选。工具与 LLM 检查器可勾选存储输出并填写变量名。图数据仍读写 `nodes` / `edges`，布局存在任务顶层 `ui`。

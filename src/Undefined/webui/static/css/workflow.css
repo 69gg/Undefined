@@ -718,6 +718,14 @@
   margin-bottom: 12px;
 }
 
+.wf-output-store .muted-sm {
+  margin: 6px 0 0;
+}
+
+.wf-output-store .form-control:disabled {
+  opacity: 0.55;
+}
+
 .wf-kv-row,
 .wf-case-row {
   display: grid;

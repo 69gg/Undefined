@@ -56,7 +56,15 @@
     function defaultNode(type) {
         const id = `${String(type).replace(/[^a-z]/g, "_")}_${Math.random().toString(16).slice(2, 6)}`;
         if (type === "tool") {
-            return { id, type, tool_name: "", args: {}, emit: false };
+            return {
+                id,
+                type,
+                tool_name: "",
+                args: {},
+                emit: false,
+                store_output: true,
+                output_var: "",
+            };
         }
         if (type === "template") {
             return { id, type, template: "{{trigger.text}}", emit: true };
@@ -71,6 +79,8 @@
                 toolsets: [],
                 agents: [],
                 emit: false,
+                store_output: true,
+                output_var: "",
             };
         }
         if (type === "llm.agent") {
@@ -80,10 +90,19 @@
                 agent: "",
                 input: "{{trigger.text}}",
                 emit: false,
+                store_output: true,
+                output_var: "",
             };
         }
         if (type === "llm.main") {
-            return { id, type, prompt: "{{trigger.text}}", emit: true };
+            return {
+                id,
+                type,
+                prompt: "{{trigger.text}}",
+                emit: true,
+                store_output: true,
+                output_var: "",
+            };
         }
         if (type === "branch.if") {
             return {
@@ -189,16 +208,27 @@
         return NODE_MIN_HEIGHT + Math.max(0, extras - 1) * 18;
     }
 
+    function outputVarLabel(node) {
+        if (!node || node.store_output === false) return "";
+        const name = String(node.output_var || "").trim();
+        return name ? `{{${name}}}` : "";
+    }
+
     function nodeSummary(node) {
         if (!node) return "";
+        const stored = outputVarLabel(node);
+        const suffix = stored ? ` · ${stored}` : "";
         if (node.type === "start") return String(node.kind || "message");
-        if (node.type === "tool") return String(node.tool_name || "");
+        if (node.type === "tool")
+            return `${String(node.tool_name || "")}${suffix}`.trim();
         if (node.type === "template")
             return String(node.template || "").slice(0, 48);
-        if (node.type === "llm.agent") return String(node.agent || "");
+        if (node.type === "llm.agent")
+            return `${String(node.agent || "")}${suffix}`.trim();
         if (node.type === "llm.main")
-            return String(node.prompt || "").slice(0, 48);
+            return stored || String(node.prompt || "").slice(0, 48);
         if (node.type === "llm.blank") {
+            if (stored) return stored;
             const allow = [
                 ...(node.tools || []),
                 ...(node.toolsets || []),

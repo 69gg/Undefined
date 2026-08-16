@@ -6,9 +6,60 @@ import logging
 import re
 from typing import Any
 
+from Undefined.automations.constants import (
+    RESERVED_VARIABLE_NAMES,
+    STORE_OUTPUT_NODE_TYPES,
+)
+
 logger = logging.getLogger(__name__)
 
 _PLACEHOLDER_RE = re.compile(r"\{\{\s*([^{}]+?)\s*\}\}")
+OUTPUT_VAR_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def output_var_name(node: dict[str, Any]) -> str:
+    """Return the configured alias, or an empty string when unset."""
+    return str(node.get("output_var") or "").strip()
+
+
+def should_store_output(node: dict[str, Any]) -> bool:
+    """Whether this node's text output is exposed as a template variable."""
+    node_type = str(node.get("type") or "").strip()
+    if node_type not in STORE_OUTPUT_NODE_TYPES:
+        return True
+    return bool(node.get("store_output", True))
+
+
+def assign_node_output(
+    variables: dict[str, Any],
+    node: dict[str, Any],
+    output: str,
+) -> None:
+    """Write a finished node's output into the interpolation context."""
+    if not should_store_output(node):
+        return
+    node_id = str(node.get("id") or "").strip()
+    if node_id:
+        nodes_vars = variables.setdefault("nodes", {})
+        if isinstance(nodes_vars, dict):
+            nodes_vars[node_id] = {"output": output}
+        variables[node_id] = output
+    custom = output_var_name(node)
+    if not custom or custom == node_id:
+        return
+    variables[custom] = output
+    vars_ns = variables.setdefault("vars", {})
+    if isinstance(vars_ns, dict):
+        vars_ns[custom] = output
+
+
+def is_valid_output_var(name: str) -> bool:
+    """True when ``name`` is a legal, non-reserved variable identifier."""
+    value = name.strip()
+    return (
+        bool(OUTPUT_VAR_PATTERN.fullmatch(value))
+        and value not in RESERVED_VARIABLE_NAMES
+    )
 
 
 def _lookup(path: str, variables: dict[str, Any]) -> Any:

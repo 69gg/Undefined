@@ -271,6 +271,7 @@ def _runner(
     execute_tool: Any = None,
     submit_llm: Any = None,
     send_message: Any = None,
+    ask_main: Any = None,
 ) -> WorkflowRunner:
     async def _send(text: str) -> None:
         if send_message is not None:
@@ -278,7 +279,7 @@ def _runner(
 
     return WorkflowRunner(
         execute_tool=execute_tool or AsyncMock(return_value=""),
-        ask_main=AsyncMock(return_value=""),
+        ask_main=ask_main or AsyncMock(return_value=""),
         submit_llm=submit_llm or AsyncMock(return_value={"choices": []}),
         send_message=_send if send_message is None else send_message,
         get_openai_tools=lambda: [],
@@ -496,6 +497,249 @@ async def test_legacy_tool_error_continues_serial_chain() -> None:
         mentions_all=(),
     )
     assert called == ["first", "second"]
+
+
+def test_assign_node_output_named_and_skipped() -> None:
+    from Undefined.automations.template import (
+        assign_node_output,
+        is_valid_output_var,
+        render_template,
+    )
+
+    stored: dict[str, Any] = {"nodes": {}, "vars": {}}
+    assign_node_output(
+        stored,
+        {
+            "id": "fetch",
+            "type": "tool",
+            "store_output": True,
+            "output_var": "hotspots",
+        },
+        "list-a",
+    )
+    assert stored["fetch"] == "list-a"
+    assert stored["hotspots"] == "list-a"
+    assert stored["vars"]["hotspots"] == "list-a"
+    assert stored["nodes"]["fetch"]["output"] == "list-a"
+    assert render_template("got {{hotspots}} / {{vars.hotspots}}", stored) == (
+        "got list-a / list-a"
+    )
+    assert is_valid_output_var("hotspots")
+    assert not is_valid_output_var("trigger")
+    assert not is_valid_output_var("1hot")
+
+    skipped: dict[str, Any] = {"nodes": {}, "vars": {}}
+    assign_node_output(
+        skipped,
+        {
+            "id": "fetch",
+            "type": "tool",
+            "store_output": False,
+            "output_var": "hotspots",
+        },
+        "secret",
+    )
+    assert "fetch" not in skipped
+    assert "hotspots" not in skipped
+    assert render_template("got {{hotspots}}", skipped) == "got {{hotspots}}"
+
+
+@pytest.mark.asyncio
+async def test_runner_stores_tool_and_llm_output_as_named_variables() -> None:
+    sent: list[str] = []
+
+    async def send_message(text: str) -> None:
+        sent.append(text)
+
+    async def execute_tool(
+        name: str, args: dict[str, Any], context: dict[str, Any]
+    ) -> str:
+        _ = name, args, context
+        return "hot-list"
+
+    ask_main = AsyncMock(return_value="summary")
+    runner = _runner(
+        execute_tool=execute_tool,
+        send_message=send_message,
+        ask_main=ask_main,
+    )
+    task = {
+        "auto_send_final": False,
+        "nodes": [
+            {
+                "id": "start",
+                "type": "start",
+                "kind": "message",
+                "channels": ["group"],
+            },
+            {
+                "id": "fetch",
+                "type": "tool",
+                "tool_name": "web",
+                "args": {},
+                "store_output": True,
+                "output_var": "hotspots",
+            },
+            {
+                "id": "draft",
+                "type": "llm.main",
+                "prompt": "wrap {{hotspots}}",
+                "store_output": True,
+                "output_var": "summary",
+            },
+            {
+                "id": "say",
+                "type": "template",
+                "template": "{{summary}} :: {{fetch}}",
+                "emit": True,
+            },
+        ],
+        "edges": [
+            {"from": "start", "to": "fetch"},
+            {"from": "fetch", "to": "draft"},
+            {"from": "draft", "to": "say"},
+        ],
+    }
+    await runner.run(
+        task,
+        event=AutomationEvent(kind="message", channel="group", text="go"),
+        pass_text="go",
+        consume_mentions=(),
+        consume_stripped="go",
+        mentions_all=(),
+    )
+    assert sent == ["summary :: hot-list"]
+    ask_main.assert_awaited_once()
+    assert ask_main.await_args is not None
+    assert ask_main.await_args.args[0] == "wrap hot-list"
+
+
+@pytest.mark.asyncio
+async def test_runner_skips_variable_when_store_output_false() -> None:
+    sent: list[str] = []
+
+    async def send_message(text: str) -> None:
+        sent.append(text)
+
+    async def execute_tool(
+        name: str, args: dict[str, Any], context: dict[str, Any]
+    ) -> str:
+        _ = name, args, context
+        return "secret"
+
+    runner = _runner(execute_tool=execute_tool, send_message=send_message)
+    task = {
+        "auto_send_final": False,
+        "nodes": [
+            {
+                "id": "start",
+                "type": "start",
+                "kind": "message",
+                "channels": ["group"],
+            },
+            {
+                "id": "fetch",
+                "type": "tool",
+                "tool_name": "web",
+                "args": {},
+                "store_output": False,
+                "output_var": "hotspots",
+            },
+            {
+                "id": "say",
+                "type": "template",
+                "template": "got {{hotspots}} {{fetch}}",
+                "emit": True,
+            },
+        ],
+        "edges": [
+            {"from": "start", "to": "fetch"},
+            {"from": "fetch", "to": "say"},
+        ],
+    }
+    await runner.run(
+        task,
+        event=AutomationEvent(kind="message", channel="group", text="go"),
+        pass_text="go",
+        consume_mentions=(),
+        consume_stripped="go",
+        mentions_all=(),
+    )
+    assert sent == ["got {{hotspots}} {{fetch}}"]
+
+
+def test_validate_output_var_rules() -> None:
+    reserved = collect_automation_issues(
+        {
+            "nodes": [
+                {
+                    "id": "start",
+                    "type": "start",
+                    "kind": "cron",
+                    "cron": "* * * * *",
+                },
+                {
+                    "id": "fetch",
+                    "type": "tool",
+                    "tool_name": "web",
+                    "output_var": "trigger",
+                },
+            ],
+            "edges": [{"from": "start", "to": "fetch"}],
+        }
+    )
+    assert any("reserved" in item["message"] for item in reserved)
+
+    invalid = collect_automation_issues(
+        {
+            "nodes": [
+                {
+                    "id": "start",
+                    "type": "start",
+                    "kind": "cron",
+                    "cron": "* * * * *",
+                },
+                {
+                    "id": "fetch",
+                    "type": "tool",
+                    "tool_name": "web",
+                    "output_var": "1hot",
+                },
+            ],
+            "edges": [{"from": "start", "to": "fetch"}],
+        }
+    )
+    assert any("letter or underscore" in item["message"] for item in invalid)
+
+    duplicate = collect_automation_issues(
+        {
+            "nodes": [
+                {
+                    "id": "start",
+                    "type": "start",
+                    "kind": "cron",
+                    "cron": "* * * * *",
+                },
+                {
+                    "id": "fetch",
+                    "type": "tool",
+                    "tool_name": "web",
+                    "output_var": "hotspots",
+                },
+                {
+                    "id": "other",
+                    "type": "llm.main",
+                    "prompt": "x",
+                    "output_var": "hotspots",
+                },
+            ],
+            "edges": [
+                {"from": "start", "to": "fetch"},
+                {"from": "fetch", "to": "other"},
+            ],
+        }
+    )
+    assert any("already used" in item["message"] for item in duplicate)
 
 
 def test_serialize_migrated_task_keeps_crontab_mode() -> None:

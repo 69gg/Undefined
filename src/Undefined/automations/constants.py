@@ -44,6 +44,10 @@ NODE_TYPES = frozenset(
         "loop.each",
     }
 )
+STORE_OUTPUT_NODE_TYPES = frozenset({"tool", "llm.blank", "llm.agent", "llm.main"})
+RESERVED_VARIABLE_NAMES = frozenset(
+    {"trigger", "nodes", "index", "item", "vars", "start", "else"}
+)
 
 TEXT_MATCH_MODES = frozenset({"contains", "keyword", "regex"})
 PASS_TEXT_MODES = frozenset({"original", "stripped"})

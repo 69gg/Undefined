@@ -11,9 +11,12 @@ from Undefined.automations.constants import (
     EVENT_KINDS,
     LOOP_MAX_ITERATIONS,
     NODE_TYPES,
+    RESERVED_VARIABLE_NAMES,
     START_KINDS,
     START_NODE_ID,
+    STORE_OUTPUT_NODE_TYPES,
 )
+from Undefined.automations.template import OUTPUT_VAR_PATTERN, output_var_name
 
 
 class AutomationValidationError(ValueError):
@@ -210,6 +213,43 @@ def collect_automation_issues(
             cases = node.get("cases")
             if not isinstance(cases, list) or not cases:
                 issues.append(_issue(f"{prefix}.cases", "branch.if requires cases"))
+        if node_type in STORE_OUTPUT_NODE_TYPES:
+            custom = output_var_name(node)
+            if custom:
+                if not OUTPUT_VAR_PATTERN.fullmatch(custom):
+                    issues.append(
+                        _issue(
+                            f"{prefix}.output_var",
+                            "output_var must start with a letter or underscore",
+                        )
+                    )
+                elif custom in RESERVED_VARIABLE_NAMES:
+                    issues.append(
+                        _issue(
+                            f"{prefix}.output_var",
+                            f"output_var '{custom}' is reserved",
+                        )
+                    )
+
+    claimed: dict[str, str] = {node_id: node_id for node_id in nodes}
+    for node_id, node in nodes.items():
+        if str(node.get("type") or "") not in STORE_OUTPUT_NODE_TYPES:
+            continue
+        if not bool(node.get("store_output", True)):
+            continue
+        custom = output_var_name(node)
+        if not custom or custom == node_id:
+            continue
+        owner = claimed.get(custom)
+        if owner and owner != node_id:
+            issues.append(
+                _issue(
+                    f"nodes.{node_id}.output_var",
+                    f"variable '{custom}' already used by node {owner}",
+                )
+            )
+            continue
+        claimed[custom] = node_id
 
     edges_raw = task.get("edges")
     if not isinstance(edges_raw, list):

@@ -28,6 +28,25 @@
         return `<label class="schedule-mode-option"><input type="checkbox" data-field="${escapeHtml(name)}"${checked ? " checked" : ""} /> <span>${escapeHtml(t(labelKey))}</span></label>`;
     }
 
+    function actionOutputMarkup(node) {
+        const store = node.store_output !== false;
+        return `
+            <div class="wf-chip-row">
+                ${checkbox("emit", Boolean(node.emit), "schedules.emit")}
+                ${checkbox("store_output", store, "schedules.store_output")}
+            </div>
+            <div class="wf-output-store">
+                ${field(
+                    "schedules.output_var",
+                    `${input(
+                        "output_var",
+                        node.output_var || "",
+                        `placeholder="${escapeHtml(t("schedules.output_var_placeholder"))}"${store ? "" : " disabled"}`,
+                    )}<p class="muted-sm">${escapeHtml(t("schedules.output_var_hint"))}</p>`,
+                )}
+            </div>`;
+    }
+
     function nameList(items) {
         return (items || [])
             .map((item) => (typeof item === "string" ? item : item.name || ""))
@@ -278,7 +297,7 @@
                         .join("")}</div>
                     <button type="button" class="btn ghost" data-kv-add="1">${escapeHtml(t("schedules.add_arg"))}</button>`,
                 )}
-                <div class="wf-chip-row">${checkbox("emit", Boolean(node.emit), "schedules.emit")}</div>`;
+                ${actionOutputMarkup(node)}`;
         }
         if (node.type === "template") {
             return `${field("schedules.template", textarea("template", node.template || ""))}
@@ -291,16 +310,16 @@
                 ${field("schedules.tools", pickMarkup("tools", node.tools || [], tools))}
                 ${field("schedules.toolsets", pickMarkup("toolsets", node.toolsets || [], toolsets))}
                 ${field("schedules.agents", pickMarkup("agents", node.agents || [], agents))}
-                <div class="wf-chip-row">${checkbox("emit", Boolean(node.emit), "schedules.emit")}</div>`;
+                ${actionOutputMarkup(node)}`;
         }
         if (node.type === "llm.agent") {
             return `${field("schedules.agent", optionSelect("agent", node.agent || "", agents, true))}
                 ${field("schedules.input", input("input", node.input || "", `data-var-target="1"`))}
-                <div class="wf-chip-row">${checkbox("emit", Boolean(node.emit), "schedules.emit")}</div>`;
+                ${actionOutputMarkup(node)}`;
         }
         if (node.type === "llm.main") {
             return `${field("schedules.prompt", textarea("prompt", node.prompt || ""))}
-                <div class="wf-chip-row">${checkbox("emit", Boolean(node.emit), "schedules.emit")}</div>`;
+                ${actionOutputMarkup(node)}`;
         }
         if (node.type === "branch.if") {
             const cases = Array.isArray(node.cases) ? node.cases : [];
@@ -452,6 +471,10 @@
         (task.nodes || []).forEach((node) => {
             if (node.id && node.id !== nodeId && node.id !== "start") {
                 items.push(`{{${node.id}}}`);
+                const named = String(node.output_var || "").trim();
+                if (named && named !== node.id && node.store_output !== false) {
+                    items.push(`{{${named}}}`);
+                }
             }
         });
         return items;
@@ -554,6 +577,9 @@
             root.querySelectorAll("[data-pick]").forEach((el) => {
                 patch[el.getAttribute("data-pick")] = pickNames(el);
             });
+            if (typeof patch.output_var === "string") {
+                patch.output_var = patch.output_var.trim();
+            }
             if (node.type === "tool") patch.args = readKv(root);
             if (node.type === "branch.if") {
                 patch.cases = Array.from(
@@ -584,6 +610,15 @@
         root.addEventListener("change", (event) => {
             if (event.target && event.target.closest("[data-pick-filter]"))
                 return;
+            if (
+                event.target &&
+                event.target.getAttribute("data-field") === "store_output"
+            ) {
+                const nameInput = root.querySelector(
+                    '[data-field="output_var"]',
+                );
+                if (nameInput) nameInput.disabled = !event.target.checked;
+            }
             apply();
             if (
                 event.target &&
