@@ -25,7 +25,7 @@
 | 入退群 | OneBot `group_increase` / `group_decrease`，无 AI 可拦 |
 | 时间 | APScheduler |
 
-事件用当前会话上下文（`request_type` / `group_id` / `user_id` / `sender_id` / `address` / `channel` 写入工具 context）；时间触发才用 snapshot。出站走 `MessageSender`，受 `[access]` 约束。`send_message` 只填 `message` 时按该会话推断目标。
+事件用当前会话上下文（`request_type` / `group_id` / `user_id` / `sender_id` / `address` / `channel` 写入工具 context）；时间触发才用 snapshot。工具节点同时注入主 AI 持有的 `cognitive_service` / `knowledge_manager` / `meme_service` / `attachment_registry`。出站走 `MessageSender`，受 `[access]` 约束。`send_message` 只填 `message` 时按该会话推断目标。
 
 ## Start：场景多选 + @ 专项
 

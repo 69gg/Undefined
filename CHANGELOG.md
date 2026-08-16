@@ -11,6 +11,7 @@
 - 空白 LLM 白名单改为搜索点选；画布连线改为先点出点再点目标，能连则连上。
 - 工具与三种 LLM 节点支持把输出存成指定名称的变量（`store_output` / `output_var`），下游用 `{{名称}}` 引用；可关闭存储。
 - 无相互依赖的分支改为依赖就绪即并行，不再整波 `gather` 等齐；多上游仍 AND join。消息触发时工具 / 主 AI 使用当前会话 context，`send_message` 可只填 `message`。
+- 自动化工具节点补齐 `cognitive_service` / `knowledge_manager` / `meme_service` / `attachment_registry`，避免已启用的认知记忆被误报「未启用」。
 
 ---
 

@@ -98,6 +98,66 @@ def test_resolve_live_event_address_prefers_event_session() -> None:
 
 
 @pytest.mark.asyncio
+async def test_execute_tool_injects_cognitive_service() -> None:
+    captured: list[Any] = []
+    cognitive = SimpleNamespace(enabled=True)
+
+    async def execute_tool(
+        name: str, args: dict[str, Any], context: dict[str, Any]
+    ) -> str:
+        _ = name, args
+        captured.append(context.get("cognitive_service"))
+        return "ok"
+
+    ai = SimpleNamespace(
+        tool_manager=SimpleNamespace(execute_tool=execute_tool),
+        _cognitive_service=cognitive,
+        memory_storage=SimpleNamespace(),
+        runtime_config=SimpleNamespace(),
+    )
+    service = _make_service(ai=ai)
+    try:
+        result = await service._execute_tool("cognitive.get_profile", {}, {})
+    finally:
+        service.shutdown()
+
+    assert result == "ok"
+    assert captured == [cognitive]
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_keeps_explicit_cognitive_service() -> None:
+    captured: list[Any] = []
+    injected = SimpleNamespace(enabled=True, source="context")
+    owned = SimpleNamespace(enabled=True, source="ai")
+
+    async def execute_tool(
+        name: str, args: dict[str, Any], context: dict[str, Any]
+    ) -> str:
+        _ = name, args
+        captured.append(context.get("cognitive_service"))
+        return "ok"
+
+    ai = SimpleNamespace(
+        tool_manager=SimpleNamespace(execute_tool=execute_tool),
+        _cognitive_service=owned,
+        memory_storage=SimpleNamespace(),
+        runtime_config=SimpleNamespace(),
+    )
+    service = _make_service(ai=ai)
+    try:
+        await service._execute_tool(
+            "cognitive.get_profile",
+            {},
+            {"cognitive_service": injected},
+        )
+    finally:
+        service.shutdown()
+
+    assert captured == [injected]
+
+
+@pytest.mark.asyncio
 async def test_event_workflow_injects_live_session_into_tool_context(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

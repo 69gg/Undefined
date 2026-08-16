@@ -54,6 +54,13 @@ logger = logging.getLogger(__name__)
 
 CONTEXT_DIR = Path("data/scheduler_context")
 
+_AI_SERVICE_CONTEXT_ATTRS: tuple[tuple[str, str], ...] = (
+    ("cognitive_service", "_cognitive_service"),
+    ("knowledge_manager", "_knowledge_manager"),
+    ("meme_service", "_meme_service"),
+    ("attachment_registry", "attachment_registry"),
+)
+
 
 class AutomationService:
     """Load, persist, match and run automation graphs."""
@@ -518,6 +525,15 @@ class AutomationService:
             return
         await io.delete_file(CONTEXT_DIR / f"{context_id}.json")
 
+    def _inject_ai_services(self, tool_context: dict[str, Any]) -> None:
+        """Fill AI-owned services that tool handlers read from context."""
+        for context_key, attr in _AI_SERVICE_CONTEXT_ATTRS:
+            if tool_context.get(context_key) is not None:
+                continue
+            value = getattr(self.ai, attr, None)
+            if value is not None:
+                tool_context[context_key] = value
+
     async def _execute_tool(
         self,
         tool_name: str,
@@ -528,6 +544,7 @@ class AutomationService:
         if tool_name == SELF_CALL_TOOL_NAME:
             return await self._execute_self_call(tool_args, tool_context)
 
+        self._inject_ai_services(tool_context)
         task_id = tool_context.get("scheduled_task_id") or ""
         logger.info(
             "[自动化] 调用工具: id=%s tool=%s arg_keys=%s",
@@ -919,6 +936,10 @@ class AutomationService:
                 send_like_callback = send_like_cb
                 send_private_message_callback = send_private_cb
                 send_image_callback = send_img_cb
+                cognitive_service = getattr(self.ai, "_cognitive_service", None)
+                knowledge_manager = getattr(self.ai, "_knowledge_manager", None)
+                meme_service = getattr(self.ai, "_meme_service", None)
+                attachment_registry = getattr(self.ai, "attachment_registry", None)
                 resource_vars = dict(globals())
                 resource_vars.update(locals())
                 resources = collect_context_resources(resource_vars)
@@ -966,6 +987,11 @@ class AutomationService:
                 tool_context["scheduled_task_id"] = task_id
                 tool_context["scheduled_task_name"] = task_info.get("task_name", "")
                 tool_context.update(session_identity)
+                self._inject_ai_services(tool_context)
+                for context_key, _attr in _AI_SERVICE_CONTEXT_ATTRS:
+                    value = tool_context.get(context_key)
+                    if value is not None:
+                        ctx.set_resource(context_key, value)
 
                 resolved_event = event
                 if resolved_event is None:
