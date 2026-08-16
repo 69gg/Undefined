@@ -59,10 +59,8 @@ function syncMainContentLayout() {
     if (appContent && state.authenticated) {
         if (state.view !== "app") {
             appContent.style.display = "none";
-        } else if (state.tab === "chat") {
+        } else if (state.tab === "chat" || state.tab === "schedules") {
             appContent.style.display = "grid";
-        } else if (state.tab === "schedules") {
-            appContent.style.display = "flex";
         } else {
             appContent.style.display = "block";
         }

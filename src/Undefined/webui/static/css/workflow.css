@@ -7,21 +7,20 @@
   min-height: 0;
   max-width: none;
   overflow: hidden;
-  padding: 12px 18px 16px;
+  padding-top: 0;
+  padding-bottom: max(16px, env(safe-area-inset-bottom));
 }
 
 .main-content.workflow-layout #appContent {
   flex: 1 1 auto;
   min-height: 0;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: auto;
 }
 
 .main-content.workflow-layout #appContent > .mobile-shell {
   min-height: 0;
-  flex: 1 1 auto;
-  display: flex;
-  flex-direction: column;
 }
 
 .main-content.workflow-layout .mobile-topbar {
@@ -33,7 +32,8 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  flex: 1 1 auto;
+  grid-row: 2;
+  height: 100%;
   min-height: 0;
   overflow: hidden;
 }
@@ -44,8 +44,8 @@
   top: auto;
   z-index: 20;
   align-items: flex-end;
-  margin: -12px -18px 12px;
-  padding: 12px 18px;
+  margin: 0 -60px 16px;
+  padding: 14px 60px;
   background: var(--bg-app);
   border-bottom: 1px solid var(--border-color);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);

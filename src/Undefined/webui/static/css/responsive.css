@@ -19,7 +19,12 @@
   }
   .main-content.workflow-layout {
     height: 100dvh;
+    padding-top: 0;
     padding-bottom: max(14px, env(safe-area-inset-bottom));
+  }
+  .main-content.workflow-layout #tab-schedules.active > .header.sticky {
+    margin: 0 -30px 16px;
+    padding: 14px 30px;
   }
 }
 
@@ -79,11 +84,11 @@
     padding: 14px 16px max(12px, env(safe-area-inset-bottom));
   }
   .main-content.workflow-layout #tab-schedules.active > .header.sticky {
-    margin: -14px -16px 12px;
-    padding: 12px 16px;
+    margin: 0 0 12px;
+    padding: 0;
     position: relative;
-    border-bottom: 1px solid var(--border-color);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
+    border-bottom: 0;
+    box-shadow: none;
   }
   .main-content.chat-layout #tab-chat > .header {
     margin-bottom: 8px;
