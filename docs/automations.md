@@ -84,4 +84,4 @@ LLM/template 默认不发群，`emit: true` 才发。图级 `auto_send_final` �
 
 `automation.list` / `get` / `create` / `update` / `delete` / `set_enabled`。短命令能表达 channels、group_ids、user_ids、mentions、text、pass_text。
 
-WebUI「自动化」页把列表与画布做成上下两屏：上面是总数与选择，滚下去是节点盘 / 画布 / 检查器。点选卡片会滚到画布，不把列表藏掉。图数据仍读写 `nodes` / `edges`，布局存在任务顶层 `ui`。
+WebUI「自动化」页把列表与画布做成上下两屏：上面是总数与选择，滚下去是节点盘 / 画布 / 检查器。点选卡片会滚到画布，不把列表藏掉。连线是先点出点再点目标；空白 LLM 白名单用搜索点选。图数据仍读写 `nodes` / `edges`，布局存在任务顶层 `ui`。

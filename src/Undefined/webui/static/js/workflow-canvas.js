@@ -53,13 +53,83 @@
             <div class="wf-world">
                 <svg class="wf-edges"></svg>
                 <div class="wf-nodes"></div>
-            </div>`;
+            </div>
+            <div class="wf-connect-hint" hidden></div>`;
         const world = root.querySelector(".wf-world");
         const svg = root.querySelector(".wf-edges");
         const nodesLayer = root.querySelector(".wf-nodes");
+        const hint = root.querySelector(".wf-connect-hint");
 
         function uiState() {
             return graph.getState();
+        }
+
+        function clearGhost() {
+            const ghost = svg.querySelector("[data-ghost]");
+            if (ghost) ghost.remove();
+        }
+
+        function paintConnect() {
+            root.classList.toggle("is-connecting", Boolean(connect));
+            if (hint) {
+                hint.hidden = !connect;
+                hint.textContent = connect ? t("schedules.connect_next") : "";
+            }
+            nodesLayer.querySelectorAll(".wf-handle.is-out").forEach((el) => {
+                const active =
+                    connect &&
+                    el.dataset.nodeId === connect.from &&
+                    (el.dataset.handle || "") === (connect.case || "");
+                el.classList.toggle("is-active", Boolean(active));
+            });
+            const { task } = uiState();
+            nodesLayer.querySelectorAll(".wf-node").forEach((el) => {
+                const toId = el.dataset.nodeId || "";
+                let ready = false;
+                if (connect && toId && toId !== connect.from) {
+                    ready = !G.canConnect(task, connect.from, toId, {
+                        case: connect.case || "",
+                        kind: connect.kind || "",
+                    });
+                }
+                el.classList.toggle("is-target", ready);
+                el.querySelector(".wf-handle.is-in")?.classList.toggle(
+                    "is-ready",
+                    ready,
+                );
+            });
+        }
+
+        function cancelConnect() {
+            connect = null;
+            clearGhost();
+            paintConnect();
+        }
+
+        function beginConnect(fromId, handle) {
+            connect = {
+                from: fromId,
+                case: handle.id || "",
+                kind: handle.kind || "",
+            };
+            paintConnect();
+        }
+
+        function completeConnect(toId) {
+            if (!connect || !toId || toId === connect.from) return false;
+            const extra = {
+                case: connect.case || "",
+                kind: connect.kind || "",
+            };
+            const error = graph.connect(connect.from, toId, extra);
+            if (error) {
+                if (typeof showToast === "function") {
+                    showToast(error, "error", 2800);
+                }
+                return false;
+            }
+            cancelConnect();
+            return true;
         }
 
         function worldPoint(event) {
@@ -211,6 +281,13 @@
                     inbound.className = "wf-handle is-in";
                     inbound.dataset.nodeId = node.id;
                     inbound.dataset.handle = "in";
+                    inbound.addEventListener("pointerdown", (event) => {
+                        event.stopPropagation();
+                    });
+                    inbound.addEventListener("click", (event) => {
+                        event.stopPropagation();
+                        if (connect) completeConnect(node.id);
+                    });
                     el.appendChild(inbound);
                 }
                 handles.outs.forEach((handle, index) => {
@@ -229,17 +306,32 @@
                     }
                     outbound.addEventListener("pointerdown", (event) => {
                         event.stopPropagation();
-                        event.preventDefault();
-                        connect = {
-                            from: node.id,
-                            case: handle.id,
-                            kind: handle.kind || "",
-                        };
+                    });
+                    outbound.addEventListener("click", (event) => {
+                        event.stopPropagation();
+                        if (
+                            connect &&
+                            connect.from === node.id &&
+                            (connect.case || "") === (handle.id || "")
+                        ) {
+                            cancelConnect();
+                            return;
+                        }
+                        if (connect && connect.from !== node.id) {
+                            completeConnect(node.id);
+                            return;
+                        }
+                        beginConnect(node.id, handle);
                     });
                     el.appendChild(outbound);
                 });
                 el.addEventListener("pointerdown", (event) => {
                     if (event.target.closest(".wf-handle")) return;
+                    if (connect) {
+                        event.preventDefault();
+                        completeConnect(node.id);
+                        return;
+                    }
                     graph.selectNode(node.id);
                     const start = worldPoint(event);
                     drag = {
@@ -252,25 +344,7 @@
                 nodesLayer.appendChild(el);
             });
             if (typeof opts.onRender === "function") opts.onRender(uiState());
-        }
-
-        function finishConnect(event) {
-            if (!connect) return;
-            const point = worldPoint(event);
-            const target = nodeAt(point);
-            if (target) {
-                const extra = {
-                    case: connect.case || "",
-                    kind: connect.kind || "",
-                };
-                const error = graph.connect(connect.from, target.id, extra);
-                if (error && typeof showToast === "function") {
-                    showToast(error, "error", 2800);
-                }
-            }
-            connect = null;
-            const ghost = svg.querySelector("[data-ghost]");
-            if (ghost) ghost.remove();
+            paintConnect();
         }
 
         root.addEventListener("pointerdown", (event) => {
@@ -279,6 +353,10 @@
                 event.target === world ||
                 event.target === svg
             ) {
+                if (connect) {
+                    cancelConnect();
+                    return;
+                }
                 if (spaceDown || event.button === 1 || event.altKey) {
                     panDrag = {
                         x: event.clientX,
@@ -319,8 +397,9 @@
             }
             if (connect) {
                 const { task } = uiState();
-                const ui = G.ensureUi(task);
                 const from = G.nodeMap(task)[connect.from];
+                if (!from) return;
+                const ui = G.ensureUi(task);
                 const fromPos = ui.positions[from.id] || { x: 0, y: 0 };
                 const outs = handlePositions(from, fromPos).outs;
                 let origin = outs[0];
@@ -330,6 +409,7 @@
                         (connect.kind && item.kind === connect.kind),
                 );
                 if (matched) origin = matched;
+                if (!origin) return;
                 const point = worldPoint(event);
                 let ghost = svg.querySelector("[data-ghost]");
                 if (!ghost) {
@@ -338,7 +418,7 @@
                         "path",
                     );
                     ghost.setAttribute("data-ghost", "1");
-                    ghost.setAttribute("class", "wf-edge-path");
+                    ghost.setAttribute("class", "wf-edge-path is-ghost");
                     svg.appendChild(ghost);
                 }
                 ghost.setAttribute(
@@ -362,7 +442,6 @@
                 }
                 drag = null;
             }
-            finishConnect(event);
         });
         root.addEventListener(
             "wheel",
@@ -395,6 +474,10 @@
         });
         window.addEventListener("keydown", (event) => {
             if (event.code === "Space") spaceDown = true;
+            if (event.key === "Escape" && connect) {
+                event.preventDefault();
+                cancelConnect();
+            }
         });
         window.addEventListener("keyup", (event) => {
             if (event.code === "Space") spaceDown = false;

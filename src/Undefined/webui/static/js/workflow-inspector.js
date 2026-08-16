@@ -135,6 +135,124 @@
         return select(name, value || "", options);
     }
 
+    function pickNames(box) {
+        if (!box) return [];
+        return Array.from(box.querySelectorAll("[data-pick-remove]"))
+            .map((el) => el.getAttribute("data-pick-remove") || "")
+            .filter(Boolean);
+    }
+
+    function catalogNames(box) {
+        try {
+            return JSON.parse(
+                decodeURIComponent(
+                    box.getAttribute("data-pick-options") || "%5B%5D",
+                ),
+            );
+        } catch (_error) {
+            return [];
+        }
+    }
+
+    function pickCountLabel(count) {
+        return t("schedules.pick_count").replaceAll("{count}", String(count));
+    }
+
+    function renderPickChips(box, selected) {
+        const chips = box.querySelector("[data-pick-chips]");
+        if (chips) {
+            chips.innerHTML = selected.length
+                ? selected
+                      .map(
+                          (name) =>
+                              `<button type="button" class="wf-pick-chip" data-pick-remove="${escapeHtml(name)}" title="${escapeHtml(name)}">${escapeHtml(name)} <span aria-hidden="true">×</span></button>`,
+                      )
+                      .join("")
+                : `<span class="wf-pick-empty">${escapeHtml(t("schedules.pick_empty"))}</span>`;
+        }
+        const count = box.querySelector("[data-pick-count]");
+        if (count) count.textContent = pickCountLabel(selected.length);
+    }
+
+    function paintPickList(box) {
+        const list = box.querySelector("[data-pick-list]");
+        if (!list) return;
+        const query = String(
+            box.querySelector("[data-pick-filter]")?.value || "",
+        )
+            .trim()
+            .toLowerCase();
+        const selected = new Set(pickNames(box));
+        const visible = catalogNames(box).filter(
+            (name) => !query || String(name).toLowerCase().includes(query),
+        );
+        list.innerHTML = visible.length
+            ? visible
+                  .map(
+                      (name) => `
+                <button type="button" class="wf-pick-option${selected.has(name) ? " is-on" : ""}" data-pick-toggle="${escapeHtml(name)}">
+                    <span class="wf-pick-mark" aria-hidden="true"></span>
+                    <span class="wf-pick-name">${escapeHtml(name)}</span>
+                </button>`,
+                  )
+                  .join("")
+            : `<div class="wf-pick-none">${escapeHtml(t("schedules.pick_none"))}</div>`;
+    }
+
+    function setPickSelected(box, selected) {
+        const names = catalogNames(box);
+        selected.forEach((name) => {
+            if (!names.includes(name)) names.push(name);
+        });
+        box.setAttribute(
+            "data-pick-options",
+            encodeURIComponent(JSON.stringify(names)),
+        );
+        renderPickChips(box, selected);
+        paintPickList(box);
+    }
+
+    function togglePickValue(box, name) {
+        const value = String(name || "").trim();
+        if (!value) return;
+        const selected = pickNames(box);
+        const index = selected.indexOf(value);
+        if (index >= 0) selected.splice(index, 1);
+        else selected.push(value);
+        setPickSelected(box, selected);
+    }
+
+    function pickMarkup(field, selected, names) {
+        const chosen = Array.isArray(selected) ? selected.filter(Boolean) : [];
+        const catalog = Array.from(new Set([...(names || []), ...chosen]));
+        return `<div class="wf-pick" data-pick="${escapeHtml(field)}" data-pick-options="${encodeURIComponent(JSON.stringify(catalog))}">
+            <div class="wf-pick-toolbar">
+                <span class="wf-pick-count" data-pick-count>${escapeHtml(pickCountLabel(chosen.length))}</span>
+                <button type="button" class="btn ghost" data-pick-clear="1">${escapeHtml(t("schedules.pick_clear"))}</button>
+            </div>
+            <div class="wf-pick-chips" data-pick-chips>${
+                chosen.length
+                    ? chosen
+                          .map(
+                              (name) =>
+                                  `<button type="button" class="wf-pick-chip" data-pick-remove="${escapeHtml(name)}" title="${escapeHtml(name)}">${escapeHtml(name)} <span aria-hidden="true">×</span></button>`,
+                          )
+                          .join("")
+                    : `<span class="wf-pick-empty">${escapeHtml(t("schedules.pick_empty"))}</span>`
+            }</div>
+            <input class="form-control form-control-sm" data-pick-filter="1" type="search" placeholder="${escapeHtml(t("schedules.pick_search"))}" />
+            <div class="wf-pick-list" data-pick-list>${catalog
+                .map(
+                    (name) => `
+                <button type="button" class="wf-pick-option${chosen.includes(name) ? " is-on" : ""}" data-pick-toggle="${escapeHtml(name)}">
+                    <span class="wf-pick-mark" aria-hidden="true"></span>
+                    <span class="wf-pick-name">${escapeHtml(name)}</span>
+                </button>`,
+                )
+                .join("")}</div>
+        </div>`;
+    }
+
     function renderNode(node, catalog) {
         const tools = nameList(catalog.tools);
         const agents = nameList(catalog.agents);
@@ -170,33 +288,9 @@
             return `
                 ${field("schedules.system_prompt", textarea("system_prompt", node.system_prompt || ""))}
                 ${field("schedules.user_prompt", textarea("user_prompt", node.user_prompt || ""))}
-                ${field(
-                    "schedules.tools",
-                    `<select class="form-control" data-multi="tools" multiple>${tools
-                        .map(
-                            (name) =>
-                                `<option value="${escapeHtml(name)}"${(node.tools || []).includes(name) ? " selected" : ""}>${escapeHtml(name)}</option>`,
-                        )
-                        .join("")}</select>`,
-                )}
-                ${field(
-                    "schedules.toolsets",
-                    `<select class="form-control" data-multi="toolsets" multiple>${toolsets
-                        .map(
-                            (name) =>
-                                `<option value="${escapeHtml(name)}"${(node.toolsets || []).includes(name) ? " selected" : ""}>${escapeHtml(name)}</option>`,
-                        )
-                        .join("")}</select>`,
-                )}
-                ${field(
-                    "schedules.agents",
-                    `<select class="form-control" data-multi="agents" multiple>${agents
-                        .map(
-                            (name) =>
-                                `<option value="${escapeHtml(name)}"${(node.agents || []).includes(name) ? " selected" : ""}>${escapeHtml(name)}</option>`,
-                        )
-                        .join("")}</select>`,
-                )}
+                ${field("schedules.tools", pickMarkup("tools", node.tools || [], tools))}
+                ${field("schedules.toolsets", pickMarkup("toolsets", node.toolsets || [], toolsets))}
+                ${field("schedules.agents", pickMarkup("agents", node.agents || [], agents))}
                 <div class="wf-chip-row">${checkbox("emit", Boolean(node.emit), "schedules.emit")}</div>`;
         }
         if (node.type === "llm.agent") {
@@ -457,10 +551,8 @@
                     patch[name] = el.value === "" ? null : Number(el.value);
                 else patch[name] = el.value;
             });
-            root.querySelectorAll("[data-multi]").forEach((el) => {
-                patch[el.getAttribute("data-multi")] = Array.from(
-                    el.selectedOptions,
-                ).map((option) => option.value);
+            root.querySelectorAll("[data-pick]").forEach((el) => {
+                patch[el.getAttribute("data-pick")] = pickNames(el);
             });
             if (node.type === "tool") patch.args = readKv(root);
             if (node.type === "branch.if") {
@@ -490,6 +582,8 @@
         }
 
         root.addEventListener("change", (event) => {
+            if (event.target && event.target.closest("[data-pick-filter]"))
+                return;
             apply();
             if (
                 event.target &&
@@ -498,7 +592,50 @@
                 render();
             }
         });
+        root.addEventListener("input", (event) => {
+            const box = event.target.closest("[data-pick]");
+            if (box && event.target.closest("[data-pick-filter]")) {
+                paintPickList(box);
+            }
+        });
+        root.addEventListener("keydown", (event) => {
+            if (event.key !== "Enter") return;
+            const filter = event.target.closest("[data-pick-filter]");
+            const box = event.target.closest("[data-pick]");
+            if (!filter || !box) return;
+            event.preventDefault();
+            togglePickValue(box, filter.value);
+            filter.value = "";
+            paintPickList(box);
+            apply();
+        });
         root.addEventListener("click", (event) => {
+            const pick = event.target.closest("[data-pick]");
+            if (pick && event.target.closest("[data-pick-clear]")) {
+                setPickSelected(pick, []);
+                apply();
+                return;
+            }
+            if (pick && event.target.closest("[data-pick-remove]")) {
+                togglePickValue(
+                    pick,
+                    event.target
+                        .closest("[data-pick-remove]")
+                        .getAttribute("data-pick-remove"),
+                );
+                apply();
+                return;
+            }
+            if (pick && event.target.closest("[data-pick-toggle]")) {
+                togglePickValue(
+                    pick,
+                    event.target
+                        .closest("[data-pick-toggle]")
+                        .getAttribute("data-pick-toggle"),
+                );
+                apply();
+                return;
+            }
             if (event.target.closest("[data-remove-edge]")) {
                 graph.removeSelected();
                 return;

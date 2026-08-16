@@ -198,7 +198,14 @@
         if (node.type === "llm.agent") return String(node.agent || "");
         if (node.type === "llm.main")
             return String(node.prompt || "").slice(0, 48);
-        if (node.type === "llm.blank") return "blank";
+        if (node.type === "llm.blank") {
+            const allow = [
+                ...(node.tools || []),
+                ...(node.toolsets || []),
+                ...(node.agents || []),
+            ].filter(Boolean);
+            return allow.length ? String(allow.length) : "blank";
+        }
         if (node.type === "branch.if")
             return `${(node.cases || []).length} cases`;
         if (node.type === "branch.llm")
