@@ -119,15 +119,16 @@ AI 的置顶备忘录（自我约束、待办事项等），支持完整 CRUD：
 - **重分析 / 重索引**：对单张表情包重新触发 AI 描述生成或搜索索引更新。
 - **统计概览**：总数、启用 / 禁用数、静态 / 动态数等。
 
-### 定时任务（Schedules）
+### 自动化（Automations）
 
-管理当前运行中的调度任务：
+管理条件驱动的青春版工作流：
 
-- **任务列表**：按任务 ID、名称、crontab、目标和模式搜索；列表展示下次执行时间、发送目标和任务模式。
-- **创建 / 编辑**：支持单工具、多工具和 AI 自我督办三种模式，可调整 `cron_expression`、统一投递地址、最大执行次数和执行内容。地址支持 `qq:<QQ号>`、`group:<群号>` 和 `wechat:<逻辑QQ号>`。
-- **删除任务**：从 WebUI 直接删除不再需要的调度任务。
+- **任务列表**：按 ID、名称、触发类型、场景和上次运行状态搜索。
+- **Start 检查器**：场景多选（群 / QQ 私聊 / 微信）、群号与 QQ、@ 条款（具体 QQ 或任意）、剩余文本、`pass_text`、clock、时间类字段。
+- **编排**：添加 tool / template / blank / agent / main / if / LLM 分支 / 循环；边 JSON 与整图 JSON 排障。
+- **预设**：每日主 AI、@ + 关键词、入群欢迎、热点 DAG。
 
-WebUI 会先验证登录态，再通过后端代理访问 Runtime API 的定时任务接口；浏览器前端不会直接读取或暴露 `[api].auth_key`。
+WebUI 会先验证登录态，再通过后端代理访问 Runtime API 的 `/api/v1/automations`。浏览器前端不会直接读取或暴露 `[api].auth_key`。
 
 ### 微信接入（WeChat）
 
@@ -227,7 +228,7 @@ WebUI 和桌面端 / Android 客户端共享同一 Management API：
 2. 确保防火墙放行 `[webui].port`（默认 8787）。
 3. 桌面端 / Android 客户端输入 `http://<IP>:8787` 和密码即可连接。
 
-如果启用了 Runtime API（`[api].enabled = true`），WebUI 会自动代理 Runtime API 的功能（探针、记忆查询、定时任务、AI Chat 等），无需单独暴露 Runtime API 端口。
+如果启用了 Runtime API（`[api].enabled = true`），WebUI 会自动代理 Runtime API 的功能（探针、记忆查询、自动化、AI Chat 等），无需单独暴露 Runtime API 端口。
 
 ---
 

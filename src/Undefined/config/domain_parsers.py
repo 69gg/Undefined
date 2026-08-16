@@ -17,6 +17,7 @@ from .coercers import (
 )
 from .models import (
     APIConfig,
+    AutomationsConfig,
     CognitiveConfig,
     HISTORIAN_MIN_POLL_INTERVAL_SECONDS,
     MemeConfig,
@@ -240,6 +241,34 @@ def _parse_message_batcher_config(data: dict[str, Any]) -> MessageBatcherConfig:
         allow_cancel_after_send=_coerce_bool(
             section.get("allow_cancel_after_send"), False
         ),
+    )
+
+
+def _parse_automations_config(data: dict[str, Any]) -> AutomationsConfig:
+    section_raw = data.get("automations", {})
+    section = section_raw if isinstance(section_raw, dict) else {}
+    max_nodes = max(1, _coerce_int(section.get("max_nodes"), 30))
+    max_concurrent = max(1, _coerce_int(section.get("max_concurrent"), 3))
+    node_timeout = max(1.0, _coerce_float(section.get("node_timeout_seconds"), 120.0))
+    workflow_timeout = max(
+        node_timeout, _coerce_float(section.get("workflow_timeout_seconds"), 180.0)
+    )
+    blank_iters = max(1, _coerce_int(section.get("blank_llm_max_iterations"), 20))
+    loop_iters = _coerce_int(section.get("loop_max_iterations"), 25)
+    if loop_iters < 1:
+        loop_iters = 1
+    if loop_iters > 25:
+        loop_iters = 25
+    cooldown = max(0, _coerce_int(section.get("default_cooldown_seconds"), 60))
+    return AutomationsConfig(
+        enabled=_coerce_bool(section.get("enabled"), True),
+        max_nodes=max_nodes,
+        max_concurrent=max_concurrent,
+        node_timeout_seconds=node_timeout,
+        workflow_timeout_seconds=workflow_timeout,
+        blank_llm_max_iterations=blank_iters,
+        loop_max_iterations=loop_iters,
+        default_cooldown_seconds=cooldown,
     )
 
 

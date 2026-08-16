@@ -23,11 +23,13 @@ toolsets/
 │   ├── render_html/         # HTML 渲染
 │   ├── render_latex/        # LaTeX 渲染
 │   └── render_markdown/     # Markdown 渲染
-└── scheduler/               # 定时任务工具集
-    ├── create_schedule_task/
-    ├── delete_schedule_task/
-    ├── list_schedule_tasks/
-    └── update_schedule_task/
+└── automation/              # 条件驱动自动化
+    ├── list/
+    ├── get/
+    ├── create/
+    ├── update/
+    ├── delete/
+    └── set_enabled/
 ```
 
 ## 命名规范
@@ -36,7 +38,7 @@ toolsets/
 - **注册名称**: `{category}.{tool_name}`
 - **示例**:
   - `toolsets/render/render_html/` → 注册为 `render.render_html`
-  - `toolsets/scheduler/create_schedule_task/` → 注册为 `scheduler.create_schedule_task`
+  - `toolsets/automation/create/` → 注册为 `automation.create`
 
 ## 暴露给 Agent（callable.json）
 
@@ -152,13 +154,10 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
 - `memes.search_memes`: 支持 `keyword` / `semantic` / `hybrid` 三种检索模式
 - `memes.send_meme_by_uid`: 根据统一图片 `uid` 发送独立表情包消息
 
-### Scheduler（定时任务）
+### Automation（条件驱动自动化）
 
-- `scheduler.create_schedule_task`: 创建定时任务
-- `scheduler.delete_schedule_task`: 删除定时任务
-- `scheduler.list_schedule_tasks`: 列出所有定时任务
-- `scheduler.update_schedule_task`: 更新定时任务
-- `scheduler.create_schedule_task` / `scheduler.update_schedule_task` 支持 `self_instruction` 参数，可在未来时刻调用 AI 自己执行一条延迟指令
+- `automation.list` / `automation.get` / `automation.create` / `automation.update` / `automation.delete` / `automation.set_enabled`
+- 短命令支持 `channels`、`mentions`、`text`、`pass_text`；全图传 `nodes` + `edges`
 
 ### Messages（消息）
 

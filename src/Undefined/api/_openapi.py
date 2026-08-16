@@ -78,14 +78,17 @@ def _build_openapi_spec(ctx: RuntimeAPIContext, request: web.Request) -> dict[st
         "/api/v1/memes/{uid}/reindex": {
             "post": {"summary": "Queue a meme reindex job"}
         },
-        "/api/v1/schedules": {
-            "get": {"summary": "List scheduled tasks"},
-            "post": {"summary": "Create a scheduled task"},
+        "/api/v1/automations/catalog": {
+            "get": {"summary": "Automation node catalog and presets"}
         },
-        "/api/v1/schedules/{task_id}": {
-            "get": {"summary": "Get a scheduled task"},
-            "patch": {"summary": "Update a scheduled task"},
-            "delete": {"summary": "Delete a scheduled task"},
+        "/api/v1/automations": {
+            "get": {"summary": "List automations"},
+            "post": {"summary": "Create an automation graph or short command"},
+        },
+        "/api/v1/automations/{task_id}": {
+            "get": {"summary": "Get an automation"},
+            "patch": {"summary": "Update an automation (merge / patch_nodes)"},
+            "delete": {"summary": "Delete an automation"},
         },
         "/api/v1/cognitive/events": {
             "get": {"summary": "Search cognitive event memories"}

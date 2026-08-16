@@ -1,0 +1,14 @@
+{
+    "type": "function",
+    "function": {
+        "name": "delete",
+        "description": "删除一条自动化。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "task_id": { "type": "string" }
+            },
+            "required": ["task_id"]
+        }
+    }
+}

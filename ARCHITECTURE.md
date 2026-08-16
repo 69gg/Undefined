@@ -107,7 +107,7 @@ graph TB
             TS_GroupAnalysis["group_analysis.*<br/>• member_structure<br/>• message_mix<br/>• member_activity<br/>• activity_trend<br/>• inactive_risk<br/>• member_messages<br/>• join_statistics<br/>• new_member_activity"]
             TS_Notices["notices.*<br/>• list / get / stats"]
             TS_Render["render.*<br/>• render_html<br/>• render_latex<br/>• render_markdown"]
-            TS_Scheduler["scheduler.*<br/>• create_schedule_task<br/>• delete_schedule_task<br/>• list_schedule_tasks"]
+            TS_Automation["automation.*<br/>• list / get / create<br/>• update / delete / set_enabled"]
             TS_Cognitive["cognitive.*<br/>• search_events<br/>• get_profile<br/>• search_profiles"]
             TS_MCP["mcp.*<br/>MCP 工具集"]
             TS_Memes["memes.*<br/>• search_memes<br/>• send_meme_by_uid"]
@@ -163,13 +163,13 @@ graph TB
             CognitiveProfileStorage["ProfileStorage<br/>侧写存储<br/>[cognitive/profile_storage.py]<br/>• users/groups Markdown<br/>• 历史快照"]
             MemeSystem["MemeSystem<br/>表情包存储<br/>[memes/]<br/>• worker.py (两阶段识别)<br/>• sqlite+chromadb<br/>• blob 持久化"]
             FAQStorage["FAQStorage<br/>FAQ 存储<br/>[faq.py]<br/>• data/faq/{group_id}/"]
-            ScheduledTaskStorage["ScheduledTaskStorage<br/>定时任务存储<br/>[scheduled_task_storage.py]"]
+            AutomationStorage["AutomationStorage<br/>自动化存储<br/>[automations/storage.py]"]
             TokenUsageStorage["TokenUsageStorage<br/>Token 使用统计<br/>[token_usage_storage.py]<br/>• 自动归档<br/>• gzip 压缩<br/>• 流式可选 TTFT/TPS"]
         end
         
         subgraph IOLayer["异步 IO 层 (src/Undefined/utils/)"]
             IOUtils["IO 工具<br/>[io.py]<br/>• write_json<br/>• read_json<br/>• append_line<br/>• 文件锁 (flock/msvcrt) + 原子写入"]
-            SchedulerUtils["调度器工具<br/>[scheduler.py]<br/>• crontab 解析"]
+            SchedulerUtils["调度器门面<br/>[scheduler.py]<br/>• APScheduler 时间触发<br/>• 自动化 DAG 执行"]
             CacheUtils["缓存工具<br/>[cache.py]<br/>• 定期清理"]
             SenderUtils["Sender 工具<br/>[sender.py]"]
         end
@@ -183,7 +183,7 @@ graph TB
             Dir_Cognitive["cognitive/<br/>• chromadb/<br/>• profiles/<br/>• queues/"]
             File_Memory["memory.json<br/>(置顶备忘录)"]
             File_EndSummary["end_summaries.json<br/>(短期总结)"]
-            File_ScheduledTasks["scheduled_tasks.json<br/>(定时任务)"]
+            File_ScheduledTasks["automations.json<br/>(自动化)"]
             Dir_Logs["logs/<br/>• bot.log<br/>• 轮转日志"]
             File_Config["config.toml<br/>config.local.json"]
     end
@@ -486,7 +486,7 @@ graph TB
                 TGroupAnalysis["group_analysis.*<br/>群分析"]
                 TNotice["notices.*<br/>公告"]
                 TRender["render.*<br/>渲染"]
-                TSched["scheduler.*<br/>定时任务"]
+                TSched["automation.*<br/>自动化"]
                 TCognitive["cognitive.*<br/>认知记忆"]
                 TMCP["mcp.*<br/>MCP 工具集"]
                 TMemes["memes.*<br/>表情包"]
@@ -572,7 +572,7 @@ graph LR
             CognitiveVector["CognitiveVectorStore<br/>data/cognitive/chromadb/"]
             CognitiveProfile["ProfileStorage<br/>data/cognitive/profiles/"]
             FAQ["FAQStorage<br/>data/faq/{group_id}/<br/>• ID: YYYYMMDD-NNN"]
-            Tasks["ScheduledTaskStorage<br/>data/scheduled_tasks.json<br/>• Cron 格式"]
+            Tasks["AutomationStorage<br/>data/automations.json<br/>• DAG + Cron"]
             TokenUsage["TokenUsageStorage<br/>data/token_usage.jsonl<br/>• 自动归档<br/>• gzip 压缩<br/>• 流式可选 TTFT/TPS"]
         end
         
@@ -858,17 +858,17 @@ description: 从 PDF 文件中提取文本和表格，填写表单。当用户�
 
 1. **外部实体层**：用户、管理员、OneBot 协议端 (NapCat/Lagrange.Core)、大模型 API 服务商
 2. **核心入口层**：main.py 启动入口、配置管理器 (config/loader.py + parsers/ + load_sections/)、热更新应用器 (config/hot_reload.py)、OneBotClient (onebot/ + onebot.py shim)、WeixinService (`weixin/` + `weixin-ilink-client`)、RequestContext (context.py)、Runtime API Server (api/app.py → api/routes/ 路由子模块，含 naga/ 子包)
-3. **消息处理层**：MessageHandler (`handlers/`)、统一 DeliveryAddress 路由 (`utils/message_targets.py`)、SecurityService (security.py)、CommandDispatcher (services/command.py + commands/ mixins)、MessageBatcher (services/message_batcher/)、AICoordinator (services/coordinator/ + ai_coordinator.py 门面)、QueueManager (queue_manager.py)、自动处理管线 (skills/pipelines/)、Bilibili/arXiv/GitHub 解析与发送模块
-    自动提取由 `PipelineRegistry` 并行检测、并行处理全部命中的管线；发送结果写入历史后继续进入 AI 自动回复。
+3. **消息处理层**：MessageHandler (`handlers/`)、统一 DeliveryAddress 路由 (`utils/message_targets.py`)、SecurityService (security.py)、CommandDispatcher (services/command.py + commands/ mixins)、自动处理管线 (skills/pipelines/)、Automations (`automations/`，pipeline 之后、对应 AI loop 之前 await，命中可拦截)、MessageBatcher (services/message_batcher/)、AICoordinator (services/coordinator/ + ai_coordinator.py 门面)、QueueManager (queue_manager.py)、Bilibili/arXiv/GitHub 解析与发送模块
+    自动提取由 `PipelineRegistry` 并行检测、并行处理全部命中的管线；随后 `await` 自动化工作流，未拦截时再进入 AI 自动回复。
 4. **AI 核心能力层**：AIClient (ai/client/ + client.py shim)、PromptBuilder (ai/prompts/ + prompts.py shim)、ModelRequester (ai/llm/ + llm.py shim)、ToolManager (tooling.py)、MultimodalAnalyzer (ai/multimodal/ + multimodal.py shim)、SummaryService (summaries.py)、TokenCounter (tokens.py)。OpenAI Chat Completions / Responses、Anthropic Messages SDK 归一化、CoT 续传与文本 Tool Call 容错见[模型 API 与兼容层](docs/model-compatibility.md)。
-5. **存储与上下文层**：MessageHistoryManager (utils/history.py, 10000条限制)、MemoryStorage (memory.py, 置顶备忘录, 500条上限)、EndSummaryStorage、CognitiveService + JobQueue + HistorianWorker + VectorStore + ProfileStorage、MemeService + MemeWorker + MemeStore + MemeVectorStore (表情包库)、FAQStorage、ScheduledTaskStorage、TokenUsageStorage (自动归档)
-6. **技能系统层**：ToolRegistry (registry.py)、AgentRegistry、7个 Agents、11类 Toolsets
+5. **存储与上下文层**：MessageHistoryManager (utils/history.py, 10000条限制)、MemoryStorage (memory.py, 置顶备忘录, 500条上限)、EndSummaryStorage、CognitiveService + JobQueue + HistorianWorker + VectorStore + ProfileStorage、MemeService + MemeWorker + MemeStore + MemeVectorStore (表情包库)、FAQStorage、AutomationStorage (`data/automations.json`；旧 `scheduled_tasks.json` 启动时一次性转为新格式，不删旧文件、不双写)、TokenUsageStorage (自动归档)
+6. **技能系统层**：ToolRegistry (registry.py)、AgentRegistry、7个 Agents、12类 Toolsets
 7. **异步 IO 层**：统一 IO 工具 (utils/io.py)，包含 write_json、read_json、append_line、跨平台文件锁 (flock/msvcrt)
-8. **数据持久化层**：历史数据目录、FAQ 目录、Token 归档目录、记忆文件、总结文件、定时任务文件、微信绑定/游标/隔离/审计状态
+8. **数据持久化层**：历史数据目录、FAQ 目录、Token 归档目录、记忆文件、总结文件、自动化文件、微信绑定/游标/隔离/审计状态
 
 ### 微信 iLink 路由边界
 
-微信接入由主进程独立管理，不依赖 OneBot 是否在线。`WeixinService` 先校验帐号与 peer，再把已绑定来源映射为逻辑 QQ 私聊交给 `MessageHandler`；未知来源在写历史或调用 AI 之前进入隔离存储。`DeliveryAddress` 将逻辑身份与物理通道分离：`qq:<id>` 和 `wechat:<id>` 可共享同一个用户历史、认知记忆与权限，但发送器、消息合并 scope 和 transport 元数据保持通道隔离。定时任务同样持久化规范 `address`，旧 `target_type + target_id` 在加载时转换为 `group:` 或 `qq:` 地址。
+微信接入由主进程独立管理，不依赖 OneBot 是否在线。`WeixinService` 先校验帐号与 peer，再把已绑定来源映射为逻辑 QQ 私聊交给 `MessageHandler`；未知来源在写历史或调用 AI 之前进入隔离存储。`DeliveryAddress` 将逻辑身份与物理通道分离：`qq:<id>` 和 `wechat:<id>` 可共享同一个用户历史、认知记忆与权限，但发送器、消息合并 scope 和 transport 元数据保持通道隔离。自动化同样持久化规范 `address`，旧 `target_type + target_id` 在加载时转换为 `group:` 或 `qq:` 地址。
 
 ### "车站-列车" 队列模型
 
@@ -895,7 +895,7 @@ description: 从 PDF 文件中提取文本和表格，填写表单。当用户�
 ### Skills 插件系统
 
 - **Tools (基础工具)**：原子化的功能单元，如 `send_message`, `get_history`, `bilibili_video`, `arxiv_paper`。
-- **Toolsets (复合工具集)**：11大类工具集 (group, messages, memory, contacts, group_analysis, notices, render, scheduler, cognitive, mcp, memes)。
+- **Toolsets (复合工具集)**：11大类工具集 (group, messages, memory, contacts, group_analysis, notices, render, automation, cognitive, mcp, memes)。
 - **注册表延迟导入 + 热重载**：启动时读取 `config.json` 建立本地 schema，`handler.py` 仅在首次执行工具时导入；当 `skills/` 下的 `config.json`/`handler.py` 发生变更时会自动重新加载。
 - **模型 schema 按需投影**：启用 `skills.tool_search_enabled` 后，主 AI 的请求级 `ToolSearchSession` 只投影配置为始终加载的工具、虚拟 `tool_search` 和本轮已检索工具的 schema，其余工具仅注入规范名称；搜索命中的 schema 从下一模型轮开始可用，新 `ask()` 会重置。该机制不改变本地完整注册表、handler 导入时机或子 Agent 工具集。
 - **Agent 自我介绍自动生成**：启动时按 Agent 代码/配置 hash 生成 `intro.generated.md` 并与 `intro.md` 合并。

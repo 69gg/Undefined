@@ -489,21 +489,33 @@ async def runtime_memory_delete_handler(request: web.Request) -> Response:
     )
 
 
-@routes.get("/api/v1/management/runtime/schedules")
-@routes.get("/api/runtime/schedules")
-async def runtime_schedules_list_handler(request: web.Request) -> Response:
+@routes.get("/api/v1/management/runtime/automations/catalog")
+@routes.get("/api/runtime/automations/catalog")
+async def runtime_automations_catalog_handler(request: web.Request) -> Response:
     if not check_auth(request):
         return _unauthorized()
     return await _proxy_runtime(
         method="GET",
-        path="/api/v1/schedules",
+        path="/api/v1/automations/catalog",
         timeout_seconds=20.0,
     )
 
 
-@routes.post("/api/v1/management/runtime/schedules")
-@routes.post("/api/runtime/schedules")
-async def runtime_schedules_create_handler(request: web.Request) -> Response:
+@routes.get("/api/v1/management/runtime/automations")
+@routes.get("/api/runtime/automations")
+async def runtime_automations_list_handler(request: web.Request) -> Response:
+    if not check_auth(request):
+        return _unauthorized()
+    return await _proxy_runtime(
+        method="GET",
+        path="/api/v1/automations",
+        timeout_seconds=20.0,
+    )
+
+
+@routes.post("/api/v1/management/runtime/automations")
+@routes.post("/api/runtime/automations")
+async def runtime_automations_create_handler(request: web.Request) -> Response:
     if not check_auth(request):
         return _unauthorized()
     try:
@@ -512,28 +524,28 @@ async def runtime_schedules_create_handler(request: web.Request) -> Response:
         return web.json_response({"error": "Invalid JSON payload"}, status=400)
     return await _proxy_runtime(
         method="POST",
-        path="/api/v1/schedules",
+        path="/api/v1/automations",
         payload=payload,
         timeout_seconds=30.0,
     )
 
 
-@routes.get("/api/v1/management/runtime/schedules/{task_id}")
-@routes.get("/api/runtime/schedules/{task_id}")
-async def runtime_schedule_detail_handler(request: web.Request) -> Response:
+@routes.get("/api/v1/management/runtime/automations/{task_id}")
+@routes.get("/api/runtime/automations/{task_id}")
+async def runtime_automation_detail_handler(request: web.Request) -> Response:
     if not check_auth(request):
         return _unauthorized()
     task_id = _url_quote(str(request.match_info.get("task_id", "")).strip(), safe="")
     return await _proxy_runtime(
         method="GET",
-        path=f"/api/v1/schedules/{task_id}",
+        path=f"/api/v1/automations/{task_id}",
         timeout_seconds=20.0,
     )
 
 
-@routes.patch("/api/v1/management/runtime/schedules/{task_id}")
-@routes.patch("/api/runtime/schedules/{task_id}")
-async def runtime_schedule_update_handler(request: web.Request) -> Response:
+@routes.patch("/api/v1/management/runtime/automations/{task_id}")
+@routes.patch("/api/runtime/automations/{task_id}")
+async def runtime_automation_update_handler(request: web.Request) -> Response:
     if not check_auth(request):
         return _unauthorized()
     task_id = _url_quote(str(request.match_info.get("task_id", "")).strip(), safe="")
@@ -543,21 +555,21 @@ async def runtime_schedule_update_handler(request: web.Request) -> Response:
         return web.json_response({"error": "Invalid JSON payload"}, status=400)
     return await _proxy_runtime(
         method="PATCH",
-        path=f"/api/v1/schedules/{task_id}",
+        path=f"/api/v1/automations/{task_id}",
         payload=payload,
         timeout_seconds=30.0,
     )
 
 
-@routes.delete("/api/v1/management/runtime/schedules/{task_id}")
-@routes.delete("/api/runtime/schedules/{task_id}")
-async def runtime_schedule_delete_handler(request: web.Request) -> Response:
+@routes.delete("/api/v1/management/runtime/automations/{task_id}")
+@routes.delete("/api/runtime/automations/{task_id}")
+async def runtime_automation_delete_handler(request: web.Request) -> Response:
     if not check_auth(request):
         return _unauthorized()
     task_id = _url_quote(str(request.match_info.get("task_id", "")).strip(), safe="")
     return await _proxy_runtime(
         method="DELETE",
-        path=f"/api/v1/schedules/{task_id}",
+        path=f"/api/v1/automations/{task_id}",
         timeout_seconds=30.0,
     )
 

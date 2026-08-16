@@ -7,15 +7,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from Undefined.skills.toolsets.scheduler.create_schedule_task.handler import (
-    execute as create_schedule_task_execute,
-)
-from Undefined.skills.toolsets.scheduler.list_schedule_tasks.handler import (
-    execute as list_schedule_tasks_execute,
-)
-from Undefined.skills.toolsets.scheduler.update_schedule_task.handler import (
-    execute as update_schedule_task_execute,
-)
 from Undefined.utils import io as async_io
 from Undefined.utils.scheduler import (
     SELF_CALL_TOOL_NAME,
@@ -48,120 +39,6 @@ def test_resolve_task_address_preserves_address_and_legacy_only_paths() -> None:
     assert legacy_only.canonical == "qq:12345"
     assert matching_targets is not None
     assert matching_targets.canonical == "group:12345"
-
-
-@pytest.mark.asyncio
-async def test_create_schedule_task_supports_self_instruction() -> None:
-    scheduler = SimpleNamespace(add_task=AsyncMock(return_value=True))
-    context: dict[str, Any] = {
-        "scheduler": scheduler,
-        "group_id": 10001,
-    }
-
-    result = await create_schedule_task_execute(
-        {
-            "cron_expression": "0 9 * * *",
-            "self_instruction": "明天早上先总结待办，再提醒我前三项。",
-        },
-        context,
-    )
-
-    assert "调用未来的自己" in result
-    scheduler.add_task.assert_awaited_once()
-    kwargs = scheduler.add_task.await_args.kwargs
-    assert kwargs["tool_name"] == SELF_CALL_TOOL_NAME
-    assert kwargs["tool_args"] == {"prompt": "明天早上先总结待办，再提醒我前三项。"}
-    assert kwargs["self_instruction"] == "明天早上先总结待办，再提醒我前三项。"
-
-
-@pytest.mark.asyncio
-async def test_create_schedule_task_keeps_wechat_address_without_legacy_target() -> (
-    None
-):
-    scheduler = SimpleNamespace(add_task=AsyncMock(return_value=True))
-    context: dict[str, Any] = {
-        "scheduler": scheduler,
-        "request_type": "private",
-        "user_id": 12345,
-        "address": "wechat:12345",
-    }
-
-    result = await create_schedule_task_execute(
-        {
-            "cron_expression": "0 9 * * *",
-            "self_instruction": "提醒我查看微信消息。",
-        },
-        context,
-    )
-
-    assert "调用未来的自己" in result
-    kwargs = scheduler.add_task.await_args.kwargs
-    assert kwargs["target_address"] == "wechat:12345"
-    assert kwargs["target_id"] is None
-    assert kwargs["target_type"] == "private"
-
-
-@pytest.mark.asyncio
-async def test_create_schedule_task_rejects_conflicting_modes() -> None:
-    scheduler = SimpleNamespace(add_task=AsyncMock(return_value=True))
-    context: dict[str, Any] = {
-        "scheduler": scheduler,
-        "group_id": 10001,
-    }
-
-    result = await create_schedule_task_execute(
-        {
-            "cron_expression": "*/5 * * * *",
-            "tool_name": "get_current_time",
-            "self_instruction": "冲突参数",
-        },
-        context,
-    )
-
-    assert "不能同时使用" in result
-    scheduler.add_task.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_update_schedule_task_supports_self_instruction() -> None:
-    scheduler = SimpleNamespace(update_task=AsyncMock(return_value=True))
-    context: dict[str, Any] = {"scheduler": scheduler}
-
-    result = await update_schedule_task_execute(
-        {
-            "task_id": "task_demo",
-            "self_instruction": "每晚 11 点帮我生成复盘提纲。",
-        },
-        context,
-    )
-
-    assert "已成功修改" in result
-    scheduler.update_task.assert_awaited_once()
-    kwargs = scheduler.update_task.await_args.kwargs
-    assert kwargs["tool_name"] == SELF_CALL_TOOL_NAME
-    assert kwargs["tool_args"] == {"prompt": "每晚 11 点帮我生成复盘提纲。"}
-    assert kwargs["self_instruction"] == "每晚 11 点帮我生成复盘提纲。"
-
-
-@pytest.mark.asyncio
-async def test_list_schedule_tasks_marks_self_instruction_task() -> None:
-    scheduler = SimpleNamespace(
-        list_tasks=lambda: {
-            "task_self_1": {
-                "task_name": "future_me",
-                "tool_name": SELF_CALL_TOOL_NAME,
-                "tool_args": {"prompt": "明天提醒我看板更新"},
-                "cron": "0 9 * * *",
-                "current_executions": 0,
-            }
-        }
-    )
-    context: dict[str, Any] = {"scheduler": scheduler}
-
-    result = await list_schedule_tasks_execute({}, context)
-
-    assert "调用未来的自己" in result
-    assert "明天提醒我看板更新" in result
 
 
 @pytest.mark.asyncio

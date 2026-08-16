@@ -211,15 +211,16 @@ curl http://127.0.0.1:8788/openapi.json
 - 入库文本和向量索引只使用纯文本 `description + tags + aliases`，不依赖 OCR。
 - 后台重跑分析使用两阶段 LLM 管线：先判定，再描述。
 
-### 定时任务
+### 自动化
 
-- `GET /api/v1/schedules`
-- `POST /api/v1/schedules`
-- `GET /api/v1/schedules/{task_id}`
-- `PATCH /api/v1/schedules/{task_id}`
-- `DELETE /api/v1/schedules/{task_id}`
+- `GET /api/v1/automations/catalog`
+- `GET /api/v1/automations`
+- `POST /api/v1/automations`
+- `GET /api/v1/automations/{task_id}`
+- `PATCH /api/v1/automations/{task_id}`
+- `DELETE /api/v1/automations/{task_id}`
 
-`GET /api/v1/schedules` 返回：
+`GET /api/v1/automations` 返回：
 
 ```json
 {
@@ -228,85 +229,40 @@ curl http://127.0.0.1:8788/openapi.json
     {
       "task_id": "task_daily_report",
       "task_name": "每日摘要",
-      "mode": "self_instruction",
-      "cron": "0 9 * * *",
+      "start_kind": "cron",
+      "enabled": true,
+      "consume_ai_loop": true,
+      "auto_send_final": true,
       "address": "group:123456",
-      "target_type": "group",
-      "target_id": 123456,
-      "tool_name": "scheduler.call_self",
-      "tool_args": { "prompt": "总结昨天群里的待办。" },
-      "self_instruction": "总结昨天群里的待办。",
-      "max_executions": null,
-      "current_executions": 0,
+      "nodes": [
+        {"id": "start", "type": "start", "kind": "cron", "cron": "0 9 * * *"},
+        {"id": "main", "type": "llm.main", "prompt": "总结昨天群里的待办。", "emit": true}
+      ],
+      "edges": [{"from": "start", "to": "main"}],
       "next_run_time": "2026-06-07T09:00:00+08:00"
     }
   ]
 }
 ```
 
-创建和更新任务使用相同的 JSON 字段；`PATCH` 只提交需要修改的字段即可。`mode` 支持：
-
-| mode | 必填字段 | 说明 |
-|---|---|---|
-| `single` | `tool_name`、`tool_args` | 定时调用单个工具 |
-| `multi` | `tools`、`execution_mode` | 定时串行或并行调用多个工具 |
-| `self_instruction` | `self_instruction` | 在触发时唤醒 AI 自身执行自然语言指令 |
-
-通用字段：
-
-| 字段 | 说明 |
-|---|---|
-| `task_id` | 创建时可选；不传时自动生成。新建 ID 只允许字母、数字、`_`、`.`、`:`、`-`，最长 96 字符；已有历史任务即使 ID 含中文，也可继续通过详情、更新和删除接口管理 |
-| `task_name` | 可选的可读名称 |
-| `cron_expression` | 标准 5 段 crontab 表达式；也兼容字段名 `cron` |
-| `address` | 推荐的规范投递地址：`qq:<QQ号>`、`group:<群号>` 或 `wechat:<逻辑QQ号>`；`PATCH` 时传 `null` 可清空 |
-| `target_type` | `group` 或 `private`，默认 `group` |
-| `target_id` | 可选的发送目标 ID；`PATCH` 时传 `null` 可清空 |
-| `max_executions` | 可选的最大执行次数；`PATCH` 时传 `null` 可清空 |
-
-创建“自我督办”任务：
+创建短命令或全图均可；`PATCH` 只提交需要修改的字段，也可用 `patch_nodes` 改单个节点。短命令示例：
 
 ```json
 {
   "task_id": "task_daily_review",
   "task_name": "每日复盘",
-  "cron_expression": "0 9 * * *",
-  "mode": "self_instruction",
-  "self_instruction": "请总结昨天的待办，并提醒我今天优先处理前三项。",
+  "kind": "cron",
+  "cron": "0 9 * * *",
+  "prompt": "请总结昨天的待办，并提醒我今天优先处理前三项。",
   "address": "wechat:12345678"
 }
 ```
 
-创建单工具任务：
-
-```json
-{
-  "cron_expression": "*/30 * * * *",
-  "mode": "single",
-  "tool_name": "get_current_time",
-  "tool_args": { "format": "iso" }
-}
-```
-
-创建多工具任务：
-
-```json
-{
-  "cron_expression": "0 8 * * 1",
-  "mode": "multi",
-  "execution_mode": "serial",
-  "tools": [
-    { "tool_name": "get_current_time", "tool_args": {} },
-    { "tool_name": "scheduler.call_self", "tool_args": { "prompt": "生成本周计划。" } }
-  ]
-}
-```
-
 说明：
-- `tool_name`、`tools`、`self_instruction` 互斥；显式传 `mode` 时也必须与对应字段一致。
-- 历史任务如果保存为单个 `scheduler.call_self` 工具调用，列表和详情会按 `self_instruction` 模式返回，并从 `prompt` 回填 `self_instruction`。
-- `tool_args` 必须是 JSON 对象；`tools` 必须是非空数组，最多 20 项。
-- 所有 `/api/v1/schedules*` 路由都遵循 Runtime API 的 `X-Undefined-API-Key` 鉴权。
+- 新建 ID 只允许字母、数字、`_`、`.`、`:`、`-`，最长 96 字符。
+- `address` 推荐规范投递地址：`qq:<QQ号>`、`group:<群号>` 或 `wechat:<逻辑QQ号>`。
+- 所有 `/api/v1/automations*` 路由都遵循 Runtime API 的 `X-Undefined-API-Key` 鉴权。
+- 旧 `scheduled_tasks.json` 只在启动且尚无 `automations.json` 时一次性转为新格式；不删除旧文件、不双写。
 
 ### 微信 ClawBot / iLink
 
@@ -710,8 +666,8 @@ Runtime API 进程重启后不会恢复未完成 job；已落盘的聊天历史�
 
 ```json
 {
-  "tool_name": "scheduler.create_schedule_task",
-  "args": { "description": "...", "cron": "0 9 * * *" },
+  "tool_name": "automation.create",
+  "args": { "kind": "cron", "cron": "0 9 * * *", "prompt": "..." },
   "context": {
     "request_type": "group",
     "group_id": 123456,
@@ -881,11 +837,12 @@ WebUI 不直接在前端暴露 `auth_key`，而是通过后端代理访问主进
 - `GET /api/runtime/probes/internal`
 - `GET /api/runtime/probes/external`
 - `GET /api/runtime/memory`
-- `GET /api/runtime/schedules`
-- `POST /api/runtime/schedules`
-- `GET /api/runtime/schedules/{task_id}`
-- `PATCH /api/runtime/schedules/{task_id}`
-- `DELETE /api/runtime/schedules/{task_id}`
+- `GET /api/runtime/automations/catalog`
+- `GET /api/runtime/automations`
+- `POST /api/runtime/automations`
+- `GET /api/runtime/automations/{task_id}`
+- `PATCH /api/runtime/automations/{task_id}`
+- `DELETE /api/runtime/automations/{task_id}`
 - `GET /api/runtime/cognitive/events`
 - `GET /api/runtime/cognitive/profiles`
 - `GET /api/runtime/cognitive/profile/{entity_type}/{entity_id}`

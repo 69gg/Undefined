@@ -36,6 +36,37 @@ def iter_text_lines(
         yield from enumerate(handle, start=1)
 
 
+def write_json_sync(file_path: Path | str, data: Any, use_lock: bool = True) -> None:
+    """同步原子写入 JSON。供启动迁移等不能 await 的路径使用。"""
+    p = Path(file_path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+
+    def atomic_write() -> None:
+        tmp_path: Path | None = None
+        try:
+            fd, tmp_name = tempfile.mkstemp(
+                prefix=f".{p.name}.", suffix=".tmp", dir=str(p.parent)
+            )
+            tmp_path = Path(tmp_name)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_name, p)
+        finally:
+            if tmp_path is not None and tmp_path.exists():
+                tmp_path.unlink()
+
+    if use_lock:
+        lock_path = p.with_name(f"{p.name}.lock")
+        logger.debug(f"[IO] 获取排他锁: path={lock_path}")
+        with FileLock(lock_path, shared=False):
+            atomic_write()
+        logger.debug(f"[IO] 释放锁: path={lock_path}")
+    else:
+        atomic_write()
+
+
 async def write_json(file_path: Path | str, data: Any, use_lock: bool = True) -> None:
     """异步安全地写入 JSON 文件
 
@@ -53,39 +84,8 @@ async def write_json(file_path: Path | str, data: Any, use_lock: bool = True) ->
         f"[IO] 写入JSON: path={p}, use_lock={use_lock}, size_estimate={data_size} chars"
     )
 
-    def lock_path_for(target: Path) -> Path:
-        return target.with_name(f"{target.name}.lock")
-
-    def sync_write() -> None:
-        p.parent.mkdir(parents=True, exist_ok=True)
-
-        def atomic_write() -> None:
-            tmp_path: Path | None = None
-            try:
-                fd, tmp_name = tempfile.mkstemp(
-                    prefix=f".{p.name}.", suffix=".tmp", dir=str(p.parent)
-                )
-                tmp_path = Path(tmp_name)
-                with os.fdopen(fd, "w", encoding="utf-8") as f:
-                    json.dump(data, f, ensure_ascii=False, indent=2)
-                    f.flush()
-                    os.fsync(f.fileno())
-                os.replace(tmp_name, p)
-            finally:
-                if tmp_path is not None and tmp_path.exists():
-                    tmp_path.unlink()
-
-        if use_lock:
-            lock_path = lock_path_for(p)
-            logger.debug(f"[IO] 获取排他锁: path={lock_path}")
-            with FileLock(lock_path, shared=False):
-                atomic_write()
-            logger.debug(f"[IO] 释放锁: path={lock_path}")
-        else:
-            atomic_write()
-
     try:
-        await asyncio.to_thread(sync_write)
+        await asyncio.to_thread(write_json_sync, file_path, data, use_lock)
         elapsed = time.perf_counter() - start_time
         logger.info(f"[IO] 写入成功: path={p}, elapsed={elapsed:.3f}s")
     except Exception as e:

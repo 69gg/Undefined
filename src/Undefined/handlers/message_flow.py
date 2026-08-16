@@ -49,6 +49,7 @@ from Undefined.utils.history import MessageHistoryManager
 from Undefined.utils.logging import log_debug_json, redact_string
 from Undefined.utils.queue_intervals import build_model_queue_intervals
 from Undefined.utils.resources import resolve_resource_path
+from Undefined.automations.match import AutomationEvent
 from Undefined.utils.scheduler import TaskScheduler
 from Undefined.utils.message_reply import GENERIC_REPLY_PLACEHOLDER, ReplyContext
 from Undefined.utils.message_targets import DeliveryAddress
@@ -589,6 +590,15 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
             await self._handle_poke_notice(event)
             return
 
+        if post_type == "notice" and event.get("notice_type") in {
+            "group_increase",
+            "group_decrease",
+            "member_join",
+            "member_leave",
+        }:
+            await self._handle_member_notice(event)
+            return
+
         if event.get("message_type") == "private":
             await self._handle_private_message(event)
             return
@@ -708,6 +718,17 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
                 "[消息策略] 已关闭私聊处理: user=%s",
                 private_sender_id,
             )
+            await self._run_automations(
+                AutomationEvent(
+                    kind="message",
+                    channel="private",
+                    text=str(parsed_content_raw or text),
+                    sender_id=private_sender_id,
+                    user_id=private_sender_id,
+                    nickname=str(user_name or private_sender_nickname or ""),
+                    address=f"qq:{private_sender_id}",
+                )
+            )
             return
 
         # 多模型池控制指令优先于斜杠命令与 AI 回复
@@ -739,6 +760,19 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
             text=text,
             message_content=private_message_content,
         )
+
+        if await self._run_automations(
+            AutomationEvent(
+                kind="message",
+                channel="private",
+                text=str(parsed_content_raw or text),
+                sender_id=private_sender_id,
+                user_id=private_sender_id,
+                nickname=str(user_name or private_sender_nickname or ""),
+                address=f"qq:{private_sender_id}",
+            )
+        ):
+            return
 
         await self.ai_coordinator.handle_private_reply(
             private_sender_id,
@@ -814,6 +848,17 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
             scope_key=build_attachment_scope(user_id=qq_id, request_type="private"),
         )
         if not self.config.should_process_private_message():
+            await self._run_automations(
+                AutomationEvent(
+                    kind="message",
+                    channel="wechat",
+                    text=str(text),
+                    sender_id=qq_id,
+                    user_id=qq_id,
+                    nickname=str(sender_name or ""),
+                    address=address.canonical,
+                )
+            )
             return
 
         if (
@@ -853,6 +898,18 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
             message_content=message_content,
             address=address,
         )
+        if await self._run_automations(
+            AutomationEvent(
+                kind="message",
+                channel="wechat",
+                text=str(text),
+                sender_id=qq_id,
+                user_id=qq_id,
+                nickname=str(sender_name or ""),
+                address=address.canonical,
+            )
+        ):
+            return
         await self.ai_coordinator.handle_private_reply(
             qq_id,
             text,
@@ -1133,6 +1190,17 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
                 self.config.process_every_message,
                 is_at_bot,
             )
+            await self._run_automations(
+                AutomationEvent(
+                    kind="message",
+                    channel="group",
+                    text=str(parsed_content_raw or text),
+                    sender_id=sender_id,
+                    nickname=str(sender_card or sender_nickname or ""),
+                    group_id=group_id,
+                    address=f"group:{group_id}",
+                )
+            )
             return
 
         # 斜杠命令仅在 @bot 时生效；未 @ 时不拦截普通群聊
@@ -1167,6 +1235,19 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
             text=text,
             message_content=message_content,
         )
+
+        if await self._run_automations(
+            AutomationEvent(
+                kind="message",
+                channel="group",
+                text=str(parsed_content_raw or text),
+                sender_id=sender_id,
+                nickname=str(sender_card or sender_nickname or ""),
+                group_id=group_id,
+                address=f"group:{group_id}",
+            )
+        ):
+            return
 
         display_name = sender_card or sender_nickname or str(sender_id)
         await self.ai_coordinator.handle_auto_reply(
@@ -1260,6 +1341,42 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
         )
         detections = await self.pipeline_registry.run(context)
         return bool(detections)
+
+    async def _run_automations(self, event: AutomationEvent) -> bool:
+        """Run matching automations. True means the AI loop should be skipped."""
+        scheduler = getattr(self.ai_coordinator, "scheduler", None)
+        handle = getattr(scheduler, "handle_event", None)
+        if not callable(handle):
+            return False
+        try:
+            return bool(await handle(event))
+        except Exception:
+            logger.exception("[自动化] 处理事件失败 kind=%s", event.kind)
+            return False
+
+    async def _handle_member_notice(self, event: dict[str, Any]) -> None:
+        """入群 / 退群自动化触发。"""
+        group_id = safe_int(event.get("group_id"))
+        user_id = safe_int(event.get("user_id"))
+        notice_type = str(event.get("notice_type") or "")
+        kind = (
+            "member_join"
+            if notice_type in {"group_increase", "member_join"}
+            else "member_leave"
+        )
+        if group_id is None:
+            return
+        await self._run_automations(
+            AutomationEvent(
+                kind=kind,
+                channel="group",
+                text="",
+                sender_id=user_id,
+                user_id=user_id,
+                group_id=group_id,
+                address=f"group:{group_id}",
+            )
+        )
 
     async def apply_skills_hot_reload_config(
         self,

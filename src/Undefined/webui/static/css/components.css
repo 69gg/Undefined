@@ -485,8 +485,61 @@ body.update-dialog-open { overflow: hidden; }
   padding-top: 16px;
   border-top: 1px dashed var(--border-color);
 }
+.schedule-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 16px;
+}
+.schedule-mention-list {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.schedule-mention-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+}
+.schedule-node-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 8px 0 12px;
+}
+.schedule-node-list {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.schedule-node-card {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  background: var(--bg-app);
+}
+.schedule-node-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.schedule-var-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 8px 0 12px;
+}
+.schedule-last-run {
+  margin: 8px 0 12px;
+}
 .schedule-json-area {
-  min-height: 180px;
+  min-height: 120px;
   max-height: 420px;
   overflow: auto;
   tab-size: 2;

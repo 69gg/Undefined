@@ -85,7 +85,7 @@ Console 和 Chat 都需要连接到已经运行的 Undefined 服务。首次部�
 - **callable.json 共享机制**：通过简单的配置文件（`callable.json`）即可让 Agent 互相调用、将 `skills/tools/` 或 `skills/toolsets/` 下的工具按白名单暴露给 Agent，支持细粒度访问控制，实现复杂的多 Agent 协作场景。
 - **Agent 自我介绍自动生成**：启动时按 Agent 代码/配置 hash 生成 `intro.generated.md`（第一人称、结构化），与 `intro.md` 合并后作为描述；减少手动维护，保持能力说明与实现同步，有助于精准调度。
 - **请求上下文管理**：基于 Python `contextvars` 的统一请求上下文系统，自动 UUID 追踪，零竞态条件，完全的并发隔离。
-- **定时任务系统**：支持 Crontab 语法的强大定时任务系统，可自动执行各种操作（如定时提醒、定时搜索），并支持“向未来的自己发指令”（`self_instruction` 自调用模式）。
+- **自动化工作流**：条件驱动的青春版工作流（场景多选、@ 专项匹配、tool/LLM/分支/循环），命中后可接管本轮 AI；启动时可将旧 `scheduled_tasks.json` 一次性转为新格式。详见 [docs/automations.md](docs/automations.md)。
 - **MCP 协议支持**：支持通过 MCP (Model Context Protocol) 连接外部工具和数据源，扩展 AI 能力。
 - **Agent 私有 MCP**：可为单个 agent 提供独立 MCP 配置，按调用即时加载并释放，工具仅对该 agent 可见。
 - **Anthropic Skills**：支持 Anthropic Agent Skills（SKILL.md 格式），遵循 agentskills.io 开放标准，提供领域知识注入能力。
@@ -118,6 +118,7 @@ Undefined 的功能极为丰富，为了让本页面不过于臃肿，我们将�
 - 🔎 **[Tool Search 按需工具加载](docs/tool-search.md)**：减少主 AI 请求携带的 function schema，说明启用方式、检索语法、请求级生命周期、权限边界及 Chat Completions / Responses 兼容行为。
 - 😶 **[表情包系统 (Memes)](docs/memes.md)**：查看表情包两阶段判定管线、统一图片 `uid` 发送机制、检索模式及库存管理说明。
 - 💡 **[交互与使用手册](docs/usage.md)**：包含实用的对话示例、多模态解析用法，以及群管家必备的管理员`/指令`。
+- 🔁 **[自动化工作流](docs/automations.md)**：条件驱动青春版工作流、@ 专项匹配、分支与循环。
 - 📝 **[版本变更记录](CHANGELOG.md)**：查看按版本整理的更新摘要，也可在运行时使用 `/changelog` 查询。
 - 🛡️ **[访问控制说明](docs/access-control.md)**：教你如何精准配置黑白名单，让机器人的使用范围分毫不差。
 - 🧠 **[认知记忆系统详解](docs/cognitive-memory.md)**：黑科技解密——“无阻塞后台史官”是如何将对话内化为向量记忆与用户侧写的。

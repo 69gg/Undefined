@@ -170,11 +170,12 @@ Management API 会把运行态相关能力统一代理到主进程 Runtime API�
 - `GET /api/v1/management/runtime/probes/internal`
 - `GET /api/v1/management/runtime/probes/external`
 - `GET /api/v1/management/runtime/memory`
-- `GET /api/v1/management/runtime/schedules`
-- `POST /api/v1/management/runtime/schedules`
-- `GET /api/v1/management/runtime/schedules/{task_id}`
-- `PATCH /api/v1/management/runtime/schedules/{task_id}`
-- `DELETE /api/v1/management/runtime/schedules/{task_id}`
+- `GET /api/v1/management/runtime/automations/catalog`
+- `GET /api/v1/management/runtime/automations`
+- `POST /api/v1/management/runtime/automations`
+- `GET /api/v1/management/runtime/automations/{task_id}`
+- `PATCH /api/v1/management/runtime/automations/{task_id}`
+- `DELETE /api/v1/management/runtime/automations/{task_id}`
 - `GET /api/v1/management/runtime/weixin`
 - `POST /api/v1/management/runtime/weixin/login`
 - `GET /api/v1/management/runtime/weixin/login/{session_id}`
@@ -378,7 +379,7 @@ event: stage
 data: {"stage":"waiting_tools"}
 ```
 
-定时任务代理用于 WebUI“定时任务”页。Management API 会先校验 WebUI 登录态，再在服务端注入 Runtime API 的 `X-Undefined-API-Key` 请求头；浏览器前端不会直接接触 `[api].auth_key`。
+自动化代理用于 WebUI“自动化”页。Management API 会先校验 WebUI 登录态，再在服务端注入 Runtime API 的 `X-Undefined-API-Key` 请求头；浏览器前端不会直接接触 `[api].auth_key`。
 
 微信代理用于 WebUI“微信接入”页，覆盖状态、二维码登录、验证码、帐号启停/改绑/解绑、未知来源隔离和审计。二维码端点按二进制响应代理并保留禁止缓存语义；其他端点按 JSON 代理。iLink 凭据和 Runtime API Key 都只存在于服务端，详见 [微信 iLink 接入](wechat-ilink.md)。
 

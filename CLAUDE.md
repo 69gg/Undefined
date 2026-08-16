@@ -73,6 +73,7 @@ bash scripts/install_git_hooks.sh
 | `api/` | Runtime API / Management API 相关服务；路由拆分在 `api/routes/`，包含 `chat`、`cognitive`、`health`、`memes`、`memory`、`naga`、`system`、`tools` |
 | `webui/` | aiohttp 管理控制台；路由拆分在 `webui/routes/`，覆盖配置、日志、运行态、表情包与系统管理 |
 | `mcp/` | MCP 工具注册、连接与转换 |
+| `automations/` | 条件驱动青春版工作流：start 匹配、@ 专项消费、DAG / 分支 / 循环、旧定时任务迁移 |
 | `config/` | 配置系统：`loader.py`(TOML 解析+类型化)、`models.py`(数据模型)、`hot_reload.py`(热更新) |
 | `attachments.py` | 富媒体/附件注册、作用域隔离、`<attachment uid="..."/>` 统一标签（`<pic>` 向后兼容）渲染 |
 | `utils/` | `io.py`(异步 IO)、`history.py`(消息历史)、`paths.py`、`logging.py`、`sender.py` 等通用能力 |
@@ -85,6 +86,7 @@ OneBot WebSocket → onebot.py → handlers.py
   → SecurityService(注入检测)
   → CommandDispatcher(斜杠指令，命中即结束后续处理)
   → skills/pipelines(Bilibili / arXiv / GitHub 并行自动提取)
+  → Automations(pipeline 后 await；命中可拦截对应 AI，发生在 MessageBatcher 之前)
   → MessageBatcher(同 sender 短时合并；拍一拍/buffer 内 @bot 旁路)
   → AICoordinator → QueueManager(按模型隔离, 4 级优先级)
   → AIClient → LLM API / Skills / MCP
@@ -135,7 +137,7 @@ Management / Runtime 请求 → webui/app.py 或 api/app.py → routes/*
 - `data/attachment_registry.json` — 附件注册表
 - `data/memory.json` — 置顶备忘录（500 条上限）
 - `data/end_summaries.json` — 短期总结存储
-- `data/scheduled_tasks.json` — 定时任务存储
+- `data/automations.json` — 自动化工作流存储。启动时若无此文件但存在旧 `scheduled_tasks.json`，则读取并转为新格式写入，不删除旧文件、不双写
 - `data/faq/` — FAQ 存储
 - `data/token_usage.jsonl` — Token 统计（自动 gzip 归档；流式调用可含可选 `ttft_seconds` / `tokens_per_second`）
 - `knowledge/` — 本地知识库数据目录（`texts/`、`intro.md`、`chroma/` 等）

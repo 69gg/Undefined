@@ -1,3 +1,14 @@
+## Unreleased
+
+本版本将「定时任务」升级为条件驱动的青春版工作流「自动化 / Automations」：消息命中后可接管本轮 AI。
+
+- 新增 `src/Undefined/automations/`：场景多选、@ 专项消费、tool/template/三种 LLM、自动 if-else、LLM 分支（选项即 tool）与 25 次硬顶循环；运行时只写 `data/automations.json`。若启动时没有新文件但存在旧 `scheduled_tasks.json`，则读取并转为新格式后写入新文件，不删除旧文件、不双写。
+- 不再提供 `/api/v1/schedules` 与 `scheduler.*`；对外入口只有 `/api/v1/automations` 与 `automation.*`。
+- 群聊 / QQ 私聊 / 微信 / 拍一拍 / 入退群在 pipeline 之后、对应 AI loop 之前 `await` 工作流；成功或失败且 `consume_ai_loop` 时拦截该入口 AI。
+- 新增 `automation.*` 工具、`GET /api/v1/automations/catalog` 与 CRUD；WebUI 编排页支持场景、@ 条件、分支、循环与上次运行。配置节 `[automations]`。
+
+---
+
 ## v3.12.0 斜杠命令查询、四段侧写与对外发言边界
 
 本版本让主 AI 能查询斜杠命令并按视角过滤，把用户/群侧写拆成评价、正文、锐评并改进 `/profile` 出图；同时收紧对外说话方式，避免客服腔、内部工具名和假装能改实现。安全模型在可重试 HTTP 错误时沿用现有重试次数。

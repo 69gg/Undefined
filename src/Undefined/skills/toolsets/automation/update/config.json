@@ -1,0 +1,44 @@
+{
+    "type": "function",
+    "function": {
+        "name": "update",
+        "description": "更新自动化。默认与已有图 merge；可传 patch_nodes 按 id 改节点；也可提交完整 nodes/edges 覆盖。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "task_id": { "type": "string" },
+                "task_name": { "type": "string" },
+                "enabled": { "type": "boolean" },
+                "channels": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                },
+                "group_ids": {
+                    "type": "array",
+                    "items": { "type": "integer" }
+                },
+                "user_ids": {
+                    "type": "array",
+                    "items": { "type": "integer" }
+                },
+                "mentions": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                },
+                "text": { "type": "string" },
+                "pass_text": { "type": "string" },
+                "prompt": { "type": "string" },
+                "nodes": { "type": "array" },
+                "edges": { "type": "array" },
+                "patch_nodes": {
+                    "type": "array",
+                    "description": "按 id 合并到现有节点，例：[{\"id\":\"web\",\"input\":\"{{trigger.text_stripped}}\"}]"
+                },
+                "merge": { "type": "object" },
+                "address": { "type": "string" },
+                "consume_ai_loop": { "type": "boolean" }
+            },
+            "required": ["task_id"]
+        }
+    }
+}

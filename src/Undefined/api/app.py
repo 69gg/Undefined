@@ -25,6 +25,7 @@ from ._helpers import (
 )
 from ._naga_state import NagaState
 from .routes import (
+    automations,
     chat,
     cognitive,
     commands,
@@ -32,7 +33,6 @@ from .routes import (
     memes,
     memory,
     naga,
-    schedules,
     system,
     tools,
     weixin,
@@ -138,19 +138,22 @@ class RuntimeAPIServer:
                     "/api/v1/memes/{uid}/reindex",
                     self._meme_reindex_handler,
                 ),
-                web.get("/api/v1/schedules", self._schedules_list_handler),
-                web.post("/api/v1/schedules", self._schedules_create_handler),
                 web.get(
-                    "/api/v1/schedules/{task_id}",
-                    self._schedule_detail_handler,
+                    "/api/v1/automations/catalog", self._automations_catalog_handler
+                ),
+                web.get("/api/v1/automations", self._automations_list_handler),
+                web.post("/api/v1/automations", self._automations_create_handler),
+                web.get(
+                    "/api/v1/automations/{task_id}",
+                    self._automation_detail_handler,
                 ),
                 web.patch(
-                    "/api/v1/schedules/{task_id}",
-                    self._schedule_update_handler,
+                    "/api/v1/automations/{task_id}",
+                    self._automation_update_handler,
                 ),
                 web.delete(
-                    "/api/v1/schedules/{task_id}",
-                    self._schedule_delete_handler,
+                    "/api/v1/automations/{task_id}",
+                    self._automation_delete_handler,
                 ),
                 web.get("/api/v1/cognitive/events", self._cognitive_events_handler),
                 web.get(
@@ -345,21 +348,23 @@ class RuntimeAPIServer:
     async def _meme_reindex_handler(self, request: web.Request) -> Response:
         return await memes.meme_reindex_handler(self._ctx, request)
 
-    # Schedules
-    async def _schedules_list_handler(self, request: web.Request) -> Response:
-        return await schedules.schedules_list_handler(self._ctx, request)
+    async def _automations_catalog_handler(self, request: web.Request) -> Response:
+        return await automations.automations_catalog_handler(self._ctx, request)
 
-    async def _schedules_create_handler(self, request: web.Request) -> Response:
-        return await schedules.schedules_create_handler(self._ctx, request)
+    async def _automations_list_handler(self, request: web.Request) -> Response:
+        return await automations.automations_list_handler(self._ctx, request)
 
-    async def _schedule_detail_handler(self, request: web.Request) -> Response:
-        return await schedules.schedule_detail_handler(self._ctx, request)
+    async def _automations_create_handler(self, request: web.Request) -> Response:
+        return await automations.automations_create_handler(self._ctx, request)
 
-    async def _schedule_update_handler(self, request: web.Request) -> Response:
-        return await schedules.schedule_update_handler(self._ctx, request)
+    async def _automation_detail_handler(self, request: web.Request) -> Response:
+        return await automations.automation_detail_handler(self._ctx, request)
 
-    async def _schedule_delete_handler(self, request: web.Request) -> Response:
-        return await schedules.schedule_delete_handler(self._ctx, request)
+    async def _automation_update_handler(self, request: web.Request) -> Response:
+        return await automations.automation_update_handler(self._ctx, request)
+
+    async def _automation_delete_handler(self, request: web.Request) -> Response:
+        return await automations.automation_delete_handler(self._ctx, request)
 
     # Cognitive
     async def _cognitive_events_handler(self, request: web.Request) -> Response:

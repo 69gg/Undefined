@@ -850,7 +850,7 @@ log_thinking = true
 # zh: 部分 OpenAI-compatible 网关会对 tools schema 做更严格的校验（尤其是 tools[].function.name / description），可能触发 400。
 # en: Some OpenAI-compatible gateways strictly validate tools schema (especially tools[].function.name/description) and may return 400.
 [tools]
-# zh: 工具名分隔符：当工具原始名称包含 '.'（例如 scheduler.create_schedule_task / mcp.server.tool）时，发送给模型前会把 '.' 映射为该分隔符。
+# zh: 工具名分隔符：当工具原始名称包含 '.'（例如 automation.create / mcp.server.tool）时，发送给模型前会把 '.' 映射为该分隔符。
 # en: Tool-name delimiter: map '.' to this delimiter before sending tools to the model.
 dot_delimiter = "-_-"
 # zh: 是否启用 tools.description 截断。关闭时不会按长度截断，仅做清理/规范化。
@@ -935,6 +935,34 @@ pre_send_seconds = 0.0
 # zh: 投机调用已经向用户发出过任何消息后，新消息到达是否仍然取消该 inflight 调用。默认 false（安全：不取消，新消息开新 batch），开启后可能造成重复发送。
 # en: Whether to cancel an in-flight speculative LLM call even when it has already sent at least one message to the user. Default false (safe: do not cancel; the new message starts a new batch). Enabling this may cause duplicate replies.
 allow_cancel_after_send = false
+
+# zh: 条件驱动自动化（青春版工作流）。消息命中后可接管本轮 AI；时间类仍走 APScheduler。
+# en: Condition-driven automations (lightweight workflows). A matching inbound event can consume the AI loop; time triggers still use APScheduler.
+[automations]
+# zh: 总开关。关闭后不匹配事件、时间任务进入后也会直接跳过。
+# en: Master switch. When false, events are not matched and time jobs return immediately.
+enabled = true
+# zh: 单张图最多节点数（含 start / 分支 / 循环体），建议 30。
+# en: Max nodes per graph including start, branches and loop bodies. Suggested 30.
+max_nodes = 30
+# zh: 同时运行的自动化上限。
+# en: Max concurrent automation runs.
+max_concurrent = 3
+# zh: 单个节点超时（秒）。
+# en: Per-node timeout in seconds.
+node_timeout_seconds = 120.0
+# zh: 整张图超时（秒）。
+# en: Whole-graph timeout in seconds.
+workflow_timeout_seconds = 180.0
+# zh: llm.blank 工具迭代上限。
+# en: Max tool-calling iterations for llm.blank nodes.
+blank_llm_max_iterations = 20
+# zh: 循环硬顶，默认与上限均为 25，配置不得高于 25。
+# en: Loop iteration cap. Default and hard max are both 25.
+loop_max_iterations = 25
+# zh: 事件类自动化默认冷却（秒）。0 表示不冷却。时间类默认不冷却。
+# en: Default cooldown in seconds for event automations. 0 disables cooldown. Time triggers default to no cooldown.
+default_cooldown_seconds = 60
 
 # zh: 历史记录配置。
 # en: History settings.

@@ -10,7 +10,7 @@
 2. [认知记忆系统](#2-认知记忆系统)
 3. [内置智能体 (Agents)](#3-内置智能体-agents)
 4. [工具集能力一览 (Toolsets & Tools)](#4-工具集能力一览-toolsets--tools)
-5. [定时任务与调度](#5-定时任务与调度)
+5. [自动化与调度](#5-自动化与调度)
 6. [FAQ 知识库管理](#6-faq-知识库管理)
 7. [内置斜杠指令参考](#7-内置斜杠指令参考)
 8. [多模型池（私聊模型切换）](#8-多模型池私聊模型切换)
@@ -376,38 +376,30 @@ QQ/NapCat 在 `sendMsg` 阶段返回超时并不等于消息未送达：服务�
 
 ---
 
-## 5. 定时任务与调度
+## 5. 自动化与调度
 
-调度器基于标准 crontab 语法，支持三种执行模式，适用于从简单报时到复杂 AI 自主任务的全部场景。
+自动化是青春版工作流：消息、拍一拍、入退群或时间触发后，按一张小图执行 tool / 模板 / LLM / if-else / 循环，并可拦截本轮主 AI。旧 Crontab 任务会在启动时一次性转为新图。详见 [自动化](automations.md)。
 
-也可以在 WebUI 的“定时任务”页查看、创建、编辑和删除当前调度任务；WebUI 会通过已鉴权的 Management 代理访问 Runtime API，不会把 Runtime API 密钥暴露给浏览器前端。
+也可以在 WebUI 的“自动化”页查看、创建、编辑和删除当前工作流；WebUI 会通过已鉴权的 Management 代理访问 Runtime API，不会把 Runtime API 密钥暴露给浏览器前端。
 
-发送目标使用统一投递地址：QQ 私聊为 `qq:<QQ号>`，群聊为 `group:<群号>`，微信私聊为 `wechat:<逻辑QQ号>`。从当前会话创建任务时默认继承物理通道，因此微信中创建的提醒仍从微信返回；也可通过 `address` 显式指定。旧的 `target_type + target_id` 继续兼容，但不要与指向不同规范会话的 `address` 混用。
+发送目标使用统一投递地址：QQ 私聊为 `qq:<QQ号>`，群聊为 `group:<群号>`，微信私聊为 `wechat:<逻辑QQ号>`。从当前会话创建任务时默认继承物理通道；时间类触发才使用 snapshot 地址。旧的 `target_type + target_id` 继续兼容。
 
 ### 执行模式
 
 | 模式 | 描述 | 配置字段 |
 |---|---|---|
-| **单工具模式** | 定时调用一个指定的工具，传入固定参数 | `tool_name` + `tool_args` |
-| **多工具串/并行模式** | 定时依次（serial）或同时（parallel）调用多个工具 | `tools` + `execution_mode` |
-| **AI 自我督办模式** | 在触发时刻，以一段自然语言指令唤醒 AI 自主完成任务 | `self_instruction` |
-
-### 自我督办模式示例
-
-这是调度器最灵活的功能：您可以通过自然语言预约将任意复杂的指令投递给"未来的 AI 自己"来执行。
-
-> *"每天上午 9:00，请回顾昨日遗留的待办事项，并把最重要的前三项通过私聊发给我。"*
-> *"每周一 08:30，请总结上周群内的高频讨论话题，生成一份周报并发送至群聊。"*
-> *"明天晚上 23:00，帮我生成今天的话痨统计图表发到本群。"*（仅执行一次：设置 `max_executions: 1`）
+| **短命令** | 场景 + @ 条件 + 剩余文本，再接一个 prompt / tool / agent | `channels` `mentions` `text` + `prompt`/`tool_name`/`agent` |
+| **全图** | start + 多节点 DAG，含 if / LLM 分支 / 循环 | `nodes` + `edges` |
 
 ### 任务管理工具
 
 | 工具 | 说明 |
 |---|---|
-| `scheduler.create_schedule_task` | 创建定时任务，支持 `max_executions`（达到次数后自动删除） |
-| `scheduler.update_schedule_task` | 修改任务的触发规则、执行内容或参数 |
-| `scheduler.delete_schedule_task` | 删除指定定时任务 |
-| `scheduler.list_schedule_tasks` | 列出当前所有定时任务及其运行状态 |
+| `automation.create` | 短命令或全图创建自动化 |
+| `automation.update` | merge / `patch_nodes` |
+| `automation.delete` | 删除 |
+| `automation.list` / `automation.get` | 列表与详情 |
+| `automation.set_enabled` | 启停 |
 
 ---
 

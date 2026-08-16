@@ -45,12 +45,8 @@ skills/
 │   │   ├── render_html/
 │   │   ├── render_latex/
 │   │   └── render_markdown/
-│   └── scheduler/  # 定时任务工具集
-│       ├── create_schedule_task/
-│       ├── delete_schedule_task/
-│       ├── get_current_time/
-│       ├── list_schedule_tasks/
-│       └── update_schedule_task/
+│   └── automation/  # 条件驱动自动化
+│       ├── list/ get/ create/ update/ delete/ set_enabled/
 │
 ├── commands/       # 平台级斜杠指令，以插件形式动态加载
 │   ├── __init__.py
@@ -95,10 +91,10 @@ skills/
 - **定位**: 按功能分类的相关工具组
 - **调用方式**: 注册到主 AI 完整工具池；启用 Tool Search 时按需检索 schema
 - **Agent 可见性**: 默认仅主 AI 可见；可通过 `skills/toolsets/{category}/{tool_name}/callable.json` 按白名单暴露给 Agent
-- **命名规则**: `{category}.{tool_name}`（如 `render.render_html`, `scheduler.create_schedule_task`）
+- **命名规则**: `{category}.{tool_name}`（如 `render.render_html`, `automation.create`）
 - **目录结构**: `toolsets/{category}/{tool_name}/`
 - **适用场景**: 功能相关、需要分组管理的工具
-- **示例**: `render.render_html`, `scheduler.create_schedule_task`, `render.render_markdown`
+- **示例**: `render.render_html`, `automation.create`, `render.render_markdown`
 
 ### 智能体
 

@@ -267,6 +267,7 @@ async def internal_probe_handler(
             "queue": cognitive_queue_snapshot,
         },
         "scheduler": build_schedules_summary(ctx),
+        "automations": build_schedules_summary(ctx),
         "api": {
             "enabled": bool(cfg.api.enabled),
             "host": cfg.api.host,

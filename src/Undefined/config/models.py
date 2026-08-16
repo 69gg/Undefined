@@ -543,6 +543,20 @@ class MessageBatcherConfig:
 
 
 @dataclass
+class AutomationsConfig:
+    """条件驱动自动化（青春版工作流）配置。"""
+
+    enabled: bool = True
+    max_nodes: int = 30
+    max_concurrent: int = 3
+    node_timeout_seconds: float = 120.0
+    workflow_timeout_seconds: float = 180.0
+    blank_llm_max_iterations: int = 20
+    loop_max_iterations: int = 25
+    default_cooldown_seconds: int = 60
+
+
+@dataclass
 class PromptSystemInfoConfig:
     """Prompt 中的运行系统信息注入配置。"""
 
