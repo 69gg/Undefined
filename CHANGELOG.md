@@ -7,7 +7,7 @@
 - 补齐自动化运行时详细日志：事件匹配、时间触发、节点执行、出站发送与超时。
 - 不再提供 `/api/v1/schedules` 与 `scheduler.*`；对外入口只有 `/api/v1/automations` 与 `automation.*`。
 - 群聊 / QQ 私聊 / 微信 / 拍一拍 / 入退群在 pipeline 之后、对应 AI loop 之前 `await` 工作流；成功或失败且 `consume_ai_loop` 时拦截该入口 AI。
-- 新增 `automation.*` 工具、`GET /api/v1/automations/catalog` 与 CRUD；WebUI 自动化页改为 Dify 式全屏画布（节点盘、拖拽连线、类型化检查器），布局写入任务 `ui`；`POST /api/v1/automations/validate` 返回全部 issues。配置节 `[automations]`。
+- 新增 `automation.*` 工具、`GET /api/v1/automations/catalog` 与 CRUD；WebUI 自动化页改为 Dify 式画布（节点盘、拖拽连线、类型化检查器），列表与画布上下两屏滚动切换，布局写入任务 `ui`；`POST /api/v1/automations/validate` 返回全部 issues。配置节 `[automations]`。
 
 ---
 

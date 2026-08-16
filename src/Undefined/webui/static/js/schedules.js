@@ -22,6 +22,8 @@
         inspector: null,
         savedSnapshot: "",
         issues: [],
+        page: "list",
+        editorInView: false,
     };
 
     function i18nFormat(key, params) {
@@ -207,8 +209,19 @@
             .map((task) => {
                 const kind = kindOf(task);
                 const failed = task.last_status === "failed";
+                const selected =
+                    scheduleState.editing &&
+                    !scheduleState.draftNew &&
+                    scheduleState.selectedId === task.task_id;
+                const cardClass = [
+                    "schedule-flow-card",
+                    failed ? "is-failed" : "",
+                    selected ? "is-selected" : "",
+                ]
+                    .filter(Boolean)
+                    .join(" ");
                 return `
-                <button type="button" class="schedule-flow-card${failed ? " is-failed" : ""}" data-task-id="${escapeHtml(task.task_id)}">
+                <button type="button" class="${cardClass}" data-task-id="${escapeHtml(task.task_id)}">
                     <div class="schedule-flow-title">${escapeHtml(taskTitle(task))}</div>
                     <div class="schedule-flow-meta">
                         <span class="schedule-flow-kind">${escapeHtml(kind || "--")}</span>
@@ -289,10 +302,12 @@
             idInput.value = scheduleState.draftNew
                 ? idInput.value
                 : scheduleState.selectedId;
-            idInput.disabled = !scheduleState.draftNew;
+            idInput.disabled =
+                !scheduleState.editing || !scheduleState.draftNew;
         }
         if (enabled) enabled.checked = task.enabled !== false;
-        get("btnWfDelete").disabled = scheduleState.draftNew;
+        get("btnWfDelete").disabled =
+            !scheduleState.editing || scheduleState.draftNew;
         const json = get("wfGraphJson");
         if (json && document.activeElement !== json) {
             json.value = G.prettyJson(scheduleState.graph.payload());
@@ -357,16 +372,82 @@
         renderPalette();
     }
 
+    function scroller() {
+        return get("tab-schedules");
+    }
+
+    function prefersReducedMotion() {
+        return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    }
+
+    function showSchedulePage(page) {
+        const target =
+            page === "editor"
+                ? get("scheduleEditorView")
+                : get("scheduleListView");
+        const box = scroller();
+        if (!target || !box) return;
+        scheduleState.page = page;
+        const top =
+            target.getBoundingClientRect().top -
+            box.getBoundingClientRect().top +
+            box.scrollTop;
+        box.scrollTo({
+            top,
+            behavior: prefersReducedMotion() ? "auto" : "smooth",
+        });
+        if (page === "editor") scheduleState.canvas?.render();
+    }
+
+    function restoreSchedulePage() {
+        window.requestAnimationFrame(() => {
+            window.requestAnimationFrame(() =>
+                showSchedulePage(scheduleState.page || "list"),
+            );
+        });
+    }
+
+    function syncEmptyState() {
+        const empty = get("wfEmptyState");
+        const editor = get("scheduleEditorView");
+        if (empty) empty.hidden = scheduleState.editing;
+        editor?.classList.toggle("is-empty", !scheduleState.editing);
+        get("tab-schedules")?.classList.toggle(
+            "is-editing",
+            scheduleState.editing,
+        );
+        [
+            "btnWfSave",
+            "btnWfLayout",
+            "wfTaskName",
+            "wfEnabled",
+            "wfTaskId",
+        ].forEach((id) => {
+            const node = get(id);
+            if (!node) return;
+            if (id === "wfTaskId") {
+                node.disabled =
+                    !scheduleState.editing || !scheduleState.draftNew;
+                return;
+            }
+            node.disabled = !scheduleState.editing;
+        });
+        const del = get("btnWfDelete");
+        if (del) {
+            del.disabled = !scheduleState.editing || scheduleState.draftNew;
+        }
+    }
+
     function setEditing(editing) {
         scheduleState.editing = editing;
-        get("scheduleListView").hidden = editing;
-        get("scheduleEditorView").hidden = !editing;
-        get("tab-schedules")?.classList.toggle("is-editing", editing);
+        if (!editing) scheduleState.page = "list";
+        syncEmptyState();
         if (typeof syncMainContentLayout === "function")
             syncMainContentLayout();
     }
 
     function openDraft(task) {
+        if (!confirmLeave()) return;
         scheduleState.draftNew = true;
         scheduleState.selectedId = "";
         scheduleState.issues = [];
@@ -379,13 +460,26 @@
         setEditorStatus("");
         syncEditorChrome();
         writeTaskQuery("new");
+        renderList();
+        window.requestAnimationFrame(() =>
+            window.requestAnimationFrame(() => showSchedulePage("editor")),
+        );
     }
 
     function openEditor(taskId) {
+        const sameOpen =
+            scheduleState.editing &&
+            !scheduleState.draftNew &&
+            scheduleState.selectedId === taskId;
+        if (sameOpen) {
+            showSchedulePage("editor");
+            return;
+        }
         const task = scheduleState.tasks.find(
             (item) => item.task_id === taskId,
         );
         if (!task) return;
+        if (!confirmLeave()) return;
         scheduleState.draftNew = false;
         scheduleState.selectedId = taskId;
         scheduleState.issues = [];
@@ -396,6 +490,10 @@
         setEditorStatus("");
         syncEditorChrome();
         writeTaskQuery(taskId);
+        renderList();
+        window.requestAnimationFrame(() =>
+            window.requestAnimationFrame(() => showSchedulePage("editor")),
+        );
         validateDraft();
     }
 
@@ -405,6 +503,7 @@
         scheduleState.dirty = false;
         writeTaskQuery("");
         renderList();
+        showSchedulePage("list");
     }
 
     function writeTaskQuery(taskId) {
@@ -575,6 +674,7 @@
             save();
             return;
         }
+        if (!scheduleState.editorInView) return;
         if (
             (event.ctrlKey || event.metaKey) &&
             event.key.toLowerCase() === "z"
@@ -602,6 +702,50 @@
         }
     }
 
+    function bindPageObserver() {
+        const box = scroller();
+        const editor = get("scheduleEditorView");
+        if (!box || !editor) return;
+        const observer = new IntersectionObserver(
+            (entries) => {
+                entries.forEach((entry) => {
+                    if (entry.target !== editor) return;
+                    scheduleState.editorInView =
+                        entry.isIntersecting && entry.intersectionRatio >= 0.4;
+                    if (scheduleState.editorInView)
+                        scheduleState.page = "editor";
+                    else if (entry.intersectionRatio < 0.15)
+                        scheduleState.page = "list";
+                });
+            },
+            { root: box, threshold: [0.15, 0.4, 0.6] },
+        );
+        observer.observe(editor);
+    }
+
+    function bindListWheel() {
+        const list = get("scheduleList");
+        if (!list) return;
+        list.addEventListener(
+            "wheel",
+            (event) => {
+                const box = scroller();
+                if (!box) return;
+                const atBottom =
+                    list.scrollTop + list.clientHeight >= list.scrollHeight - 1;
+                const atTop = list.scrollTop <= 0;
+                if (event.deltaY > 0 && atBottom) {
+                    event.preventDefault();
+                    box.scrollBy({ top: event.deltaY });
+                } else if (event.deltaY < 0 && atTop) {
+                    event.preventDefault();
+                    box.scrollBy({ top: event.deltaY });
+                }
+            },
+            { passive: false },
+        );
+    }
+
     function bindEvents() {
         get("btnSchedulesRefresh")?.addEventListener("click", refresh);
         get("btnSchedulesNew")?.addEventListener("click", showPresetDialog);
@@ -613,7 +757,15 @@
             scheduleState.search = String(event.target.value || "");
             renderList();
         });
-        get("btnWfBack")?.addEventListener("click", closeEditor);
+        get("btnWfBack")?.addEventListener("click", () =>
+            showSchedulePage("list"),
+        );
+        get("btnWfEmptyBack")?.addEventListener("click", () =>
+            showSchedulePage("list"),
+        );
+        get("btnWfScrollEditor")?.addEventListener("click", () =>
+            showSchedulePage("editor"),
+        );
         get("btnWfSave")?.addEventListener("click", save);
         get("btnWfDelete")?.addEventListener("click", removeSelected);
         get("btnWfLayout")?.addEventListener("click", () =>
@@ -637,6 +789,9 @@
             }
         });
         document.addEventListener("keydown", bindEditorKeys);
+        bindPageObserver();
+        bindListWheel();
+        syncEmptyState();
     }
 
     const controller = {
@@ -651,6 +806,7 @@
             if (!scheduleState.loaded) refresh();
             if (typeof syncMainContentLayout === "function")
                 syncMainContentLayout();
+            restoreSchedulePage();
         },
         confirmLeave,
         isEditing() {

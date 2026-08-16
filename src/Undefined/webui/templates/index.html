@@ -853,7 +853,7 @@
 
                 <!-- Tab Schedules / Automations -->
                 <section id="tab-schedules" class="tab-content">
-                    <div id="scheduleListView" class="schedule-list-view">
+                    <div id="scheduleListView" class="schedule-page schedule-list-view">
                         <div class="header">
                             <div>
                                 <h1 class="page-title" data-i18n="schedules.title">自动化</h1>
@@ -890,11 +890,14 @@
                                 data-i18n-placeholder="schedules.search_placeholder" placeholder="搜索自动化..." />
                         </div>
                         <div id="scheduleList" class="schedule-card-grid"></div>
+                        <button id="btnWfScrollEditor" class="schedule-page-cue" type="button">
+                            <span data-i18n="schedules.scroll_editor">下滑进入画布</span>
+                        </button>
                     </div>
 
-                    <div id="scheduleEditorView" class="schedule-editor-view" hidden>
+                    <div id="scheduleEditorView" class="schedule-page schedule-editor-view is-empty">
                         <div class="wf-toolbar">
-                            <button id="btnWfBack" class="btn ghost" type="button" data-i18n="schedules.back">返回列表</button>
+                            <button id="btnWfBack" class="btn ghost" type="button" data-i18n="schedules.back">回到列表</button>
                             <input id="wfTaskName" class="wf-name-input" type="text" data-i18n-placeholder="schedules.task_name" placeholder="名称" />
                             <input id="wfTaskId" class="wf-id-input form-control form-control-sm" type="text" placeholder="id" />
                             <label class="wf-toggle"><input id="wfEnabled" type="checkbox" checked /> <span data-i18n="schedules.enabled">启用</span></label>
@@ -906,19 +909,25 @@
                                 <button id="btnWfSave" class="btn primary" type="button" data-i18n="schedules.save">保存</button>
                             </div>
                         </div>
-                        <div class="wf-workspace">
-                            <aside id="wfPalette" class="wf-palette"></aside>
-                            <div class="wf-stage">
-                                <div id="wfCanvas" class="wf-canvas" tabindex="0"></div>
-                                <div id="wfMobileNodes" class="wf-mobile-nodes"></div>
+                        <div class="wf-editor-body">
+                            <div class="wf-workspace">
+                                <aside id="wfPalette" class="wf-palette"></aside>
+                                <div class="wf-stage">
+                                    <div id="wfCanvas" class="wf-canvas" tabindex="0"></div>
+                                    <div id="wfMobileNodes" class="wf-mobile-nodes"></div>
+                                </div>
+                                <aside id="wfInspector" class="wf-inspector"></aside>
                             </div>
-                            <aside id="wfInspector" class="wf-inspector"></aside>
+                            <details id="wfAdvanced" class="wf-advanced">
+                                <summary data-i18n="schedules.advanced">高级 / JSON</summary>
+                                <textarea id="wfGraphJson" class="form-control form-textarea schedule-json-area" spellcheck="false"></textarea>
+                                <button id="btnWfApplyJson" class="btn ghost" type="button" data-i18n="schedules.apply_json">应用 JSON</button>
+                            </details>
                         </div>
-                        <details id="wfAdvanced" class="wf-advanced">
-                            <summary data-i18n="schedules.advanced">高级 / JSON</summary>
-                            <textarea id="wfGraphJson" class="form-control form-textarea schedule-json-area" spellcheck="false"></textarea>
-                            <button id="btnWfApplyJson" class="btn ghost" type="button" data-i18n="schedules.apply_json">应用 JSON</button>
-                        </details>
+                        <div id="wfEmptyState" class="wf-empty-state">
+                            <p data-i18n="schedules.pick_task">从上方选择一条自动化，或新建后在此编排。</p>
+                            <button id="btnWfEmptyBack" class="btn ghost" type="button" data-i18n="schedules.back">回到列表</button>
+                        </div>
                     </div>
 
                     <div id="schedulePresetDialog" class="wf-modal" hidden>

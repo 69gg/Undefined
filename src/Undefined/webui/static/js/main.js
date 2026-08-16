@@ -47,20 +47,24 @@ function renderAboutChangelogEntry(entry) {
 
 function syncMainContentLayout() {
     const mainContent = document.querySelector(".main-content");
-    const editingWorkflow =
-        state.tab === "schedules" &&
-        !!get("tab-schedules")?.classList.contains("is-editing");
     if (mainContent) {
         mainContent.classList.toggle("chat-layout", state.tab === "chat");
-        mainContent.classList.toggle("workflow-layout", editingWorkflow);
+        mainContent.classList.toggle(
+            "workflow-layout",
+            state.tab === "schedules",
+        );
     }
 
     const appContent = get("appContent");
     if (appContent && state.authenticated) {
-        if (state.view === "app") {
-            appContent.style.display = state.tab === "chat" ? "grid" : "block";
-        } else {
+        if (state.view !== "app") {
             appContent.style.display = "none";
+        } else if (state.tab === "chat") {
+            appContent.style.display = "grid";
+        } else if (state.tab === "schedules") {
+            appContent.style.display = "flex";
+        } else {
+            appContent.style.display = "block";
         }
     }
 }
