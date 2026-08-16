@@ -19,7 +19,6 @@ from Undefined.context import RequestContextFilter
 from Undefined.faq import FAQStorage
 from Undefined.handlers import MessageHandler
 from Undefined.memory import MemoryStorage
-from Undefined.scheduled_task_storage import ScheduledTaskStorage
 from Undefined.end_summary_storage import EndSummaryStorage
 from Undefined.onebot import OneBotClient
 from Undefined.api import RuntimeAPIContext, RuntimeAPIServer
@@ -186,7 +185,6 @@ async def main() -> None:
         init_start = time.perf_counter()
         onebot = OneBotClient(config.onebot_ws_url, config.onebot_token)
         memory_storage = MemoryStorage(max_memories=100)
-        task_storage = ScheduledTaskStorage()
         end_summary_storage = EndSummaryStorage()
         ai = AIClient(
             config.chat_model,
@@ -364,7 +362,7 @@ async def main() -> None:
                 config.memes.queue_path,
             )
 
-        handler = MessageHandler(config, onebot, ai, faq_storage, task_storage)
+        handler = MessageHandler(config, onebot, ai, faq_storage)
         await handler.initialize()
         weixin_service = WeixinService(
             config,

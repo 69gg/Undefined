@@ -34,9 +34,10 @@ from Undefined.onebot import (
     get_message_sender_id,
 )
 from Undefined.rate_limit import RateLimiter
-from Undefined.scheduled_task_storage import ScheduledTaskStorage
-from Undefined.services.coordinator import AICoordinator
+from Undefined.automations.match import AutomationEvent
+from Undefined.automations.service import AutomationService
 from Undefined.services.command import CommandDispatcher
+from Undefined.services.coordinator import AICoordinator
 from Undefined.services.message_batcher import MessageBatcher, make_scope
 from Undefined.services.model_pool import ModelPoolService
 from Undefined.services.queue_manager import QueueManager
@@ -49,8 +50,6 @@ from Undefined.utils.history import MessageHistoryManager
 from Undefined.utils.logging import log_debug_json, redact_string
 from Undefined.utils.queue_intervals import build_model_queue_intervals
 from Undefined.utils.resources import resolve_resource_path
-from Undefined.automations.match import AutomationEvent
-from Undefined.utils.scheduler import TaskScheduler
 from Undefined.utils.message_reply import GENERIC_REPLY_PLACEHOLDER, ReplyContext
 from Undefined.utils.message_targets import DeliveryAddress
 from Undefined.utils.sender import AddressBoundSender, MessageSender
@@ -103,7 +102,6 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
         onebot: OneBotClient,
         ai: AIClient,
         faq_storage: FAQStorage,
-        task_storage: ScheduledTaskStorage,
     ) -> None:
         self.config = config
         self.onebot = onebot
@@ -146,7 +144,7 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
             self.history_manager,
             self.sender,
             onebot,
-            TaskScheduler(ai, self.sender, onebot, self.history_manager, task_storage),
+            AutomationService(ai, self.sender, onebot, self.history_manager),
             self.security,
             command_dispatcher=self.command_dispatcher,
         )
@@ -1434,6 +1432,10 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
                 return_exceptions=True,
             )
         await self.pipeline_registry.stop_hot_reload()
+        scheduler = getattr(self.ai_coordinator, "scheduler", None)
+        shutdown = getattr(scheduler, "shutdown", None)
+        if callable(shutdown):
+            shutdown()
         await self.message_batcher.flush_all()
         # 关闭前排空 AI 队列并落盘历史，避免丢回复/丢记录
         await self.ai_coordinator.queue_manager.drain()

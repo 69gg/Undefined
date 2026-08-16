@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any
 
@@ -9,29 +8,19 @@ from Undefined.api.routes.schedules import (
     build_schedules_summary,
     serialize_schedule_task,
 )
-from Undefined.utils.scheduler import SELF_CALL_TOOL_NAME
-
-
-class _FakeJob:
-    def __init__(self) -> None:
-        self.next_run_time = datetime(2026, 6, 7, 9, 0, tzinfo=timezone.utc)
-
-
-class _FakeApscheduler:
-    def __init__(self) -> None:
-        self.running = True
-
-    def get_job(self, _task_id: str) -> _FakeJob:
-        return _FakeJob()
+from Undefined.automations.constants import SELF_CALL_TOOL_NAME
 
 
 class _FakeScheduler:
     def __init__(self) -> None:
-        self.scheduler = _FakeApscheduler()
+        self.clock_running = True
         self.tasks: dict[str, dict[str, Any]] = {}
 
     def list_tasks(self) -> dict[str, dict[str, Any]]:
         return self.tasks
+
+    def next_run_iso(self, _task_id: str) -> str | None:
+        return "2026-06-07T09:00:00+00:00"
 
 
 def _context(scheduler: Any) -> RuntimeAPIContext:
@@ -62,7 +51,7 @@ def test_build_schedules_summary_includes_running_when_unavailable() -> None:
 
 
 def test_build_schedules_summary_includes_running_when_list_tasks_missing() -> None:
-    context = _context(SimpleNamespace(scheduler=SimpleNamespace(running=True)))
+    context = _context(SimpleNamespace(clock_running=True))
 
     assert build_schedules_summary(context) == {
         "available": False,

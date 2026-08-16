@@ -1,5 +1,7 @@
 from typing import Any, Dict
 
+from Undefined.skills.toolsets.automation._runtime import get_automation_service
+
 
 def _start_of(task: Dict[str, Any]) -> Dict[str, Any]:
     for node in task.get("nodes") or []:
@@ -10,10 +12,10 @@ def _start_of(task: Dict[str, Any]) -> Dict[str, Any]:
 
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     _ = args
-    scheduler = context.get("scheduler")
-    if not scheduler:
-        return "调度器未在上下文中提供"
-    tasks = scheduler.list_tasks()
+    service = get_automation_service(context)
+    if not service:
+        return "自动化服务未在上下文中提供"
+    tasks = service.list_tasks()
     if not tasks:
         return "当前没有自动化"
     lines = ["自动化列表：\n"]

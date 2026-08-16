@@ -1,6 +1,8 @@
 from copy import deepcopy
 from typing import Any, Dict
 
+from Undefined.skills.toolsets.automation._runtime import get_automation_service
+
 
 def _apply_start_fields(task: Dict[str, Any], args: Dict[str, Any]) -> None:
     nodes = task.get("nodes")
@@ -31,10 +33,10 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     task_id = str(args.get("task_id") or "").strip()
     if not task_id:
         return "task_id 不能为空"
-    scheduler = context.get("scheduler")
-    if not scheduler:
-        return "调度器未在上下文中提供"
-    existing = scheduler.list_tasks().get(task_id)
+    service = get_automation_service(context)
+    if not service:
+        return "自动化服务未在上下文中提供"
+    existing = service.list_tasks().get(task_id)
     if not isinstance(existing, dict):
         return f"找不到自动化 {task_id}"
     payload = deepcopy(existing)
@@ -82,7 +84,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             by_id[node_id] = current
         payload["nodes"] = [by_id[node_id] for node_id in order]
     try:
-        await scheduler.upsert_automation(task_id, payload)
+        await service.upsert_automation(task_id, payload)
     except Exception as exc:
         return f"更新失败: {exc}"
     return f"已更新自动化 {task_id}"

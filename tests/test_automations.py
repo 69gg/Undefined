@@ -26,7 +26,7 @@ from Undefined.automations.validate import (
 )
 from Undefined.handlers import MessageHandler
 from Undefined.handlers.poke import PokeMixin
-from Undefined.utils.scheduler import TaskScheduler
+from Undefined.automations.service import AutomationService
 
 
 def test_consume_mentions_strips_only_written_tokens() -> None:
@@ -498,7 +498,7 @@ def test_serialize_migrated_task_keeps_crontab_mode() -> None:
         command_dispatcher=SimpleNamespace(),
         queue_manager=SimpleNamespace(),
         history_manager=SimpleNamespace(),
-        scheduler=SimpleNamespace(scheduler=SimpleNamespace(get_job=lambda _id: None)),
+        scheduler=SimpleNamespace(next_run_iso=lambda _id: None),
     )
     migrated = migrate_legacy_task(
         {
@@ -526,7 +526,7 @@ async def test_remove_event_automation_without_job() -> None:
         async def save_all(self, _tasks: dict[str, Any]) -> None:
             return None
 
-    scheduler = TaskScheduler(
+    service = AutomationService(
         SimpleNamespace(
             memory_storage=SimpleNamespace(),
             runtime_config=SimpleNamespace(),
@@ -534,10 +534,10 @@ async def test_remove_event_automation_without_job() -> None:
         SimpleNamespace(),
         SimpleNamespace(),
         SimpleNamespace(),
-        task_storage=cast(Any, _DummyStorage()),
+        storage=cast(Any, _DummyStorage()),
     )
     try:
-        scheduler.tasks["evt"] = {
+        service.tasks["evt"] = {
             "task_id": "evt",
             "nodes": [
                 {
@@ -549,11 +549,11 @@ async def test_remove_event_automation_without_job() -> None:
             ],
             "edges": [],
         }
-        assert await scheduler.remove_task("evt") is True
-        assert "evt" not in scheduler.tasks
-        assert await scheduler.remove_task("missing") is False
+        assert await service.remove_task("evt") is True
+        assert "evt" not in service.tasks
+        assert await service.remove_task("missing") is False
     finally:
-        scheduler.scheduler.shutdown(wait=False)
+        service.shutdown()
 
 
 def test_storage_migrates_legacy_json(tmp_path: Any) -> None:

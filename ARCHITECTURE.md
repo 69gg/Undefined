@@ -26,6 +26,7 @@ graph TB
     %% ==================== 消息处理层 ====================
     subgraph MessageLayer["消息处理层 (src/Undefined/)"]
         MessageHandler["MessageHandler<br/>消息处理器<br/>[handlers/]"]
+        AutomationService["AutomationService<br/>自动化运行时<br/>[automations/service.py]<br/>• 事件匹配 • DAG 执行<br/>• APScheduler 时间触发"]
 
         subgraph BilibiliModule["Bilibili 模块 (bilibili/)"]
             BilibiliParser["parser.py<br/>标识符解析<br/>• BV/AV号 • URL<br/>• b23.tv短链 • 小程序JSON"]
@@ -169,7 +170,6 @@ graph TB
         
         subgraph IOLayer["异步 IO 层 (src/Undefined/utils/)"]
             IOUtils["IO 工具<br/>[io.py]<br/>• write_json<br/>• read_json<br/>• append_line<br/>• 文件锁 (flock/msvcrt) + 原子写入"]
-            SchedulerUtils["调度器门面<br/>[scheduler.py]<br/>• APScheduler 时间触发<br/>• 自动化 DAG 执行"]
             CacheUtils["缓存工具<br/>[cache.py]<br/>• 定期清理"]
             SenderUtils["Sender 工具<br/>[sender.py]"]
         end
@@ -228,6 +228,10 @@ graph TB
     GitHubParser -->|"仓库ID"| GitHubClient
     GitHubClient -->|"public仓库信息"| GitHubSender
     GitHubSender -->|"发送图片卡片"| OneBotClient
+    
+    MessageHandler -->|"2.7 自动化"| AutomationService
+    AutomationService -->|"读写"| AutomationStorage
+    AutomationStorage -->|"异步读写"| IOUtils
     
     MessageHandler -->|"3. 自动回复"| AICoordinator
     AICoordinator -->|"3.1 入桶等待合并"| MessageBatcher
@@ -293,7 +297,6 @@ graph TB
     MemoryStorage -->|"异步读写"| IOUtils
     TokenUsageStorage -->|"异步读写<br/>自动归档"| IOUtils
     FAQStorage -->|"异步读写"| IOUtils
-    ScheduledTaskStorage -->|"异步读写"| IOUtils
     CognitiveJobQueue -->|"异步读写"| IOUtils
     CognitiveProfileStorage -->|"异步读写"| IOUtils
     
@@ -328,11 +331,11 @@ graph TB
     
     class User,Admin,OneBotServer,LLM_API external
     class Main,ConfigLoader,ConfigHotReload,ConfigModels,OneBotClient,Context,WebUI core
-    class MessageHandler,SecurityService,InjectionAgent,CommandDispatcher,MessageBatcher,AICoordinator message
+    class MessageHandler,AutomationService,SecurityService,InjectionAgent,CommandDispatcher,MessageBatcher,AICoordinator message
     class AIClient,PromptBuilder,ModelRequester,ToolManager,MultimodalAnalyzer,SummaryService,TokenCounter,Parsing ai
     class ToolRegistry,AgentRegistry,AgentToolRegistry,IntroGenerator skills
-    class RequestContext,ContextFilter,ResourceRegistry,HistoryManager,MemoryStorage,EndSummaryStorage,CognitiveService,CognitiveJobQueue,CognitiveHistorian,CognitiveVectorStore,CognitiveProfileStorage,FAQStorage,ScheduledTaskStorage,TokenUsageStorage storage
-    class IOUtils,SchedulerUtils,CacheUtils,SenderUtils io
+    class RequestContext,ContextFilter,ResourceRegistry,HistoryManager,MemoryStorage,EndSummaryStorage,CognitiveService,CognitiveJobQueue,CognitiveHistorian,CognitiveVectorStore,CognitiveProfileStorage,FAQStorage,AutomationStorage,TokenUsageStorage storage
+    class IOUtils,CacheUtils,SenderUtils io
     class Dir_History,Dir_FAQ,Dir_TokenUsage,Dir_Cognitive,File_Memory,File_EndSummary,File_ScheduledTasks,Dir_Logs,File_Config persistence
     class Prompts,Intros resource
     class QueueManager,ModelQueues,DispatcherLoop queue
@@ -858,7 +861,7 @@ description: 从 PDF 文件中提取文本和表格，填写表单。当用户�
 
 1. **外部实体层**：用户、管理员、OneBot 协议端 (NapCat/Lagrange.Core)、大模型 API 服务商
 2. **核心入口层**：main.py 启动入口、配置管理器 (config/loader.py + parsers/ + load_sections/)、热更新应用器 (config/hot_reload.py)、OneBotClient (onebot/ + onebot.py shim)、WeixinService (`weixin/` + `weixin-ilink-client`)、RequestContext (context.py)、Runtime API Server (api/app.py → api/routes/ 路由子模块，含 naga/ 子包)
-3. **消息处理层**：MessageHandler (`handlers/`)、统一 DeliveryAddress 路由 (`utils/message_targets.py`)、SecurityService (security.py)、CommandDispatcher (services/command.py + commands/ mixins)、自动处理管线 (skills/pipelines/)、Automations (`automations/`，pipeline 之后、对应 AI loop 之前 await，命中可拦截)、MessageBatcher (services/message_batcher/)、AICoordinator (services/coordinator/ + ai_coordinator.py 门面)、QueueManager (queue_manager.py)、Bilibili/arXiv/GitHub 解析与发送模块
+3. **消息处理层**：MessageHandler (`handlers/`)、统一 DeliveryAddress 路由 (`utils/message_targets.py`)、SecurityService (security.py)、CommandDispatcher (services/command.py + commands/ mixins)、自动处理管线 (skills/pipelines/)、AutomationService (`automations/service.py`，pipeline 之后、对应 AI loop 之前 await，命中可拦截)、MessageBatcher (services/message_batcher/)、AICoordinator (services/coordinator/ + ai_coordinator.py 门面)、QueueManager (queue_manager.py)、Bilibili/arXiv/GitHub 解析与发送模块
     自动提取由 `PipelineRegistry` 并行检测、并行处理全部命中的管线；随后 `await` 自动化工作流，未拦截时再进入 AI 自动回复。
 4. **AI 核心能力层**：AIClient (ai/client/ + client.py shim)、PromptBuilder (ai/prompts/ + prompts.py shim)、ModelRequester (ai/llm/ + llm.py shim)、ToolManager (tooling.py)、MultimodalAnalyzer (ai/multimodal/ + multimodal.py shim)、SummaryService (summaries.py)、TokenCounter (tokens.py)。OpenAI Chat Completions / Responses、Anthropic Messages SDK 归一化、CoT 续传与文本 Tool Call 容错见[模型 API 与兼容层](docs/model-compatibility.md)。
 5. **存储与上下文层**：MessageHistoryManager (utils/history.py, 10000条限制)、MemoryStorage (memory.py, 置顶备忘录, 500条上限)、EndSummaryStorage、CognitiveService + JobQueue + HistorianWorker + VectorStore + ProfileStorage、MemeService + MemeWorker + MemeStore + MemeVectorStore (表情包库)、FAQStorage、AutomationStorage (`data/automations.json`；旧 `scheduled_tasks.json` 启动时一次性转为新格式，不删旧文件、不双写)、TokenUsageStorage (自动归档)

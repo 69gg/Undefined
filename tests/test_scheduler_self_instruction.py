@@ -7,15 +7,13 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from Undefined.automations.address import resolve_task_address
+from Undefined.automations.constants import SELF_CALL_TOOL_NAME
+from Undefined.automations.service import AutomationService
 from Undefined.utils import io as async_io
-from Undefined.utils.scheduler import (
-    SELF_CALL_TOOL_NAME,
-    TaskScheduler,
-    _resolve_task_address,
-)
 
 
-class _DummyTaskStorage:
+class _DummyStorage:
     def load_tasks(self) -> dict[str, Any]:
         return {}
 
@@ -23,15 +21,44 @@ class _DummyTaskStorage:
         return None
 
 
+def _make_service(
+    *,
+    ai: Any | None = None,
+    sender: Any | None = None,
+    onebot: Any | None = None,
+) -> AutomationService:
+    return AutomationService(
+        ai
+        or SimpleNamespace(
+            ask=AsyncMock(),
+            memory_storage=SimpleNamespace(),
+            runtime_config=SimpleNamespace(),
+        ),
+        sender
+        or SimpleNamespace(
+            send_group_message=AsyncMock(),
+            send_private_message=AsyncMock(),
+        ),
+        onebot
+        or SimpleNamespace(
+            send_like=AsyncMock(),
+            get_image=AsyncMock(return_value=None),
+            get_forward_msg=AsyncMock(return_value=[]),
+        ),
+        SimpleNamespace(),
+        storage=cast(Any, _DummyStorage()),
+    )
+
+
 def test_resolve_task_address_rejects_conflicting_legacy_target() -> None:
     with pytest.raises(ValueError, match="address 与旧目标参数指向不同会话"):
-        _resolve_task_address("wechat:12345", 12345, "private")
+        resolve_task_address("wechat:12345", 12345, "private")
 
 
 def test_resolve_task_address_preserves_address_and_legacy_only_paths() -> None:
-    address_only = _resolve_task_address("wechat:12345", None, "private")
-    legacy_only = _resolve_task_address(None, 12345, "private")
-    matching_targets = _resolve_task_address("group:12345", 12345, "group")
+    address_only = resolve_task_address("wechat:12345", None, "private")
+    legacy_only = resolve_task_address(None, 12345, "private")
+    matching_targets = resolve_task_address("group:12345", 12345, "group")
 
     assert address_only is not None
     assert address_only.canonical == "wechat:12345"
@@ -42,7 +69,9 @@ def test_resolve_task_address_preserves_address_and_legacy_only_paths() -> None:
 
 
 @pytest.mark.asyncio
-async def test_task_scheduler_execute_self_call_invokes_ai_and_sends_result() -> None:
+async def test_automation_service_execute_self_call_invokes_ai_and_sends_result() -> (
+    None
+):
     ai = SimpleNamespace(
         ask=AsyncMock(return_value="未来指令已执行"),
         memory_storage=SimpleNamespace(),
@@ -52,19 +81,7 @@ async def test_task_scheduler_execute_self_call_invokes_ai_and_sends_result() ->
         send_group_message=AsyncMock(),
         send_private_message=AsyncMock(),
     )
-    onebot = SimpleNamespace(
-        send_like=AsyncMock(),
-        get_image=AsyncMock(return_value=None),
-        get_forward_msg=AsyncMock(return_value=[]),
-    )
-    history_manager = SimpleNamespace()
-    scheduler = TaskScheduler(
-        ai,
-        sender,
-        onebot,
-        history_manager,
-        task_storage=cast(Any, _DummyTaskStorage()),
-    )
+    service = _make_service(ai=ai, sender=sender)
 
     sent_messages: list[str] = []
 
@@ -72,7 +89,7 @@ async def test_task_scheduler_execute_self_call_invokes_ai_and_sends_result() ->
         sent_messages.append(message)
 
     try:
-        result = await scheduler._execute_tool(
+        result = await service._execute_tool(
             SELF_CALL_TOOL_NAME,
             {"prompt": "请在触发时复盘并提醒我明天重点。"},
             {
@@ -82,13 +99,13 @@ async def test_task_scheduler_execute_self_call_invokes_ai_and_sends_result() ->
             },
         )
     finally:
-        scheduler.scheduler.shutdown(wait=False)
+        service.shutdown()
 
     assert result == "已执行向未来自己的指令"
     ai.ask.assert_awaited_once()
     ask_call = ai.ask.await_args
     assert ask_call.args[0] == "请在触发时复盘并提醒我明天重点。"
-    assert ask_call.kwargs["scheduler"] is scheduler
+    assert ask_call.kwargs["scheduler"] is service
     assert ask_call.kwargs["extra_context"]["scheduled_self_call"] is True
     assert ask_call.kwargs["extra_context"]["scheduled_task_id"] == "task_self_abc"
     assert ask_call.kwargs["extra_context"]["scheduled_task_name"] == "future-review"
@@ -96,68 +113,50 @@ async def test_task_scheduler_execute_self_call_invokes_ai_and_sends_result() ->
 
 
 @pytest.mark.asyncio
-async def test_task_scheduler_update_task_refreshes_job_args() -> None:
-    ai = SimpleNamespace(
-        ask=AsyncMock(),
-        memory_storage=SimpleNamespace(),
-        runtime_config=SimpleNamespace(),
-    )
-    sender = SimpleNamespace(
-        send_group_message=AsyncMock(),
-        send_private_message=AsyncMock(),
-    )
-    onebot = SimpleNamespace(
-        send_like=AsyncMock(),
-        get_image=AsyncMock(return_value=None),
-        get_forward_msg=AsyncMock(return_value=[]),
-    )
-    scheduler = TaskScheduler(
-        ai,
-        sender,
-        onebot,
-        SimpleNamespace(),
-        task_storage=cast(Any, _DummyTaskStorage()),
-    )
+async def test_upsert_automation_refreshes_job_args() -> None:
+    service = _make_service()
 
     try:
-        created = await scheduler.add_task(
-            task_id="task_edit_args",
-            tool_name="get_current_time",
-            tool_args={"format": "iso"},
-            cron_expression="0 9 * * *",
-            target_id=10001,
-            target_type="group",
+        created = await service.upsert_automation(
+            "task_edit_args",
+            {
+                "task_name": "edit",
+                "tool_name": "get_current_time",
+                "tool_args": {"format": "iso"},
+                "cron": "0 9 * * *",
+                "target_id": 10001,
+                "target_type": "group",
+            },
         )
-        updated = await scheduler.update_task(
-            task_id="task_edit_args",
-            tool_name="messages.send_message",
-            tool_args={"message": "updated"},
-            target_id=None,
-            target_id_provided=True,
-            target_type="private",
+        updated = await service.upsert_automation(
+            "task_edit_args",
+            {
+                "task_name": "edit",
+                "tool_name": "messages.send_message",
+                "tool_args": {"message": "updated"},
+                "cron": "0 9 * * *",
+                "address": "qq:10002",
+            },
         )
-        job = scheduler.scheduler.get_job("task_edit_args")
+        job = service._apscheduler.get_job("task_edit_args")
     finally:
-        scheduler.scheduler.shutdown(wait=False)
+        service.shutdown()
 
     assert created is True
     assert updated is True
     assert job is not None
-    assert list(job.args) == [
-        "task_edit_args",
-        "messages.send_message",
-        {"message": "updated"},
-        None,
-        "private",
-    ]
+    assert list(job.args) == ["task_edit_args"]
+    stored = service.list_tasks()["task_edit_args"]
+    assert stored["address"] == "qq:10002"
+    assert stored["target_type"] == "private"
 
 
 @pytest.mark.asyncio
-async def test_task_scheduler_routes_wechat_result_by_canonical_address(
+async def test_time_fire_routes_wechat_result_by_canonical_address(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "Undefined.utils.scheduler.collect_context_resources",
+        "Undefined.automations.service.collect_context_resources",
         lambda values: {
             key: values[key]
             for key in (
@@ -170,6 +169,7 @@ async def test_task_scheduler_routes_wechat_result_by_canonical_address(
                 "history_manager",
                 "onebot_client",
             )
+            if key in values
         },
     )
     ai = SimpleNamespace(
@@ -182,19 +182,8 @@ async def test_task_scheduler_routes_wechat_result_by_canonical_address(
         send_private_message=AsyncMock(),
         send_address_message=AsyncMock(),
     )
-    onebot = SimpleNamespace(
-        send_like=AsyncMock(),
-        get_image=AsyncMock(return_value=None),
-        get_forward_msg=AsyncMock(return_value=[]),
-    )
-    scheduler = TaskScheduler(
-        ai,
-        sender,
-        onebot,
-        SimpleNamespace(),
-        task_storage=cast(Any, _DummyTaskStorage()),
-    )
-    scheduler.tasks["task_wechat"] = {
+    service = _make_service(ai=ai, sender=sender)
+    service.tasks["task_wechat"] = {
         "task_id": "task_wechat",
         "tool_name": SELF_CALL_TOOL_NAME,
         "tool_args": {"prompt": "提醒我"},
@@ -205,15 +194,9 @@ async def test_task_scheduler_routes_wechat_result_by_canonical_address(
     }
 
     try:
-        await scheduler._execute_tool_wrapper(
-            "task_wechat",
-            SELF_CALL_TOOL_NAME,
-            {"prompt": "提醒我"},
-            None,
-            "private",
-        )
+        await service._on_time_fire("task_wechat")
     finally:
-        scheduler.scheduler.shutdown(wait=False)
+        service.shutdown()
 
     sender.send_address_message.assert_awaited_once()
     address = sender.send_address_message.await_args.args[0]
@@ -227,7 +210,7 @@ async def test_task_scheduler_routes_wechat_result_by_canonical_address(
     [(".png", "image"), (".ogg", "record")],
 )
 @pytest.mark.asyncio
-async def test_task_scheduler_routes_wechat_media_as_address_file(
+async def test_time_fire_routes_wechat_media_as_address_file(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     suffix: str,
@@ -236,7 +219,7 @@ async def test_task_scheduler_routes_wechat_media_as_address_file(
     media_path = tmp_path / f"reminder{suffix}"
     await async_io.write_bytes(media_path, b"media")
     monkeypatch.setattr(
-        "Undefined.utils.scheduler.collect_context_resources",
+        "Undefined.automations.service.collect_context_resources",
         lambda values: {
             key: values[key]
             for key in (
@@ -245,6 +228,7 @@ async def test_task_scheduler_routes_wechat_media_as_address_file(
                 "history_manager",
                 "onebot_client",
             )
+            if key in values
         },
     )
 
@@ -271,19 +255,8 @@ async def test_task_scheduler_routes_wechat_media_as_address_file(
         send_address_message=AsyncMock(),
         send_address_file=AsyncMock(),
     )
-    onebot = SimpleNamespace(
-        send_like=AsyncMock(),
-        get_image=AsyncMock(return_value=None),
-        get_forward_msg=AsyncMock(return_value=[]),
-    )
-    scheduler = TaskScheduler(
-        ai,
-        sender,
-        onebot,
-        SimpleNamespace(),
-        task_storage=cast(Any, _DummyTaskStorage()),
-    )
-    scheduler.tasks["task_wechat_media"] = {
+    service = _make_service(ai=ai, sender=sender)
+    service.tasks["task_wechat_media"] = {
         "task_id": "task_wechat_media",
         "tool_name": "test.media",
         "tool_args": {},
@@ -294,18 +267,12 @@ async def test_task_scheduler_routes_wechat_media_as_address_file(
     }
 
     try:
-        await scheduler._execute_tool_wrapper(
-            "task_wechat_media",
-            "test.media",
-            {},
-            None,
-            "private",
-        )
+        await service._on_time_fire("task_wechat_media")
     finally:
-        scheduler.scheduler.shutdown(wait=False)
+        service.shutdown()
 
     sender.send_address_file.assert_awaited_once_with(
-        _resolve_task_address("wechat:12345", None, "private"),
+        resolve_task_address("wechat:12345", None, "private"),
         str(media_path),
         name=media_path.name,
         kind=expected_kind,

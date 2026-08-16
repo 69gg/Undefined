@@ -334,6 +334,7 @@ async def execute_tool_invoke(
                 req_ctx.set_resource("onebot_client", ctx.onebot)
             if ctx.scheduler is not None:
                 req_ctx.set_resource("scheduler", ctx.scheduler)
+                req_ctx.set_resource("automations", ctx.scheduler)
             if ctx.cognitive_service is not None:
                 req_ctx.set_resource("cognitive_service", ctx.cognitive_service)
             if ctx.meme_service is not None:

@@ -73,7 +73,7 @@ bash scripts/install_git_hooks.sh
 | `api/` | Runtime API / Management API 相关服务；路由拆分在 `api/routes/`，包含 `chat`、`cognitive`、`health`、`memes`、`memory`、`naga`、`system`、`tools` |
 | `webui/` | aiohttp 管理控制台；路由拆分在 `webui/routes/`，覆盖配置、日志、运行态、表情包与系统管理 |
 | `mcp/` | MCP 工具注册、连接与转换 |
-| `automations/` | 条件驱动青春版工作流：start 匹配、@ 专项消费、DAG / 分支 / 循环、旧定时任务迁移 |
+| `automations/` | 条件驱动青春版工作流：`AutomationService` 运行时、start 匹配、@ 专项消费、DAG / 分支 / 循环、旧定时任务迁移 |
 | `config/` | 配置系统：`loader.py`(TOML 解析+类型化)、`models.py`(数据模型)、`hot_reload.py`(热更新) |
 | `attachments.py` | 富媒体/附件注册、作用域隔离、`<attachment uid="..."/>` 统一标签（`<pic>` 向后兼容）渲染 |
 | `utils/` | `io.py`(异步 IO)、`history.py`(消息历史)、`paths.py`、`logging.py`、`sender.py` 等通用能力 |

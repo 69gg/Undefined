@@ -17,7 +17,7 @@ from Undefined.services.model_pool import ModelPoolService
 from Undefined.services.queue_manager import QueueManager
 from Undefined.services.security import SecurityService
 from Undefined.utils.history import MessageHistoryManager
-from Undefined.utils.scheduler import TaskScheduler
+from Undefined.automations.service import AutomationService
 from Undefined.utils.sender import MessageSender
 from Undefined.weixin.audio import VOICE_SOURCE_SUFFIXES
 
@@ -40,7 +40,7 @@ class AICoordinator(
         history_manager: MessageHistoryManager,
         sender: MessageSender,
         onebot: Any,  # OneBotClient
-        scheduler: TaskScheduler,
+        scheduler: AutomationService,
         security: SecurityService,
         command_dispatcher: Any = None,
     ) -> None:

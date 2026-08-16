@@ -105,7 +105,8 @@ curl http://127.0.0.1:8788/openapi.json
 | `message_batcher` | `object` | 消息合并器快照（`config` 含 `enabled`/`window_seconds`/`pre_send_seconds`/`speculative_enabled`/`strategy`/`max_window_seconds`/`max_messages_per_batch`/`group_enabled`/`private_enabled`/`allow_cancel_after_send`/`shutdown`；`pending_buckets` 当前缓冲桶数；`buckets[]` 列出每个桶的 `scope`/`sender_id`/`count`/`elapsed_seconds`/`phase`（`typing`/`speculating`/`finalizing`）/`has_inflight`/`has_speculative_dispatch`） |
 | `memory` | `object` | 长期记忆（`count`：条数） |
 | `cognitive` | `object` | 认知服务（`enabled`、`queue`） |
-| `scheduler` | `object` | 定时任务调度摘要（`available`、`count`、`running`） |
+| `scheduler` | `object` | 自动化摘要（`available`、`count`、`running`；与 `automations` 相同） |
+| `automations` | `object` | 与 `scheduler` 相同的自动化摘要 |
 | `api` | `object` | Runtime API 配置（`enabled`、`host`、`port`、`openapi_enabled`） |
 | `skills` | `object` | 技能统计，包含 `tools`、`toolsets`、`agents`、`pipelines`、`commands`、`anthropic_skills` 子对象 |
 | `models` | `object` | 模型配置；生成模型包含 `model_name`、脱敏 `api_url`、canonical `api_mode`（`openai.chat_completions` / `openai.responses` / `anthropic.messages`）、`thinking_enabled`、`thinking_param_enabled`、`thinking_tool_call_compat`、`reasoning_content_replay`、`system_prompt_as_user`、`responses_tool_choice_compat`、`responses_force_stateless_replay`、`prompt_cache_enabled`、`reasoning_enabled`、`reasoning_effort` |

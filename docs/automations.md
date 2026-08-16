@@ -9,8 +9,8 @@
 - 运行时只读写 `data/automations.json`
 - 启动时若还没有新文件、但存在旧 `data/scheduled_tasks.json`：读取并转为 start + 节点，写入 `automations.json`；**不删除**旧文件，之后也**不双写**
 - 已有 `automations.json` 时不再读取旧文件
+- 运行时由 `AutomationService`（`automations/service.py`）加载图、匹配事件、跑 DAG，并用 APScheduler 触发时间类 start。工具上下文注入 `automations` 与兼容别名 `scheduler`
 - 对外入口只有 `/api/v1/automations` 与 `automation.*`；不再提供 `/schedules` 或 `scheduler.*`
-- `TaskScheduler` 仍是运行时门面（`context["scheduler"]`），供 `automation.*` 使用
 
 ## 挂载点
 

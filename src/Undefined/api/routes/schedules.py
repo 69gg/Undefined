@@ -7,8 +7,8 @@ from copy import deepcopy
 from typing import Any
 
 from Undefined.api._context import RuntimeAPIContext
+from Undefined.automations.constants import SELF_CALL_TOOL_NAME
 from Undefined.utils.message_targets import parse_delivery_address
-from Undefined.utils.scheduler import SELF_CALL_TOOL_NAME
 
 _TASK_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,96}$")
 _LEGACY_TASK_ID_MAX_LENGTH = 256
@@ -46,15 +46,13 @@ def _parse_existing_task_id(value: Any) -> str:
 
 def _next_run_time_iso(ctx: RuntimeAPIContext, task_id: str) -> str | None:
     scheduler = ctx.scheduler
-    apscheduler = getattr(scheduler, "scheduler", None)
-    get_job = getattr(apscheduler, "get_job", None)
-    if not callable(get_job):
+    next_run = getattr(scheduler, "next_run_iso", None)
+    if not callable(next_run):
         return None
-    job = get_job(task_id)
-    next_run_time = getattr(job, "next_run_time", None) if job is not None else None
-    if next_run_time is None:
+    value = next_run(task_id)
+    if value is None:
         return None
-    return str(next_run_time.isoformat())
+    return str(value)
 
 
 def _schedule_task_mode(task: dict[str, Any]) -> str:
@@ -117,7 +115,5 @@ def build_schedules_summary(ctx: RuntimeAPIContext) -> dict[str, Any]:
     return {
         "available": True,
         "count": len(tasks),
-        "running": bool(
-            getattr(getattr(scheduler, "scheduler", None), "running", False)
-        ),
+        "running": bool(getattr(scheduler, "clock_running", False)),
     }

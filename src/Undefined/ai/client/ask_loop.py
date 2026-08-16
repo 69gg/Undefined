@@ -149,7 +149,7 @@ class ClientAskLoopMixin(ClientQueueMixin):
             sender: 消息发送助手实例
             history_manager: 历史记录管理器实例
             onebot_client: OneBot 客户端实例
-            scheduler: 任务调度器实例
+            scheduler: 自动化服务实例
             extra_context: 额外的上下文负载
 
         返回:
@@ -363,6 +363,7 @@ class ClientAskLoopMixin(ClientQueueMixin):
         tool_context.setdefault("history_manager", history_manager)
         tool_context.setdefault("onebot_client", onebot_client)
         tool_context.setdefault("scheduler", scheduler)
+        tool_context.setdefault("automations", scheduler)
 
         async def render_html_to_image_with_proxy(*args: Any, **kwargs: Any) -> Any:
             kwargs.setdefault(

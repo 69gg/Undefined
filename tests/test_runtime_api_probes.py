@@ -154,7 +154,7 @@ async def test_runtime_internal_probe_includes_group_superadmin_queue_snapshot()
 @pytest.mark.asyncio
 async def test_runtime_internal_probe_includes_scheduler_summary() -> None:
     scheduler = SimpleNamespace(
-        scheduler=SimpleNamespace(running=True),
+        clock_running=True,
         list_tasks=lambda: {
             "task_daily": {"cron": "0 9 * * *"},
             "task_weekly": {"cron": "0 8 * * 1"},
