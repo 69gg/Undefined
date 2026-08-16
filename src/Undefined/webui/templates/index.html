@@ -853,18 +853,19 @@
 
                 <!-- Tab Schedules / Automations -->
                 <section id="tab-schedules" class="tab-content">
-                    <div id="scheduleListView" class="schedule-page schedule-list-view">
-                        <div class="header">
-                            <div>
-                                <h1 class="page-title" data-i18n="schedules.title">自动化</h1>
-                                <p class="page-subtitle" data-i18n="schedules.subtitle">条件驱动工作流：画布编排场景、分支与循环。</p>
-                            </div>
-                            <div class="toolbar">
-                                <button id="btnSchedulesRefresh" class="btn" type="button" data-i18n="schedules.refresh">刷新</button>
-                                <button id="btnSchedulesNew" class="btn primary" type="button" data-i18n="schedules.new">新建自动化</button>
-                            </div>
+                    <div class="header sticky">
+                        <div>
+                            <h1 class="page-title" data-i18n="schedules.title">自动化</h1>
+                            <p class="page-subtitle" data-i18n="schedules.subtitle">条件驱动工作流：画布编排场景、分支与循环。</p>
                         </div>
+                        <div class="toolbar">
+                            <button id="btnSchedulesRefresh" class="btn" type="button" data-i18n="schedules.refresh">刷新</button>
+                            <button id="btnSchedulesNew" class="btn primary" type="button" data-i18n="schedules.new">新建自动化</button>
+                        </div>
+                    </div>
 
+                    <div id="schedulePages" class="schedule-pages">
+                        <div id="scheduleListView" class="schedule-page schedule-list-view">
                         <div class="schedule-summary-grid">
                             <div class="schedule-summary-item">
                                 <span class="schedule-summary-label" data-i18n="schedules.total">总数</span>
@@ -928,6 +929,8 @@
                             <p data-i18n="schedules.pick_task">从上方选择一条自动化，或新建后在此编排。</p>
                             <button id="btnWfEmptyBack" class="btn ghost" type="button" data-i18n="schedules.back">回到列表</button>
                         </div>
+                    </div>
+
                     </div>
 
                     <div id="schedulePresetDialog" class="wf-modal" hidden>

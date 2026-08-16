@@ -540,6 +540,7 @@ async def test_index_handler_renders_schedules_tab() -> None:
 
     assert payload_text is not None
     assert 'id="tab-schedules"' in payload_text
+    assert 'id="schedulePages"' in payload_text
     assert 'class="schedule-page schedule-list-view"' in payload_text
     assert 'id="scheduleEditorView"' in payload_text
     assert 'id="btnWfScrollEditor"' in payload_text

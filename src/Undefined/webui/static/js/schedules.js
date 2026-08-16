@@ -373,7 +373,7 @@
     }
 
     function scroller() {
-        return get("tab-schedules");
+        return get("schedulePages") || get("tab-schedules");
     }
 
     function prefersReducedMotion() {
