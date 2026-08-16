@@ -248,18 +248,18 @@ def _parse_automations_config(data: dict[str, Any]) -> AutomationsConfig:
     section_raw = data.get("automations", {})
     section = section_raw if isinstance(section_raw, dict) else {}
     max_nodes = max(1, _coerce_int(section.get("max_nodes"), 30))
-    max_concurrent = max(1, _coerce_int(section.get("max_concurrent"), 3))
-    node_timeout = max(1.0, _coerce_float(section.get("node_timeout_seconds"), 120.0))
+    max_concurrent = max(1, _coerce_int(section.get("max_concurrent"), 16))
+    node_timeout = max(1.0, _coerce_float(section.get("node_timeout_seconds"), 600.0))
     workflow_timeout = max(
-        node_timeout, _coerce_float(section.get("workflow_timeout_seconds"), 180.0)
+        node_timeout, _coerce_float(section.get("workflow_timeout_seconds"), 1200.0)
     )
-    blank_iters = max(1, _coerce_int(section.get("blank_llm_max_iterations"), 20))
+    blank_iters = max(1, _coerce_int(section.get("blank_llm_max_iterations"), 100))
     loop_iters = _coerce_int(section.get("loop_max_iterations"), 25)
     if loop_iters < 1:
         loop_iters = 1
     if loop_iters > 25:
         loop_iters = 25
-    cooldown = max(0, _coerce_int(section.get("default_cooldown_seconds"), 60))
+    cooldown = max(0, _coerce_int(section.get("default_cooldown_seconds"), 0))
     return AutomationsConfig(
         enabled=_coerce_bool(section.get("enabled"), True),
         max_nodes=max_nodes,

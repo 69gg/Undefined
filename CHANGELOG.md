@@ -13,6 +13,8 @@
 - 无相互依赖的分支改为依赖就绪即并行，不再整波 `gather` 等齐；多上游仍 AND join。消息触发时工具 / 主 AI 使用当前会话 context，`send_message` 可只填 `message`。
 - 自动化工具节点补齐 `cognitive_service` / `knowledge_manager` / `meme_service` / `attachment_registry`，避免已启用的认知记忆被误报「未启用」。
 - 画布保存成功后滚回列表页并刷新卡片，展示服务端最新状态。
+- `[automations].default_cooldown_seconds` 默认改为 `0`，事件类工作流默认不再冷却。
+- `[automations]` 默认放宽：`max_concurrent = 16`、`node_timeout_seconds = 600`、`workflow_timeout_seconds = 1200`、`blank_llm_max_iterations = 100`。
 
 ---
 

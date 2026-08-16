@@ -947,22 +947,22 @@ enabled = true
 max_nodes = 30
 # zh: 同时运行的自动化上限。
 # en: Max concurrent automation runs.
-max_concurrent = 3
+max_concurrent = 16
 # zh: 单个节点超时（秒）。
 # en: Per-node timeout in seconds.
-node_timeout_seconds = 120.0
+node_timeout_seconds = 600.0
 # zh: 整张图超时（秒）。
 # en: Whole-graph timeout in seconds.
-workflow_timeout_seconds = 180.0
+workflow_timeout_seconds = 1200.0
 # zh: llm.blank 工具迭代上限。
 # en: Max tool-calling iterations for llm.blank nodes.
-blank_llm_max_iterations = 20
+blank_llm_max_iterations = 100
 # zh: 循环硬顶，默认与上限均为 25，配置不得高于 25。
 # en: Loop iteration cap. Default and hard max are both 25.
 loop_max_iterations = 25
 # zh: 事件类自动化默认冷却（秒）。0 表示不冷却。时间类默认不冷却。
 # en: Default cooldown in seconds for event automations. 0 disables cooldown. Time triggers default to no cooldown.
-default_cooldown_seconds = 60
+default_cooldown_seconds = 0
 
 # zh: 历史记录配置。
 # en: History settings.

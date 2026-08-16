@@ -548,12 +548,12 @@ class AutomationsConfig:
 
     enabled: bool = True
     max_nodes: int = 30
-    max_concurrent: int = 3
-    node_timeout_seconds: float = 120.0
-    workflow_timeout_seconds: float = 180.0
-    blank_llm_max_iterations: int = 20
+    max_concurrent: int = 16
+    node_timeout_seconds: float = 600.0
+    workflow_timeout_seconds: float = 1200.0
+    blank_llm_max_iterations: int = 100
     loop_max_iterations: int = 25
-    default_cooldown_seconds: int = 60
+    default_cooldown_seconds: int = 0
 
 
 @dataclass

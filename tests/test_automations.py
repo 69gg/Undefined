@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from copy import deepcopy
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
@@ -1168,6 +1169,88 @@ def test_iter_matching_respects_enabled() -> None:
     matched = iter_matching_tasks(
         tasks,
         AutomationEvent(kind="message", channel="group", text="hi", group_id=1),
+    )
+    assert matched == []
+
+
+def test_automations_config_defaults() -> None:
+    from Undefined.automations.constants import (
+        DEFAULT_BLANK_LLM_MAX_ITERATIONS,
+        DEFAULT_EVENT_COOLDOWN_SECONDS,
+        DEFAULT_MAX_CONCURRENT,
+        DEFAULT_NODE_TIMEOUT_SECONDS,
+        DEFAULT_WORKFLOW_TIMEOUT_SECONDS,
+    )
+    from Undefined.config.models import AutomationsConfig
+
+    cfg = AutomationsConfig()
+    assert DEFAULT_MAX_CONCURRENT == 16
+    assert DEFAULT_NODE_TIMEOUT_SECONDS == 600.0
+    assert DEFAULT_WORKFLOW_TIMEOUT_SECONDS == 1200.0
+    assert DEFAULT_BLANK_LLM_MAX_ITERATIONS == 100
+    assert DEFAULT_EVENT_COOLDOWN_SECONDS == 0
+    assert cfg.max_concurrent == 16
+    assert cfg.node_timeout_seconds == 600.0
+    assert cfg.workflow_timeout_seconds == 1200.0
+    assert cfg.blank_llm_max_iterations == 100
+    assert cfg.default_cooldown_seconds == 0
+
+
+def test_event_automations_have_no_default_cooldown() -> None:
+    from Undefined.automations.constants import DEFAULT_EVENT_COOLDOWN_SECONDS
+    from Undefined.config.models import AutomationsConfig
+
+    assert DEFAULT_EVENT_COOLDOWN_SECONDS == 0
+    assert AutomationsConfig().default_cooldown_seconds == 0
+
+    now = datetime.now(timezone.utc)
+    tasks = {
+        "a": {
+            "enabled": True,
+            "last_run_at": (now - timedelta(seconds=1)).isoformat(),
+            "nodes": [
+                {
+                    "id": "start",
+                    "type": "start",
+                    "kind": "message",
+                    "channels": ["group"],
+                    "text": "hi",
+                }
+            ],
+            "edges": [],
+        }
+    }
+    matched = iter_matching_tasks(
+        tasks,
+        AutomationEvent(kind="message", channel="group", text="hi", group_id=1),
+        now=now,
+    )
+    assert [task_id for task_id, _, _ in matched] == ["a"]
+
+
+def test_iter_matching_honors_explicit_task_cooldown() -> None:
+    now = datetime.now(timezone.utc)
+    tasks = {
+        "a": {
+            "enabled": True,
+            "cooldown_seconds": 60,
+            "last_run_at": (now - timedelta(seconds=1)).isoformat(),
+            "nodes": [
+                {
+                    "id": "start",
+                    "type": "start",
+                    "kind": "message",
+                    "channels": ["group"],
+                    "text": "hi",
+                }
+            ],
+            "edges": [],
+        }
+    }
+    matched = iter_matching_tasks(
+        tasks,
+        AutomationEvent(kind="message", channel="group", text="hi", group_id=1),
+        now=now,
     )
     assert matched == []
 

@@ -78,7 +78,7 @@ LLM/template 默认不发群，`emit: true` 才发。图级 `auto_send_final` �
 
 ## 配置 `[automations]`
 
-`enabled`、`max_nodes`（建议 30）、`max_concurrent`、节点/整图超时、`blank_llm_max_iterations`、`loop_max_iterations`（默认与上限 25）、`default_cooldown_seconds`（事件类默认 60s）。
+`enabled`、`max_nodes`（建议 30）、`max_concurrent`（默认 16）、节点超时 600s、整图超时 1200s、`blank_llm_max_iterations`（默认 100）、`loop_max_iterations`（默认与上限 25）、`default_cooldown_seconds`（事件类默认 0，不冷却）。
 
 ## 工具
 
