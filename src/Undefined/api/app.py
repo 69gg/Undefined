@@ -141,6 +141,10 @@ class RuntimeAPIServer:
                 web.get(
                     "/api/v1/automations/catalog", self._automations_catalog_handler
                 ),
+                web.post(
+                    "/api/v1/automations/validate",
+                    self._automations_validate_handler,
+                ),
                 web.get("/api/v1/automations", self._automations_list_handler),
                 web.post("/api/v1/automations", self._automations_create_handler),
                 web.get(
@@ -350,6 +354,9 @@ class RuntimeAPIServer:
 
     async def _automations_catalog_handler(self, request: web.Request) -> Response:
         return await automations.automations_catalog_handler(self._ctx, request)
+
+    async def _automations_validate_handler(self, request: web.Request) -> Response:
+        return await automations.automations_validate_handler(self._ctx, request)
 
     async def _automations_list_handler(self, request: web.Request) -> Response:
         return await automations.automations_list_handler(self._ctx, request)

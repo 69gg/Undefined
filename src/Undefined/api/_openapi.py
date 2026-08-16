@@ -79,7 +79,13 @@ def _build_openapi_spec(ctx: RuntimeAPIContext, request: web.Request) -> dict[st
             "post": {"summary": "Queue a meme reindex job"}
         },
         "/api/v1/automations/catalog": {
-            "get": {"summary": "Automation node catalog and presets"}
+            "get": {"summary": "Automation node catalog, presets, and palette names"}
+        },
+        "/api/v1/automations/validate": {
+            "post": {
+                "summary": "Validate an automation graph without saving",
+                "description": "Returns {ok, issues:[{path, message}]} for the editor.",
+            }
         },
         "/api/v1/automations": {
             "get": {"summary": "List automations"},

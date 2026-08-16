@@ -13,17 +13,143 @@ from Undefined.automations.constants import (
     TEXT_MATCH_MODES,
 )
 
+NODE_TYPE_META: tuple[dict[str, str], ...] = (
+    {
+        "id": "start",
+        "group": "trigger",
+        "label": "Start",
+        "description": "Event or time trigger. Exactly one per graph.",
+    },
+    {
+        "id": "tool",
+        "group": "action",
+        "label": "Tool",
+        "description": "Call a registered tool or agent name with interpolated args.",
+    },
+    {
+        "id": "template",
+        "group": "action",
+        "label": "Template",
+        "description": "Render text without an LLM.",
+    },
+    {
+        "id": "llm.blank",
+        "group": "llm",
+        "label": "Blank LLM",
+        "description": "Agent model with a whitelist of tools, toolsets, and agents.",
+    },
+    {
+        "id": "llm.agent",
+        "group": "llm",
+        "label": "Agent",
+        "description": "Run a registered Agent.",
+    },
+    {
+        "id": "llm.main",
+        "group": "llm",
+        "label": "Main AI",
+        "description": "Call the main AIClient.ask() loop.",
+    },
+    {
+        "id": "branch.if",
+        "group": "branch",
+        "label": "If / else",
+        "description": "Match cases on text, mentions, or clock; else is required.",
+    },
+    {
+        "id": "branch.llm",
+        "group": "branch",
+        "label": "LLM branch",
+        "description": "Force the model to pick one option via choose_<id>.",
+    },
+    {
+        "id": "loop.times",
+        "group": "loop",
+        "label": "Repeat",
+        "description": "Run body nodes a fixed number of times (hard cap 25).",
+    },
+    {
+        "id": "loop.each",
+        "group": "loop",
+        "label": "For each",
+        "description": "Iterate a JSON array or line list through body nodes.",
+    },
+)
 
-def build_catalog(*, bot_qq: int | None = None) -> dict[str, Any]:
-    """Return node types, match modes, and example presets."""
+
+def _function_entries(schemas: Any) -> list[dict[str, str]]:
+    entries: list[dict[str, str]] = []
+    if not isinstance(schemas, list):
+        return entries
+    seen: set[str] = set()
+    for schema in schemas:
+        if not isinstance(schema, dict):
+            continue
+        function = schema.get("function")
+        if not isinstance(function, dict):
+            continue
+        name = str(function.get("name") or "").strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        entries.append(
+            {
+                "name": name,
+                "description": str(function.get("description") or "").strip()[:240],
+            }
+        )
+    return entries
+
+
+def _palette_from_ai(ai: Any) -> dict[str, Any]:
+    tools: list[dict[str, str]] = []
+    agents: list[dict[str, str]] = []
+    if ai is None:
+        return {"tools": tools, "toolsets": [], "agents": agents}
+    tool_reg = getattr(ai, "tool_registry", None)
+    agent_reg = getattr(ai, "agent_registry", None)
+    agent_names: set[str] = set()
+    if agent_reg is not None:
+        getter = getattr(agent_reg, "get_agents_schema", None)
+        if not callable(getter):
+            getter = getattr(agent_reg, "get_schema", None)
+        if callable(getter):
+            agents = _function_entries(getter())
+            agent_names = {item["name"] for item in agents}
+    if tool_reg is not None:
+        getter = getattr(tool_reg, "get_tools_schema", None)
+        if not callable(getter):
+            getter = getattr(tool_reg, "get_schema", None)
+        if callable(getter):
+            for entry in _function_entries(getter()):
+                if entry["name"] in agent_names:
+                    continue
+                tools.append(entry)
+    toolset_names = sorted(
+        {
+            name.split(".", 1)[0]
+            for name in (item["name"] for item in tools)
+            if "." in name
+        }
+    )
+    return {"tools": tools, "toolsets": toolset_names, "agents": agents}
+
+
+def build_catalog(*, bot_qq: int | None = None, ai: Any = None) -> dict[str, Any]:
+    """Return node types, match modes, palette names, and example presets."""
     bot_mention = str(bot_qq) if bot_qq else "*"
+    palette = _palette_from_ai(ai)
     return {
         "node_types": sorted(NODE_TYPES),
+        "node_type_meta": [dict(item) for item in NODE_TYPE_META],
         "start_kinds": sorted(START_KINDS),
         "channels": sorted(CHANNELS),
         "text_match_modes": sorted(TEXT_MATCH_MODES),
         "pass_text_modes": sorted(PASS_TEXT_MODES),
         "loop_max_iterations": LOOP_MAX_ITERATIONS,
+        "tools": palette["tools"],
+        "toolsets": palette["toolsets"],
+        "agents": palette["agents"],
         "examples": {
             "mentions_only_written": {
                 "mentions": ["10001", "*"],

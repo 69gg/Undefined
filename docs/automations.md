@@ -2,7 +2,7 @@
 
 对外名称：**自动化 / Automations**。一张小图把工具、模板、LLM、if/else 与有上限的循环串起来；消息命中后可以接管本轮主 AI。
 
-详细设计约束：不做 HTTP/代码节点、独立子工作流文件、人工审批、自由拖拽画布、Console/Chat UI。
+详细设计约束：不做 HTTP/代码节点、独立子工作流文件、人工审批、Console/Chat 独立编辑器。WebUI 提供画布编辑器；图数据仍是 `nodes` / `edges`。
 
 ## 存储与兼容
 
@@ -84,4 +84,4 @@ LLM/template 默认不发群，`emit: true` 才发。图级 `auto_send_final` �
 
 `automation.list` / `get` / `create` / `update` / `delete` / `set_enabled`。短命令能表达 channels、group_ids、user_ids、mentions、text、pass_text。
 
-WebUI「自动化」页可编排场景、@ 条件、if / LLM 分支、循环体，并查看上次运行。
+WebUI「自动化」页提供列表与全屏画布编辑器：左侧节点盘、中间拖拽连线、右侧类型化检查器。图数据仍读写 `nodes` / `edges`，布局存在任务顶层 `ui`。

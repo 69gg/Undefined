@@ -853,206 +853,82 @@
 
                 <!-- Tab Schedules / Automations -->
                 <section id="tab-schedules" class="tab-content">
-                    <div class="header">
-                        <div>
-                            <h1 class="page-title" data-i18n="schedules.title">自动化</h1>
-                            <p class="page-subtitle" data-i18n="schedules.subtitle">条件驱动的青春版工作流：场景、@ 专项、分支与循环。</p>
+                    <div id="scheduleListView" class="schedule-list-view">
+                        <div class="header">
+                            <div>
+                                <h1 class="page-title" data-i18n="schedules.title">自动化</h1>
+                                <p class="page-subtitle" data-i18n="schedules.subtitle">条件驱动工作流：画布编排场景、分支与循环。</p>
+                            </div>
+                            <div class="toolbar">
+                                <button id="btnSchedulesRefresh" class="btn" type="button" data-i18n="schedules.refresh">刷新</button>
+                                <button id="btnSchedulesNew" class="btn primary" type="button" data-i18n="schedules.new">新建自动化</button>
+                            </div>
                         </div>
-                        <div class="toolbar">
-                            <button id="btnSchedulesRefresh" class="btn" type="button" data-i18n="schedules.refresh">刷新</button>
-                            <button id="btnSchedulesNew" class="btn primary" type="button" data-i18n="schedules.new">新建自动化</button>
+
+                        <div class="schedule-summary-grid">
+                            <div class="schedule-summary-item">
+                                <span class="schedule-summary-label" data-i18n="schedules.total">总数</span>
+                                <span id="scheduleStatTotal" class="schedule-summary-value">--</span>
+                            </div>
+                            <div class="schedule-summary-item">
+                                <span class="schedule-summary-label" data-i18n="schedules.event_count">事件</span>
+                                <span id="scheduleStatEvent" class="schedule-summary-value">--</span>
+                            </div>
+                            <div class="schedule-summary-item">
+                                <span class="schedule-summary-label" data-i18n="schedules.time_count">时间</span>
+                                <span id="scheduleStatTime" class="schedule-summary-value">--</span>
+                            </div>
+                            <div class="schedule-summary-item">
+                                <span class="schedule-summary-label" data-i18n="schedules.failed_count">失败</span>
+                                <span id="scheduleStatFailed" class="schedule-summary-value">--</span>
+                            </div>
                         </div>
+
+                        <div id="scheduleStatus" class="log-meta"></div>
+                        <div class="schedule-list-toolbar">
+                            <input id="scheduleSearchInput" type="search" class="form-control"
+                                data-i18n-placeholder="schedules.search_placeholder" placeholder="搜索自动化..." />
+                        </div>
+                        <div id="scheduleList" class="schedule-card-grid"></div>
                     </div>
 
-                    <div class="schedule-summary-grid">
-                        <div class="schedule-summary-item">
-                            <span class="schedule-summary-label" data-i18n="schedules.total">总数</span>
-                            <span id="scheduleStatTotal" class="schedule-summary-value">--</span>
+                    <div id="scheduleEditorView" class="schedule-editor-view" hidden>
+                        <div class="wf-toolbar">
+                            <button id="btnWfBack" class="btn ghost" type="button" data-i18n="schedules.back">返回列表</button>
+                            <input id="wfTaskName" class="wf-name-input" type="text" data-i18n-placeholder="schedules.task_name" placeholder="名称" />
+                            <input id="wfTaskId" class="wf-id-input form-control form-control-sm" type="text" placeholder="id" />
+                            <label class="wf-toggle"><input id="wfEnabled" type="checkbox" checked /> <span data-i18n="schedules.enabled">启用</span></label>
+                            <span id="wfIssueBadge" class="wf-issue-badge"></span>
+                            <span id="wfEditorStatus" class="status-msg"></span>
+                            <div class="wf-toolbar-actions">
+                                <button id="btnWfLayout" class="btn ghost" type="button" data-i18n="schedules.layout">整理布局</button>
+                                <button id="btnWfDelete" class="btn danger" type="button" data-i18n="schedules.delete">删除</button>
+                                <button id="btnWfSave" class="btn primary" type="button" data-i18n="schedules.save">保存</button>
+                            </div>
                         </div>
-                        <div class="schedule-summary-item">
-                            <span class="schedule-summary-label" data-i18n="schedules.event_count">事件</span>
-                            <span id="scheduleStatEvent" class="schedule-summary-value">--</span>
+                        <div class="wf-workspace">
+                            <aside id="wfPalette" class="wf-palette"></aside>
+                            <div class="wf-stage">
+                                <div id="wfCanvas" class="wf-canvas" tabindex="0"></div>
+                                <div id="wfMobileNodes" class="wf-mobile-nodes"></div>
+                            </div>
+                            <aside id="wfInspector" class="wf-inspector"></aside>
                         </div>
-                        <div class="schedule-summary-item">
-                            <span class="schedule-summary-label" data-i18n="schedules.time_count">时间</span>
-                            <span id="scheduleStatTime" class="schedule-summary-value">--</span>
-                        </div>
-                        <div class="schedule-summary-item">
-                            <span class="schedule-summary-label" data-i18n="schedules.failed_count">失败</span>
-                            <span id="scheduleStatFailed" class="schedule-summary-value">--</span>
-                        </div>
+                        <details id="wfAdvanced" class="wf-advanced">
+                            <summary data-i18n="schedules.advanced">高级 / JSON</summary>
+                            <textarea id="wfGraphJson" class="form-control form-textarea schedule-json-area" spellcheck="false"></textarea>
+                            <button id="btnWfApplyJson" class="btn ghost" type="button" data-i18n="schedules.apply_json">应用 JSON</button>
+                        </details>
                     </div>
 
-                    <div id="scheduleStatus" class="log-meta"></div>
-                    <div class="schedule-workspace">
-                        <div class="schedule-pane schedule-list-pane">
-                            <div class="schedule-list-toolbar">
-                                <input id="scheduleSearchInput" type="search" class="form-control form-control-sm"
-                                    data-i18n-placeholder="schedules.search_placeholder" placeholder="搜索自动化..." />
+                    <div id="schedulePresetDialog" class="wf-modal" hidden>
+                        <div class="wf-modal-card">
+                            <div class="wf-modal-head">
+                                <h2 data-i18n="schedules.choose_preset">从预设开始</h2>
+                                <button id="btnPresetClose" class="btn ghost" type="button">×</button>
                             </div>
-                            <div id="scheduleList" class="schedule-list"></div>
+                            <div id="schedulePresetGrid" class="wf-preset-grid"></div>
                         </div>
-
-                        <form id="scheduleEditor" class="schedule-pane schedule-editor" autocomplete="off">
-                            <div class="schedule-editor-head">
-                                <div>
-                                    <div id="scheduleEditorModeLabel" class="card-title" data-i18n="schedules.editor_new">新建自动化</div>
-                                    <div id="scheduleEditorTaskId" class="muted-sm">--</div>
-                                </div>
-                                <span id="scheduleEditorBadge" class="runtime-tag">--</span>
-                            </div>
-
-                            <div class="form-fields schedule-editor-grid">
-                                <div class="form-group">
-                                    <label class="form-label" for="scheduleTaskId" data-i18n="schedules.task_id">自动化 ID</label>
-                                    <input id="scheduleTaskId" type="text" class="form-control" placeholder="hotspot_group" />
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="scheduleTaskName" data-i18n="schedules.task_name">名称</label>
-                                    <input id="scheduleTaskName" type="text" class="form-control" />
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="schedulePreset" data-i18n="schedules.preset">预设</label>
-                                    <select id="schedulePreset" class="form-control"></select>
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="scheduleKind" data-i18n="schedules.kind">触发类型</label>
-                                    <select id="scheduleKind" class="form-control">
-                                        <option value="message">message</option>
-                                        <option value="cron">cron</option>
-                                        <option value="daily">daily</option>
-                                        <option value="at">at</option>
-                                        <option value="interval">interval</option>
-                                        <option value="poke">poke</option>
-                                        <option value="member_join">member_join</option>
-                                        <option value="member_leave">member_leave</option>
-                                    </select>
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="scheduleTargetAddress" data-i18n="schedules.target_address">投递地址</label>
-                                    <input id="scheduleTargetAddress" type="text" class="form-control" placeholder="group:123456" />
-                                    <p class="form-hint" data-i18n="schedules.target_address_hint">支持 qq:&lt;QQ号&gt;、group:&lt;群号&gt; 或 wechat:&lt;逻辑QQ号&gt;。事件类默认用当前会话。</p>
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="scheduleMaxExecutions" data-i18n="schedules.max_executions">最大执行次数</label>
-                                    <input id="scheduleMaxExecutions" type="number" min="1" step="1" class="form-control" />
-                                </div>
-                            </div>
-
-                            <div class="schedule-chip-row" id="scheduleFlagRow">
-                                <label class="schedule-mode-option"><input id="scheduleEnabled" type="checkbox" checked /> <span data-i18n="schedules.enabled">启用</span></label>
-                                <label class="schedule-mode-option"><input id="scheduleConsume" type="checkbox" checked /> <span data-i18n="schedules.consume">拦截主 AI</span></label>
-                                <label class="schedule-mode-option"><input id="scheduleAutoSend" type="checkbox" checked /> <span data-i18n="schedules.auto_send">自动发送终值</span></label>
-                            </div>
-
-                            <div id="scheduleChannelRow" class="schedule-chip-row">
-                                <span class="form-label" data-i18n="schedules.channels">场景</span>
-                                <label class="schedule-mode-option"><input id="scheduleChGroup" type="checkbox" checked /> <span data-i18n="schedules.channel_group">群聊</span></label>
-                                <label class="schedule-mode-option"><input id="scheduleChPrivate" type="checkbox" /> <span data-i18n="schedules.channel_private">QQ 私聊</span></label>
-                                <label class="schedule-mode-option"><input id="scheduleChWechat" type="checkbox" /> <span data-i18n="schedules.channel_wechat">微信</span></label>
-                            </div>
-
-                            <div class="form-fields schedule-editor-grid">
-                                <div class="form-group">
-                                    <label class="form-label" for="scheduleGroupIds" data-i18n="schedules.group_ids">群号（逗号分隔，空=任意）</label>
-                                    <input id="scheduleGroupIds" type="text" class="form-control" />
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="scheduleUserIds" data-i18n="schedules.user_ids">QQ（逗号分隔，空=任意）</label>
-                                    <input id="scheduleUserIds" type="text" class="form-control" />
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" data-i18n="schedules.mentions">@ 条件</label>
-                                    <div id="scheduleMentions" class="schedule-mention-list"></div>
-                                    <button id="btnMentionAdd" class="btn ghost" type="button" data-i18n="schedules.mention_add">添加 @</button>
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="scheduleText" data-i18n="schedules.remain_text">剩余文本</label>
-                                    <input id="scheduleText" type="text" class="form-control" />
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="scheduleTextMatch" data-i18n="schedules.text_match">文本匹配</label>
-                                    <select id="scheduleTextMatch" class="form-control">
-                                        <option value="contains">contains</option>
-                                        <option value="keyword">keyword</option>
-                                        <option value="regex">regex</option>
-                                    </select>
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="schedulePassText" data-i18n="schedules.pass_text">传入文本</label>
-                                    <select id="schedulePassText" class="form-control">
-                                        <option value="stripped">stripped</option>
-                                        <option value="original">original</option>
-                                    </select>
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="scheduleClockAfter" data-i18n="schedules.clock_after">Clock after</label>
-                                    <input id="scheduleClockAfter" type="text" class="form-control" placeholder="09:00" />
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="scheduleClockBefore" data-i18n="schedules.clock_before">Clock before</label>
-                                    <input id="scheduleClockBefore" type="text" class="form-control" placeholder="18:00" />
-                                </div>
-                                <div class="form-group" id="scheduleCronGroup">
-                                    <label class="form-label" for="scheduleCron" data-i18n="schedules.cron">Crontab</label>
-                                    <input id="scheduleCron" type="text" class="form-control" placeholder="0 9 * * *" />
-                                </div>
-                                <div class="form-group" id="scheduleDailyGroup">
-                                    <label class="form-label" for="scheduleDailyTime" data-i18n="schedules.daily_time">每日时间</label>
-                                    <input id="scheduleDailyTime" type="text" class="form-control" placeholder="09:00" />
-                                </div>
-                                <div class="form-group" id="scheduleAtGroup">
-                                    <label class="form-label" for="scheduleAt" data-i18n="schedules.at">一次性时间</label>
-                                    <input id="scheduleAt" type="text" class="form-control" placeholder="2026-08-16T09:00:00" />
-                                </div>
-                                <div class="form-group" id="scheduleIntervalGroup">
-                                    <label class="form-label" for="scheduleInterval" data-i18n="schedules.interval">间隔秒</label>
-                                    <input id="scheduleInterval" type="number" min="1" class="form-control" />
-                                </div>
-                            </div>
-
-                            <div class="schedule-node-toolbar">
-                                <span class="form-label" data-i18n="schedules.nodes">节点</span>
-                                <button type="button" class="btn ghost" data-add-node="tool">tool</button>
-                                <button type="button" class="btn ghost" data-add-node="template">template</button>
-                                <button type="button" class="btn ghost" data-add-node="llm.blank">blank</button>
-                                <button type="button" class="btn ghost" data-add-node="llm.agent">agent</button>
-                                <button type="button" class="btn ghost" data-add-node="llm.main">main</button>
-                                <button type="button" class="btn ghost" data-add-node="branch.if">if</button>
-                                <button type="button" class="btn ghost" data-add-node="branch.llm">LLM 分支</button>
-                                <button type="button" class="btn ghost" data-add-node="loop.times">循环次数</button>
-                                <button type="button" class="btn ghost" data-add-node="loop.each">循环展开</button>
-                            </div>
-                            <div id="scheduleNodes" class="schedule-node-list"></div>
-
-                            <div class="form-group">
-                                <label class="form-label" for="scheduleEdgesJson" data-i18n="schedules.edges">边 JSON</label>
-                                <textarea id="scheduleEdgesJson" class="form-control form-textarea schedule-json-area" spellcheck="false">[]</textarea>
-                            </div>
-                            <div class="form-group">
-                                <label class="form-label" for="scheduleGraphJson" data-i18n="schedules.graph_json">整图 JSON（排障）</label>
-                                <textarea id="scheduleGraphJson" class="form-control form-textarea schedule-json-area" spellcheck="false">{}</textarea>
-                            </div>
-                            <div id="scheduleLastRun" class="muted-sm schedule-last-run"></div>
-                            <div class="schedule-var-row">
-                                <span class="form-label" data-i18n="schedules.vars">插入变量</span>
-                                <button type="button" class="btn ghost" data-var="{{trigger.text}}">text</button>
-                                <button type="button" class="btn ghost" data-var="{{trigger.text_original}}">original</button>
-                                <button type="button" class="btn ghost" data-var="{{trigger.text_stripped}}">stripped</button>
-                                <button type="button" class="btn ghost" data-var="{{trigger.mentions}}">mentions</button>
-                                <button type="button" class="btn ghost" data-var="{{item}}">item</button>
-                                <button type="button" class="btn ghost" data-var="{{index}}">index</button>
-                            </div>
-
-                            <div class="schedule-editor-footer">
-                                <div id="scheduleEditorStatus" class="status-msg"></div>
-                                <div class="toolbar">
-                                    <button id="btnScheduleReset" class="btn ghost" type="button" data-i18n="schedules.reset">重置</button>
-                                    <button id="btnScheduleDelete" class="btn danger" type="button" data-i18n="schedules.delete">删除</button>
-                                    <button id="btnScheduleSave" class="btn primary" type="submit" data-i18n="schedules.save">保存</button>
-                                </div>
-                            </div>
-                        </form>
                     </div>
                 </section>
 
@@ -1306,6 +1182,9 @@
     <script src="/static/js/bot.js"></script>
     <script src="/static/js/runtime.js"></script>
     <script src="/static/js/memes.js"></script>
+    <script src="/static/js/workflow-graph.js"></script>
+    <script src="/static/js/workflow-canvas.js"></script>
+    <script src="/static/js/workflow-inspector.js"></script>
     <script src="/static/js/schedules.js"></script>
     <script src="/static/js/weixin.js"></script>
     <script src="/static/js/config-form.js"></script>

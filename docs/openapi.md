@@ -215,6 +215,7 @@ curl http://127.0.0.1:8788/openapi.json
 ### 自动化
 
 - `GET /api/v1/automations/catalog`
+- `POST /api/v1/automations/validate`
 - `GET /api/v1/automations`
 - `POST /api/v1/automations`
 - `GET /api/v1/automations/{task_id}`
@@ -240,6 +241,7 @@ curl http://127.0.0.1:8788/openapi.json
         {"id": "main", "type": "llm.main", "prompt": "总结昨天群里的待办。", "emit": true}
       ],
       "edges": [{"from": "start", "to": "main"}],
+      "ui": {"zoom": 1, "pan": {"x": 40, "y": 40}, "positions": {"start": {"x": 0, "y": 0}}},
       "next_run_time": "2026-06-07T09:00:00+08:00"
     }
   ]
@@ -259,8 +261,10 @@ curl http://127.0.0.1:8788/openapi.json
 }
 ```
 
-说明：
 - 新建 ID 只允许字母、数字、`_`、`.`、`:`、`-`，最长 96 字符。
+- `POST /api/v1/automations/validate` 校验全图但不保存，返回 `{ "ok": true, "issues": [{ "path": "start.channels", "message": "..." }] }`。
+- catalog 额外返回 `node_type_meta`、`tools` / `toolsets` / `agents` 名称列表，供画布节点盘与检查器下拉使用。
+- 任务可带 `ui`（节点坐标、缩放、平移），运行时忽略该字段。
 - `address` 推荐规范投递地址：`qq:<QQ号>`、`group:<群号>` 或 `wechat:<逻辑QQ号>`。
 - 所有 `/api/v1/automations*` 路由都遵循 Runtime API 的 `X-Undefined-API-Key` 鉴权。
 - 旧 `scheduled_tasks.json` 只在启动且尚无 `automations.json` 时一次性转为新格式；不删除旧文件、不双写。
@@ -839,6 +843,7 @@ WebUI 不直接在前端暴露 `auth_key`，而是通过后端代理访问主进
 - `GET /api/runtime/probes/external`
 - `GET /api/runtime/memory`
 - `GET /api/runtime/automations/catalog`
+- `POST /api/runtime/automations/validate`
 - `GET /api/runtime/automations`
 - `POST /api/runtime/automations`
 - `GET /api/runtime/automations/{task_id}`

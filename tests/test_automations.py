@@ -22,6 +22,7 @@ from Undefined.automations.short import build_short_automation
 from Undefined.automations.storage import AutomationStorage
 from Undefined.automations.validate import (
     AutomationValidationError,
+    collect_automation_issues,
     validate_automation,
 )
 from Undefined.handlers import MessageHandler
@@ -982,6 +983,14 @@ async def test_automations_catalog_and_short_create() -> None:
     catalog_body = json.loads(catalog.text or "{}")
     assert "presets" in catalog_body
     assert catalog_body["loop_max_iterations"] == 25
+    assert "node_type_meta" in catalog_body
+    assert {item["id"] for item in catalog_body["node_type_meta"]} >= {
+        "tool",
+        "branch.if",
+        "loop.each",
+    }
+    assert catalog_body["tools"] == []
+    assert catalog_body["agents"] == []
 
     request = _JsonRequest(
         _json={
@@ -998,3 +1007,133 @@ async def test_automations_catalog_and_short_create() -> None:
     body = json.loads(created.text or "{}")
     assert body["task"]["nodes"][0]["mentions"] == ["10000"]
     assert "hotspot" in scheduler.tasks
+
+
+def test_collect_automation_issues_reports_multiple_problems() -> None:
+    issues = collect_automation_issues(
+        {
+            "nodes": [
+                {"id": "start", "type": "start", "kind": "message"},
+                {
+                    "id": "iff",
+                    "type": "branch.if",
+                    "cases": [],
+                },
+            ],
+            "edges": [{"from": "iff", "to": "missing"}],
+        }
+    )
+    messages = [item["message"] for item in issues]
+    assert "event start requires channels" in messages
+    assert "branch.if requires cases" in messages
+    assert any("unknown node" in message for message in messages)
+
+
+@pytest.mark.asyncio
+async def test_automations_validate_and_ui_roundtrip() -> None:
+    scheduler = _FakeAutoScheduler()
+    ai = SimpleNamespace(
+        memory_storage=None,
+        tool_registry=SimpleNamespace(
+            get_tools_schema=lambda: [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "echo",
+                        "description": "Echo text",
+                    },
+                },
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "render.render_markdown",
+                        "description": "Render",
+                    },
+                },
+            ]
+        ),
+        agent_registry=SimpleNamespace(
+            get_agents_schema=lambda: [
+                {
+                    "type": "function",
+                    "function": {"name": "web_agent", "description": "Web"},
+                }
+            ]
+        ),
+    )
+    ctx = _api_context(scheduler)
+    ctx.ai = ai
+    server = RuntimeAPIServer(ctx, host="127.0.0.1", port=8788)
+    catalog = await server._automations_catalog_handler(
+        cast(web.Request, SimpleNamespace())
+    )
+    catalog_body = json.loads(catalog.text or "{}")
+    assert [item["name"] for item in catalog_body["tools"]] == [
+        "echo",
+        "render.render_markdown",
+    ]
+    assert catalog_body["toolsets"] == ["render"]
+    assert catalog_body["agents"][0]["name"] == "web_agent"
+
+    invalid = await server._automations_validate_handler(
+        cast(
+            web.Request,
+            _JsonRequest(
+                _json={
+                    "nodes": [
+                        {"id": "start", "type": "start", "kind": "message"},
+                    ],
+                    "edges": [],
+                }
+            ),
+        )
+    )
+    invalid_body = json.loads(invalid.text or "{}")
+    assert invalid_body["ok"] is False
+    assert invalid_body["issues"]
+
+    created = await server._automations_create_handler(
+        cast(
+            web.Request,
+            _JsonRequest(
+                _json={
+                    "task_id": "laid_out",
+                    "task_name": "布局",
+                    "nodes": [
+                        {
+                            "id": "start",
+                            "type": "start",
+                            "kind": "message",
+                            "channels": ["group"],
+                        },
+                        {
+                            "id": "main",
+                            "type": "template",
+                            "template": "ok",
+                            "emit": True,
+                        },
+                    ],
+                    "edges": [{"from": "start", "to": "main"}],
+                    "ui": {
+                        "zoom": 1.2,
+                        "pan": {"x": 10, "y": 20},
+                        "positions": {
+                            "start": {"x": 0, "y": 0},
+                            "main": {"x": 240, "y": 0},
+                        },
+                    },
+                }
+            ),
+        )
+    )
+    assert created.status == 201
+    created_body = json.loads(created.text or "{}")
+    assert created_body["task"]["ui"]["zoom"] == 1.2
+    assert created_body["task"]["ui"]["positions"]["main"]["x"] == 240
+
+    valid = await server._automations_validate_handler(
+        cast(web.Request, _JsonRequest(_json=created_body["task"]))
+    )
+    valid_body = json.loads(valid.text or "{}")
+    assert valid_body["ok"] is True
+    assert valid_body["issues"] == []

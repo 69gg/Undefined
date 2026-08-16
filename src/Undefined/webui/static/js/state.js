@@ -177,6 +177,7 @@ const state = {
     configExists: !!(initialState && initialState.config_exists),
     capabilities: null,
     tab: (initialState && initialState.initial_tab) || "overview",
+    initialTask: (initialState && initialState.initial_task) || "",
     view: initialView || "landing",
     mobileDrawerOpen: false,
     configMobileActionsOpen: false,

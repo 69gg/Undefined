@@ -47,8 +47,12 @@ function renderAboutChangelogEntry(entry) {
 
 function syncMainContentLayout() {
     const mainContent = document.querySelector(".main-content");
+    const editingWorkflow =
+        state.tab === "schedules" &&
+        !!get("tab-schedules")?.classList.contains("is-editing");
     if (mainContent) {
         mainContent.classList.toggle("chat-layout", state.tab === "chat");
+        mainContent.classList.toggle("workflow-layout", editingWorkflow);
     }
 
     const appContent = get("appContent");
@@ -193,6 +197,15 @@ function refreshUI() {
 }
 
 function switchTab(tab) {
+    if (
+        state.tab === "schedules" &&
+        tab !== "schedules" &&
+        window.SchedulesController &&
+        typeof window.SchedulesController.confirmLeave === "function" &&
+        !window.SchedulesController.confirmLeave()
+    ) {
+        return;
+    }
     abortPendingRequests(); // Cancel pending requests from previous tab
     state.tab = tab;
     state.mobileDrawerOpen = false;
@@ -666,6 +679,14 @@ async function init() {
             const v = el.getAttribute("data-view");
             const tab = el.getAttribute("data-tab");
             if (v === "landing") {
+                if (
+                    window.SchedulesController &&
+                    typeof window.SchedulesController.confirmLeave ===
+                        "function" &&
+                    !window.SchedulesController.confirmLeave()
+                ) {
+                    return;
+                }
                 state.view = "landing";
                 refreshUI();
             } else if (tab) switchTab(tab);

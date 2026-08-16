@@ -501,6 +501,23 @@ async def runtime_automations_catalog_handler(request: web.Request) -> Response:
     )
 
 
+@routes.post("/api/v1/management/runtime/automations/validate")
+@routes.post("/api/runtime/automations/validate")
+async def runtime_automations_validate_handler(request: web.Request) -> Response:
+    if not check_auth(request):
+        return _unauthorized()
+    try:
+        payload = await request.json()
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+        return web.json_response({"error": "Invalid JSON payload"}, status=400)
+    return await _proxy_runtime(
+        method="POST",
+        path="/api/v1/automations/validate",
+        payload=payload,
+        timeout_seconds=20.0,
+    )
+
+
 @routes.get("/api/v1/management/runtime/automations")
 @routes.get("/api/runtime/automations")
 async def runtime_automations_list_handler(request: web.Request) -> Response:

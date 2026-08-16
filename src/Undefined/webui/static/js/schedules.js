@@ -1,44 +1,35 @@
 (function () {
-    const EVENT_KINDS = new Set([
-        "message",
-        "poke",
-        "member_join",
-        "member_leave",
-    ]);
-    const TIME_KINDS = new Set(["cron", "daily", "at", "interval"]);
-
+    const G = window.WorkflowGraph;
     const scheduleState = {
         initialized: false,
         loaded: false,
         busy: false,
-        tasks: [],
-        catalog: { presets: [] },
-        selectedId: "",
+        editing: false,
+        dirty: false,
         draftNew: true,
+        selectedId: "",
         search: "",
-        lastFocused: null,
+        tasks: [],
+        catalog: {
+            presets: [],
+            tools: [],
+            agents: [],
+            toolsets: [],
+            node_type_meta: [],
+        },
+        graph: null,
+        canvas: null,
+        inspector: null,
+        savedSnapshot: "",
+        issues: [],
     };
 
-    function i18nFormat(key, params = {}) {
+    function i18nFormat(key, params) {
         let text = t(key);
-        Object.keys(params).forEach((name) => {
+        Object.keys(params || {}).forEach((name) => {
             text = text.replaceAll(`{${name}}`, String(params[name]));
         });
         return text;
-    }
-
-    function parseJsonText(value, fallback, label) {
-        const text = String(value || "").trim();
-        if (!text) return fallback;
-        try {
-            return JSON.parse(text);
-        } catch (error) {
-            throw new Error(`${label}: ${error.message || error}`);
-        }
-    }
-
-    function prettyJson(value) {
-        return JSON.stringify(value === undefined ? null : value, null, 2);
     }
 
     async function parseJsonSafe(response) {
@@ -57,47 +48,11 @@
         return payload.detail ? `${base}: ${payload.detail}` : base;
     }
 
-    function csvInts(value) {
-        return String(value || "")
-            .split(/[,，\s]+/)
-            .map((item) => item.trim())
-            .filter(Boolean)
-            .map((item) => Number(item))
-            .filter((item) => Number.isInteger(item));
-    }
-
-    function startNode(task) {
-        const nodes = Array.isArray(task.nodes) ? task.nodes : [];
-        return (
-            nodes.find((node) => node && node.id === "start") || {
-                id: "start",
-                type: "start",
-                kind: "message",
-                channels: ["group"],
-            }
-        );
-    }
-
-    function emptyTask() {
-        return {
-            task_name: "",
-            enabled: true,
-            consume_ai_loop: true,
-            auto_send_final: true,
-            nodes: [
-                {
-                    id: "start",
-                    type: "start",
-                    kind: "message",
-                    channels: ["group"],
-                    mentions: [],
-                    text: "",
-                    pass_text: "stripped",
-                    text_match: "contains",
-                },
-            ],
-            edges: [],
-        };
+    function kindOf(task) {
+        const start =
+            (task.nodes || []).find((node) => node && node.id === "start") ||
+            {};
+        return String(start.kind || task.start_kind || "").trim();
     }
 
     function taskTitle(task) {
@@ -116,21 +71,21 @@
         return date.toLocaleString();
     }
 
-    function setStatus(message, type = "") {
-        const status = get("scheduleEditorStatus");
-        if (!status) return;
-        status.textContent = message || "";
-        status.className = `status-msg ${type}`.trim();
-    }
-
     function setPageStatus(message) {
         const status = get("scheduleStatus");
         if (status) status.textContent = message || "";
     }
 
+    function setEditorStatus(message, type) {
+        const status = get("wfEditorStatus");
+        if (!status) return;
+        status.textContent = message || "";
+        status.className = `status-msg ${type || ""}`.trim();
+    }
+
     function setBusy(loading) {
         scheduleState.busy = loading;
-        ["btnSchedulesRefresh", "btnSchedulesNew", "btnScheduleSave"].forEach(
+        ["btnSchedulesRefresh", "btnSchedulesNew", "btnWfSave"].forEach(
             (id) => {
                 const button = get(id);
                 if (button) button.disabled = loading;
@@ -138,364 +93,91 @@
         );
     }
 
-    function kindOf(task) {
-        return String(startNode(task).kind || task.start_kind || "").trim();
+    function snapshotOf(task) {
+        const copy = G.clone(task || {});
+        return JSON.stringify({
+            task_name: copy.task_name,
+            enabled: copy.enabled,
+            consume_ai_loop: copy.consume_ai_loop,
+            auto_send_final: copy.auto_send_final,
+            address: copy.address,
+            max_executions: copy.max_executions,
+            cooldown_seconds: copy.cooldown_seconds,
+            nodes: copy.nodes,
+            edges: copy.edges,
+            ui: copy.ui,
+        });
     }
 
-    function defaultNode(type) {
-        const id = `${type.replace(/[^a-z]/g, "_")}_${Math.random().toString(16).slice(2, 6)}`;
-        if (type === "tool") {
-            return { id, type, tool_name: "", args: {}, emit: false };
-        }
-        if (type === "template") {
-            return { id, type, template: "{{trigger.text}}", emit: true };
-        }
-        if (type === "llm.blank") {
-            return {
-                id,
-                type,
-                system_prompt: "",
-                user_prompt: "{{trigger.text}}",
-                tools: [],
-                emit: false,
-            };
-        }
-        if (type === "llm.agent") {
-            return {
-                id,
-                type,
-                agent: "",
-                input: "{{trigger.text}}",
-                emit: false,
-            };
-        }
-        if (type === "llm.main") {
-            return { id, type, prompt: "{{trigger.text}}", emit: true };
-        }
-        if (type === "branch.if") {
-            return {
-                id,
-                type,
-                input: "{{trigger.text_original}}",
-                cases: [{ id: "hit", text: "" }],
-            };
-        }
-        if (type === "branch.llm") {
-            return {
-                id,
-                type,
-                input: "{{trigger.text}}",
-                options: [
-                    { id: "a", description: "选项 A" },
-                    { id: "b", description: "选项 B" },
-                ],
-            };
-        }
-        if (type === "loop.times") {
-            return { id, type, count: 3, body: [] };
-        }
-        return { id, type, source: "{{web}}", body: [] };
+    function markDirty() {
+        if (!scheduleState.graph) return;
+        scheduleState.dirty =
+            snapshotOf(scheduleState.graph.payload()) !==
+            scheduleState.savedSnapshot;
+        get("tab-schedules")?.classList.toggle("is-dirty", scheduleState.dirty);
     }
 
-    function nodeFields(node) {
-        const type = String(node.type || "");
-        if (type === "tool") {
-            return prettyJson({
-                tool_name: node.tool_name || "",
-                args: node.args || node.tool_args || {},
-                emit: Boolean(node.emit),
-            });
-        }
-        if (type === "template") {
-            return prettyJson({
-                template: node.template || "",
-                emit: Boolean(node.emit),
-            });
-        }
-        if (type === "llm.blank") {
-            return prettyJson({
-                system_prompt: node.system_prompt || "",
-                user_prompt: node.user_prompt || "",
-                tools: node.tools || [],
-                toolsets: node.toolsets || [],
-                agents: node.agents || [],
-                emit: Boolean(node.emit),
-            });
-        }
-        if (type === "llm.agent") {
-            return prettyJson({
-                agent: node.agent || "",
-                input: node.input || "",
-                emit: Boolean(node.emit),
-            });
-        }
-        if (type === "llm.main") {
-            return prettyJson({
-                prompt: node.prompt || "",
-                emit: Boolean(node.emit),
-            });
-        }
-        if (type === "branch.if") {
-            return prettyJson({
-                input: node.input || "{{trigger.text_original}}",
-                cases: node.cases || [],
-            });
-        }
-        if (type === "branch.llm") {
-            return prettyJson({
-                input: node.input || "",
-                options: node.options || [],
-            });
-        }
-        if (type === "loop.times") {
-            return prettyJson({
-                count: node.count || 25,
-                body: node.body || [],
-                until: node.until || null,
-            });
-        }
-        if (type === "loop.each") {
-            return prettyJson({
-                source: node.source || "",
-                body: node.body || [],
-            });
-        }
-        return prettyJson(node);
+    function confirmLeave() {
+        if (!scheduleState.editing || !scheduleState.dirty) return true;
+        return window.confirm(t("schedules.confirm_leave"));
     }
 
-    function renderMentions(mentions) {
-        const box = get("scheduleMentions");
+    function paletteGroups() {
+        const meta = scheduleState.catalog.node_type_meta || [];
+        const byId = {};
+        meta.forEach((item) => {
+            byId[item.id] = item;
+        });
+        const groups = { action: [], llm: [], branch: [], loop: [] };
+        G.PALETTE_TYPES.forEach((item) => {
+            if (!groups[item.group]) groups[item.group] = [];
+            groups[item.group].push({
+                ...item,
+                label: t(`schedules.node_type.${item.id}`) || item.id,
+            });
+        });
+        return groups;
+    }
+
+    function renderPalette() {
+        const box = get("wfPalette");
         if (!box) return;
-        const items = Array.isArray(mentions) ? mentions : [];
-        box.innerHTML = items
-            .map(
-                (value, index) => `
-            <div class="schedule-mention-row" data-mention-index="${index}">
-                <input class="form-control" data-mention-input="1" value="${escapeHtml(value)}" placeholder="10001 or *" />
-                <button type="button" class="btn ghost" data-mention-any="1">${escapeHtml(t("schedules.mention_any"))}</button>
-                <button type="button" class="btn ghost" data-mention-remove="1">×</button>
-            </div>`,
-            )
+        const groups = paletteGroups();
+        box.innerHTML = Object.keys(groups)
+            .map((group) => {
+                const items = groups[group];
+                if (!items.length) return "";
+                return `<div class="wf-palette-group">
+                    <div class="wf-palette-label">${escapeHtml(t(`schedules.group_${group}`))}</div>
+                    ${items
+                        .map(
+                            (item) => `
+                        <button type="button" class="wf-palette-item" draggable="true" data-node-type="${escapeHtml(item.id)}">
+                            <span class="wf-palette-swatch" style="--wf-swatch:${WorkflowCanvas.SWATCH[item.id] || "#d97757"}"></span>
+                            ${escapeHtml(item.label)}
+                        </button>`,
+                        )
+                        .join("")}
+                </div>`;
+            })
             .join("");
-    }
-
-    function readMentions() {
-        return Array.from(
-            document.querySelectorAll("#scheduleMentions [data-mention-input]"),
-        )
-            .map((input) => String(input.value || "").trim())
-            .filter(Boolean);
-    }
-
-    function renderNodes(nodes) {
-        const box = get("scheduleNodes");
-        if (!box) return;
-        const list = (Array.isArray(nodes) ? nodes : []).filter(
-            (node) => node && node.id !== "start",
-        );
-        box.innerHTML = list
-            .map(
-                (node) => `
-            <div class="schedule-node-card" data-node-id="${escapeHtml(node.id)}">
-                <div class="schedule-node-head">
-                    <strong>${escapeHtml(node.type || "")}</strong>
-                    <input class="form-control form-control-sm" data-node-id-input="1" value="${escapeHtml(node.id)}" />
-                    <button type="button" class="btn ghost" data-node-remove="1">${escapeHtml(t("schedules.node_remove"))}</button>
-                </div>
-                <textarea class="form-control form-textarea schedule-json-area" data-node-json="1" spellcheck="false">${escapeHtml(nodeFields(node))}</textarea>
-            </div>`,
-            )
-            .join("");
-    }
-
-    function readNodesFromCards(start) {
-        const nodes = [start];
-        document
-            .querySelectorAll("#scheduleNodes .schedule-node-card")
-            .forEach((card) => {
-                const idInput = card.querySelector("[data-node-id-input]");
-                const jsonArea = card.querySelector("[data-node-json]");
-                const nodeId = String(
-                    idInput?.value || card.getAttribute("data-node-id") || "",
-                ).trim();
-                let extra = {};
-                try {
-                    extra = parseJsonText(
-                        jsonArea?.value,
-                        {},
-                        t("schedules.node_json"),
-                    );
-                } catch (_error) {
-                    extra = {};
-                }
-                const type = String(
-                    extra.type ||
-                        card.querySelector("strong")?.textContent ||
-                        "tool",
+        box.querySelectorAll("[data-node-type]").forEach((button) => {
+            button.addEventListener("dragstart", (event) => {
+                event.dataTransfer.setData(
+                    "application/x-undefined-node",
+                    button.getAttribute("data-node-type") || "",
                 );
-                nodes.push({ ...extra, id: nodeId, type });
             });
-        return nodes;
-    }
-
-    function fillEditor(task, draftNew) {
-        const start = startNode(task);
-        const kind = String(start.kind || "message");
-        get("scheduleTaskId").value = draftNew
-            ? ""
-            : String(task.task_id || "");
-        get("scheduleTaskId").disabled = !draftNew;
-        get("scheduleTaskName").value = String(task.task_name || "");
-        get("scheduleKind").value = kind;
-        get("scheduleTargetAddress").value = String(task.address || "");
-        get("scheduleMaxExecutions").value = task.max_executions || "";
-        get("scheduleEnabled").checked = task.enabled !== false;
-        get("scheduleConsume").checked = task.consume_ai_loop !== false;
-        get("scheduleAutoSend").checked = task.auto_send_final !== false;
-        const channels = new Set(start.channels || []);
-        get("scheduleChGroup").checked = channels.has("group");
-        get("scheduleChPrivate").checked = channels.has("private");
-        get("scheduleChWechat").checked = channels.has("wechat");
-        get("scheduleGroupIds").value = (start.group_ids || []).join(", ");
-        get("scheduleUserIds").value = (start.user_ids || []).join(", ");
-        renderMentions(start.mentions || []);
-        get("scheduleText").value = String(start.text || "");
-        get("scheduleTextMatch").value = String(start.text_match || "contains");
-        get("schedulePassText").value = String(
-            start.pass_text ||
-                (start.mentions && start.mentions.length
-                    ? "stripped"
-                    : "original"),
-        );
-        const clock =
-            start.clock && typeof start.clock === "object" ? start.clock : {};
-        get("scheduleClockAfter").value = String(clock.after || "");
-        get("scheduleClockBefore").value = String(clock.before || "");
-        get("scheduleCron").value = String(start.cron || task.cron || "");
-        get("scheduleDailyTime").value = String(start.time || "");
-        get("scheduleAt").value = String(start.at || "");
-        get("scheduleInterval").value = start.interval_seconds || "";
-        renderNodes(task.nodes || []);
-        get("scheduleEdgesJson").value = prettyJson(task.edges || []);
-        const graph = {
-            task_name: task.task_name || "",
-            enabled: task.enabled !== false,
-            consume_ai_loop: task.consume_ai_loop !== false,
-            auto_send_final: task.auto_send_final !== false,
-            address: task.address || "",
-            nodes: task.nodes || [],
-            edges: task.edges || [],
-        };
-        get("scheduleGraphJson").value = prettyJson(graph);
-        const last = [
-            t("schedules.last_run"),
-            task.last_status || "--",
-            formatDateTime(task.last_run_at),
-            task.last_node_id ? `node=${task.last_node_id}` : "",
-            task.last_error || "",
-        ]
-            .filter(Boolean)
-            .join(" · ");
-        get("scheduleLastRun").textContent = last;
-        get("scheduleEditorModeLabel").textContent = draftNew
-            ? t("schedules.editor_new")
-            : t("schedules.editor_edit");
-        get("scheduleEditorTaskId").textContent = draftNew
-            ? t("schedules.draft")
-            : String(task.task_id || "--");
-        get("scheduleEditorBadge").textContent = kind || "--";
-        toggleKindFields(kind);
-        get("btnScheduleDelete").disabled = draftNew;
-    }
-
-    function toggleKindFields(kind) {
-        const event = EVENT_KINDS.has(kind);
-        get("scheduleChannelRow").style.display = event ? "flex" : "none";
-        get("scheduleCronGroup").style.display = kind === "cron" ? "" : "none";
-        get("scheduleDailyGroup").style.display =
-            kind === "daily" ? "" : "none";
-        get("scheduleAtGroup").style.display = kind === "at" ? "" : "none";
-        get("scheduleIntervalGroup").style.display =
-            kind === "interval" ? "" : "none";
-    }
-
-    function readEditor() {
-        const kind = String(get("scheduleKind").value || "message");
-        const channels = [];
-        if (get("scheduleChGroup").checked) channels.push("group");
-        if (get("scheduleChPrivate").checked) channels.push("private");
-        if (get("scheduleChWechat").checked) channels.push("wechat");
-        const mentions = readMentions();
-        const clock = {};
-        if (get("scheduleClockAfter").value.trim()) {
-            clock.after = get("scheduleClockAfter").value.trim();
-        }
-        if (get("scheduleClockBefore").value.trim()) {
-            clock.before = get("scheduleClockBefore").value.trim();
-        }
-        const start = {
-            id: "start",
-            type: "start",
-            kind,
-        };
-        if (EVENT_KINDS.has(kind)) {
-            start.channels = channels;
-            const groupIds = csvInts(get("scheduleGroupIds").value);
-            if (groupIds.length) start.group_ids = groupIds;
-            const userIds = csvInts(get("scheduleUserIds").value);
-            if (userIds.length) start.user_ids = userIds;
-            if (mentions.length) start.mentions = mentions;
-            if (get("scheduleText").value.trim()) {
-                start.text = get("scheduleText").value.trim();
-            }
-            start.text_match = get("scheduleTextMatch").value;
-            start.pass_text = get("schedulePassText").value;
-        }
-        if (Object.keys(clock).length) start.clock = clock;
-        if (kind === "cron") start.cron = get("scheduleCron").value.trim();
-        if (kind === "daily")
-            start.time = get("scheduleDailyTime").value.trim();
-        if (kind === "at") start.at = get("scheduleAt").value.trim();
-        if (kind === "interval") {
-            start.interval_seconds = Number(get("scheduleInterval").value || 0);
-        }
-        let edges = parseJsonText(
-            get("scheduleEdgesJson").value,
-            [],
-            t("schedules.edges"),
-        );
-        if (!Array.isArray(edges)) edges = [];
-        const nodes = readNodesFromCards(start);
-        const payload = {
-            task_name: get("scheduleTaskName").value.trim(),
-            enabled: get("scheduleEnabled").checked,
-            consume_ai_loop: get("scheduleConsume").checked,
-            auto_send_final: get("scheduleAutoSend").checked,
-            address: get("scheduleTargetAddress").value.trim() || null,
-            nodes,
-            edges,
-        };
-        const maxExec = String(get("scheduleMaxExecutions").value || "").trim();
-        if (maxExec) payload.max_executions = Number(maxExec);
-        const jsonOverride = String(
-            get("scheduleGraphJson").value || "",
-        ).trim();
-        if (jsonOverride && jsonOverride !== "{}") {
-            const parsed = parseJsonText(
-                jsonOverride,
-                null,
-                t("schedules.graph_json"),
-            );
-            if (parsed && Array.isArray(parsed.nodes) && parsed.nodes.length) {
-                return {
-                    ...payload,
-                    ...parsed,
-                    nodes: parsed.nodes,
-                    edges: parsed.edges || edges,
-                };
-            }
-        }
-        return payload;
+            button.addEventListener("click", () => {
+                if (!scheduleState.graph) return;
+                const { selectedId } = scheduleState.graph.getState();
+                scheduleState.graph.addNode(
+                    button.getAttribute("data-node-type"),
+                    null,
+                    selectedId ? { from: selectedId } : { from: "start" },
+                );
+            });
+        });
     }
 
     function renderList() {
@@ -523,74 +205,232 @@
         }
         list.innerHTML = items
             .map((task) => {
-                const selected =
-                    !scheduleState.draftNew &&
-                    task.task_id === scheduleState.selectedId;
                 const kind = kindOf(task);
+                const failed = task.last_status === "failed";
                 return `
-                <button type="button" class="schedule-list-item${selected ? " is-selected" : ""}" data-task-id="${escapeHtml(task.task_id)}">
-                    <div class="schedule-list-main">
-                        <div class="schedule-list-title">${escapeHtml(taskTitle(task))}</div>
-                        <div class="schedule-list-sub"><code>${escapeHtml(kind)}</code> ${(task.channels || []).map(escapeHtml).join(" / ")}</div>
-                    </div>
-                    <div class="schedule-list-meta">
+                <button type="button" class="schedule-flow-card${failed ? " is-failed" : ""}" data-task-id="${escapeHtml(task.task_id)}">
+                    <div class="schedule-flow-title">${escapeHtml(taskTitle(task))}</div>
+                    <div class="schedule-flow-meta">
+                        <span class="schedule-flow-kind">${escapeHtml(kind || "--")}</span>
                         <span>${escapeHtml(task.enabled === false ? t("schedules.disabled") : t("schedules.enabled"))}</span>
                         <span>${escapeHtml(task.last_status || "--")}</span>
+                        <span>${escapeHtml(t("schedules.next_run"))}: ${escapeHtml(formatDateTime(task.next_run_time))}</span>
                     </div>
                 </button>`;
             })
             .join("");
         list.querySelectorAll("[data-task-id]").forEach((button) => {
             button.addEventListener("click", () =>
-                selectTask(button.getAttribute("data-task-id")),
+                openEditor(button.getAttribute("data-task-id")),
             );
         });
     }
 
     function renderStats() {
         const tasks = scheduleState.tasks;
+        const eventKinds = G.EVENT_KINDS;
         get("scheduleStatTotal").textContent = String(tasks.length);
         get("scheduleStatEvent").textContent = String(
-            tasks.filter((task) => EVENT_KINDS.has(kindOf(task))).length,
+            tasks.filter((task) => eventKinds.has(kindOf(task))).length,
         );
         get("scheduleStatTime").textContent = String(
-            tasks.filter((task) => TIME_KINDS.has(kindOf(task))).length,
+            tasks.filter((task) => !eventKinds.has(kindOf(task))).length,
         );
         get("scheduleStatFailed").textContent = String(
             tasks.filter((task) => task.last_status === "failed").length,
         );
     }
 
-    function fillPresets() {
-        const select = get("schedulePreset");
-        if (!select) return;
-        const presets = scheduleState.catalog.presets || [];
-        select.innerHTML = `<option value="">${escapeHtml(t("schedules.preset_none"))}</option>${presets
+    function renderPresets() {
+        const grid = get("schedulePresetGrid");
+        if (!grid) return;
+        const presets = [
+            { id: "", name: t("schedules.preset_blank"), task: G.emptyTask() },
+            ...(scheduleState.catalog.presets || []),
+        ];
+        grid.innerHTML = presets
             .map(
-                (preset) =>
-                    `<option value="${escapeHtml(preset.id)}">${escapeHtml(preset.name)}</option>`,
+                (preset) => `
+            <button type="button" class="wf-preset-card" data-preset-id="${escapeHtml(preset.id)}">
+                <strong>${escapeHtml(preset.name)}</strong>
+            </button>`,
             )
-            .join("")}`;
+            .join("");
+        grid.querySelectorAll("[data-preset-id]").forEach((button) => {
+            button.addEventListener("click", () => {
+                const id = button.getAttribute("data-preset-id") || "";
+                const preset = presets.find((item) => item.id === id);
+                hidePresetDialog();
+                openDraft(preset?.task || G.emptyTask());
+            });
+        });
     }
 
-    function newTask() {
+    function showPresetDialog() {
+        renderPresets();
+        const dialog = get("schedulePresetDialog");
+        if (dialog) dialog.hidden = false;
+    }
+
+    function hidePresetDialog() {
+        const dialog = get("schedulePresetDialog");
+        if (dialog) dialog.hidden = true;
+    }
+
+    function syncEditorChrome() {
+        const { task } = scheduleState.graph.getState();
+        const nameInput = get("wfTaskName");
+        const idInput = get("wfTaskId");
+        const enabled = get("wfEnabled");
+        if (nameInput && document.activeElement !== nameInput) {
+            nameInput.value = task.task_name || "";
+        }
+        if (idInput) {
+            idInput.value = scheduleState.draftNew
+                ? idInput.value
+                : scheduleState.selectedId;
+            idInput.disabled = !scheduleState.draftNew;
+        }
+        if (enabled) enabled.checked = task.enabled !== false;
+        get("btnWfDelete").disabled = scheduleState.draftNew;
+        const json = get("wfGraphJson");
+        if (json && document.activeElement !== json) {
+            json.value = G.prettyJson(scheduleState.graph.payload());
+        }
+        const badge = get("wfIssueBadge");
+        if (badge) {
+            if (scheduleState.issues.length) {
+                badge.textContent = i18nFormat("schedules.issue_count", {
+                    count: scheduleState.issues.length,
+                });
+                badge.className = "wf-issue-badge is-error";
+            } else {
+                badge.textContent = t("schedules.validate_ok");
+                badge.className = "wf-issue-badge is-ok";
+            }
+        }
+        renderMobileNodes(task);
+        markDirty();
+    }
+
+    function renderMobileNodes(task) {
+        const box = get("wfMobileNodes");
+        if (!box) return;
+        box.innerHTML = (task.nodes || [])
+            .map(
+                (node) => `
+            <button type="button" class="schedule-flow-card" data-select-node="${escapeHtml(node.id)}">
+                <div class="schedule-flow-title">${escapeHtml(node.id)}</div>
+                <div class="muted-sm">${escapeHtml(t(`schedules.node_type.${node.type}`) || node.type)}</div>
+            </button>`,
+            )
+            .join("");
+        box.querySelectorAll("[data-select-node]").forEach((button) => {
+            button.addEventListener("click", () =>
+                scheduleState.graph.selectNode(
+                    button.getAttribute("data-select-node"),
+                ),
+            );
+        });
+    }
+
+    function ensureGraph(task) {
+        if (!scheduleState.graph) {
+            scheduleState.graph = G.createGraph(task);
+            scheduleState.graph.subscribe(() => {
+                if (scheduleState.editing) syncEditorChrome();
+            });
+            scheduleState.canvas = window.WorkflowCanvas.createCanvas(
+                get("wfCanvas"),
+                scheduleState.graph,
+            );
+            scheduleState.inspector = window.WorkflowInspector.createInspector(
+                get("wfInspector"),
+                scheduleState.graph,
+                () => scheduleState.catalog,
+            );
+        } else {
+            scheduleState.graph.load(task);
+            scheduleState.inspector?.render();
+            scheduleState.canvas?.render();
+        }
+        renderPalette();
+    }
+
+    function setEditing(editing) {
+        scheduleState.editing = editing;
+        get("scheduleListView").hidden = editing;
+        get("scheduleEditorView").hidden = !editing;
+        get("tab-schedules")?.classList.toggle("is-editing", editing);
+        if (typeof syncMainContentLayout === "function")
+            syncMainContentLayout();
+    }
+
+    function openDraft(task) {
         scheduleState.draftNew = true;
         scheduleState.selectedId = "";
-        fillEditor(emptyTask(), true);
-        renderList();
-        setStatus("");
+        scheduleState.issues = [];
+        ensureGraph({ ...G.emptyTask(), ...task });
+        scheduleState.savedSnapshot = snapshotOf(scheduleState.graph.payload());
+        scheduleState.dirty = false;
+        const idInput = get("wfTaskId");
+        if (idInput) idInput.value = "";
+        setEditing(true);
+        setEditorStatus("");
+        syncEditorChrome();
+        writeTaskQuery("new");
     }
 
-    function selectTask(taskId) {
+    function openEditor(taskId) {
         const task = scheduleState.tasks.find(
             (item) => item.task_id === taskId,
         );
         if (!task) return;
         scheduleState.draftNew = false;
         scheduleState.selectedId = taskId;
-        fillEditor(task, false);
+        scheduleState.issues = [];
+        ensureGraph(task);
+        scheduleState.savedSnapshot = snapshotOf(scheduleState.graph.payload());
+        scheduleState.dirty = false;
+        setEditing(true);
+        setEditorStatus("");
+        syncEditorChrome();
+        writeTaskQuery(taskId);
+        validateDraft();
+    }
+
+    function closeEditor() {
+        if (!confirmLeave()) return;
+        setEditing(false);
+        scheduleState.dirty = false;
+        writeTaskQuery("");
         renderList();
-        setStatus("");
+    }
+
+    function writeTaskQuery(taskId) {
+        const url = new URL(window.location.href);
+        if (state.tab === "schedules" && taskId)
+            url.searchParams.set("task", taskId);
+        else url.searchParams.delete("task");
+        window.history.replaceState(null, "", url);
+    }
+
+    async function validateDraft() {
+        if (!scheduleState.graph) return;
+        try {
+            const response = await api("/api/runtime/automations/validate", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(scheduleState.graph.payload()),
+            });
+            const body = await parseJsonSafe(response);
+            scheduleState.issues = Array.isArray(body?.issues)
+                ? body.issues
+                : [];
+            syncEditorChrome();
+        } catch (_error) {
+            scheduleState.issues = [];
+        }
     }
 
     async function refresh() {
@@ -611,24 +451,20 @@
             if (catalogResp.ok) {
                 scheduleState.catalog = (await parseJsonSafe(catalogResp)) || {
                     presets: [],
+                    tools: [],
+                    agents: [],
+                    toolsets: [],
                 };
             }
-            fillPresets();
             renderStats();
             renderList();
-            if (!scheduleState.draftNew && scheduleState.selectedId) {
-                const current = scheduleState.tasks.find(
-                    (item) => item.task_id === scheduleState.selectedId,
-                );
-                if (current) fillEditor(current, false);
-                else newTask();
-            }
             scheduleState.loaded = true;
             setPageStatus(
                 i18nFormat("schedules.loaded", {
                     count: scheduleState.tasks.length,
                 }),
             );
+            maybeOpenFromQuery();
         } catch (error) {
             if (error.name === "AbortError") return;
             setPageStatus(
@@ -639,13 +475,26 @@
         }
     }
 
-    async function save(event) {
-        event.preventDefault();
-        if (scheduleState.busy) return;
+    function maybeOpenFromQuery() {
+        if (scheduleState.editing) return;
+        const params = new URLSearchParams(window.location.search);
+        const taskId = params.get("task") || state.initialTask || "";
+        if (!taskId) return;
+        if (taskId === "new") {
+            showPresetDialog();
+            return;
+        }
+        if (scheduleState.tasks.some((item) => item.task_id === taskId)) {
+            openEditor(taskId);
+        }
+    }
+
+    async function save() {
+        if (!scheduleState.graph || scheduleState.busy) return;
         try {
-            const payload = readEditor();
+            const payload = scheduleState.graph.payload();
             const taskId = scheduleState.draftNew
-                ? String(get("scheduleTaskId").value || "").trim()
+                ? String(get("wfTaskId").value || "").trim()
                 : scheduleState.selectedId;
             if (scheduleState.draftNew && taskId) payload.task_id = taskId;
             setBusy(true);
@@ -661,16 +510,25 @@
             );
             const body = await parseJsonSafe(response);
             if (!response.ok) throw new Error(requestError(response, body));
-            setStatus(t("schedules.saved"), "success");
+            setEditorStatus(t("schedules.saved"), "success");
             showToast(t("schedules.saved"), "success");
             scheduleState.draftNew = false;
             scheduleState.selectedId = body.task?.task_id || taskId;
+            if (body.task) {
+                ensureGraph(body.task);
+                scheduleState.savedSnapshot = snapshotOf(
+                    scheduleState.graph.payload(),
+                );
+            }
+            scheduleState.dirty = false;
+            writeTaskQuery(scheduleState.selectedId);
             await refresh();
         } catch (error) {
-            setStatus(
+            setEditorStatus(
                 `${t("schedules.save_failed")}: ${error.message || error}`,
                 "error",
             );
+            validateDraft();
         } finally {
             setBusy(false);
         }
@@ -688,7 +546,8 @@
             const body = await parseJsonSafe(response);
             if (!response.ok) throw new Error(requestError(response, body));
             showToast(t("schedules.deleted"), "success");
-            newTask();
+            scheduleState.dirty = false;
+            closeEditor();
             await refresh();
         } catch (error) {
             showToast(
@@ -701,109 +560,83 @@
         }
     }
 
-    function applyPreset(presetId) {
-        const preset = (scheduleState.catalog.presets || []).find(
-            (item) => item.id === presetId,
-        );
-        if (!preset || !preset.task) return;
-        fillEditor({ ...emptyTask(), ...preset.task }, true);
-        scheduleState.draftNew = true;
-        scheduleState.selectedId = "";
-        renderList();
+    function bindEditorKeys(event) {
+        if (!scheduleState.editing) return;
+        const typing =
+            event.target &&
+            (event.target.tagName === "INPUT" ||
+                event.target.tagName === "TEXTAREA" ||
+                event.target.tagName === "SELECT");
+        if (
+            (event.ctrlKey || event.metaKey) &&
+            event.key.toLowerCase() === "s"
+        ) {
+            event.preventDefault();
+            save();
+            return;
+        }
+        if (
+            (event.ctrlKey || event.metaKey) &&
+            event.key.toLowerCase() === "z"
+        ) {
+            event.preventDefault();
+            if (event.shiftKey) scheduleState.graph?.redo();
+            else scheduleState.graph?.undo();
+            return;
+        }
+        if (
+            (event.ctrlKey || event.metaKey) &&
+            event.key.toLowerCase() === "y"
+        ) {
+            event.preventDefault();
+            scheduleState.graph?.redo();
+            return;
+        }
+        if (typing) return;
+        if (event.key === "Delete" || event.key === "Backspace") {
+            event.preventDefault();
+            scheduleState.graph?.removeSelected();
+        }
+        if (event.key === "Escape") {
+            scheduleState.graph?.selectNode("");
+        }
     }
 
     function bindEvents() {
         get("btnSchedulesRefresh")?.addEventListener("click", refresh);
-        get("btnSchedulesNew")?.addEventListener("click", newTask);
-        get("btnScheduleReset")?.addEventListener("click", () => {
-            if (scheduleState.selectedId) selectTask(scheduleState.selectedId);
-            else newTask();
+        get("btnSchedulesNew")?.addEventListener("click", showPresetDialog);
+        get("btnPresetClose")?.addEventListener("click", hidePresetDialog);
+        get("schedulePresetDialog")?.addEventListener("click", (event) => {
+            if (event.target.id === "schedulePresetDialog") hidePresetDialog();
         });
-        get("btnScheduleDelete")?.addEventListener("click", removeSelected);
-        get("scheduleEditor")?.addEventListener("submit", save);
         get("scheduleSearchInput")?.addEventListener("input", (event) => {
             scheduleState.search = String(event.target.value || "");
             renderList();
         });
-        get("scheduleKind")?.addEventListener("change", (event) => {
-            toggleKindFields(event.target.value);
+        get("btnWfBack")?.addEventListener("click", closeEditor);
+        get("btnWfSave")?.addEventListener("click", save);
+        get("btnWfDelete")?.addEventListener("click", removeSelected);
+        get("btnWfLayout")?.addEventListener("click", () =>
+            scheduleState.graph?.autoLayout(),
+        );
+        get("wfTaskName")?.addEventListener("change", (event) => {
+            scheduleState.graph?.setMeta({ task_name: event.target.value });
         });
-        get("schedulePreset")?.addEventListener("change", (event) => {
-            if (event.target.value) applyPreset(event.target.value);
+        get("wfEnabled")?.addEventListener("change", (event) => {
+            scheduleState.graph?.setMeta({ enabled: event.target.checked });
         });
-        get("btnMentionAdd")?.addEventListener("click", () => {
-            renderMentions([...readMentions(), ""]);
-        });
-        get("scheduleMentions")?.addEventListener("click", (event) => {
-            const anyBtn = event.target.closest("[data-mention-any]");
-            const removeBtn = event.target.closest("[data-mention-remove]");
-            const row = event.target.closest("[data-mention-index]");
-            if (!row) return;
-            const items = readMentions();
-            const index = Number(row.getAttribute("data-mention-index"));
-            if (anyBtn) {
-                const input = row.querySelector("[data-mention-input]");
-                if (input) input.value = "*";
-            }
-            if (removeBtn) {
-                items.splice(index, 1);
-                renderMentions(items);
-            }
-        });
-        document.querySelectorAll("[data-add-node]").forEach((button) => {
-            button.addEventListener("click", () => {
-                const start = startNode(readEditor());
-                const nodes = readNodesFromCards(start);
-                const added = defaultNode(button.getAttribute("data-add-node"));
-                nodes.push(added);
-                const last = nodes[nodes.length - 2];
-                const edges = parseJsonText(
-                    get("scheduleEdgesJson").value,
-                    [],
-                    "edges",
-                );
-                if (last && last.id)
-                    edges.push({ from: last.id, to: added.id });
-                if (added.type === "branch.if") {
-                    edges.push({
-                        from: added.id,
-                        to: last?.id || "start",
-                        case: "else",
-                    });
+        get("btnWfApplyJson")?.addEventListener("click", () => {
+            try {
+                const parsed = JSON.parse(get("wfGraphJson").value || "{}");
+                if (!parsed || !Array.isArray(parsed.nodes)) {
+                    throw new Error(t("schedules.graph_json"));
                 }
-                get("scheduleEdgesJson").value = prettyJson(edges);
-                renderNodes(nodes);
-            });
-        });
-        get("scheduleNodes")?.addEventListener("click", (event) => {
-            const remove = event.target.closest("[data-node-remove]");
-            if (!remove) return;
-            const card = event.target.closest(".schedule-node-card");
-            card?.remove();
-        });
-        document.querySelectorAll("[data-var]").forEach((button) => {
-            button.addEventListener("click", () => {
-                const token = button.getAttribute("data-var");
-                const target = scheduleState.lastFocused;
-                if (!target || !token) return;
-                const start = target.selectionStart || target.value.length;
-                const end = target.selectionEnd || start;
-                target.value =
-                    target.value.slice(0, start) +
-                    token +
-                    target.value.slice(end);
-                target.focus();
-            });
-        });
-        document.addEventListener("focusin", (event) => {
-            if (
-                event.target &&
-                (event.target.tagName === "TEXTAREA" ||
-                    event.target.tagName === "INPUT")
-            ) {
-                scheduleState.lastFocused = event.target;
+                scheduleState.graph.load(parsed);
+            } catch (error) {
+                setEditorStatus(String(error.message || error), "error");
             }
         });
+        document.addEventListener("keydown", bindEditorKeys);
     }
 
     const controller = {
@@ -811,12 +644,27 @@
             if (scheduleState.initialized) return;
             scheduleState.initialized = true;
             bindEvents();
-            newTask();
         },
         onTabActivated(tab) {
             if (tab !== "schedules") return;
             if (typeof state !== "undefined" && !state.authenticated) return;
             if (!scheduleState.loaded) refresh();
+            if (typeof syncMainContentLayout === "function")
+                syncMainContentLayout();
+        },
+        confirmLeave,
+        isEditing() {
+            return scheduleState.editing;
+        },
+        onLanguageChanged() {
+            if (!scheduleState.loaded) return;
+            renderStats();
+            renderList();
+            if (scheduleState.editing) {
+                renderPalette();
+                scheduleState.inspector?.render();
+                syncEditorChrome();
+            }
         },
         refresh,
     };

@@ -171,6 +171,7 @@ Management API 会把运行态相关能力统一代理到主进程 Runtime API�
 - `GET /api/v1/management/runtime/probes/external`
 - `GET /api/v1/management/runtime/memory`
 - `GET /api/v1/management/runtime/automations/catalog`
+- `POST /api/v1/management/runtime/automations/validate`
 - `GET /api/v1/management/runtime/automations`
 - `POST /api/v1/management/runtime/automations`
 - `GET /api/v1/management/runtime/automations/{task_id}`

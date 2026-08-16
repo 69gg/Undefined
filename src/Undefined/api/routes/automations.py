@@ -19,9 +19,13 @@ from Undefined.api.routes.schedules import (
     serialize_schedule_task,
 )
 from Undefined.automations.catalog import build_catalog
+from Undefined.automations.constants import DEFAULT_MAX_NODES
 from Undefined.automations.runner import find_start_node, start_kind
 from Undefined.automations.short import build_short_automation, patch_nodes
-from Undefined.automations.validate import AutomationValidationError
+from Undefined.automations.validate import (
+    AutomationValidationError,
+    collect_automation_issues,
+)
 from Undefined.utils.message_targets import parse_delivery_address
 
 
@@ -46,6 +50,11 @@ def serialize_automation(
     task["last_node_id"] = task_info.get("last_node_id")
     task["nodes"] = deepcopy(task_info.get("nodes") or [])
     task["edges"] = deepcopy(task_info.get("edges") or [])
+    ui = task_info.get("ui")
+    if isinstance(ui, dict):
+        task["ui"] = deepcopy(ui)
+    elif "ui" in task:
+        task.pop("ui", None)
     if isinstance(start, dict):
         task["channels"] = list(start.get("channels") or [])
         task["mentions"] = list(start.get("mentions") or [])
@@ -115,6 +124,21 @@ async def _upsert(
     )
 
 
+def _max_nodes(ctx: RuntimeAPIContext) -> int:
+    getter = getattr(ctx, "config_getter", None)
+    if not callable(getter):
+        return DEFAULT_MAX_NODES
+    try:
+        cfg = getter()
+        automations_cfg = getattr(cfg, "automations", None)
+        return int(
+            getattr(automations_cfg, "max_nodes", DEFAULT_MAX_NODES)
+            or DEFAULT_MAX_NODES
+        )
+    except Exception:
+        return DEFAULT_MAX_NODES
+
+
 async def automations_catalog_handler(
     ctx: RuntimeAPIContext, request: web.Request
 ) -> Response:
@@ -127,7 +151,23 @@ async def automations_catalog_handler(
             bot_qq = int(getattr(cfg, "bot_qq", 0) or 0) or None
         except Exception:
             bot_qq = None
-    return web.json_response(build_catalog(bot_qq=bot_qq))
+    return web.json_response(build_catalog(bot_qq=bot_qq, ai=getattr(ctx, "ai", None)))
+
+
+async def automations_validate_handler(
+    ctx: RuntimeAPIContext, request: web.Request
+) -> Response:
+    try:
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise SchedulePayloadError("Request body must be a JSON object")
+        payload = build_short_automation(_payload_task(body))
+    except SchedulePayloadError as exc:
+        return _json_error(str(exc), status=400)
+    except Exception:
+        return _json_error("Invalid JSON", status=400)
+    issues = collect_automation_issues(payload, max_nodes=_max_nodes(ctx))
+    return web.json_response({"ok": not issues, "issues": issues})
 
 
 async def automations_list_handler(

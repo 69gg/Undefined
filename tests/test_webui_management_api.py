@@ -389,6 +389,7 @@ def test_create_app_registers_management_routes() -> None:
     assert ("PATCH", "/api/v1/management/runtime/automations/{task_id}") in routes
     assert ("DELETE", "/api/v1/management/runtime/automations/{task_id}") in routes
     assert ("GET", "/api/v1/management/runtime/automations/catalog") in routes
+    assert ("POST", "/api/v1/management/runtime/automations/validate") in routes
     assert ("POST", "/api/v1/management/config/validate") in routes
     assert ("POST", "/api/v1/management/bot/start") in routes
     assert ("GET", "/api/v1/management/update-check") in routes
@@ -532,7 +533,7 @@ async def test_runtime_chat_file_upload_handler_requires_auth(monkeypatch: Any) 
 
 
 async def test_index_handler_renders_schedules_tab() -> None:
-    request = _request(query={"view": "app", "tab": "schedules"})
+    request = _request(query={"view": "app", "tab": "schedules", "task": "hotspot"})
 
     response = await _index.index_handler(cast(web.Request, cast(Any, request)))
     payload_text = cast(web.Response, response).text
@@ -540,6 +541,11 @@ async def test_index_handler_renders_schedules_tab() -> None:
     assert payload_text is not None
     assert 'id="tab-schedules"' in payload_text
     assert 'data-tab="schedules"' in payload_text
+    assert '"initial_tab": "schedules"' in payload_text
+    assert '"initial_task": "hotspot"' in payload_text
+    assert '<script src="/static/js/workflow-graph.js"></script>' in payload_text
+    assert '<script src="/static/js/workflow-canvas.js"></script>' in payload_text
+    assert '<script src="/static/js/workflow-inspector.js"></script>' in payload_text
     assert '<script src="/static/js/schedules.js"></script>' in payload_text
 
 

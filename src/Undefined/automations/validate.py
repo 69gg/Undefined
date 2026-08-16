@@ -20,16 +20,8 @@ class AutomationValidationError(ValueError):
     """Raised when an automation graph is invalid."""
 
 
-def _nodes_by_id(nodes: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    mapping: dict[str, dict[str, Any]] = {}
-    for node in nodes:
-        node_id = str(node.get("id") or "").strip()
-        if not node_id:
-            raise AutomationValidationError("node id is required")
-        if node_id in mapping:
-            raise AutomationValidationError(f"duplicate node id: {node_id}")
-        mapping[node_id] = node
-    return mapping
+def _issue(path: str, message: str) -> dict[str, str]:
+    return {"path": path, "message": message}
 
 
 def _body_ids(node: dict[str, Any]) -> set[str]:
@@ -39,21 +31,42 @@ def _body_ids(node: dict[str, Any]) -> set[str]:
     return {str(item).strip() for item in body if str(item).strip()}
 
 
-def validate_automation(
+def _index_nodes(
+    nodes_raw: list[Any],
+    issues: list[dict[str, str]],
+) -> dict[str, dict[str, Any]]:
+    mapping: dict[str, dict[str, Any]] = {}
+    for index, item in enumerate(nodes_raw):
+        if not isinstance(item, dict):
+            issues.append(_issue(f"nodes[{index}]", "node must be an object"))
+            continue
+        node_id = str(item.get("id") or "").strip()
+        if not node_id:
+            issues.append(_issue(f"nodes[{index}]", "node id is required"))
+            continue
+        if node_id in mapping:
+            issues.append(_issue(f"nodes.{node_id}", f"duplicate node id: {node_id}"))
+            continue
+        mapping[node_id] = item
+    return mapping
+
+
+def collect_automation_issues(
     task: dict[str, Any],
     *,
     max_nodes: int = DEFAULT_MAX_NODES,
-) -> None:
-    """Raise AutomationValidationError if the graph cannot run."""
+) -> list[dict[str, str]]:
+    """Return every graph problem the editor can highlight."""
+    issues: list[dict[str, str]] = []
     nodes_raw = task.get("nodes")
     if not isinstance(nodes_raw, list) or not nodes_raw:
-        raise AutomationValidationError("nodes must be a non-empty array")
+        return [_issue("nodes", "nodes must be a non-empty array")]
     if len(nodes_raw) > max_nodes:
-        raise AutomationValidationError(
-            f"automations can contain at most {max_nodes} nodes"
+        issues.append(
+            _issue("nodes", f"automations can contain at most {max_nodes} nodes")
         )
 
-    nodes = _nodes_by_id([item for item in nodes_raw if isinstance(item, dict)])
+    nodes = _index_nodes(nodes_raw, issues)
     starts = [
         node
         for node in nodes.values()
@@ -61,92 +74,148 @@ def validate_automation(
         or str(node.get("id") or "") == START_NODE_ID
     ]
     if len(starts) != 1:
-        raise AutomationValidationError("exactly one start node is required")
-    start = starts[0]
-    if str(start.get("id") or "") != START_NODE_ID:
-        raise AutomationValidationError("start node id must be 'start'")
-    kind = str(start.get("kind") or "").strip()
-    if kind not in START_KINDS:
-        raise AutomationValidationError("start.kind is invalid")
-    if kind in EVENT_KINDS:
-        channels = start.get("channels")
-        if not isinstance(channels, list) or not channels:
-            raise AutomationValidationError("event start requires channels")
-        for channel in channels:
-            if str(channel) not in CHANNELS:
-                raise AutomationValidationError(f"unknown channel: {channel}")
-        if kind in {"member_join", "member_leave"} and any(
-            str(channel) != "group" for channel in channels
+        issues.append(_issue("start", "exactly one start node is required"))
+        start: dict[str, Any] | None = starts[0] if starts else None
+    else:
+        start = starts[0]
+        if str(start.get("id") or "") != START_NODE_ID:
+            issues.append(_issue("start", "start node id must be 'start'"))
+    if start is not None:
+        kind = str(start.get("kind") or "").strip()
+        if kind not in START_KINDS:
+            issues.append(_issue("start.kind", "start.kind is invalid"))
+        elif kind in EVENT_KINDS:
+            channels = start.get("channels")
+            if not isinstance(channels, list) or not channels:
+                issues.append(_issue("start.channels", "event start requires channels"))
+            else:
+                for channel in channels:
+                    if str(channel) not in CHANNELS:
+                        issues.append(
+                            _issue("start.channels", f"unknown channel: {channel}")
+                        )
+                if kind in {"member_join", "member_leave"} and any(
+                    str(channel) != "group" for channel in channels
+                ):
+                    issues.append(
+                        _issue(
+                            "start.channels",
+                            "member events only support group channel",
+                        )
+                    )
+                if kind == "poke" and any(
+                    str(channel) == "wechat" for channel in channels
+                ):
+                    issues.append(
+                        _issue("start.channels", "poke does not support wechat channel")
+                    )
+        if (
+            kind == "cron"
+            and not str(start.get("cron") or task.get("cron") or "").strip()
         ):
-            raise AutomationValidationError("member events only support group channel")
-        if kind == "poke" and any(str(channel) == "wechat" for channel in channels):
-            raise AutomationValidationError("poke does not support wechat channel")
-    if kind == "cron" and not str(start.get("cron") or task.get("cron") or "").strip():
-        raise AutomationValidationError("cron start requires cron expression")
-    if kind == "daily" and not str(start.get("time") or "").strip():
-        raise AutomationValidationError("daily start requires time")
-    if kind == "at" and not str(start.get("at") or "").strip():
-        raise AutomationValidationError("at start requires datetime")
-    if kind == "interval":
-        try:
-            seconds = int(start.get("interval_seconds") or 0)
-        except (TypeError, ValueError) as exc:
-            raise AutomationValidationError(
-                "interval_seconds must be a positive integer"
-            ) from exc
-        if seconds < 1:
-            raise AutomationValidationError(
-                "interval_seconds must be a positive integer"
-            )
+            issues.append(_issue("start.cron", "cron start requires cron expression"))
+        if kind == "daily" and not str(start.get("time") or "").strip():
+            issues.append(_issue("start.time", "daily start requires time"))
+        if kind == "at" and not str(start.get("at") or "").strip():
+            issues.append(_issue("start.at", "at start requires datetime"))
+        if kind == "interval":
+            try:
+                seconds = int(start.get("interval_seconds") or 0)
+            except (TypeError, ValueError):
+                seconds = 0
+                issues.append(
+                    _issue(
+                        "start.interval_seconds",
+                        "interval_seconds must be a positive integer",
+                    )
+                )
+            else:
+                if seconds < 1:
+                    issues.append(
+                        _issue(
+                            "start.interval_seconds",
+                            "interval_seconds must be a positive integer",
+                        )
+                    )
 
-    for node in nodes.values():
+    for node_id, node in nodes.items():
         node_type = str(node.get("type") or "").strip()
+        prefix = f"nodes.{node_id}"
         if node_type not in NODE_TYPES:
-            raise AutomationValidationError(f"unknown node type: {node_type}")
+            issues.append(_issue(f"{prefix}.type", f"unknown node type: {node_type}"))
+            continue
         if node_type in {"loop.times", "loop.each"}:
-            max_iterations = int(node.get("max_iterations") or LOOP_MAX_ITERATIONS)
+            try:
+                max_iterations = int(node.get("max_iterations") or LOOP_MAX_ITERATIONS)
+            except (TypeError, ValueError):
+                max_iterations = 0
             if max_iterations < 1 or max_iterations > LOOP_MAX_ITERATIONS:
-                raise AutomationValidationError(
-                    f"loop max_iterations must be 1..{LOOP_MAX_ITERATIONS}"
+                issues.append(
+                    _issue(
+                        f"{prefix}.max_iterations",
+                        f"loop max_iterations must be 1..{LOOP_MAX_ITERATIONS}",
+                    )
                 )
             body = _body_ids(node)
-            if str(node.get("id") or "") in body:
-                raise AutomationValidationError("loop body cannot include itself")
+            if node_id in body:
+                issues.append(
+                    _issue(f"{prefix}.body", "loop body cannot include itself")
+                )
             for body_id in body:
                 if body_id not in nodes:
-                    raise AutomationValidationError(
-                        f"loop body node not found: {body_id}"
+                    issues.append(
+                        _issue(f"{prefix}.body", f"loop body node not found: {body_id}")
                     )
-                if str(nodes[body_id].get("type") or "") == "start":
-                    raise AutomationValidationError("loop body cannot include start")
+                elif str(nodes[body_id].get("type") or "") == "start":
+                    issues.append(
+                        _issue(f"{prefix}.body", "loop body cannot include start")
+                    )
         if node_type == "branch.llm":
             options = node.get("options")
             if not isinstance(options, list) or len(options) < 2:
-                raise AutomationValidationError(
-                    "branch.llm requires at least two options"
+                issues.append(
+                    _issue(
+                        f"{prefix}.options", "branch.llm requires at least two options"
+                    )
                 )
-            seen: set[str] = set()
-            for option in options:
-                if not isinstance(option, dict):
-                    raise AutomationValidationError(
-                        "branch.llm options must be objects"
-                    )
-                option_id = str(option.get("id") or "").strip()
-                if not option_id or option_id == BRANCH_ELSE_CASE:
-                    raise AutomationValidationError("branch.llm option id is invalid")
-                if option_id in seen:
-                    raise AutomationValidationError(
-                        f"duplicate branch option: {option_id}"
-                    )
-                seen.add(option_id)
+            else:
+                seen: set[str] = set()
+                for option_index, option in enumerate(options):
+                    if not isinstance(option, dict):
+                        issues.append(
+                            _issue(
+                                f"{prefix}.options[{option_index}]",
+                                "branch.llm options must be objects",
+                            )
+                        )
+                        continue
+                    option_id = str(option.get("id") or "").strip()
+                    if not option_id or option_id == BRANCH_ELSE_CASE:
+                        issues.append(
+                            _issue(
+                                f"{prefix}.options[{option_index}]",
+                                "branch.llm option id is invalid",
+                            )
+                        )
+                        continue
+                    if option_id in seen:
+                        issues.append(
+                            _issue(
+                                f"{prefix}.options",
+                                f"duplicate branch option: {option_id}",
+                            )
+                        )
+                    seen.add(option_id)
         if node_type == "branch.if":
             cases = node.get("cases")
             if not isinstance(cases, list) or not cases:
-                raise AutomationValidationError("branch.if requires cases")
+                issues.append(_issue(f"{prefix}.cases", "branch.if requires cases"))
 
     edges_raw = task.get("edges")
     if not isinstance(edges_raw, list):
-        raise AutomationValidationError("edges must be an array")
+        issues.append(_issue("edges", "edges must be an array"))
+        return issues
+
     loop_bodies: dict[str, set[str]] = {
         str(node.get("id") or ""): _body_ids(node)
         for node in nodes.values()
@@ -156,21 +225,29 @@ def validate_automation(
     for loop_id, body in loop_bodies.items():
         for body_id in body:
             if body_id in body_owners:
-                raise AutomationValidationError(
-                    f"node {body_id} belongs to multiple loops"
+                issues.append(
+                    _issue(
+                        f"nodes.{body_id}",
+                        f"node {body_id} belongs to multiple loops",
+                    )
                 )
+                continue
             body_owners[body_id] = loop_id
 
     adjacency: dict[str, list[str]] = {node_id: [] for node_id in nodes}
     for index, edge in enumerate(edges_raw):
+        path = f"edges[{index}]"
         if not isinstance(edge, dict):
-            raise AutomationValidationError(f"edges[{index}] must be an object")
+            issues.append(_issue(path, f"edges[{index}] must be an object"))
+            continue
         source = str(edge.get("from") or "").strip()
         target = str(edge.get("to") or "").strip()
         if source not in nodes or target not in nodes:
-            raise AutomationValidationError(f"edges[{index}] references unknown node")
+            issues.append(_issue(path, f"edges[{index}] references unknown node"))
+            continue
         if source == target:
-            raise AutomationValidationError("self-loop edges are not allowed")
+            issues.append(_issue(path, "self-loop edges are not allowed"))
+            continue
         source_loop = body_owners.get(source)
         target_loop = body_owners.get(target)
         kind = str(edge.get("kind") or "").strip()
@@ -183,25 +260,43 @@ def validate_automation(
             if kind == "exit" and source in loop_bodies and target_loop is None:
                 adjacency[source].append(target)
                 continue
-            raise AutomationValidationError(
-                "edges cannot cross loop body except loop exit"
-            )
+            issues.append(_issue(path, "edges cannot cross loop body except loop exit"))
+            continue
         adjacency[source].append(target)
 
-    # Cycle detection on the outer graph (loop bodies are separate DAGs).
     visiting: set[str] = set()
     visited: set[str] = set()
+    cycle_reported = False
 
     def visit(node_id: str) -> None:
-        if node_id in visited:
+        nonlocal cycle_reported
+        if node_id in visited or cycle_reported:
             return
         if node_id in visiting:
-            raise AutomationValidationError("automation graph contains a cycle")
+            issues.append(_issue("edges", "automation graph contains a cycle"))
+            cycle_reported = True
+            return
         visiting.add(node_id)
         for nxt in adjacency.get(node_id, []):
             visit(nxt)
+            if cycle_reported:
+                break
         visiting.remove(node_id)
         visited.add(node_id)
 
     for node_id in nodes:
         visit(node_id)
+        if cycle_reported:
+            break
+    return issues
+
+
+def validate_automation(
+    task: dict[str, Any],
+    *,
+    max_nodes: int = DEFAULT_MAX_NODES,
+) -> None:
+    """Raise AutomationValidationError if the graph cannot run."""
+    issues = collect_automation_issues(task, max_nodes=max_nodes)
+    if issues:
+        raise AutomationValidationError(issues[0]["message"])
