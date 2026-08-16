@@ -532,9 +532,11 @@
         }
     }
 
-    async function refresh() {
-        if (scheduleState.busy) return;
-        setBusy(true);
+    async function refresh(options = {}) {
+        const force = Boolean(options.force);
+        if (scheduleState.busy && !force) return;
+        const managedBusy = !scheduleState.busy;
+        if (managedBusy) setBusy(true);
         try {
             const [listResp, catalogResp] = await Promise.all([
                 api("/api/runtime/automations", {
@@ -563,14 +565,14 @@
                     count: scheduleState.tasks.length,
                 }),
             );
-            maybeOpenFromQuery();
+            if (!options.skipOpenFromQuery) maybeOpenFromQuery();
         } catch (error) {
             if (error.name === "AbortError") return;
             setPageStatus(
                 `${t("schedules.save_failed")}: ${error.message || error}`,
             );
         } finally {
-            setBusy(false);
+            if (managedBusy) setBusy(false);
         }
     }
 
@@ -621,7 +623,10 @@
             }
             scheduleState.dirty = false;
             writeTaskQuery(scheduleState.selectedId);
-            await refresh();
+            await refresh({ force: true, skipOpenFromQuery: true });
+            window.requestAnimationFrame(() =>
+                window.requestAnimationFrame(() => showSchedulePage("list")),
+            );
         } catch (error) {
             setEditorStatus(
                 `${t("schedules.save_failed")}: ${error.message || error}`,
@@ -647,7 +652,7 @@
             showToast(t("schedules.deleted"), "success");
             scheduleState.dirty = false;
             closeEditor();
-            await refresh();
+            await refresh({ force: true, skipOpenFromQuery: true });
         } catch (error) {
             showToast(
                 `${t("runtime.failed")}: ${error.message || error}`,
