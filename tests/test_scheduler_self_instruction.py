@@ -7,8 +7,12 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from Undefined.automations.address import resolve_task_address
+from Undefined.automations.address import (
+    resolve_live_event_address,
+    resolve_task_address,
+)
 from Undefined.automations.constants import SELF_CALL_TOOL_NAME
+from Undefined.automations.match import AutomationEvent
 from Undefined.automations.service import AutomationService
 from Undefined.utils import io as async_io
 
@@ -66,6 +70,135 @@ def test_resolve_task_address_preserves_address_and_legacy_only_paths() -> None:
     assert legacy_only.canonical == "qq:12345"
     assert matching_targets is not None
     assert matching_targets.canonical == "group:12345"
+
+
+def test_resolve_live_event_address_prefers_event_session() -> None:
+    group = resolve_live_event_address(
+        address="group:1017148870",
+        channel="group",
+        group_id=1017148870,
+        user_id=2608261902,
+    )
+    wechat = resolve_live_event_address(
+        address="wechat:12345",
+        channel="wechat",
+        user_id=12345,
+    )
+    private = resolve_live_event_address(
+        address="",
+        channel="private",
+        user_id=10001,
+    )
+    assert group is not None
+    assert group.canonical == "group:1017148870"
+    assert wechat is not None
+    assert wechat.canonical == "wechat:12345"
+    assert private is not None
+    assert private.canonical == "qq:10001"
+
+
+@pytest.mark.asyncio
+async def test_event_workflow_injects_live_session_into_tool_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: list[dict[str, Any]] = []
+
+    async def execute_tool(
+        name: str, args: dict[str, Any], context: dict[str, Any]
+    ) -> str:
+        _ = name, args
+        captured.append(
+            {
+                "group_id": context.get("group_id"),
+                "user_id": context.get("user_id"),
+                "sender_id": context.get("sender_id"),
+                "address": context.get("address"),
+                "request_type": context.get("request_type"),
+                "channel": context.get("channel"),
+            }
+        )
+        return "ok"
+
+    monkeypatch.setattr(
+        "Undefined.automations.service.collect_context_resources",
+        lambda values: {
+            key: values[key]
+            for key in (
+                "send_message_callback",
+                "sender",
+                "history_manager",
+                "onebot_client",
+            )
+            if key in values
+        },
+    )
+    ai = SimpleNamespace(
+        tool_manager=SimpleNamespace(
+            execute_tool=execute_tool,
+            get_openai_tools=lambda: [],
+        ),
+        memory_storage=SimpleNamespace(),
+        runtime_config=SimpleNamespace(),
+        ask=AsyncMock(return_value=""),
+        submit_queued_llm_call=AsyncMock(return_value={"choices": []}),
+        agent_config=SimpleNamespace(max_tokens=16),
+    )
+    sender = SimpleNamespace(
+        send_group_message=AsyncMock(),
+        send_private_message=AsyncMock(),
+        send_address_message=AsyncMock(),
+    )
+    service = _make_service(ai=ai, sender=sender)
+    service.tasks["testtoviolet"] = {
+        "task_id": "testtoviolet",
+        "task_name": "测试群祸害紫罗兰",
+        "enabled": True,
+        "consume_ai_loop": True,
+        "auto_send_final": False,
+        "address": "qq:999",
+        "nodes": [
+            {
+                "id": "start",
+                "type": "start",
+                "kind": "message",
+                "channels": ["group"],
+                "group_ids": [1017148870],
+                "text": "",
+            },
+            {
+                "id": "tool_1",
+                "type": "tool",
+                "tool_name": "cognitive.get_profile",
+                "args": {"entity_id": "2608261902"},
+            },
+        ],
+        "edges": [{"from": "start", "to": "tool_1"}],
+    }
+    try:
+        consumed = await service.handle_event(
+            AutomationEvent(
+                kind="message",
+                channel="group",
+                text="hi",
+                sender_id=2608261902,
+                group_id=1017148870,
+                address="group:1017148870",
+            )
+        )
+    finally:
+        service.shutdown()
+
+    assert consumed is True
+    assert captured == [
+        {
+            "group_id": 1017148870,
+            "user_id": 2608261902,
+            "sender_id": 2608261902,
+            "address": "group:1017148870",
+            "request_type": "group",
+            "channel": "group",
+        }
+    ]
 
 
 @pytest.mark.asyncio

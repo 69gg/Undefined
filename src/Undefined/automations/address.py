@@ -5,6 +5,23 @@ from __future__ import annotations
 from Undefined.utils.message_targets import DeliveryAddress, parse_delivery_address
 
 
+def resolve_live_event_address(
+    *,
+    address: str = "",
+    channel: str = "",
+    group_id: int | None = None,
+    user_id: int | None = None,
+) -> DeliveryAddress | None:
+    """Resolve delivery from the triggering session, never a stored task target."""
+    if str(address or "").strip():
+        return resolve_task_address(address, None, "group")
+    if channel == "group" and group_id is not None:
+        return resolve_task_address(None, group_id, "group")
+    if user_id is not None:
+        return resolve_task_address(None, user_id, "private")
+    return None
+
+
 def resolve_task_address(
     address: object,
     target_id: int | None,

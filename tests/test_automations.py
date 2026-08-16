@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from copy import deepcopy
 from types import SimpleNamespace
@@ -17,7 +18,11 @@ from Undefined.automations.engine import iter_matching_tasks
 from Undefined.automations.match import AutomationEvent, match_start_node
 from Undefined.automations.mentions import consume_mentions
 from Undefined.automations.migrate import migrate_legacy_task
-from Undefined.automations.runner import WorkflowError, WorkflowRunner
+from Undefined.automations.runner import (
+    WorkflowError,
+    WorkflowRunner,
+    filter_openai_tools,
+)
 from Undefined.automations.short import build_short_automation
 from Undefined.automations.storage import AutomationStorage
 from Undefined.automations.validate import (
@@ -272,6 +277,7 @@ def _runner(
     submit_llm: Any = None,
     send_message: Any = None,
     ask_main: Any = None,
+    tool_context: dict[str, Any] | None = None,
 ) -> WorkflowRunner:
     async def _send(text: str) -> None:
         if send_message is not None:
@@ -284,7 +290,7 @@ def _runner(
         send_message=_send if send_message is None else send_message,
         get_openai_tools=lambda: [],
         agent_config=SimpleNamespace(max_tokens=16),
-        tool_context={},
+        tool_context=tool_context if tool_context is not None else {},
     )
 
 
@@ -497,6 +503,221 @@ async def test_legacy_tool_error_continues_serial_chain() -> None:
         mentions_all=(),
     )
     assert called == ["first", "second"]
+
+
+def test_filter_openai_tools_matches_short_and_dotted_names() -> None:
+    tools = [
+        {
+            "type": "function",
+            "function": {"name": "messages.send_message", "description": "send"},
+        },
+        {
+            "type": "function",
+            "function": {"name": "cognitive.get_profile", "description": "profile"},
+        },
+    ]
+    selected = filter_openai_tools(
+        tools, tools=["messages.send_message"], toolsets=None, agents=None
+    )
+    assert [item["function"]["name"] for item in selected] == ["messages.send_message"]
+    selected_short = filter_openai_tools(
+        tools, tools=["send_message"], toolsets=None, agents=None
+    )
+    assert [item["function"]["name"] for item in selected_short] == [
+        "messages.send_message"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_runner_independent_downstream_does_not_wait_for_sibling() -> None:
+    order: list[str] = []
+    after_done = asyncio.Event()
+
+    async def execute_tool(
+        name: str, args: dict[str, Any], context: dict[str, Any]
+    ) -> str:
+        _ = args, context
+        order.append(f"start:{name}")
+        if name == "slow":
+            await after_done.wait()
+        elif name == "after":
+            after_done.set()
+        order.append(f"end:{name}")
+        return name
+
+    runner = _runner(execute_tool=execute_tool, send_message=AsyncMock())
+    runner.workflow_timeout_seconds = 2
+    runner.node_timeout_seconds = 2
+    task = {
+        "auto_send_final": False,
+        "nodes": [
+            {"id": "start", "type": "start", "kind": "message", "channels": ["group"]},
+            {"id": "slow", "type": "tool", "tool_name": "slow", "args": {}},
+            {"id": "fast", "type": "tool", "tool_name": "fast", "args": {}},
+            {"id": "after", "type": "tool", "tool_name": "after", "args": {}},
+        ],
+        "edges": [
+            {"from": "start", "to": "slow"},
+            {"from": "start", "to": "fast"},
+            {"from": "fast", "to": "after"},
+        ],
+    }
+    event = AutomationEvent(kind="message", channel="group", text="hi")
+    await runner.run(
+        task,
+        event=event,
+        pass_text="hi",
+        consume_mentions=(),
+        consume_stripped="hi",
+        mentions_all=(),
+    )
+    assert order.index("end:after") < order.index("end:slow")
+    assert order.index("start:slow") < order.index("start:after")
+
+
+@pytest.mark.asyncio
+async def test_runner_join_waits_for_all_upstreams() -> None:
+    order: list[str] = []
+
+    async def execute_tool(
+        name: str, args: dict[str, Any], context: dict[str, Any]
+    ) -> str:
+        _ = args, context
+        order.append(f"start:{name}")
+        if name == "a":
+            await asyncio.sleep(0.05)
+        elif name == "b":
+            await asyncio.sleep(0.01)
+        order.append(f"end:{name}")
+        return name
+
+    runner = _runner(execute_tool=execute_tool, send_message=AsyncMock())
+    task = {
+        "auto_send_final": False,
+        "nodes": [
+            {"id": "start", "type": "start", "kind": "message", "channels": ["group"]},
+            {"id": "a", "type": "tool", "tool_name": "a", "args": {}},
+            {"id": "b", "type": "tool", "tool_name": "b", "args": {}},
+            {"id": "join", "type": "tool", "tool_name": "join", "args": {}},
+        ],
+        "edges": [
+            {"from": "start", "to": "a"},
+            {"from": "start", "to": "b"},
+            {"from": "a", "to": "join"},
+            {"from": "b", "to": "join"},
+        ],
+    }
+    event = AutomationEvent(kind="message", channel="group", text="hi")
+    await runner.run(
+        task,
+        event=event,
+        pass_text="hi",
+        consume_mentions=(),
+        consume_stripped="hi",
+        mentions_all=(),
+    )
+    assert order.index("start:join") > order.index("end:a")
+    assert order.index("start:join") > order.index("end:b")
+
+
+@pytest.mark.asyncio
+async def test_runner_copies_tool_context_per_call() -> None:
+    ids: list[int] = []
+
+    async def execute_tool(
+        name: str, args: dict[str, Any], context: dict[str, Any]
+    ) -> str:
+        _ = args
+        ids.append(id(context))
+        context["mutated"] = name
+        await asyncio.sleep(0.01)
+        return name
+
+    shared: dict[str, Any] = {"shared": True}
+    runner = _runner(execute_tool=execute_tool, tool_context=shared)
+    task = {
+        "auto_send_final": False,
+        "nodes": [
+            {"id": "start", "type": "start", "kind": "message", "channels": ["group"]},
+            {"id": "left", "type": "tool", "tool_name": "left", "args": {}},
+            {"id": "right", "type": "tool", "tool_name": "right", "args": {}},
+        ],
+        "edges": [
+            {"from": "start", "to": "left"},
+            {"from": "start", "to": "right"},
+        ],
+    }
+    event = AutomationEvent(kind="message", channel="group", text="hi")
+    await runner.run(
+        task,
+        event=event,
+        pass_text="hi",
+        consume_mentions=(),
+        consume_stripped="hi",
+        mentions_all=(),
+    )
+    assert len(ids) == 2
+    assert ids[0] != ids[1]
+    assert "mutated" not in shared
+
+
+@pytest.mark.asyncio
+async def test_runner_main_passes_session_identity() -> None:
+    captured: list[dict[str, Any]] = []
+
+    async def ask_main(prompt: str, extra: dict[str, Any]) -> str:
+        _ = prompt
+        captured.append(dict(extra))
+        return "ok"
+
+    runner = _runner(
+        ask_main=ask_main,
+        tool_context={
+            "request_type": "group",
+            "group_id": 1017148870,
+            "user_id": 2608261902,
+            "sender_id": 2608261902,
+            "address": "group:1017148870",
+            "channel": "group",
+            "scheduled_task_id": "testtoviolet",
+            "scheduled_task_name": "测试群祸害紫罗兰",
+        },
+    )
+    task = {
+        "auto_send_final": False,
+        "nodes": [
+            {"id": "start", "type": "start", "kind": "message", "channels": ["group"]},
+            {
+                "id": "llm_main",
+                "type": "llm.main",
+                "prompt": "list tools",
+                "emit": False,
+            },
+        ],
+        "edges": [{"from": "start", "to": "llm_main"}],
+    }
+    event = AutomationEvent(
+        kind="message",
+        channel="group",
+        text="hi",
+        group_id=1017148870,
+        sender_id=2608261902,
+        address="group:1017148870",
+    )
+    await runner.run(
+        task,
+        event=event,
+        pass_text="hi",
+        consume_mentions=(),
+        consume_stripped="hi",
+        mentions_all=(),
+    )
+    assert captured
+    extra = captured[0]
+    assert extra["group_id"] == 1017148870
+    assert extra["address"] == "group:1017148870"
+    assert extra["request_type"] == "group"
+    assert extra["sender_id"] == 2608261902
 
 
 def test_assign_node_output_named_and_skipped() -> None:

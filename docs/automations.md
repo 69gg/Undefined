@@ -25,7 +25,7 @@
 | 入退群 | OneBot `group_increase` / `group_decrease`，无 AI 可拦 |
 | 时间 | APScheduler |
 
-事件用当前会话上下文；时间触发才用 snapshot。出站走 `MessageSender`，受 `[access]` 约束。
+事件用当前会话上下文（`request_type` / `group_id` / `user_id` / `sender_id` / `address` / `channel` 写入工具 context）；时间触发才用 snapshot。出站走 `MessageSender`，受 `[access]` 约束。`send_message` 只填 `message` 时按该会话推断目标。
 
 ## Start：场景多选 + @ 专项
 
@@ -61,7 +61,7 @@
 
 ## 节点
 
-多上游 AND join；无相互依赖的分支并行。默认可用 `{{节点id}}` 引用上游输出。工具与三种 LLM 节点还可设置 `store_output` + `output_var`：勾选存储后，下游用 `{{名称}}`（或 `{{vars.名称}}`）读取；关掉则不写入变量。未填名称时仍按节点 ID 存储。禁止占用 `trigger` / `nodes` / `index` / `item` / `vars` / `start` / `else`。循环硬顶 **25** 次。禁止 loop 外回边。
+多上游 AND join：所有入边都满足后才启动；无相互依赖的分支一旦依赖就绪就立刻并行，不等整波齐头。默认可用 `{{节点id}}` 引用上游输出。工具与三种 LLM 节点还可设置 `store_output` + `output_var`：勾选存储后，下游用 `{{名称}}`（或 `{{vars.名称}}`）读取；关掉则不写入变量。未填名称时仍按节点 ID 存储。禁止占用 `trigger` / `nodes` / `index` / `item` / `vars` / `start` / `else`。循环硬顶 **25** 次。禁止 loop 外回边。
 
 | 类型 | 作用 |
 |---|---|

@@ -96,6 +96,36 @@ def _tool_function_name(schema: dict[str, Any]) -> str:
     return ""
 
 
+SESSION_IDENTITY_KEYS = (
+    "request_type",
+    "group_id",
+    "user_id",
+    "sender_id",
+    "address",
+    "channel",
+)
+
+
+def collect_session_identity(source: dict[str, Any]) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    for key in SESSION_IDENTITY_KEYS:
+        value = source.get(key)
+        if value is not None and value != "":
+            payload[key] = value
+    return payload
+
+
+def _tool_name_aliases(name: str) -> set[str]:
+    internal = name.replace("-_-", ".")
+    aliases = {name, internal}
+    if "." in internal:
+        aliases.add(internal.rsplit(".", 1)[-1])
+    if "." in name:
+        aliases.add(name.rsplit(".", 1)[-1])
+    aliases.discard("")
+    return aliases
+
+
 def filter_openai_tools(
     all_tools: list[dict[str, Any]],
     *,
@@ -108,11 +138,14 @@ def filter_openai_tools(
     allow_agents = {str(name).strip() for name in (agents or []) if str(name).strip()}
     if not allow_tools and not allow_sets and not allow_agents:
         return []
+    allow_tool_aliases = {
+        alias for item in allow_tools for alias in _tool_name_aliases(item)
+    }
     selected: list[dict[str, Any]] = []
     for schema in all_tools:
         name = _tool_function_name(schema)
         internal = name.replace("-_-", ".")
-        if internal in allow_tools or name in allow_tools:
+        if _tool_name_aliases(name) & allow_tool_aliases:
             selected.append(schema)
             continue
         prefix = internal.split(".", 1)[0]
@@ -122,6 +155,17 @@ def filter_openai_tools(
         if internal in allow_agents or name in allow_agents:
             selected.append(schema)
     return selected
+
+
+async def _cancel_inflight(
+    tasks: dict[str, asyncio.Task[tuple[str, str, str | None]]],
+) -> None:
+    pending = [task for task in tasks.values() if not task.done()]
+    tasks.clear()
+    for task in pending:
+        task.cancel()
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
 
 
 def _stringify(value: Any) -> str:
@@ -193,6 +237,9 @@ class WorkflowRunner:
 
     def _task_id(self) -> str:
         return str(self.tool_context.get("scheduled_task_id") or "")
+
+    def _tool_context_copy(self) -> dict[str, Any]:
+        return dict(self.tool_context)
 
     async def run(
         self,
@@ -349,74 +396,118 @@ class WorkflowRunner:
             activate_from(START_NODE_ID)
 
         last_output = completed.get(START_NODE_ID, "")
-        guard = 0
-        while guard < 200:
-            guard += 1
+        in_flight: dict[str, asyncio.Task[tuple[str, str, str | None]]] = {}
+
+        def graph_incoming(node_id: str) -> list[tuple[str, str]]:
+            found: list[tuple[str, str]] = []
+            for edge in edges:
+                if str(edge.get("to") or "") != node_id:
+                    continue
+                source = str(edge.get("from") or "")
+                if source not in active_ids:
+                    continue
+                found.append((source, str(edge.get("case") or "")))
+            return found
+
+        def collect_ready() -> list[str]:
             ready: list[str] = []
             for node_id in active_ids:
-                if node_id in completed or node_id == START_NODE_ID:
+                if (
+                    node_id in completed
+                    or node_id in in_flight
+                    or node_id == START_NODE_ID
+                ):
                     continue
-                incoming = [
-                    (source, target, case)
-                    for source, target, case in activated
-                    if target == node_id
-                ]
+                incoming = graph_incoming(node_id)
                 if not incoming:
-                    # Entry nodes of a subgraph (loop body) with no incoming body edges.
-                    has_any_edge = any(
-                        str(edge.get("to") or "") == node_id
-                        and str(edge.get("from") or "") in active_ids
-                        for edge in edges
-                    )
-                    if has_any_edge:
-                        continue
                     if only_ids is not None:
                         ready.append(node_id)
                     continue
-                if all(source in completed for source, _target, _case in incoming):
+                satisfied = 0
+                blocked = False
+                for source, edge_case in incoming:
+                    if source not in completed:
+                        blocked = True
+                        break
+                    if (source, node_id, edge_case) in activated:
+                        satisfied += 1
+                if not blocked and satisfied == len(incoming):
                     ready.append(node_id)
-            if not ready:
-                break
+            return ready
 
-            async def run_one(node_id: str) -> tuple[str, str, str | None]:
-                node = nodes[node_id]
-                try:
-                    output, case = await asyncio.wait_for(
-                        self._execute_node(
-                            node,
-                            task=task,
-                            variables=variables,
-                            emit_if_needed=emit_if_needed,
-                        ),
-                        timeout=self.node_timeout_seconds,
-                    )
-                except TimeoutError as exc:
-                    logger.error(
-                        "[自动化] 节点超时: id=%s node=%s timeout=%.0fs",
+        async def run_one(node_id: str) -> tuple[str, str, str | None]:
+            node = nodes[node_id]
+            try:
+                output, case = await asyncio.wait_for(
+                    self._execute_node(
+                        node,
+                        task=task,
+                        variables=variables,
+                        emit_if_needed=emit_if_needed,
+                    ),
+                    timeout=self.node_timeout_seconds,
+                )
+            except TimeoutError as exc:
+                logger.error(
+                    "[自动化] 节点超时: id=%s node=%s timeout=%.0fs",
+                    self._task_id(),
+                    node_id,
+                    self.node_timeout_seconds,
+                )
+                raise WorkflowError(
+                    f"node timeout after {self.node_timeout_seconds}s",
+                    node_id=node_id,
+                ) from exc
+            return node_id, output, case
+
+        try:
+            guard = 0
+            while guard < 200:
+                guard += 1
+                ready = collect_ready()
+                if ready:
+                    logger.info(
+                        "[自动化] 并行调度: id=%s nodes=%s inflight=%s",
                         self._task_id(),
-                        node_id,
-                        self.node_timeout_seconds,
+                        ",".join(ready),
+                        ",".join(sorted(in_flight)) or "-",
                     )
-                    raise WorkflowError(
-                        f"node timeout after {self.node_timeout_seconds}s",
-                        node_id=node_id,
-                    ) from exc
-                return node_id, output, case
-
-            results = await asyncio.gather(
-                *[run_one(node_id) for node_id in ready],
-                return_exceptions=True,
-            )
-            for item in results:
-                if isinstance(item, BaseException):
-                    if isinstance(item, WorkflowError):
-                        raise item
-                    raise WorkflowError(str(item)) from item
-                node_id, output, case = item
-                completed[node_id] = output
-                last_output = output
-                assign_node_output(variables, nodes.get(node_id) or {}, output)
-                activate_from(node_id, case)
+                    for node_id in ready:
+                        in_flight[node_id] = asyncio.create_task(
+                            run_one(node_id),
+                            name=f"automation:{self._task_id()}:{node_id}",
+                        )
+                if not in_flight:
+                    break
+                done, _pending = await asyncio.wait(
+                    set(in_flight.values()),
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                finished_ids = [
+                    node_id
+                    for node_id, running in list(in_flight.items())
+                    if running in done
+                ]
+                for node_id in finished_ids:
+                    task_result = in_flight.pop(node_id)
+                    try:
+                        _nid, output, case = task_result.result()
+                    except asyncio.CancelledError:
+                        await _cancel_inflight(in_flight)
+                        raise
+                    except WorkflowError:
+                        await _cancel_inflight(in_flight)
+                        raise
+                    except BaseException as exc:
+                        await _cancel_inflight(in_flight)
+                        raise WorkflowError(str(exc), node_id=node_id) from exc
+                    completed[node_id] = output
+                    last_output = output
+                    assign_node_output(variables, nodes.get(node_id) or {}, output)
+                    activate_from(node_id, case)
+        finally:
+            if in_flight:
+                await _cancel_inflight(in_flight)
         return last_output
 
     async def _execute_node(
@@ -523,7 +614,7 @@ class WorkflowRunner:
         args = render_value(args_raw, variables)
         if not isinstance(args, dict):
             args = {}
-        result = await self.execute_tool(tool_name, args, self.tool_context)
+        result = await self.execute_tool(tool_name, args, self._tool_context_copy())
         logger.debug(
             "[自动化] 工具返回: id=%s node=%s tool=%s preview=%s",
             self._task_id(),
@@ -540,7 +631,9 @@ class WorkflowRunner:
         prompt = render_template(
             str(node.get("input") or node.get("prompt") or ""), variables
         )
-        result = await self.execute_tool(agent, {"prompt": prompt}, self.tool_context)
+        result = await self.execute_tool(
+            agent, {"prompt": prompt}, self._tool_context_copy()
+        )
         return _stringify(result)
 
     async def _run_main(self, node: dict[str, Any], variables: dict[str, Any]) -> str:
@@ -550,6 +643,7 @@ class WorkflowRunner:
             "automation_id": str(self.tool_context.get("scheduled_task_id") or ""),
             "automation_name": str(self.tool_context.get("scheduled_task_name") or ""),
         }
+        extra.update(collect_session_identity(self.tool_context))
         return await self.ask_main(prompt, extra)
 
     async def _run_blank_llm(
@@ -644,7 +738,7 @@ class WorkflowRunner:
                         args = {}
                 try:
                     tool_result = await self.execute_tool(
-                        internal_name, args, self.tool_context
+                        internal_name, args, self._tool_context_copy()
                     )
                     payload = _stringify(tool_result)
                 except Exception as exc:

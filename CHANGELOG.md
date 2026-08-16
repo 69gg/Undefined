@@ -10,6 +10,7 @@
 - 新增 `automation.*` 工具、`GET /api/v1/automations/catalog` 与 CRUD；WebUI 自动化页改为 Dify 式画布（节点盘、点选连线、类型化检查器），列表与画布上下两屏滚动切换，布局写入任务 `ui`；`POST /api/v1/automations/validate` 返回全部 issues。配置节 `[automations]`。
 - 空白 LLM 白名单改为搜索点选；画布连线改为先点出点再点目标，能连则连上。
 - 工具与三种 LLM 节点支持把输出存成指定名称的变量（`store_output` / `output_var`），下游用 `{{名称}}` 引用；可关闭存储。
+- 无相互依赖的分支改为依赖就绪即并行，不再整波 `gather` 等齐；多上游仍 AND join。消息触发时工具 / 主 AI 使用当前会话 context，`send_message` 可只填 `message`。
 
 ---
 

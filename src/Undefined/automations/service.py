@@ -13,7 +13,11 @@ from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from Undefined.automations.address import legacy_target_fields, resolve_task_address
+from Undefined.automations.address import (
+    legacy_target_fields,
+    resolve_live_event_address,
+    resolve_task_address,
+)
 from Undefined.automations.constants import (
     DEFAULT_BLANK_LLM_MAX_ITERATIONS,
     DEFAULT_EVENT_COOLDOWN_SECONDS,
@@ -31,6 +35,7 @@ from Undefined.automations.migrate import migrate_legacy_task
 from Undefined.automations.runner import (
     WorkflowError,
     WorkflowRunner,
+    collect_session_identity,
     find_start_node,
     start_kind,
 )
@@ -584,6 +589,7 @@ class AutomationService:
         extra_context: dict[str, Any] = {
             "scheduled_self_call": True,
         }
+        extra_context.update(collect_session_identity(tool_context))
         if task_id:
             extra_context["scheduled_task_id"] = task_id
         if task_name:
@@ -657,16 +663,28 @@ class AutomationService:
         if not isinstance(raw_task, dict):
             return
         task_info = migrate_legacy_task(raw_task)
-        delivery_address = resolve_task_address(
-            (event.address if event is not None and event.address else None)
-            or task_info.get("address"),
-            event.group_id
-            if event is not None and event.channel == "group"
-            else (event.user_id if event is not None else task_info.get("target_id")),
-            "group"
-            if (event is not None and event.channel == "group")
-            else str(task_info.get("target_type") or "group"),
-        )
+        if event is not None:
+            event_user_id = (
+                event.user_id if event.user_id is not None else event.sender_id
+            )
+            delivery_address = resolve_live_event_address(
+                address=event.address,
+                channel=event.channel,
+                group_id=event.group_id,
+                user_id=event_user_id,
+            )
+        else:
+            raw_target = task_info.get("target_id")
+            stored_target_id: int | None
+            try:
+                stored_target_id = int(raw_target) if raw_target is not None else None
+            except (TypeError, ValueError):
+                stored_target_id = None
+            delivery_address = resolve_task_address(
+                task_info.get("address"),
+                stored_target_id,
+                str(task_info.get("target_type") or "group"),
+            )
         logger.info(
             "[自动化] 开始执行: id=%s name=%s kind=%s time_fire=%s address=%s consume_ai=%s",
             task_id,
@@ -687,7 +705,9 @@ class AutomationService:
             if event is not None:
                 request_type = "group" if event.channel == "group" else "private"
                 group_id = event.group_id
-                user_id = event.user_id
+                user_id = (
+                    event.user_id if event.user_id is not None else event.sender_id
+                )
                 sender_id = event.sender_id
             elif context_snapshot:
                 request_type = context_snapshot.get("request_type") or (
@@ -925,12 +945,27 @@ class AutomationService:
                 ctx.set_resource("automations", self)
                 ctx.set_resource("scheduler", self)
 
+                session_identity: dict[str, Any] = {"request_type": request_type}
+                if group_id is not None:
+                    session_identity["group_id"] = group_id
+                if user_id is not None:
+                    session_identity["user_id"] = user_id
+                if sender_id is not None:
+                    session_identity["sender_id"] = sender_id
+                if channel:
+                    session_identity["channel"] = channel
+                if address:
+                    session_identity["address"] = address
+                for key, value in session_identity.items():
+                    ctx.set_resource(key, value)
+
                 tool_context = ctx.get_resources()
                 tool_context.setdefault("agent_histories", {})
                 tool_context["automations"] = self
                 tool_context["scheduler"] = self
                 tool_context["scheduled_task_id"] = task_id
                 tool_context["scheduled_task_name"] = task_info.get("task_name", "")
+                tool_context.update(session_identity)
 
                 resolved_event = event
                 if resolved_event is None:
@@ -963,6 +998,7 @@ class AutomationService:
                     extra_context["scheduled_task_name"] = task_info.get(
                         "task_name", ""
                     )
+                    extra_context.update(session_identity)
                     logger.info(
                         "[自动化] 调用主 AI: id=%s prompt_len=%s preview=%s",
                         task_id,
