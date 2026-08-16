@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from Undefined.automations.constants import DEFAULT_EVENT_COOLDOWN_SECONDS, EVENT_KINDS
+from Undefined.automations.logutil import preview_text
 from Undefined.automations.match import AutomationEvent, StartMatch, match_start_node
 from Undefined.automations.runner import find_start_node, start_kind
 
@@ -72,17 +73,32 @@ def iter_matching_tasks(
         if not isinstance(task, dict):
             continue
         if task.get("enabled") is False:
+            logger.debug("[自动化] 匹配跳过停用: id=%s", task_id)
             continue
         if task_id in busy:
+            logger.debug("[自动化] 匹配跳过运行中: id=%s", task_id)
             continue
         start = find_start_node(task)
         if start is None:
+            logger.debug("[自动化] 匹配跳过无 start: id=%s", task_id)
             continue
         result = match_start_node(start, event, now=current)
         if result is None:
+            logger.debug(
+                "[自动化] 未命中: id=%s start_kind=%s event=%s channel=%s",
+                task_id,
+                str(start.get("kind") or ""),
+                event.kind,
+                event.channel,
+            )
             continue
         if cooldown_active(task, now=current, default_seconds=default_cooldown):
-            logger.debug("[自动化] 冷却中，跳过 %s", task_id)
+            logger.info(
+                "[自动化] 冷却中，跳过: id=%s last_run=%s preview=%s",
+                task_id,
+                task.get("last_run_at") or "-",
+                preview_text(result.pass_text),
+            )
             continue
         matched.append((task_id, task, result))
     return matched

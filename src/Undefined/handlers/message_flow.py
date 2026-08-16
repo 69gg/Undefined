@@ -34,6 +34,7 @@ from Undefined.onebot import (
     get_message_sender_id,
 )
 from Undefined.rate_limit import RateLimiter
+from Undefined.automations.logutil import preview_text
 from Undefined.automations.match import AutomationEvent
 from Undefined.automations.service import AutomationService
 from Undefined.services.command import CommandDispatcher
@@ -1345,12 +1346,37 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
         scheduler = getattr(self.ai_coordinator, "scheduler", None)
         handle = getattr(scheduler, "handle_event", None)
         if not callable(handle):
+            logger.debug("[自动化] 运行时未注入，跳过事件 kind=%s", event.kind)
             return False
+        logger.debug(
+            "[自动化] 入站: kind=%s channel=%s address=%s sender=%s group=%s text_len=%s preview=%s",
+            event.kind,
+            event.channel,
+            event.address,
+            event.sender_id,
+            event.group_id,
+            len(event.text or ""),
+            preview_text(event.text),
+        )
         try:
-            return bool(await handle(event))
+            consumed = bool(await handle(event))
         except Exception:
-            logger.exception("[自动化] 处理事件失败 kind=%s", event.kind)
+            logger.exception(
+                "[自动化] 处理事件失败: kind=%s channel=%s address=%s",
+                event.kind,
+                event.channel,
+                event.address,
+            )
             return False
+        if consumed:
+            logger.info(
+                "[自动化] 已拦截本轮 AI: kind=%s channel=%s address=%s sender=%s",
+                event.kind,
+                event.channel,
+                event.address,
+                event.sender_id,
+            )
+        return consumed
 
     async def _handle_member_notice(self, event: dict[str, Any]) -> None:
         """入群 / 退群自动化触发。"""

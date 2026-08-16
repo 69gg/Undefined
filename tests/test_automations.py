@@ -29,6 +29,15 @@ from Undefined.handlers.poke import PokeMixin
 from Undefined.automations.service import AutomationService
 
 
+def test_preview_text_truncates() -> None:
+    from Undefined.automations.logutil import preview_text
+
+    assert preview_text("短") == "短"
+    assert preview_text("a" * 90).startswith("a" * 80)
+    assert "len=90" in preview_text("a" * 90)
+    assert preview_text("a\nb") == "a\\nb"
+
+
 def test_consume_mentions_strips_only_written_tokens() -> None:
     result = consume_mentions("[@1(甲)] [@2] 热点", ["1"])
     assert result.matched is True

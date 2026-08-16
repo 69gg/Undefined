@@ -4,6 +4,7 @@
 
 - 新增 `src/Undefined/automations/`：场景多选、@ 专项消费、tool/template/三种 LLM、自动 if-else、LLM 分支（选项即 tool）与 25 次硬顶循环；运行时只写 `data/automations.json`。若启动时没有新文件但存在旧 `scheduled_tasks.json`，则读取并转为新格式后写入新文件，不删除旧文件、不双写。
 - 运行时改为 `AutomationService`：时间 job 只携带 `task_id`，删除 crontab `add_task` / `update_task` 与 `ScheduledTask` 模型；`utils/scheduler.py` 仅作兼容 re-export。
+- 补齐自动化运行时详细日志：事件匹配、时间触发、节点执行、出站发送与超时。
 - 不再提供 `/api/v1/schedules` 与 `scheduler.*`；对外入口只有 `/api/v1/automations` 与 `automation.*`。
 - 群聊 / QQ 私聊 / 微信 / 拍一拍 / 入退群在 pipeline 之后、对应 AI loop 之前 `await` 工作流；成功或失败且 `consume_ai_loop` 时拦截该入口 AI。
 - 新增 `automation.*` 工具、`GET /api/v1/automations/catalog` 与 CRUD；WebUI 编排页支持场景、@ 条件、分支、循环与上次运行。配置节 `[automations]`。

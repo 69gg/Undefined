@@ -25,12 +25,14 @@ from Undefined.automations.constants import (
     SELF_CALL_TOOL_NAME,
 )
 from Undefined.automations.engine import iter_matching_tasks
+from Undefined.automations.logutil import preview_text
 from Undefined.automations.match import AutomationEvent
 from Undefined.automations.migrate import migrate_legacy_task
 from Undefined.automations.runner import (
     WorkflowError,
     WorkflowRunner,
     find_start_node,
+    start_kind,
 )
 from Undefined.automations.short import build_short_automation
 from Undefined.automations.storage import AutomationStorage
@@ -77,9 +79,14 @@ class AutomationService:
 
         if not self._apscheduler.running:
             self._apscheduler.start()
-            logger.info("[自动化] 运行时已启动")
 
-        self._recover_tasks()
+        time_jobs = self._recover_tasks()
+        logger.info(
+            "[自动化] 运行时已启动: tasks=%s time_jobs=%s enabled=%s",
+            len(self.tasks),
+            time_jobs,
+            self._automation_settings()["enabled"],
+        )
 
     @property
     def clock_running(self) -> bool:
@@ -88,6 +95,7 @@ class AutomationService:
     def shutdown(self) -> None:
         if self._apscheduler.running:
             self._apscheduler.shutdown(wait=False)
+            logger.info("[自动化] 运行时已停止")
 
     def next_run_iso(self, task_id: str) -> str | None:
         job = self._apscheduler.get_job(task_id)
@@ -96,10 +104,10 @@ class AutomationService:
             return None
         return str(next_run_time.isoformat())
 
-    def _recover_tasks(self) -> None:
+    def _recover_tasks(self) -> int:
         if not self.tasks:
             logger.info("[自动化] 没有需要恢复的任务")
-            return
+            return 0
 
         count = 0
         for task_id, info in list(self.tasks.items()):
@@ -121,12 +129,31 @@ class AutomationService:
                 self._sync_time_job(task_id, info)
                 if build_apscheduler_trigger(info) is not None:
                     count += 1
-                    logger.debug("[自动化] 已恢复时间任务: %s", task_id)
+                    logger.info(
+                        "[自动化] 已恢复时间任务: id=%s name=%s kind=%s address=%s next=%s",
+                        task_id,
+                        str(info.get("task_name") or ""),
+                        start_kind(info) or "-",
+                        str(info.get("address") or ""),
+                        self.next_run_iso(task_id) or "-",
+                    )
+                else:
+                    logger.info(
+                        "[自动化] 已恢复事件任务: id=%s name=%s kind=%s enabled=%s",
+                        task_id,
+                        str(info.get("task_name") or ""),
+                        start_kind(info) or "-",
+                        bool(info.get("enabled", True)),
+                    )
             except Exception as exc:
                 logger.error("[自动化] 恢复任务 %s 失败: %s", task_id, exc)
 
-        if count > 0:
-            logger.info("[自动化] 成功恢复 %s 个时间任务", count)
+        logger.info(
+            "[自动化] 恢复完成: tasks=%s time_jobs=%s",
+            len(self.tasks),
+            count,
+        )
+        return count
 
     async def remove_task(self, task_id: str) -> bool:
         existed = task_id in self.tasks
@@ -202,6 +229,12 @@ class AutomationService:
             args=[task_id],
             replace_existing=True,
         )
+        logger.debug(
+            "[自动化] 时间 job 已同步: id=%s kind=%s next=%s",
+            task_id,
+            start_kind(task_info) or "-",
+            self.next_run_iso(task_id) or "-",
+        )
 
     async def upsert_automation(self, task_id: str, task: dict[str, Any]) -> bool:
         """Create or replace a full automation graph."""
@@ -218,7 +251,8 @@ class AutomationService:
         if address is not None:
             payload["address"] = address.canonical
             payload["target_id"], payload["target_type"] = legacy_target_fields(address)
-        if task_id not in self.tasks:
+        created = task_id not in self.tasks
+        if created:
             payload["context_id"] = await self._save_context_snapshot()
         else:
             existing = self.tasks[task_id]
@@ -235,6 +269,18 @@ class AutomationService:
         self.tasks[task_id] = payload
         self._sync_time_job(task_id, payload)
         await self.storage.save_all(self.tasks)
+        nodes = payload.get("nodes")
+        logger.info(
+            "[自动化] 已%s: id=%s name=%s kind=%s address=%s enabled=%s next=%s nodes=%s",
+            "创建" if created else "更新",
+            task_id,
+            str(payload.get("task_name") or ""),
+            start_kind(payload) or "-",
+            str(payload.get("address") or ""),
+            bool(payload.get("enabled", True)),
+            self.next_run_iso(task_id) or "-",
+            len(nodes) if isinstance(nodes, list) else 0,
+        )
         return True
 
     async def set_enabled(self, task_id: str, enabled: bool) -> bool:
@@ -243,6 +289,12 @@ class AutomationService:
             return False
         task["enabled"] = bool(enabled)
         await self.storage.save_all(self.tasks)
+        logger.info(
+            "[自动化] 已%s: id=%s name=%s",
+            "启用" if enabled else "停用",
+            task_id,
+            str(task.get("task_name") or ""),
+        )
         return True
 
     async def handle_event(
@@ -254,7 +306,25 @@ class AutomationService:
         """Match and await event automations. Return True if AI loop should stop."""
         settings = self._automation_settings()
         if not settings["enabled"]:
+            logger.debug(
+                "[自动化] 总开关关闭，忽略事件: kind=%s channel=%s address=%s",
+                event.kind,
+                event.channel,
+                event.address,
+            )
             return False
+        logger.debug(
+            "[自动化] 收到事件: kind=%s channel=%s address=%s sender=%s group=%s text_len=%s preview=%s candidates=%s running=%s",
+            event.kind,
+            event.channel,
+            event.address,
+            event.sender_id,
+            event.group_id,
+            len(event.text or ""),
+            preview_text(event.text),
+            len(self.tasks),
+            len(self._running_ids),
+        )
         matches = iter_matching_tasks(
             self.tasks,
             event,
@@ -262,9 +332,32 @@ class AutomationService:
             default_cooldown=int(settings["cooldown_seconds"]),
         )
         if not matches:
+            logger.debug(
+                "[自动化] 无匹配: kind=%s channel=%s address=%s",
+                event.kind,
+                event.channel,
+                event.address,
+            )
             return False
+        logger.info(
+            "[自动化] 命中 %s 条: kind=%s channel=%s address=%s ids=%s",
+            len(matches),
+            event.kind,
+            event.channel,
+            event.address,
+            ",".join(task_id for task_id, _task, _match in matches),
+        )
         consumed = False
-        for task_id, _task, start_match in matches:
+        for task_id, task, start_match in matches:
+            logger.info(
+                "[自动化] 命中执行: id=%s name=%s kind=%s consume_ai=%s pass_len=%s preview=%s",
+                task_id,
+                str(task.get("task_name") or ""),
+                start_kind(task) or "-",
+                bool(task.get("consume_ai_loop", True)),
+                len(start_match.pass_text),
+                preview_text(start_match.pass_text),
+            )
             try:
                 await self._run_automation(
                     task_id,
@@ -273,14 +366,25 @@ class AutomationService:
                     live_resources=live_resources,
                     time_fire=False,
                 )
-                task = self.tasks.get(task_id)
-                if isinstance(task, dict) and bool(task.get("consume_ai_loop", True)):
+                stored = self.tasks.get(task_id)
+                if isinstance(stored, dict) and bool(
+                    stored.get("consume_ai_loop", True)
+                ):
                     consumed = True
             except Exception:
-                logger.exception("[自动化] 事件执行失败: %s", task_id)
-                task = self.tasks.get(task_id)
-                if isinstance(task, dict) and bool(task.get("consume_ai_loop", True)):
+                logger.exception("[自动化] 事件执行失败: id=%s", task_id)
+                stored = self.tasks.get(task_id)
+                if isinstance(stored, dict) and bool(
+                    stored.get("consume_ai_loop", True)
+                ):
                     consumed = True
+        logger.info(
+            "[自动化] 事件处理完成: kind=%s channel=%s address=%s consume_ai=%s",
+            event.kind,
+            event.channel,
+            event.address,
+            consumed,
+        )
         return consumed
 
     async def _mark_run(
@@ -301,12 +405,32 @@ class AutomationService:
         if status == "ok":
             task["current_executions"] = int(task.get("current_executions") or 0) + 1
             max_executions = task.get("max_executions")
+            logger.info(
+                "[自动化] 运行结果: id=%s status=%s executions=%s/%s node=%s",
+                task_id,
+                status,
+                task["current_executions"],
+                max_executions if max_executions is not None else "-",
+                node_id or "-",
+            )
             await self.storage.save_all(self.tasks)
             if max_executions is not None and int(task["current_executions"]) >= int(
                 max_executions
             ):
+                logger.info(
+                    "[自动化] 达到执行上限，将删除: id=%s executions=%s",
+                    task_id,
+                    task["current_executions"],
+                )
                 await self.remove_task(task_id)
-                return
+            return
+        logger.warning(
+            "[自动化] 运行结果: id=%s status=%s node=%s error=%s",
+            task_id,
+            status,
+            node_id or "-",
+            preview_text(error, limit=200),
+        )
         await self.storage.save_all(self.tasks)
 
     async def _run_automation(
@@ -320,13 +444,23 @@ class AutomationService:
     ) -> None:
         task_info = self.tasks.get(task_id)
         if not isinstance(task_info, dict):
+            logger.warning(
+                "[自动化] 执行时任务已不存在: id=%s time_fire=%s", task_id, time_fire
+            )
             return
         settings = self._automation_settings()
         if not settings["enabled"] or task_info.get("enabled") is False:
+            logger.debug(
+                "[自动化] 跳过停用任务: id=%s enabled=%s global=%s time_fire=%s",
+                task_id,
+                task_info.get("enabled", True),
+                settings["enabled"],
+                time_fire,
+            )
             return
         async with self._run_lock:
             if task_id in self._running_ids:
-                logger.debug("[自动化] 已在运行，跳过 %s", task_id)
+                logger.info("[自动化] 已在运行，跳过 %s", task_id)
                 return
             self._running_ids.add(task_id)
         settings = self._automation_settings()
@@ -359,6 +493,12 @@ class AutomationService:
             "resource_keys": list(ctx.get_resources().keys()),
         }
         await io.write_json(CONTEXT_DIR / f"{context_id}.json", snapshot, use_lock=True)
+        logger.debug(
+            "[自动化] 已保存上下文快照: context_id=%s request_type=%s address=%s",
+            context_id,
+            snapshot.get("request_type"),
+            snapshot.get("address"),
+        )
         return context_id
 
     async def _load_context_snapshot(
@@ -383,6 +523,19 @@ class AutomationService:
         if tool_name == SELF_CALL_TOOL_NAME:
             return await self._execute_self_call(tool_args, tool_context)
 
+        task_id = tool_context.get("scheduled_task_id") or ""
+        logger.info(
+            "[自动化] 调用工具: id=%s tool=%s arg_keys=%s",
+            task_id,
+            tool_name,
+            ",".join(sorted(str(key) for key in tool_args.keys())) or "-",
+        )
+        logger.debug(
+            "[自动化] 工具参数: id=%s tool=%s args=%s",
+            task_id,
+            tool_name,
+            preview_text(tool_args, limit=300),
+        )
         ai_client: Any = self.ai
         tool_manager = getattr(ai_client, "tool_manager", None)
         if tool_manager is not None and hasattr(tool_manager, "execute_tool"):
@@ -437,10 +590,11 @@ class AutomationService:
             extra_context["scheduled_task_name"] = task_name
 
         logger.info(
-            "[自动化] 触发自我督办: task_id=%s task_name=%s prompt_len=%s",
+            "[自动化] 触发自我督办: task_id=%s task_name=%s prompt_len=%s preview=%s",
             task_id,
             task_name or "",
             len(prompt),
+            preview_text(prompt),
         )
 
         result = await self.ai.ask(
@@ -459,11 +613,28 @@ class AutomationService:
 
         result_text = str(result).strip() if isinstance(result, str) else ""
         if result_text and callable(send_message_callback):
+            logger.info(
+                "[自动化] 自我督办出站: task_id=%s len=%s preview=%s",
+                task_id,
+                len(result_text),
+                preview_text(result_text),
+            )
             await send_message_callback(result_text)
+        elif not result_text:
+            logger.info("[自动化] 自我督办无文本输出: task_id=%s", task_id)
 
         return "已执行向未来自己的指令"
 
     async def _on_time_fire(self, task_id: str) -> None:
+        task = self.tasks.get(task_id)
+        name = str(task.get("task_name") or "") if isinstance(task, dict) else ""
+        logger.info(
+            "[自动化] 时间触发: id=%s name=%s kind=%s next=%s",
+            task_id,
+            name,
+            start_kind(task) if isinstance(task, dict) else "-",
+            self.next_run_iso(task_id) or "-",
+        )
         await self._run_automation(
             task_id,
             event=None,
@@ -496,7 +667,19 @@ class AutomationService:
             if (event is not None and event.channel == "group")
             else str(task_info.get("target_type") or "group"),
         )
-        logger.info("[自动化] 开始执行: ID=%s time_fire=%s", task_id, time_fire)
+        logger.info(
+            "[自动化] 开始执行: id=%s name=%s kind=%s time_fire=%s address=%s consume_ai=%s",
+            task_id,
+            str(task_info.get("task_name") or ""),
+            start_kind(task_info) or "-",
+            time_fire,
+            str(
+                (delivery_address.canonical if delivery_address is not None else "")
+                or task_info.get("address")
+                or ""
+            ),
+            bool(task_info.get("consume_ai_loop", True)),
+        )
         try:
             context_snapshot = await self._load_context_snapshot(
                 task_info.get("context_id")
@@ -538,6 +721,16 @@ class AutomationService:
                 if delivery_address is not None
                 else task_info.get("target_id")
             )
+            logger.debug(
+                "[自动化] 投递上下文: id=%s request_type=%s group_id=%s user_id=%s sender_id=%s address=%s snapshot=%s",
+                task_id,
+                request_type,
+                group_id,
+                user_id,
+                sender_id,
+                delivery_address.canonical if delivery_address is not None else "",
+                bool(context_snapshot),
+            )
 
             async with RequestContext(
                 request_type=request_type,
@@ -549,6 +742,18 @@ class AutomationService:
                 async def send_msg_cb(
                     message: str, reply_to: int | None = None
                 ) -> None:
+                    target = (
+                        delivery_address.canonical
+                        if delivery_address is not None
+                        else f"{request_type}:{resolved_target_id}"
+                    )
+                    logger.info(
+                        "[自动化] 发送消息: id=%s target=%s len=%s preview=%s",
+                        task_id,
+                        target,
+                        len(message),
+                        preview_text(message),
+                    )
                     if (
                         delivery_address is not None
                         and delivery_address.channel == "wechat"
@@ -565,6 +770,12 @@ class AutomationService:
                     elif request_type == "private" and resolved_target_id:
                         await self.sender.send_private_message(
                             resolved_target_id, message, reply_to=reply_to
+                        )
+                    else:
+                        logger.warning(
+                            "[自动化] 消息未发送: id=%s 无投递目标 type=%s",
+                            task_id,
+                            request_type,
                         )
 
                 async def send_private_cb(
@@ -622,6 +833,14 @@ class AutomationService:
                         await self.sender.send_private_message(
                             tid, msg, auto_history=False
                         )
+                    logger.info(
+                        "[自动化] 发送媒体: id=%s type=%s target=%s kind=%s path=%s",
+                        task_id,
+                        mtype,
+                        tid,
+                        media_kind,
+                        path,
+                    )
 
                 async def get_recent_cb(
                     chat_id: str, msg_type: str, start: int, end: int
@@ -744,6 +963,12 @@ class AutomationService:
                     extra_context["scheduled_task_name"] = task_info.get(
                         "task_name", ""
                     )
+                    logger.info(
+                        "[自动化] 调用主 AI: id=%s prompt_len=%s preview=%s",
+                        task_id,
+                        len(prompt),
+                        preview_text(prompt),
+                    )
                     result = await self.ai.ask(
                         prompt,
                         send_message_callback=send_msg_cb,
@@ -798,7 +1023,12 @@ class AutomationService:
                         mentions_all=tuple(getattr(consume, "mentions_all", ()) or ()),
                     )
                 except WorkflowError as exc:
-                    logger.exception("[自动化] 节点失败: %s %s", task_id, exc)
+                    logger.exception(
+                        "[自动化] 节点失败: id=%s node=%s error=%s",
+                        task_id,
+                        exc.node_id or "-",
+                        exc,
+                    )
                     await self._mark_run(
                         task_id,
                         status="failed",
@@ -808,11 +1038,13 @@ class AutomationService:
                     return
                 duration = time.perf_counter() - start_time
                 logger.info(
-                    "[自动化] 执行成功: ID=%s, 耗时=%.2fs",
+                    "[自动化] 执行成功: id=%s name=%s elapsed=%.2fs pass_len=%s",
                     task_id,
+                    str(task_info.get("task_name") or ""),
                     duration,
+                    len(pass_text),
                 )
                 await self._mark_run(task_id, status="ok")
         except Exception as e:
-            logger.exception("[自动化] 执行出错: %s", e)
+            logger.exception("[自动化] 执行出错: id=%s error=%s", task_id, e)
             await self._mark_run(task_id, status="failed", error=str(e))

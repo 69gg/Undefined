@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import re
+import time
 from datetime import datetime
 from typing import Any, Awaitable, Callable
 
@@ -19,6 +20,7 @@ from Undefined.automations.constants import (
     LOOP_MAX_ITERATIONS,
     START_NODE_ID,
 )
+from Undefined.automations.logutil import preview_text
 from Undefined.automations.match import AutomationEvent, match_condition_on_text
 from Undefined.automations.template import render_template, render_value
 
@@ -185,6 +187,9 @@ class WorkflowRunner:
         )
         self._continue_on_tool_error = False
 
+    def _task_id(self) -> str:
+        return str(self.tool_context.get("scheduled_task_id") or "")
+
     async def run(
         self,
         task: dict[str, Any],
@@ -196,6 +201,19 @@ class WorkflowRunner:
         mentions_all: tuple[str, ...],
     ) -> str:
         self._continue_on_tool_error = bool(task.get("compat_continue_on_tool_error"))
+        nodes = task.get("nodes")
+        edges = task.get("edges")
+        logger.info(
+            "[自动化] DAG 开始: id=%s name=%s nodes=%s edges=%s pass_len=%s mentions=%s channel=%s address=%s",
+            self._task_id(),
+            str(task.get("task_name") or ""),
+            len(nodes) if isinstance(nodes, list) else 0,
+            len(edges) if isinstance(edges, list) else 0,
+            len(pass_text),
+            ",".join(consume_mentions) or "-",
+            event.channel,
+            event.address,
+        )
         variables: dict[str, Any] = {
             "trigger": {
                 "text": pass_text,
@@ -220,6 +238,13 @@ class WorkflowRunner:
         async def emit_if_needed(node: dict[str, Any], output: str) -> None:
             nonlocal emitted
             if bool(node.get("emit")) and output.strip():
+                logger.info(
+                    "[自动化] 节点出站: id=%s node=%s len=%s preview=%s",
+                    self._task_id(),
+                    node.get("id"),
+                    len(output),
+                    preview_text(output),
+                )
                 await self.send_message(output)
                 emitted = True
 
@@ -231,10 +256,35 @@ class WorkflowRunner:
                 include_bodies=False,
             )
             if not emitted and bool(task.get("auto_send_final", True)) and last.strip():
+                logger.info(
+                    "[自动化] 自动发送终态: id=%s len=%s preview=%s",
+                    self._task_id(),
+                    len(last),
+                    preview_text(last),
+                )
                 await self.send_message(last)
             return last
 
-        return await asyncio.wait_for(wrapped(), timeout=self.workflow_timeout_seconds)
+        try:
+            result = await asyncio.wait_for(
+                wrapped(), timeout=self.workflow_timeout_seconds
+            )
+        except TimeoutError as exc:
+            logger.error(
+                "[自动化] 工作流超时: id=%s timeout=%.0fs",
+                self._task_id(),
+                self.workflow_timeout_seconds,
+            )
+            raise WorkflowError(
+                f"workflow timeout after {self.workflow_timeout_seconds}s"
+            ) from exc
+        logger.info(
+            "[自动化] DAG 结束: id=%s out_len=%s preview=%s",
+            self._task_id(),
+            len(result),
+            preview_text(result),
+        )
+        return result
 
     async def _run_graph(
         self,
@@ -325,15 +375,27 @@ class WorkflowRunner:
 
             async def run_one(node_id: str) -> tuple[str, str, str | None]:
                 node = nodes[node_id]
-                output, case = await asyncio.wait_for(
-                    self._execute_node(
-                        node,
-                        task=task,
-                        variables=variables,
-                        emit_if_needed=emit_if_needed,
-                    ),
-                    timeout=self.node_timeout_seconds,
-                )
+                try:
+                    output, case = await asyncio.wait_for(
+                        self._execute_node(
+                            node,
+                            task=task,
+                            variables=variables,
+                            emit_if_needed=emit_if_needed,
+                        ),
+                        timeout=self.node_timeout_seconds,
+                    )
+                except TimeoutError as exc:
+                    logger.error(
+                        "[自动化] 节点超时: id=%s node=%s timeout=%.0fs",
+                        self._task_id(),
+                        node_id,
+                        self.node_timeout_seconds,
+                    )
+                    raise WorkflowError(
+                        f"node timeout after {self.node_timeout_seconds}s",
+                        node_id=node_id,
+                    ) from exc
                 return node_id, output, case
 
             results = await asyncio.gather(
@@ -365,12 +427,27 @@ class WorkflowRunner:
     ) -> tuple[str, str | None]:
         node_id = str(node.get("id") or "")
         node_type = str(node.get("type") or "")
+        started = time.perf_counter()
+        logger.info(
+            "[自动化] 节点开始: id=%s node=%s type=%s",
+            self._task_id(),
+            node_id,
+            node_type,
+        )
+        output = ""
+        case: str | None = None
         try:
             if node_type == "tool":
                 try:
                     output = await self._run_tool(node, variables)
                 except Exception as exc:
                     if self._continue_on_tool_error:
+                        logger.warning(
+                            "[自动化] 工具失败但继续: id=%s node=%s error=%s",
+                            self._task_id(),
+                            node_id,
+                            exc,
+                        )
                         output = f"执行失败: {exc}"
                     else:
                         raise
@@ -384,11 +461,23 @@ class WorkflowRunner:
                 output = await self._run_main(node, variables)
             elif node_type == "branch.if":
                 case = self._eval_branch_if(node, variables)
+                logger.info(
+                    "[自动化] 分支: id=%s node=%s type=%s case=%s",
+                    self._task_id(),
+                    node_id,
+                    node_type,
+                    case,
+                )
                 await emit_if_needed(node, "")
-                return case, case
             elif node_type == "branch.llm":
                 case = await self._eval_branch_llm(node, variables)
-                return case, case
+                logger.info(
+                    "[自动化] 分支: id=%s node=%s type=%s case=%s",
+                    self._task_id(),
+                    node_id,
+                    node_type,
+                    case,
+                )
             elif node_type == "loop.times":
                 output = await self._run_loop_times(
                     node, task=task, variables=variables, emit_if_needed=emit_if_needed
@@ -399,13 +488,26 @@ class WorkflowRunner:
                 )
             else:
                 raise WorkflowError(f"unknown node type: {node_type}", node_id=node_id)
+            if case is None:
+                await emit_if_needed(node, output)
+            else:
+                output = case
         except WorkflowError:
             raise
         except Exception as exc:
             raise WorkflowError(str(exc), node_id=node_id) from exc
 
-        await emit_if_needed(node, output)
-        return output, None
+        logger.info(
+            "[自动化] 节点完成: id=%s node=%s type=%s elapsed=%.2fs out_len=%s case=%s preview=%s",
+            self._task_id(),
+            node_id,
+            node_type,
+            time.perf_counter() - started,
+            len(output),
+            case or "-",
+            preview_text(output),
+        )
+        return output, case
 
     async def _run_tool(self, node: dict[str, Any], variables: dict[str, Any]) -> str:
         tool_name = render_template(str(node.get("tool_name") or ""), variables).strip()
@@ -420,6 +522,13 @@ class WorkflowRunner:
         if not isinstance(args, dict):
             args = {}
         result = await self.execute_tool(tool_name, args, self.tool_context)
+        logger.debug(
+            "[自动化] 工具返回: id=%s node=%s tool=%s preview=%s",
+            self._task_id(),
+            str(node.get("id") or ""),
+            tool_name,
+            preview_text(result, limit=200),
+        )
         return _stringify(result)
 
     async def _run_agent(self, node: dict[str, Any], variables: dict[str, Any]) -> str:
@@ -666,6 +775,13 @@ class WorkflowRunner:
         body = {
             str(item).strip() for item in (node.get("body") or []) if str(item).strip()
         }
+        logger.info(
+            "[自动化] 循环 times: id=%s node=%s count=%s body=%s",
+            self._task_id(),
+            str(node.get("id") or ""),
+            count,
+            ",".join(sorted(body)) or "-",
+        )
         until = node.get("until") if isinstance(node.get("until"), dict) else None
         last = ""
         for index in range(count):
@@ -686,7 +802,20 @@ class WorkflowRunner:
                     match_condition_on_text(text, until, sender_id=sender_id)
                     is not None
                 ):
+                    logger.info(
+                        "[自动化] 循环 until 命中，提前结束: id=%s node=%s index=%s",
+                        self._task_id(),
+                        str(node.get("id") or ""),
+                        index,
+                    )
                     break
+            logger.debug(
+                "[自动化] 循环迭代: id=%s node=%s index=%s/%s",
+                self._task_id(),
+                str(node.get("id") or ""),
+                index,
+                count,
+            )
             variables["index"] = index
             last = await self._run_graph(
                 task,
@@ -715,6 +844,13 @@ class WorkflowRunner:
         body = {
             str(item).strip() for item in (node.get("body") or []) if str(item).strip()
         }
+        logger.info(
+            "[自动化] 循环 each: id=%s node=%s items=%s body=%s",
+            self._task_id(),
+            str(node.get("id") or ""),
+            len(items),
+            ",".join(sorted(body)) or "-",
+        )
         last = ""
         for index, item in enumerate(items):
             variables["index"] = index

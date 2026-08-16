@@ -50,6 +50,10 @@ class AutomationStorage:
                 len(tasks),
                 self.path,
             )
+        elif self.path.exists():
+            logger.info("[自动化] 已从 %s 加载 %s 条", self.path, len(tasks))
+        elif not tasks:
+            logger.info("[自动化] 存储为空: path=%s", self.path)
         return tasks
 
     async def save_all(self, tasks: dict[str, Any]) -> None:
@@ -62,7 +66,7 @@ class AutomationStorage:
             else:
                 logger.warning("[自动化] 跳过未知任务格式: %s", task_id)
         await io.write_json(self.path, data_to_save, use_lock=True)
-        logger.debug("[自动化] 已保存 %s 条", len(data_to_save))
+        logger.info("[自动化] 已保存 %s 条到 %s", len(data_to_save), self.path)
 
     def _write_json_sync(self, path: Path, data: dict[str, Any]) -> None:
         from Undefined.utils.io import write_json_sync
