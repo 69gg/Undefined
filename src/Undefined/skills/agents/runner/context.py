@@ -7,6 +7,7 @@ from typing import Any
 
 import aiofiles
 
+from Undefined.automations.extract import merge_extract_tools
 from Undefined.config.models import AgentModelConfig
 from Undefined.config.search import KNOWN_SEARCH_TOOLS, order_by_priority
 from Undefined.skills.agents.agent_tool_registry import AgentToolRegistry
@@ -105,6 +106,7 @@ async def prepare_agent_run(
     tools = tool_registry.get_tools_schema()
     runtime_config = context.get("runtime_config")
     tools = _filter_tools_for_runtime_config(agent_name, tools, runtime_config)
+    tools = merge_extract_tools(tools, context.get("automation_extract_tools"))
 
     agent_skills_dir = agent_dir / "anthropic_skills"
     agent_skill_registry: AnthropicSkillRegistry | None = None

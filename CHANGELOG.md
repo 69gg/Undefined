@@ -17,6 +17,7 @@
 - `[automations]` 默认放宽：`max_concurrent = 16`、`node_timeout_seconds = 600`、`workflow_timeout_seconds = 1200`、`blank_llm_max_iterations = 100`。
 - `consume_ai_loop=false` 的事件工作流改为后台执行，不再堵住主 AI。
 - WebUI 新建自动化默认关闭「拦截主 AI」和「自动发送终值」。
+- `llm.blank` / `llm.agent` / `llm.main` 支持 `extract_vars`：把变量名与说明注入为 `extract_<名称>` 工具，模型调用后写入 `{{名称}}`。
 
 ---
 

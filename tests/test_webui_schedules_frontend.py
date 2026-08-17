@@ -53,3 +53,35 @@ def test_blank_workflow_defaults_do_not_consume_or_auto_send() -> None:
     )
     assert '"schedules.consume": "拦截主 AI"' in i18n
     assert "关闭则后台执行" not in i18n
+
+
+def test_llm_inspector_supports_extract_vars() -> None:
+    graph = _read_source(GRAPH_JS)
+    inspector = _read_source(INSPECTOR_JS)
+    i18n = _read_source(I18N_JS)
+    blank_node = graph.split('if (type === "llm.blank")', 1)[1].split(
+        'if (type === "llm.agent")', 1
+    )[0]
+    agent_node = graph.split('if (type === "llm.agent")', 1)[1].split(
+        'if (type === "llm.main")', 1
+    )[0]
+    main_node = graph.split('if (type === "llm.main")', 1)[1].split(
+        'if (type === "branch.if")', 1
+    )[0]
+    assert "extract_vars: []" in blank_node
+    assert "extract_vars: []" in agent_node
+    assert "extract_vars: []" in main_node
+    assert "function extractVarLabel(node)" in graph
+    assert "function extractVarsMarkup(node)" in inspector
+    assert "function llmOutputMarkup(node)" in inspector
+    assert "patch.extract_vars" in inspector
+    assert "data-extract-add" in inspector
+    assert "data-extract-remove" in inspector
+    assert 'node.type === "llm.blank"' in inspector
+    assert 'node.type === "llm.agent"' in inspector
+    assert 'node.type === "llm.main"' in inspector
+    assert 'node.type === "branch.llm"' in inspector
+    assert '"schedules.extract_vars": "变量提取"' in i18n
+    assert '"schedules.add_extract_var": "添加变量"' in i18n
+    assert "extract_<名称>" in i18n
+    assert '"schedules.extract_vars": "Extract variables"' in i18n

@@ -9,6 +9,7 @@ from Undefined.automations.constants import (
     CHANNELS,
     DEFAULT_MAX_NODES,
     EVENT_KINDS,
+    EXTRACT_VAR_NODE_TYPES,
     LOOP_MAX_ITERATIONS,
     NODE_TYPES,
     RESERVED_VARIABLE_NAMES,
@@ -16,6 +17,7 @@ from Undefined.automations.constants import (
     START_NODE_ID,
     STORE_OUTPUT_NODE_TYPES,
 )
+from Undefined.automations.extract import parse_extract_vars
 from Undefined.automations.template import OUTPUT_VAR_PATTERN, output_var_name
 
 
@@ -230,6 +232,54 @@ def collect_automation_issues(
                             f"output_var '{custom}' is reserved",
                         )
                     )
+        if node_type in EXTRACT_VAR_NODE_TYPES:
+            raw_extract = node.get("extract_vars")
+            if raw_extract is not None and not isinstance(raw_extract, list):
+                issues.append(
+                    _issue(f"{prefix}.extract_vars", "extract_vars must be an array")
+                )
+            else:
+                seen_extract: set[str] = set()
+                for extract_index, entry in enumerate(
+                    raw_extract if isinstance(raw_extract, list) else []
+                ):
+                    extract_path = f"{prefix}.extract_vars[{extract_index}]"
+                    if not isinstance(entry, dict):
+                        issues.append(
+                            _issue(extract_path, "extract_vars entries must be objects")
+                        )
+                        continue
+                    extract_name = str(entry.get("name") or "").strip()
+                    if not extract_name:
+                        issues.append(
+                            _issue(extract_path, "extract variable name is required")
+                        )
+                        continue
+                    if not OUTPUT_VAR_PATTERN.fullmatch(extract_name):
+                        issues.append(
+                            _issue(
+                                extract_path,
+                                "extract variable name must start with a letter or underscore",
+                            )
+                        )
+                        continue
+                    if extract_name in RESERVED_VARIABLE_NAMES:
+                        issues.append(
+                            _issue(
+                                extract_path,
+                                f"extract variable '{extract_name}' is reserved",
+                            )
+                        )
+                        continue
+                    if extract_name in seen_extract:
+                        issues.append(
+                            _issue(
+                                f"{prefix}.extract_vars",
+                                f"duplicate extract variable: {extract_name}",
+                            )
+                        )
+                        continue
+                    seen_extract.add(extract_name)
 
     claimed: dict[str, str] = {node_id: node_id for node_id in nodes}
     for node_id, node in nodes.items():
@@ -250,6 +300,21 @@ def collect_automation_issues(
             )
             continue
         claimed[custom] = node_id
+
+    for node_id, node in nodes.items():
+        if str(node.get("type") or "") not in EXTRACT_VAR_NODE_TYPES:
+            continue
+        for spec in parse_extract_vars(node):
+            owner = claimed.get(spec.name)
+            if owner:
+                issues.append(
+                    _issue(
+                        f"nodes.{node_id}.extract_vars",
+                        f"variable '{spec.name}' already used by node {owner}",
+                    )
+                )
+                continue
+            claimed[spec.name] = node_id
 
     edges_raw = task.get("edges")
     if not isinstance(edges_raw, list):

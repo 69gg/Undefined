@@ -766,6 +766,273 @@ def test_assign_node_output_named_and_skipped() -> None:
     assert render_template("got {{hotspots}}", skipped) == "got {{hotspots}}"
 
 
+def test_parse_and_apply_extract_vars() -> None:
+    from Undefined.automations.extract import (
+        apply_extract_tool_call,
+        assign_extracted_vars,
+        build_extract_tools,
+        extract_tool_name,
+        parse_extract_vars,
+    )
+
+    node = {
+        "type": "llm.main",
+        "extract_vars": [
+            {"name": "roast", "description": "吐槽"},
+            {"name": "roast", "description": "重复应忽略"},
+            {"name": "trigger", "description": "保留名"},
+            {"name": "1bad", "description": "非法"},
+            "skip-me",
+        ],
+    }
+    specs = parse_extract_vars(node)
+    assert [item.name for item in specs] == ["roast"]
+    tools = build_extract_tools(specs)
+    assert tools[0]["function"]["name"] == extract_tool_name("roast")
+    sink: dict[str, str] = {}
+    assert (
+        apply_extract_tool_call(
+            "extract_roast",
+            {"value": "有槽点"},
+            sink=sink,
+            names={"roast"},
+        )
+        == "已写入变量 roast"
+    )
+    assert apply_extract_tool_call("web", {}, sink=sink, names={"roast"}) is None
+    variables: dict[str, Any] = {"vars": {}}
+    assign_extracted_vars(variables, sink)
+    assert variables["roast"] == "有槽点"
+    assert variables["vars"]["roast"] == "有槽点"
+    assert parse_extract_vars({"type": "branch.llm", "extract_vars": specs}) == []
+
+
+@pytest.mark.asyncio
+async def test_blank_llm_extract_vars_are_available_downstream() -> None:
+    captured: dict[str, Any] = {}
+
+    async def submit_llm(
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        captured["tools"] = kwargs.get("tools")
+        messages = kwargs.get("messages") or []
+        if any(
+            isinstance(item, dict) and item.get("role") == "tool" for item in messages
+        ):
+            return {"choices": [{"message": {"content": "done"}}]}
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": "c1",
+                                "function": {
+                                    "name": "extract_roast",
+                                    "arguments": '{"value": "槽点来了"}',
+                                },
+                            }
+                        ],
+                    }
+                }
+            ]
+        }
+
+    sent: list[str] = []
+
+    async def send_message(text: str) -> None:
+        sent.append(text)
+
+    runner = _runner(submit_llm=submit_llm, send_message=send_message)
+    task = {
+        "auto_send_final": False,
+        "nodes": [
+            {
+                "id": "start",
+                "type": "start",
+                "kind": "message",
+                "channels": ["group"],
+            },
+            {
+                "id": "llm",
+                "type": "llm.blank",
+                "user_prompt": "{{trigger.text}}",
+                "extract_vars": [{"name": "roast", "description": "吐槽"}],
+                "emit": False,
+            },
+            {
+                "id": "out",
+                "type": "template",
+                "template": "{{roast}}",
+                "emit": True,
+            },
+        ],
+        "edges": [
+            {"from": "start", "to": "llm"},
+            {"from": "llm", "to": "out"},
+        ],
+    }
+    await runner.run(
+        task,
+        event=AutomationEvent(kind="message", channel="group", text="ssd"),
+        pass_text="ssd",
+        consume_mentions=(),
+        consume_stripped="ssd",
+        mentions_all=(),
+    )
+    assert sent == ["槽点来了"]
+    tool_names = [
+        str((schema.get("function") or {}).get("name") or "")
+        for schema in captured.get("tools") or []
+        if isinstance(schema, dict)
+    ]
+    assert "extract_roast" in tool_names
+
+
+@pytest.mark.asyncio
+async def test_main_llm_extract_vars_are_injected_into_ask() -> None:
+    from Undefined.automations.extract import apply_extract_tool_call
+
+    extra_seen: dict[str, Any] = {}
+
+    async def ask_main(prompt: str, extra: dict[str, Any]) -> str:
+        extra_seen.update(extra)
+        sink = extra.get("automation_extract_sink")
+        names = extra.get("automation_extract_names")
+        assert isinstance(sink, dict)
+        assert isinstance(names, set)
+        apply_extract_tool_call(
+            "extract_flag",
+            {"value": "yes"},
+            sink=sink,
+            names=names,
+        )
+        assert "extract_flag" in prompt
+        return "ok"
+
+    sent: list[str] = []
+
+    async def send_message(text: str) -> None:
+        sent.append(text)
+
+    runner = _runner(ask_main=ask_main, send_message=send_message)
+    task = {
+        "auto_send_final": False,
+        "nodes": [
+            {
+                "id": "start",
+                "type": "start",
+                "kind": "message",
+                "channels": ["group"],
+            },
+            {
+                "id": "main",
+                "type": "llm.main",
+                "prompt": "看这句话",
+                "extract_vars": [{"name": "flag", "description": "有没有槽点"}],
+                "emit": False,
+            },
+            {
+                "id": "out",
+                "type": "template",
+                "template": "{{flag}}",
+                "emit": True,
+            },
+        ],
+        "edges": [
+            {"from": "start", "to": "main"},
+            {"from": "main", "to": "out"},
+        ],
+    }
+    await runner.run(
+        task,
+        event=AutomationEvent(kind="message", channel="group", text="hi"),
+        pass_text="hi",
+        consume_mentions=(),
+        consume_stripped="hi",
+        mentions_all=(),
+    )
+    assert sent == ["yes"]
+    tools = extra_seen.get("automation_extract_tools")
+    assert isinstance(tools, list)
+    assert tools[0]["function"]["name"] == "extract_flag"
+
+
+@pytest.mark.asyncio
+async def test_agent_llm_extract_vars_are_injected_into_tool_context() -> None:
+    from Undefined.automations.extract import apply_extract_tool_call
+
+    captured: dict[str, Any] = {}
+
+    async def execute_tool(
+        name: str, args: dict[str, Any], context: dict[str, Any]
+    ) -> str:
+        captured["name"] = name
+        captured["args"] = args
+        captured["context"] = context
+        sink = context.get("automation_extract_sink")
+        names = context.get("automation_extract_names")
+        assert isinstance(sink, dict)
+        apply_extract_tool_call(
+            "extract_tag",
+            {"value": "ok"},
+            sink=sink,
+            names={str(item) for item in names or []},
+        )
+        return "agent-out"
+
+    sent: list[str] = []
+
+    async def send_message(text: str) -> None:
+        sent.append(text)
+
+    runner = _runner(execute_tool=execute_tool, send_message=send_message)
+    task = {
+        "auto_send_final": False,
+        "nodes": [
+            {
+                "id": "start",
+                "type": "start",
+                "kind": "message",
+                "channels": ["group"],
+            },
+            {
+                "id": "agent",
+                "type": "llm.agent",
+                "agent": "info_agent",
+                "input": "看这句话",
+                "extract_vars": [{"name": "tag", "description": "标签"}],
+                "emit": False,
+            },
+            {
+                "id": "out",
+                "type": "template",
+                "template": "{{tag}}",
+                "emit": True,
+            },
+        ],
+        "edges": [
+            {"from": "start", "to": "agent"},
+            {"from": "agent", "to": "out"},
+        ],
+    }
+    await runner.run(
+        task,
+        event=AutomationEvent(kind="message", channel="group", text="hi"),
+        pass_text="hi",
+        consume_mentions=(),
+        consume_stripped="hi",
+        mentions_all=(),
+    )
+    assert sent == ["ok"]
+    assert captured["name"] == "info_agent"
+    assert "extract_tag" in str(captured["args"].get("prompt") or "")
+    tools = captured["context"].get("automation_extract_tools")
+    assert isinstance(tools, list)
+    assert tools[0]["function"]["name"] == "extract_tag"
+
+
 @pytest.mark.asyncio
 async def test_runner_stores_tool_and_llm_output_as_named_variables() -> None:
     sent: list[str] = []
@@ -962,6 +1229,79 @@ def test_validate_output_var_rules() -> None:
         }
     )
     assert any("already used" in item["message"] for item in duplicate)
+
+    extract_reserved = collect_automation_issues(
+        {
+            "nodes": [
+                {
+                    "id": "start",
+                    "type": "start",
+                    "kind": "cron",
+                    "cron": "* * * * *",
+                },
+                {
+                    "id": "llm",
+                    "type": "llm.main",
+                    "prompt": "x",
+                    "extract_vars": [{"name": "trigger", "description": "x"}],
+                },
+            ],
+            "edges": [{"from": "start", "to": "llm"}],
+        }
+    )
+    assert any("reserved" in item["message"] for item in extract_reserved)
+
+    extract_clash = collect_automation_issues(
+        {
+            "nodes": [
+                {
+                    "id": "start",
+                    "type": "start",
+                    "kind": "cron",
+                    "cron": "* * * * *",
+                },
+                {
+                    "id": "fetch",
+                    "type": "tool",
+                    "tool_name": "web",
+                    "output_var": "roast",
+                },
+                {
+                    "id": "llm",
+                    "type": "llm.blank",
+                    "user_prompt": "x",
+                    "extract_vars": [{"name": "roast", "description": "吐槽"}],
+                },
+            ],
+            "edges": [
+                {"from": "start", "to": "fetch"},
+                {"from": "fetch", "to": "llm"},
+            ],
+        }
+    )
+    assert any("already used" in item["message"] for item in extract_clash)
+
+    extract_self = collect_automation_issues(
+        {
+            "nodes": [
+                {
+                    "id": "start",
+                    "type": "start",
+                    "kind": "cron",
+                    "cron": "* * * * *",
+                },
+                {
+                    "id": "llm",
+                    "type": "llm.main",
+                    "prompt": "x",
+                    "output_var": "flag",
+                    "extract_vars": [{"name": "flag", "description": "x"}],
+                },
+            ],
+            "edges": [{"from": "start", "to": "llm"}],
+        }
+    )
+    assert any("already used" in item["message"] for item in extract_self)
 
 
 def test_serialize_migrated_task_keeps_crontab_mode() -> None:

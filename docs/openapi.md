@@ -265,6 +265,7 @@ curl http://127.0.0.1:8788/openapi.json
 - `POST /api/v1/automations/validate` 校验全图但不保存，返回 `{ "ok": true, "issues": [{ "path": "start.channels", "message": "..." }] }`。
 - catalog 额外返回 `node_type_meta`、`tools` / `toolsets` / `agents` 名称列表，供画布节点盘与检查器下拉使用。
 - 工具与 `llm.*` 节点支持 `store_output`（默认 true）和 `output_var`；开启后下游可用 `{{名称}}` 读取该节点输出。
+- `llm.blank` / `llm.agent` / `llm.main` 支持 `extract_vars`（`[{ "name", "description" }]`），注入 `extract_<名称>` 工具供模型写入额外变量。`branch.llm` 不支持。
 - `consume_ai_loop=false` 时事件工作流后台执行，不拦截也不等待主 AI。
 - 任务可带 `ui`（节点坐标、缩放、平移），运行时忽略该字段。
 - `address` 推荐规范投递地址：`qq:<QQ号>`、`group:<群号>` 或 `wechat:<逻辑QQ号>`。

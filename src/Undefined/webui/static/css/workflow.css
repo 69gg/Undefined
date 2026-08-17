@@ -729,12 +729,9 @@
 .wf-kv-row,
 .wf-case-row {
   display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto;
   gap: 6px;
   margin-bottom: 8px;
-}
-
-.wf-kv-row {
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
 }
 
 .wf-var-menu {

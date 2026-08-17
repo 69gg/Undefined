@@ -36,19 +36,19 @@ NODE_TYPE_META: tuple[dict[str, str], ...] = (
         "id": "llm.blank",
         "group": "llm",
         "label": "Blank LLM",
-        "description": "Agent model with a whitelist of tools, toolsets, and agents. Output can be stored as a named variable.",
+        "description": "Agent model with a whitelist of tools, toolsets, and agents. Output can be stored as a named variable. Optional extract_vars inject tools so the model writes extra {{name}} values.",
     },
     {
         "id": "llm.agent",
         "group": "llm",
         "label": "Agent",
-        "description": "Run a registered Agent. Output can be stored as a named variable.",
+        "description": "Run a registered Agent. Output can be stored as a named variable. Optional extract_vars inject tools so the model writes extra {{name}} values.",
     },
     {
         "id": "llm.main",
         "group": "llm",
         "label": "Main AI",
-        "description": "Call the main AIClient.ask() loop. Output can be stored as a named variable.",
+        "description": "Call the main AIClient.ask() loop. Output can be stored as a named variable. Optional extract_vars inject tools so the model writes extra {{name}} values.",
     },
     {
         "id": "branch.if",

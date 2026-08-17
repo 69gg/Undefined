@@ -15,6 +15,7 @@ from Undefined.ai.client.setup import (
 from Undefined.ai.tool_search import TOOL_SEARCH_NAME, ToolSearchSession
 from Undefined.ai.transports import copy_transport_message_metadata
 from Undefined.ai.tooling import END_CO_CALL_REJECT_CONTENT
+from Undefined.automations.extract import merge_extract_tools
 from Undefined.context import RequestContext
 from Undefined.render import render_html_to_image, render_markdown_to_html
 from Undefined.skills.http_config import get_request_proxy
@@ -265,6 +266,10 @@ class ClientAskLoopMixin(ClientQueueMixin):
             tools = tool_search_session.request_tools() + hidden_prefetch_tools
         else:
             tools = all_tools
+        tools = merge_extract_tools(
+            tools,
+            extra_context.get("automation_extract_tools") if extra_context else None,
+        )
         # 预取结果必须进入 ask 自身的消息链，才能在后续 Chat Completions
         # 轮次继续可见，并避免无 RequestContext 时重复执行。
         messages, prefetched_tools = await self._maybe_prefetch_tools(
@@ -456,10 +461,17 @@ class ClientAskLoopMixin(ClientQueueMixin):
             iteration_exposed_tool_names: frozenset[str] | None = None
             if tool_search_session is not None:
                 tools = tool_search_session.request_tools() + visible_prefetch_tools
+                tools = merge_extract_tools(
+                    tools,
+                    extra_context.get("automation_extract_tools")
+                    if extra_context
+                    else None,
+                )
                 iteration_exposed_tool_names = frozenset(
                     (
                         *tool_search_session.exposed_tool_names(),
                         *(_schema_name(schema) for schema in visible_prefetch_tools),
+                        *(_schema_name(schema) for schema in tools),
                     )
                 )
             message_checkpoint_len = len(messages)

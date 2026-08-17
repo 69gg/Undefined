@@ -45,6 +45,8 @@ NODE_TYPES = frozenset(
     }
 )
 STORE_OUTPUT_NODE_TYPES = frozenset({"tool", "llm.blank", "llm.agent", "llm.main"})
+EXTRACT_VAR_NODE_TYPES = frozenset({"llm.blank", "llm.agent", "llm.main"})
+EXTRACT_TOOL_PREFIX = "extract_"
 RESERVED_VARIABLE_NAMES = frozenset(
     {"trigger", "nodes", "index", "item", "vars", "start", "else"}
 )

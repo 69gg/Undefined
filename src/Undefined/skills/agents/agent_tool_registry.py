@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
+from Undefined.automations.extract import apply_extract_tool_from_context
 from Undefined.skills.registry import BaseRegistry
 from Undefined.utils.easter_egg_calls import (
     agent_call_key,
@@ -556,6 +557,10 @@ class AgentToolRegistry(BaseRegistry):
         返回:
             工具执行的输出文本
         """
+        extract_result = apply_extract_tool_from_context(tool_name, args, context)
+        if extract_result is not None:
+            return extract_result
+
         await self._maybe_send_agent_tool_call_easter_egg(tool_name, context)
         async with self._items_lock:
             item = self._items.get(tool_name)

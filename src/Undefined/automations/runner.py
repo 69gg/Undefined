@@ -20,6 +20,14 @@ from Undefined.automations.constants import (
     LOOP_MAX_ITERATIONS,
     START_NODE_ID,
 )
+from Undefined.automations.extract import (
+    apply_extract_tool_call,
+    assign_extracted_vars,
+    build_extract_tools,
+    extract_prompt_hint,
+    merge_extract_tools,
+    parse_extract_vars,
+)
 from Undefined.automations.logutil import preview_text
 from Undefined.automations.match import AutomationEvent, match_condition_on_text
 from Undefined.automations.template import (
@@ -240,6 +248,27 @@ class WorkflowRunner:
 
     def _tool_context_copy(self) -> dict[str, Any]:
         return dict(self.tool_context)
+
+    def _bind_extract(
+        self, node: dict[str, Any]
+    ) -> tuple[dict[str, Any], dict[str, str]]:
+        specs = parse_extract_vars(node)
+        sink: dict[str, str] = {}
+        ctx = self._tool_context_copy()
+        if specs:
+            ctx["automation_extract_tools"] = build_extract_tools(specs)
+            ctx["automation_extract_sink"] = sink
+            ctx["automation_extract_names"] = {item.name for item in specs}
+        return ctx, sink
+
+    def _with_extract_hint(self, prompt: str, node: dict[str, Any]) -> str:
+        hint = extract_prompt_hint(parse_extract_vars(node))
+        if not hint:
+            return prompt
+        text = str(prompt or "").rstrip()
+        if text:
+            return f"{text}\n\n{hint}"
+        return hint
 
     async def run(
         self,
@@ -628,23 +657,36 @@ class WorkflowRunner:
         agent = render_template(str(node.get("agent") or ""), variables).strip()
         if not agent:
             raise WorkflowError("agent is required", node_id=str(node.get("id") or ""))
-        prompt = render_template(
-            str(node.get("input") or node.get("prompt") or ""), variables
+        prompt = self._with_extract_hint(
+            render_template(
+                str(node.get("input") or node.get("prompt") or ""), variables
+            ),
+            node,
         )
-        result = await self.execute_tool(
-            agent, {"prompt": prompt}, self._tool_context_copy()
-        )
+        ctx, sink = self._bind_extract(node)
+        result = await self.execute_tool(agent, {"prompt": prompt}, ctx)
+        assign_extracted_vars(variables, sink)
         return _stringify(result)
 
     async def _run_main(self, node: dict[str, Any], variables: dict[str, Any]) -> str:
-        prompt = render_template(str(node.get("prompt") or ""), variables)
+        prompt = self._with_extract_hint(
+            render_template(str(node.get("prompt") or ""), variables),
+            node,
+        )
         extra = {
             "scheduled_self_call": True,
             "automation_id": str(self.tool_context.get("scheduled_task_id") or ""),
             "automation_name": str(self.tool_context.get("scheduled_task_name") or ""),
         }
         extra.update(collect_session_identity(self.tool_context))
-        return await self.ask_main(prompt, extra)
+        ctx, sink = self._bind_extract(node)
+        if "automation_extract_tools" in ctx:
+            extra["automation_extract_tools"] = ctx["automation_extract_tools"]
+            extra["automation_extract_sink"] = sink
+            extra["automation_extract_names"] = ctx["automation_extract_names"]
+        result = await self.ask_main(prompt, extra)
+        assign_extracted_vars(variables, sink)
+        return result
 
     async def _run_blank_llm(
         self, node: dict[str, Any], variables: dict[str, Any]
@@ -663,6 +705,16 @@ class WorkflowRunner:
             if isinstance(node.get("agents"), list)
             else None,
         )
+        ctx, sink = self._bind_extract(node)
+        extract_tools = ctx.get("automation_extract_tools")
+        selected = merge_extract_tools(selected, extract_tools)
+        hint = extract_prompt_hint(parse_extract_vars(node))
+        if hint:
+            if system_prompt.strip():
+                system_prompt = f"{system_prompt.rstrip()}\n\n{hint}"
+            else:
+                user_prompt = self._with_extract_hint(user_prompt, node)
+        names = {str(item) for item in (ctx.get("automation_extract_names") or [])}
         messages: list[dict[str, Any]] = []
         if system_prompt.strip():
             messages.append({"role": "system", "content": system_prompt})
@@ -708,6 +760,7 @@ class WorkflowRunner:
             if content.strip():
                 last_content = content
             if not tool_calls:
+                assign_extracted_vars(variables, sink)
                 return last_content
             messages.append(
                 {
@@ -736,13 +789,20 @@ class WorkflowRunner:
                         args = parsed if isinstance(parsed, dict) else {}
                     except json.JSONDecodeError:
                         args = {}
-                try:
-                    tool_result = await self.execute_tool(
-                        internal_name, args, self._tool_context_copy()
-                    )
-                    payload = _stringify(tool_result)
-                except Exception as exc:
-                    payload = f"工具执行失败: {exc}"
+                handled = apply_extract_tool_call(
+                    internal_name,
+                    args,
+                    sink=sink,
+                    names=names,
+                )
+                if handled is not None:
+                    payload = handled
+                else:
+                    try:
+                        tool_result = await self.execute_tool(internal_name, args, ctx)
+                        payload = _stringify(tool_result)
+                    except Exception as exc:
+                        payload = f"工具执行失败: {exc}"
                 messages.append(
                     {
                         "role": "tool",
@@ -751,6 +811,7 @@ class WorkflowRunner:
                         "content": payload,
                     }
                 )
+        assign_extracted_vars(variables, sink)
         return last_content or "达到最大迭代次数"
 
     def _eval_branch_if(self, node: dict[str, Any], variables: dict[str, Any]) -> str:

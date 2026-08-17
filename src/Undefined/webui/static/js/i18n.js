@@ -346,6 +346,12 @@ const I18N = {
         "schedules.output_var": "变量名称",
         "schedules.output_var_placeholder": "默认使用节点 ID",
         "schedules.output_var_hint": "开启后下游可用 {{名称}} 引用本节点输出。",
+        "schedules.extract_vars": "变量提取",
+        "schedules.extract_vars_hint":
+            "为每个变量注入 extract_<名称> 工具，模型调用后写入 {{名称}}。不用于 LLM 分支。",
+        "schedules.extract_name": "变量名",
+        "schedules.extract_desc": "变量说明",
+        "schedules.add_extract_var": "添加变量",
         "schedules.cooldown": "冷却秒数",
         "schedules.weekdays": "星期（0=周一）",
         "schedules.add_case": "添加分支",
@@ -1043,6 +1049,12 @@ const I18N = {
         "schedules.output_var_placeholder": "Defaults to node ID",
         "schedules.output_var_hint":
             "When on, later nodes can use {{name}} to read this output.",
+        "schedules.extract_vars": "Extract variables",
+        "schedules.extract_vars_hint":
+            "Each name becomes an extract_<name> tool. The model calls it to write {{name}}. Not used on LLM branches.",
+        "schedules.extract_name": "Name",
+        "schedules.extract_desc": "Description",
+        "schedules.add_extract_var": "Add variable",
         "schedules.cooldown": "Cooldown seconds",
         "schedules.weekdays": "Weekdays (0=Monday)",
         "schedules.add_case": "Add case",

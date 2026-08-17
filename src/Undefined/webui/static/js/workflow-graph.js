@@ -81,6 +81,7 @@
                 emit: false,
                 store_output: true,
                 output_var: "",
+                extract_vars: [],
             };
         }
         if (type === "llm.agent") {
@@ -92,6 +93,7 @@
                 emit: false,
                 store_output: true,
                 output_var: "",
+                extract_vars: [],
             };
         }
         if (type === "llm.main") {
@@ -102,6 +104,7 @@
                 emit: true,
                 store_output: true,
                 output_var: "",
+                extract_vars: [],
             };
         }
         if (type === "branch.if") {
@@ -214,10 +217,20 @@
         return name ? `{{${name}}}` : "";
     }
 
+    function extractVarLabel(node) {
+        return (node.extract_vars || [])
+            .map((item) => String((item && item.name) || "").trim())
+            .filter(Boolean)
+            .map((name) => `{{${name}}}`)
+            .join(" ");
+    }
+
     function nodeSummary(node) {
         if (!node) return "";
         const stored = outputVarLabel(node);
-        const suffix = stored ? ` · ${stored}` : "";
+        const extracted = extractVarLabel(node);
+        const extras = [stored, extracted].filter(Boolean).join(" · ");
+        const suffix = extras ? ` · ${extras}` : "";
         if (node.type === "start") return String(node.kind || "message");
         if (node.type === "tool")
             return `${String(node.tool_name || "")}${suffix}`.trim();
@@ -226,9 +239,9 @@
         if (node.type === "llm.agent")
             return `${String(node.agent || "")}${suffix}`.trim();
         if (node.type === "llm.main")
-            return stored || String(node.prompt || "").slice(0, 48);
+            return extras || String(node.prompt || "").slice(0, 48);
         if (node.type === "llm.blank") {
-            if (stored) return stored;
+            if (extras) return extras;
             const allow = [
                 ...(node.tools || []),
                 ...(node.toolsets || []),

@@ -28,6 +28,25 @@
         return `<label class="schedule-mode-option"><input type="checkbox" data-field="${escapeHtml(name)}"${checked ? " checked" : ""} /> <span>${escapeHtml(t(labelKey))}</span></label>`;
     }
 
+    function extractVarsMarkup(node) {
+        const rows = Array.isArray(node.extract_vars) ? node.extract_vars : [];
+        return `${field(
+            "schedules.extract_vars",
+            `<div data-extract-vars="1">${rows
+                .map(
+                    (item, index) => `
+            <div class="wf-case-row" data-extract-index="${index}">
+                <input class="form-control" data-extract-name="1" value="${escapeHtml(item.name || "")}" placeholder="${escapeHtml(t("schedules.extract_name"))}" />
+                <input class="form-control" data-extract-desc="1" value="${escapeHtml(item.description || "")}" placeholder="${escapeHtml(t("schedules.extract_desc"))}" />
+                <button type="button" class="btn ghost" data-extract-remove="1">×</button>
+            </div>`,
+                )
+                .join("")}</div>
+            <button type="button" class="btn ghost" data-extract-add="1">${escapeHtml(t("schedules.add_extract_var"))}</button>
+            <p class="muted-sm">${escapeHtml(t("schedules.extract_vars_hint"))}</p>`,
+        )}`;
+    }
+
     function actionOutputMarkup(node) {
         const store = node.store_output !== false;
         return `
@@ -45,6 +64,10 @@
                     )}<p class="muted-sm">${escapeHtml(t("schedules.output_var_hint"))}</p>`,
                 )}
             </div>`;
+    }
+
+    function llmOutputMarkup(node) {
+        return `${actionOutputMarkup(node)}${extractVarsMarkup(node)}`;
     }
 
     function nameList(items) {
@@ -310,16 +333,16 @@
                 ${field("schedules.tools", pickMarkup("tools", node.tools || [], tools))}
                 ${field("schedules.toolsets", pickMarkup("toolsets", node.toolsets || [], toolsets))}
                 ${field("schedules.agents", pickMarkup("agents", node.agents || [], agents))}
-                ${actionOutputMarkup(node)}`;
+                ${llmOutputMarkup(node)}`;
         }
         if (node.type === "llm.agent") {
             return `${field("schedules.agent", optionSelect("agent", node.agent || "", agents, true))}
                 ${field("schedules.input", input("input", node.input || "", `data-var-target="1"`))}
-                ${actionOutputMarkup(node)}`;
+                ${llmOutputMarkup(node)}`;
         }
         if (node.type === "llm.main") {
             return `${field("schedules.prompt", textarea("prompt", node.prompt || ""))}
-                ${actionOutputMarkup(node)}`;
+                ${llmOutputMarkup(node)}`;
         }
         if (node.type === "branch.if") {
             const cases = Array.isArray(node.cases) ? node.cases : [];
@@ -475,6 +498,12 @@
                 if (named && named !== node.id && node.store_output !== false) {
                     items.push(`{{${named}}}`);
                 }
+                (node.extract_vars || []).forEach((item) => {
+                    const extractName = String(
+                        (item && item.name) || "",
+                    ).trim();
+                    if (extractName) items.push(`{{${extractName}}}`);
+                });
             }
         });
         return items;
@@ -599,6 +628,25 @@
                     description:
                         row.querySelector("[data-option-desc]")?.value || "",
                 }));
+            }
+            if (
+                node.type === "llm.blank" ||
+                node.type === "llm.agent" ||
+                node.type === "llm.main"
+            ) {
+                patch.extract_vars = Array.from(
+                    root.querySelectorAll("[data-extract-index]"),
+                )
+                    .map((row) => ({
+                        name:
+                            row
+                                .querySelector("[data-extract-name]")
+                                ?.value.trim() || "",
+                        description:
+                            row.querySelector("[data-extract-desc]")?.value ||
+                            "",
+                    }))
+                    .filter((item) => item.name);
             }
             const nextId = root
                 .querySelector("[data-node-id-edit]")
@@ -734,6 +782,18 @@
             }
             if (event.target.closest("[data-option-remove]")) {
                 event.target.closest("[data-option-index]")?.remove();
+                apply();
+                return;
+            }
+            if (event.target.closest("[data-extract-add]")) {
+                root.querySelector("[data-extract-vars]")?.insertAdjacentHTML(
+                    "beforeend",
+                    `<div class="wf-case-row" data-extract-index="x"><input class="form-control" data-extract-name="1" placeholder="${escapeHtml(t("schedules.extract_name"))}" /><input class="form-control" data-extract-desc="1" placeholder="${escapeHtml(t("schedules.extract_desc"))}" /><button type="button" class="btn ghost" data-extract-remove="1">×</button></div>`,
+                );
+                return;
+            }
+            if (event.target.closest("[data-extract-remove]")) {
+                event.target.closest("[data-extract-index]")?.remove();
                 apply();
             }
         });

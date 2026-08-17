@@ -67,12 +67,14 @@
 |---|---|
 | `tool` | 工具或主注册表 agent 名；args 做 `{{ }}`；可命名存储输出 |
 | `template` | 无模型整形 |
-| `llm.blank` | agent 模型 + 白名单 tools/toolsets/agents；可命名存储输出 |
-| `llm.agent` | 现成 Agent；可命名存储输出 |
-| `llm.main` | `AIClient.ask()`，原自我督办；可命名存储输出 |
+| `llm.blank` | agent 模型 + 白名单 tools/toolsets/agents；可命名存储输出；可配置 `extract_vars` |
+| `llm.agent` | 现成 Agent；可命名存储输出；可配置 `extract_vars` |
+| `llm.main` | `AIClient.ask()`，原自我督办；可命名存储输出；可配置 `extract_vars` |
 | `branch.if` | if / else if + 必填 else 出边 |
 | `branch.llm` | 选项做成强制 tool `choose_<id>`，用选中 tool 走出边 |
 | `loop.times` / `loop.each` | 体为子节点 id 列表；`{{index}}` / `{{item}}` |
+
+`llm.blank` / `llm.agent` / `llm.main` 可设 `extract_vars: [{ "name", "description" }, ...]`（不含 `branch.llm`）。运行时注入 `extract_<名称>` 工具，模型调用后写入 `{{名称}}` / `{{vars.名称}}`。
 
 LLM/template 默认不发群，`emit: true` 才发。WebUI 新建默认关闭 `consume_ai_loop` 与 `auto_send_final`。失败即停；未拦截主 AI 时工作流后台执行，主 AI 照常继续。
 
@@ -84,4 +86,4 @@ LLM/template 默认不发群，`emit: true` 才发。WebUI 新建默认关闭 `c
 
 `automation.list` / `get` / `create` / `update` / `delete` / `set_enabled`。短命令能表达 channels、group_ids、user_ids、mentions、text、pass_text。
 
-WebUI「自动化」页把列表与画布做成上下两屏：上面是总数与选择，滚下去是节点盘 / 画布 / 检查器。点选卡片会滚到画布，不把列表藏掉。连线是先点出点再点目标；空白 LLM 白名单用搜索点选。工具与 LLM 检查器可勾选存储输出并填写变量名。图数据仍读写 `nodes` / `edges`，布局存在任务顶层 `ui`。
+WebUI「自动化」页把列表与画布做成上下两屏：上面是总数与选择，滚下去是节点盘 / 画布 / 检查器。点选卡片会滚到画布，不把列表藏掉。连线是先点出点再点目标；空白 LLM 白名单用搜索点选。工具与 LLM 检查器可勾选存储输出并填写变量名；三种 LLM 节点还可配置变量提取。图数据仍读写 `nodes` / `edges`，布局存在任务顶层 `ui`。

@@ -10,6 +10,7 @@ from typing import Any
 
 from Undefined.context import RequestContext
 from Undefined.attachments import scope_from_context
+from Undefined.automations.extract import apply_extract_tool_from_context
 from Undefined.skills.agents import AgentRegistry
 from Undefined.skills.anthropic_skills import AnthropicSkillRegistry
 from Undefined.skills.tools import ToolRegistry
@@ -211,6 +212,12 @@ class ToolManager:
             执行结果
         """
         start_time = time.perf_counter()
+
+        extract_result = apply_extract_tool_from_context(
+            function_name, function_args, context
+        )
+        if extract_result is not None:
+            return extract_result
 
         # 先注入 RequestContext，再做会话级策略判定（避免缺 group_id/user_id）
         # 身份字段以活跃 RequestContext 为准（覆盖 context 中可能被污染的值）
