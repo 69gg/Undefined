@@ -1255,6 +1255,139 @@ def test_iter_matching_honors_explicit_task_cooldown() -> None:
     assert matched == []
 
 
+class _DummyAutomationStorage:
+    def load_tasks(self) -> dict[str, Any]:
+        return {}
+
+    async def save_all(self, _tasks: dict[str, Any]) -> None:
+        return None
+
+
+def _make_automation_service() -> AutomationService:
+    return AutomationService(
+        SimpleNamespace(
+            ask=AsyncMock(),
+            memory_storage=SimpleNamespace(),
+            runtime_config=SimpleNamespace(),
+        ),
+        SimpleNamespace(
+            send_group_message=AsyncMock(),
+            send_private_message=AsyncMock(),
+        ),
+        SimpleNamespace(
+            send_like=AsyncMock(),
+            get_image=AsyncMock(return_value=None),
+            get_forward_msg=AsyncMock(return_value=[]),
+        ),
+        SimpleNamespace(),
+        storage=cast(Any, _DummyAutomationStorage()),
+    )
+
+
+def _group_message_task(*, consume_ai_loop: bool) -> dict[str, Any]:
+    return {
+        "enabled": True,
+        "consume_ai_loop": consume_ai_loop,
+        "nodes": [
+            {
+                "id": "start",
+                "type": "start",
+                "kind": "message",
+                "channels": ["group"],
+                "text": "",
+            }
+        ],
+        "edges": [],
+    }
+
+
+@pytest.mark.asyncio
+async def test_handle_event_nonblocking_returns_before_workflow_finishes() -> None:
+    service = _make_automation_service()
+    started = asyncio.Event()
+    release = asyncio.Event()
+    finished = asyncio.Event()
+
+    async def slow_execute(*_args: Any, **_kwargs: Any) -> None:
+        started.set()
+        await release.wait()
+        finished.set()
+
+    setattr(service, "_execute_workflow", slow_execute)
+    service.tasks["bg"] = _group_message_task(consume_ai_loop=False)
+    event = AutomationEvent(kind="message", channel="group", text="hi", group_id=1)
+    try:
+        consumed = await service.handle_event(event)
+        assert consumed is False
+        assert finished.is_set() is False
+        await asyncio.wait_for(started.wait(), timeout=1)
+        assert finished.is_set() is False
+        release.set()
+        pending = list(service._background_tasks)
+        if pending:
+            await asyncio.wait_for(asyncio.gather(*pending), timeout=1)
+        assert finished.is_set()
+    finally:
+        release.set()
+        service.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_handle_event_blocking_waits_for_workflow() -> None:
+    service = _make_automation_service()
+    order: list[str] = []
+
+    async def execute(*_args: Any, **_kwargs: Any) -> None:
+        order.append("start")
+        await asyncio.sleep(0)
+        order.append("done")
+
+    setattr(service, "_execute_workflow", execute)
+    service.tasks["block"] = _group_message_task(consume_ai_loop=True)
+    event = AutomationEvent(kind="message", channel="group", text="hi", group_id=1)
+    try:
+        consumed = await service.handle_event(event)
+        assert consumed is True
+        assert order == ["start", "done"]
+        assert not service._background_tasks
+    finally:
+        service.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_handle_event_mixed_spawns_nonblocking_and_awaits_blocking() -> None:
+    service = _make_automation_service()
+    bg_started = asyncio.Event()
+    bg_release = asyncio.Event()
+    blocking_done = asyncio.Event()
+
+    async def execute(task_id: str, **_kwargs: Any) -> None:
+        if task_id == "bg":
+            bg_started.set()
+            await bg_release.wait()
+            return
+        blocking_done.set()
+
+    setattr(service, "_execute_workflow", execute)
+    service.tasks["bg"] = _group_message_task(consume_ai_loop=False)
+    service.tasks["block"] = _group_message_task(consume_ai_loop=True)
+    event = AutomationEvent(kind="message", channel="group", text="hi", group_id=1)
+    try:
+        consumed = await service.handle_event(event)
+        assert consumed is True
+        assert blocking_done.is_set()
+        await asyncio.wait_for(bg_started.wait(), timeout=1)
+        assert len(service._background_tasks) == 1
+        bg_release.set()
+        await asyncio.wait_for(
+            asyncio.gather(*list(service._background_tasks)),
+            timeout=1,
+        )
+    finally:
+        bg_release.set()
+        service.shutdown()
+
+
 def _group_handler() -> Any:
     handler: Any = MessageHandler.__new__(MessageHandler)
     handler.config = SimpleNamespace(

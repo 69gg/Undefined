@@ -6,7 +6,7 @@
 - 运行时改为 `AutomationService`：时间 job 只携带 `task_id`，删除 crontab `add_task` / `update_task` 与 `ScheduledTask` 模型；`utils/scheduler.py` 仅作兼容 re-export。
 - 补齐自动化运行时详细日志：事件匹配、时间触发、节点执行、出站发送与超时。
 - 不再提供 `/api/v1/schedules` 与 `scheduler.*`；对外入口只有 `/api/v1/automations` 与 `automation.*`。
-- 群聊 / QQ 私聊 / 微信 / 拍一拍 / 入退群在 pipeline 之后、对应 AI loop 之前 `await` 工作流；成功或失败且 `consume_ai_loop` 时拦截该入口 AI。
+- 群聊 / QQ 私聊 / 微信 / 拍一拍 / 入退群在 pipeline 之后、对应 AI loop 之前接入工作流；`consume_ai_loop=true` 时 await 并拦截该入口 AI，`false` 时后台执行并立刻放行主 AI。
 - 新增 `automation.*` 工具、`GET /api/v1/automations/catalog` 与 CRUD；WebUI 自动化页改为 Dify 式画布（节点盘、点选连线、类型化检查器），列表与画布上下两屏滚动切换，布局写入任务 `ui`；`POST /api/v1/automations/validate` 返回全部 issues。配置节 `[automations]`。
 - 空白 LLM 白名单改为搜索点选；画布连线改为先点出点再点目标，能连则连上。
 - 工具与三种 LLM 节点支持把输出存成指定名称的变量（`store_output` / `output_var`），下游用 `{{名称}}` 引用；可关闭存储。
@@ -15,6 +15,8 @@
 - 画布保存成功后滚回列表页并刷新卡片，展示服务端最新状态。
 - `[automations].default_cooldown_seconds` 默认改为 `0`，事件类工作流默认不再冷却。
 - `[automations]` 默认放宽：`max_concurrent = 16`、`node_timeout_seconds = 600`、`workflow_timeout_seconds = 1200`、`blank_llm_max_iterations = 100`。
+- `consume_ai_loop=false` 的事件工作流改为后台执行，不再堵住主 AI。
+- WebUI 新建自动化默认关闭「拦截主 AI」和「自动发送终值」。
 
 ---
 

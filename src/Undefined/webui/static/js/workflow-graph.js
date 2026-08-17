@@ -34,8 +34,8 @@
         return {
             task_name: "",
             enabled: true,
-            consume_ai_loop: true,
-            auto_send_final: true,
+            consume_ai_loop: false,
+            auto_send_final: false,
             nodes: [
                 {
                     id: "start",

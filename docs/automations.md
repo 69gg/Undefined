@@ -14,7 +14,7 @@
 
 ## 挂载点
 
-统一在 **pipeline 之后、对应 AI loop 之前 `await` 工作流**。匹配并成功（或失败）且 `consume_ai_loop=true` 则拦截该入口的 AI。未过「是否处理消息」门控时仍做匹配旁路。Bot 自身消息不匹配。自动化看单条消息，发生在 MessageBatcher 之前。
+统一在 **pipeline 之后、对应 AI loop 之前接入工作流**。`consume_ai_loop=true` 时 await 该图并拦截本轮主 AI；`false` 时后台执行、立刻放行主 AI。匹配失败仍继续后续流程。未过「是否处理消息」门控时仍做匹配旁路。Bot 自身消息不匹配。自动化看单条消息，发生在 MessageBatcher 之前。
 
 | 入口 | 顺序 |
 |---|---|
@@ -74,7 +74,7 @@
 | `branch.llm` | 选项做成强制 tool `choose_<id>`，用选中 tool 走出边 |
 | `loop.times` / `loop.each` | 体为子节点 id 列表；`{{index}}` / `{{item}}` |
 
-LLM/template 默认不发群，`emit: true` 才发。图级 `auto_send_final` 默认 true。失败即停，不进主 AI。
+LLM/template 默认不发群，`emit: true` 才发。WebUI 新建默认关闭 `consume_ai_loop` 与 `auto_send_final`。失败即停；未拦截主 AI 时工作流后台执行，主 AI 照常继续。
 
 ## 配置 `[automations]`
 

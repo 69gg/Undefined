@@ -84,8 +84,8 @@
             )}
             <div class="wf-chip-row">
                 ${checkbox("enabled", task.enabled !== false, "schedules.enabled")}
-                ${checkbox("consume_ai_loop", task.consume_ai_loop !== false, "schedules.consume")}
-                ${checkbox("auto_send_final", task.auto_send_final !== false, "schedules.auto_send")}
+                ${checkbox("consume_ai_loop", task.consume_ai_loop === true, "schedules.consume")}
+                ${checkbox("auto_send_final", task.auto_send_final === true, "schedules.auto_send")}
             </div>
             ${field("schedules.target_address", input("address", task.address || "", `placeholder="group:123456"`))}
             ${field("schedules.max_executions", input("max_executions", task.max_executions || "", `type="number" min="1"`))}

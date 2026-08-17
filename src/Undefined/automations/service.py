@@ -1,4 +1,4 @@
-"""Automation runtime: persist graphs, fire time jobs, await event workflows."""
+"""Automation runtime: persist graphs, fire time jobs, run event workflows."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import logging
 import os
 import time
 import uuid
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -86,6 +87,7 @@ class AutomationService:
             for task_id, info in loaded.items()
         }
         self._running_ids: set[str] = set()
+        self._background_tasks: set[asyncio.Task[None]] = set()
         self._run_lock = asyncio.Lock()
         self._run_sema = asyncio.Semaphore(DEFAULT_MAX_CONCURRENT)
 
@@ -108,6 +110,9 @@ class AutomationService:
         if self._apscheduler.running:
             self._apscheduler.shutdown(wait=False)
             logger.info("[自动化] 运行时已停止")
+        for task in list(self._background_tasks):
+            if not task.done():
+                task.cancel()
 
     def next_run_iso(self, task_id: str) -> str | None:
         job = self._apscheduler.get_job(task_id)
@@ -309,13 +314,67 @@ class AutomationService:
         )
         return True
 
+    def _spawn_event_run(
+        self,
+        task_id: str,
+        *,
+        event: AutomationEvent,
+        start_match: Any,
+        live_resources: dict[str, Any] | None,
+    ) -> None:
+        """Run a non-blocking automation in the background and return immediately."""
+        snapshot_event = replace(event, extra=dict(event.extra))
+        snapshot_resources = dict(live_resources) if live_resources else None
+        logger.info(
+            "[自动化] 非阻塞后台执行: id=%s kind=%s address=%s",
+            task_id,
+            snapshot_event.kind,
+            snapshot_event.address,
+        )
+
+        async def _run() -> None:
+            try:
+                await self._run_automation(
+                    task_id,
+                    event=snapshot_event,
+                    start_match=start_match,
+                    live_resources=snapshot_resources,
+                    time_fire=False,
+                )
+            except Exception:
+                logger.exception("[自动化] 非阻塞执行失败: id=%s", task_id)
+
+        task = asyncio.create_task(_run(), name=f"automation:{task_id}")
+        self._background_tasks.add(task)
+
+        def _finalize(done_task: asyncio.Task[None]) -> None:
+            self._background_tasks.discard(done_task)
+            try:
+                exc = done_task.exception()
+            except asyncio.CancelledError:
+                logger.debug("[自动化] 非阻塞任务已取消: id=%s", task_id)
+                return
+            if exc is not None:
+                logger.exception(
+                    "[自动化] 非阻塞任务失败: id=%s",
+                    task_id,
+                    exc_info=(type(exc), exc, exc.__traceback__),
+                )
+
+        task.add_done_callback(_finalize)
+
     async def handle_event(
         self,
         event: AutomationEvent,
         *,
         live_resources: dict[str, Any] | None = None,
     ) -> bool:
-        """Match and await event automations. Return True if AI loop should stop."""
+        """Match event automations. Return True if the AI loop should stop.
+
+        ``consume_ai_loop=true`` workflows are awaited before returning.
+        Non-blocking workflows are spawned in the background so the main AI
+        path can continue immediately.
+        """
         settings = self._automation_settings()
         if not settings["enabled"]:
             logger.debug(
@@ -360,16 +419,29 @@ class AutomationService:
             ",".join(task_id for task_id, _task, _match in matches),
         )
         consumed = False
+        blocking: list[tuple[str, Any]] = []
         for task_id, task, start_match in matches:
+            consume_ai = bool(task.get("consume_ai_loop", True))
             logger.info(
                 "[自动化] 命中执行: id=%s name=%s kind=%s consume_ai=%s pass_len=%s preview=%s",
                 task_id,
                 str(task.get("task_name") or ""),
                 start_kind(task) or "-",
-                bool(task.get("consume_ai_loop", True)),
+                consume_ai,
                 len(start_match.pass_text),
                 preview_text(start_match.pass_text),
             )
+            if consume_ai:
+                blocking.append((task_id, start_match))
+                consumed = True
+                continue
+            self._spawn_event_run(
+                task_id,
+                event=event,
+                start_match=start_match,
+                live_resources=live_resources,
+            )
+        for task_id, start_match in blocking:
             try:
                 await self._run_automation(
                     task_id,
@@ -378,24 +450,15 @@ class AutomationService:
                     live_resources=live_resources,
                     time_fire=False,
                 )
-                stored = self.tasks.get(task_id)
-                if isinstance(stored, dict) and bool(
-                    stored.get("consume_ai_loop", True)
-                ):
-                    consumed = True
             except Exception:
                 logger.exception("[自动化] 事件执行失败: id=%s", task_id)
-                stored = self.tasks.get(task_id)
-                if isinstance(stored, dict) and bool(
-                    stored.get("consume_ai_loop", True)
-                ):
-                    consumed = True
         logger.info(
-            "[自动化] 事件处理完成: kind=%s channel=%s address=%s consume_ai=%s",
+            "[自动化] 事件处理完成: kind=%s channel=%s address=%s consume_ai=%s background=%s",
             event.kind,
             event.channel,
             event.address,
             consumed,
+            len(self._background_tasks),
         )
         return consumed
 

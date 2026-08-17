@@ -1342,7 +1342,10 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
         return bool(detections)
 
     async def _run_automations(self, event: AutomationEvent) -> bool:
-        """Run matching automations. True means the AI loop should be skipped."""
+        """Run matching automations. True means the AI loop should be skipped.
+
+        Non-blocking matches return immediately while their graphs keep running.
+        """
         scheduler = getattr(self.ai_coordinator, "scheduler", None)
         handle = getattr(scheduler, "handle_event", None)
         if not callable(handle):

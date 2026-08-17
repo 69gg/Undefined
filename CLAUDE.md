@@ -86,7 +86,7 @@ OneBot WebSocket → onebot.py → handlers.py
   → SecurityService(注入检测)
   → CommandDispatcher(斜杠指令，命中即结束后续处理)
   → skills/pipelines(Bilibili / arXiv / GitHub 并行自动提取)
-  → Automations(pipeline 后 await；命中可拦截对应 AI，发生在 MessageBatcher 之前)
+  → Automations(pipeline 后接入；consume_ai_loop 时 await 并拦截对应 AI，否则后台执行并立刻放行；发生在 MessageBatcher 之前)
   → MessageBatcher(同 sender 短时合并；拍一拍/buffer 内 @bot 旁路)
   → AICoordinator → QueueManager(按模型隔离, 4 级优先级)
   → AIClient → LLM API / Skills / MCP
