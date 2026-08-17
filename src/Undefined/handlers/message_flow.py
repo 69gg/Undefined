@@ -1381,6 +1381,36 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
             )
         return consumed
 
+    async def _resolve_member_nickname(self, group_id: int, user_id: int | None) -> str:
+        """Resolve group card or QQ nickname for a member notice."""
+        if user_id is None:
+            return ""
+        try:
+            member_info = await self.onebot.get_group_member_info(group_id, user_id)
+            if isinstance(member_info, dict):
+                card = str(member_info.get("card") or "").strip()
+                nickname = str(member_info.get("nickname") or "").strip()
+                if card or nickname:
+                    return card or nickname
+        except Exception as exc:
+            logger.warning(
+                "[自动化] 获取入退群成员名片失败: group=%s user=%s err=%s",
+                group_id,
+                user_id,
+                exc,
+            )
+        try:
+            user_info = await self.onebot.get_stranger_info(user_id)
+            if isinstance(user_info, dict):
+                return str(user_info.get("nickname") or "").strip()
+        except Exception as exc:
+            logger.warning(
+                "[自动化] 获取入退群用户昵称失败: user=%s err=%s",
+                user_id,
+                exc,
+            )
+        return ""
+
     async def _handle_member_notice(self, event: dict[str, Any]) -> None:
         """入群 / 退群自动化触发。"""
         group_id = safe_int(event.get("group_id"))
@@ -1393,6 +1423,7 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
         )
         if group_id is None:
             return
+        nickname = await self._resolve_member_nickname(group_id, user_id)
         await self._run_automations(
             AutomationEvent(
                 kind=kind,
@@ -1400,6 +1431,7 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
                 text="",
                 sender_id=user_id,
                 user_id=user_id,
+                nickname=nickname,
                 group_id=group_id,
                 address=f"group:{group_id}",
             )

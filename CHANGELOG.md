@@ -18,6 +18,7 @@
 - `consume_ai_loop=false` 的事件工作流改为后台执行，不再堵住主 AI。
 - WebUI 新建自动化默认关闭「拦截主 AI」和「自动发送终值」。
 - `llm.blank` / `llm.agent` / `llm.main` 支持 `extract_vars`：把变量名与说明注入为 `extract_<名称>` 工具，模型调用后写入 `{{名称}}`。
+- 入群欢迎预设改为使用 `{{trigger.nickname}}`；入退群事件会解析群名片 / QQ 昵称写入该变量。
 
 ---
 

@@ -232,7 +232,7 @@ def build_catalog(*, bot_qq: int | None = None, ai: Any = None) -> dict[str, Any
                         {
                             "id": "welcome",
                             "type": "template",
-                            "template": "欢迎 {{trigger.user_id}} 入群。",
+                            "template": "欢迎 {{trigger.nickname}} 入群。",
                             "emit": True,
                         },
                     ],

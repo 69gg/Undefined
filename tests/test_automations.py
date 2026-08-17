@@ -1805,6 +1805,32 @@ async def test_group_entry_intercepts_ai(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 @pytest.mark.asyncio
+async def test_member_join_notice_passes_nickname() -> None:
+    handler = _group_handler()
+    handler.onebot.get_group_member_info = AsyncMock(
+        return_value={"card": "群名片", "nickname": "QQ昵称"}
+    )
+    captured: list[AutomationEvent] = []
+
+    async def handle_event(event: AutomationEvent) -> bool:
+        captured.append(event)
+        return False
+
+    handler.ai_coordinator.scheduler.handle_event = handle_event
+    await handler._handle_member_notice(
+        {
+            "notice_type": "group_increase",
+            "group_id": 30001,
+            "user_id": 20001,
+        }
+    )
+    assert len(captured) == 1
+    assert captured[0].kind == "member_join"
+    assert captured[0].nickname == "群名片"
+    assert captured[0].user_id == 20001
+
+
+@pytest.mark.asyncio
 async def test_private_entry_intercepts_ai(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         handlers_module,
@@ -2012,6 +2038,12 @@ async def test_automations_catalog_and_short_create() -> None:
     }
     assert catalog_body["tools"] == []
     assert catalog_body["agents"] == []
+    welcome = next(
+        item for item in catalog_body["presets"] if item["id"] == "member_join_welcome"
+    )
+    welcome_template = welcome["task"]["nodes"][1]["template"]
+    assert "{{trigger.nickname}}" in welcome_template
+    assert "{{trigger.user_id}}" not in welcome_template
 
     request = _JsonRequest(
         _json={
