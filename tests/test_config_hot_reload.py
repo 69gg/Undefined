@@ -74,6 +74,7 @@ class _FakeReloadRegistry:
 class _FakeMessageHandler:
     def __init__(self) -> None:
         self.reload_updates: list[tuple[bool, float, float]] = []
+        self.automation_updates: list[int] = []
 
     async def apply_skills_hot_reload_config(
         self,
@@ -83,6 +84,13 @@ class _FakeMessageHandler:
         debounce: float,
     ) -> None:
         self.reload_updates.append((enabled, interval, debounce))
+
+    async def apply_automations_hot_reload_config(
+        self,
+        *,
+        max_concurrent: int,
+    ) -> None:
+        self.automation_updates.append(max_concurrent)
 
 
 class _FakeConfigManager:
@@ -611,3 +619,28 @@ async def test_apply_config_updates_refreshes_pipelines_hot_reload() -> None:
     assert anthropic_skill_registry.started == [(3.0, 0.75)]
     assert message_handler.reload_updates == [(True, 3.0, 0.75)]
     assert config_manager.started == [(3.0, 0.75)]
+
+
+@pytest.mark.asyncio
+async def test_apply_config_updates_refreshes_automation_concurrency() -> None:
+    updated = cast(
+        Any,
+        SimpleNamespace(automations=SimpleNamespace(max_concurrent=7)),
+    )
+    message_handler = _FakeMessageHandler()
+    context = HotReloadContext(
+        ai_client=cast(Any, _FakeAIClient()),
+        queue_manager=cast(Any, _FakeQueueManager()),
+        config_manager=cast(Any, _FakeConfigManager()),
+        security_service=cast(Any, _FakeSecurityService()),
+        message_handler=cast(Any, message_handler),
+    )
+
+    apply_config_updates(
+        updated,
+        {"automations": (SimpleNamespace(max_concurrent=1), updated.automations)},
+        context,
+    )
+    await asyncio.sleep(0)
+
+    assert message_handler.automation_updates == [7]

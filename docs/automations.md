@@ -25,13 +25,15 @@
 | 入退群 | OneBot `group_increase` / `group_decrease`，无 AI 可拦 |
 | 时间 | APScheduler |
 
-事件用当前会话上下文（`request_type` / `group_id` / `user_id` / `sender_id` / `address` / `channel` 写入工具 context）；时间触发才用 snapshot。工具节点同时注入主 AI 持有的 `cognitive_service` / `knowledge_manager` / `meme_service` / `attachment_registry`。出站走 `MessageSender`，受 `[access]` 约束。`send_message` 只填 `message` 时按该会话推断目标。
+事件用当前会话上下文（`request_type` / `group_id` / `user_id` / `sender_id` / `address` / `channel` 写入工具 context）；普通消息还会把当前消息 ID、附件、原始消息段、引用摘要、队列 lane 与单消息批次信息作为 live resources 注入。后台工作流会先深拷贝这些资源，避免消息处理返回后读到被修改的数据。时间触发才使用持久化 snapshot。工具节点同时注入主 AI 持有的 `cognitive_service` / `knowledge_manager` / `meme_service` / `attachment_registry`。出站走 `MessageSender`，受 `[access]` 约束。`send_message` 只填 `message` 时按该会话推断目标。
 
 ## Start：场景多选 + @ 专项
 
 恰好一个 `id="start"`。事件类必须带 `channels`（多选，至少一项）：`group` | `private` | `wechat`。可再收窄 `group_ids` / `user_ids`。时间类不看 channels，投递仍用 `address`。
 
 `kind`：`message` | `cron` | `daily` | `at` | `interval` | `poke` | `member_join` | `member_leave`。poke 只能 group/private；入退群只能 group。
+
+时间类格式在保存和启用时就会校验，并与实际 APScheduler 建 job 复用同一解析逻辑：`cron` 使用五段 crontab；`daily.time` 必须是补零后的 `HH:MM`（`00:00`–`23:59`）；`at` 必须是同时包含日期与时间的 ISO-8601 datetime，时区可选；`interval_seconds` 必须为正整数。非法配置返回校验错误，不会先保存再在建 job 时失败。
 
 ### @ 消费规则（仅 message）
 
@@ -56,8 +58,9 @@
 - `{{trigger.text_original}}` / `{{trigger.text_stripped}}`
 - `{{trigger.mentions}}` / `{{trigger.mentions_all}}`
 - `{{trigger.channel}}` `{{trigger.sender_id}}` `{{trigger.nickname}}` `{{trigger.address}}` `{{trigger.group_id}}` `{{trigger.time}}`
+- 当前普通消息还提供：`{{trigger.message_id}}`、`{{trigger.message_ids}}`、`{{trigger.attachments}}`、`{{trigger.message_content}}`、`{{trigger.reply_context}}`、`{{trigger.queue_lane}}`、`{{trigger.batch_scope}}`、`{{trigger.batched_count}}`、`{{trigger.current_input_is_batched}}`
 
-节点模板可自行选用带 @ / 不带 @ 的变量。分支 `branch.if` 用同一套 mentions 规则做 case 文本匹配，**不改**全局 `trigger.*`。
+自动化发生在 MessageBatcher 之前，因此普通消息的批次变量固定表示当前单条消息：`batched_count=1`、`current_input_is_batched=false`。直接附件与合并转发引用都会进入 `trigger.attachments`；结构化引用消息位于 `trigger.reply_context`。时间、拍一拍和成员事件没有对应资源时使用空字符串、空数组或空对象，`batched_count=0`。节点模板可自行选用带 @ / 不带 @ 的变量。分支 `branch.if` 用同一套 mentions 规则做 case 文本匹配，**不改**全局 `trigger.*`。
 
 ## 节点
 
@@ -78,9 +81,13 @@
 
 LLM/template 默认不发群，`emit: true` 才发。WebUI 新建默认关闭 `consume_ai_loop` 与 `auto_send_final`。失败即停；未拦截主 AI 时工作流后台执行，主 AI 照常继续。
 
+保存前还会校验运行所需字段（`tool_name`、Agent 名及各类 LLM prompt/input）、分支声明与出边的一致性，以及所有节点是否能从 start 到达。`branch.if` 的每个 case 和 `else`、`branch.llm` 的每个 option 都必须至少有一条对应出边；未知或无 case 标签的分支出边会被拒绝。loop body 由所属 loop 的可达性带入，不会被误判为孤立节点。这里只校验名称非空，不要求工具或 Agent 已经完成运行时注册。
+
 ## 配置 `[automations]`
 
-`enabled`、`max_nodes`（建议 30）、`max_concurrent`（默认 16）、节点超时 600s、整图超时 1200s、`blank_llm_max_iterations`（默认 100）、`loop_max_iterations`（默认与上限 25）、`default_cooldown_seconds`（事件类默认 0，不冷却）。
+`enabled`、`max_nodes`（建议 30）、`max_concurrent`（默认 16）、节点超时 600s、整图超时 1200s、`blank_llm_max_iterations`（默认 100）、`loop_max_iterations`（默认与上限 25）、`default_cooldown_seconds`（事件类默认 0，不冷却）。`max_concurrent` 支持热更新：调大后立即放行等待任务；调小不会取消运行中的图，新任务会等待当前并发自然降到新上限以下。
+
+任务级 `enabled=false` 会立即移除对应 APScheduler job，列表中的 `next_run_time` 变为 `null`；重新启用时先执行完整校验，再恢复时间 job。启动恢复同样不会为停用任务创建 job。历史非法任务不会被自动删除或重写，仍可停用，但编辑或重新启用时必须通过当前校验。
 
 ## 工具
 

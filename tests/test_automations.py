@@ -15,6 +15,7 @@ from aiohttp import web
 
 import Undefined.handlers as handlers_module
 from Undefined.api import RuntimeAPIContext, RuntimeAPIServer
+from Undefined.attachments.models import RegisteredMessageAttachments
 from Undefined.automations.engine import iter_matching_tasks
 from Undefined.automations.match import AutomationEvent, match_start_node
 from Undefined.automations.mentions import consume_mentions
@@ -34,6 +35,11 @@ from Undefined.automations.validate import (
 from Undefined.handlers import MessageHandler
 from Undefined.handlers.poke import PokeMixin
 from Undefined.automations.service import AutomationService
+from Undefined.services.queue_manager import (
+    QUEUE_LANE_GROUP_NORMAL,
+    QUEUE_LANE_PRIVATE,
+)
+from Undefined.utils.message_reply import ReplyContext
 
 
 def test_preview_text_truncates() -> None:
@@ -401,6 +407,104 @@ async def test_runner_branch_llm_uses_option_tool() -> None:
         mentions_all=(),
     )
     assert sent == ["SEARCH"]
+
+
+@pytest.mark.asyncio
+async def test_runner_exposes_message_resources_as_trigger_variables() -> None:
+    captured_args: list[dict[str, Any]] = []
+
+    async def execute_tool(
+        _name: str,
+        args: dict[str, Any],
+        _context: dict[str, Any],
+    ) -> str:
+        captured_args.append(args)
+        return "ok"
+
+    runner = _runner(execute_tool=execute_tool, send_message=AsyncMock())
+    task = {
+        "auto_send_final": False,
+        "nodes": [
+            {"id": "start", "type": "start", "kind": "message", "channels": ["group"]},
+            {
+                "id": "capture",
+                "type": "tool",
+                "tool_name": "capture",
+                "args": {
+                    "message_id": "{{trigger.message_id}}",
+                    "message_ids": "{{trigger.message_ids}}",
+                    "attachments": "{{trigger.attachments}}",
+                    "message_content": "{{trigger.message_content}}",
+                    "reply": "{{trigger.reply_context.message}}",
+                    "queue_lane": "{{trigger.queue_lane}}",
+                    "batch_scope": "{{trigger.batch_scope}}",
+                    "batched_count": "{{trigger.batched_count}}",
+                    "is_batched": "{{trigger.current_input_is_batched}}",
+                },
+            },
+        ],
+        "edges": [{"from": "start", "to": "capture"}],
+    }
+    await runner.run(
+        task,
+        event=AutomationEvent(kind="message", channel="group", text="hi"),
+        pass_text="hi",
+        consume_mentions=(),
+        consume_stripped="hi",
+        mentions_all=(),
+        trigger_resources={
+            "message_id": "m1",
+            "message_ids": ["m1"],
+            "attachments": [{"uid": "pic_1"}],
+            "message_content": [{"type": "text"}],
+            "reply_context": {"message": "quoted"},
+            "queue_lane": "group_mention",
+            "batch_scope": "group:1",
+            "batched_count": 1,
+            "current_input_is_batched": False,
+        },
+    )
+    assert captured_args == [
+        {
+            "message_id": "m1",
+            "message_ids": "['m1']",
+            "attachments": "[{'uid': 'pic_1'}]",
+            "message_content": "[{'type': 'text'}]",
+            "reply": "quoted",
+            "queue_lane": "group_mention",
+            "batch_scope": "group:1",
+            "batched_count": "1",
+            "is_batched": "False",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_runner_time_trigger_message_resources_use_empty_defaults() -> None:
+    sent: list[str] = []
+    runner = _runner(send_message=AsyncMock(side_effect=sent.append))
+    task = {
+        "auto_send_final": False,
+        "nodes": [
+            {"id": "start", "type": "start", "kind": "cron", "cron": "0 9 * * *"},
+            {
+                "id": "done",
+                "type": "template",
+                "template": "{{trigger.message_id}}|{{trigger.message_ids}}|{{trigger.batched_count}}|{{trigger.current_input_is_batched}}",
+                "emit": True,
+            },
+        ],
+        "edges": [{"from": "start", "to": "done"}],
+    }
+    await runner.run(
+        task,
+        event=AutomationEvent(kind="time", channel="group"),
+        pass_text="",
+        consume_mentions=(),
+        consume_stripped="",
+        mentions_all=(),
+    )
+    assert sent == ["|[]|0|False"]
 
 
 @pytest.mark.asyncio
@@ -1603,12 +1707,14 @@ class _DummyAutomationStorage:
         return None
 
 
-def _make_automation_service() -> AutomationService:
+def _make_automation_service(*, max_concurrent: int = 16) -> AutomationService:
     return AutomationService(
         SimpleNamespace(
             ask=AsyncMock(),
             memory_storage=SimpleNamespace(),
-            runtime_config=SimpleNamespace(),
+            runtime_config=SimpleNamespace(
+                automations=SimpleNamespace(max_concurrent=max_concurrent)
+            ),
         ),
         SimpleNamespace(
             send_group_message=AsyncMock(),
@@ -1728,6 +1834,97 @@ async def test_handle_event_mixed_spawns_nonblocking_and_awaits_blocking() -> No
         service.shutdown()
 
 
+@pytest.mark.asyncio
+async def test_automation_concurrency_limit_resizes_without_over_admission() -> None:
+    service = _make_automation_service(max_concurrent=1)
+    started = {task_id: asyncio.Event() for task_id in ("one", "two", "three")}
+    releases = {task_id: asyncio.Event() for task_id in started}
+
+    async def execute(task_id: str, **_kwargs: Any) -> None:
+        started[task_id].set()
+        await releases[task_id].wait()
+
+    setattr(service, "_execute_workflow", execute)
+    for task_id in started:
+        service.tasks[task_id] = _group_message_task(consume_ai_loop=True)
+
+    def start_run(task_id: str) -> asyncio.Task[None]:
+        return asyncio.create_task(
+            service._run_automation(
+                task_id,
+                event=AutomationEvent(
+                    kind="message", channel="group", text="hi", group_id=1
+                ),
+                start_match=None,
+                live_resources=None,
+                time_fire=False,
+            )
+        )
+
+    runs = [start_run("one")]
+    try:
+        await asyncio.wait_for(started["one"].wait(), timeout=1)
+        runs.append(start_run("two"))
+        await asyncio.sleep(0)
+        assert not started["two"].is_set()
+
+        await service.update_max_concurrent(2)
+        await asyncio.wait_for(started["two"].wait(), timeout=1)
+
+        await service.update_max_concurrent(1)
+        runs.append(start_run("three"))
+        await asyncio.sleep(0)
+        releases["one"].set()
+        await asyncio.sleep(0)
+        assert not started["three"].is_set()
+
+        releases["two"].set()
+        await asyncio.wait_for(started["three"].wait(), timeout=1)
+        releases["three"].set()
+        await asyncio.wait_for(asyncio.gather(*runs), timeout=1)
+        assert service._run_limiter.limit == 1
+    finally:
+        for release in releases.values():
+            release.set()
+        await asyncio.gather(*runs, return_exceptions=True)
+        service.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_nonblocking_automation_deep_copies_live_resources() -> None:
+    service = _make_automation_service()
+    inspect_snapshot = asyncio.Event()
+    captured: list[dict[str, Any] | None] = []
+
+    async def run_automation(
+        _task_id: str,
+        *,
+        live_resources: dict[str, Any] | None,
+        **_kwargs: Any,
+    ) -> None:
+        await inspect_snapshot.wait()
+        captured.append(live_resources)
+
+    setattr(service, "_run_automation", run_automation)
+    resources: dict[str, Any] = {"attachments": [{"uid": "pic_original"}]}
+    try:
+        service._spawn_event_run(
+            "snapshot",
+            event=AutomationEvent(kind="message", channel="group", text="hi"),
+            start_match=None,
+            live_resources=resources,
+        )
+        resources["attachments"][0]["uid"] = "pic_mutated"
+        inspect_snapshot.set()
+        await asyncio.wait_for(
+            asyncio.gather(*list(service._background_tasks)), timeout=1
+        )
+        assert captured == [{"attachments": [{"uid": "pic_original"}]}]
+    finally:
+        inspect_snapshot.set()
+        service.shutdown()
+
+
 def _group_handler() -> Any:
     handler: Any = MessageHandler.__new__(MessageHandler)
     handler.config = SimpleNamespace(
@@ -1801,6 +1998,17 @@ async def test_group_entry_intercepts_ai(monkeypatch: pytest.MonkeyPatch) -> Non
     }
     await handler.handle_message(event)
     handler.ai_coordinator.scheduler.handle_event.assert_awaited()
+    live_resources = handler.ai_coordinator.scheduler.handle_event.await_args.kwargs[
+        "live_resources"
+    ]
+    assert live_resources["message_id"] == 1
+    assert live_resources["message_ids"] == [1]
+    assert live_resources["message_content"] == event["message"]
+    assert live_resources["attachments"] == []
+    assert live_resources["queue_lane"] == QUEUE_LANE_GROUP_NORMAL
+    assert live_resources["batch_scope"] == "group:30001"
+    assert live_resources["batched_count"] == 1
+    assert live_resources["current_input_is_batched"] is False
     handler.ai_coordinator.handle_auto_reply.assert_not_awaited()
 
 
@@ -1867,7 +2075,13 @@ async def test_private_entry_intercepts_ai(monkeypatch: pytest.MonkeyPatch) -> N
     handler._schedule_profile_display_name_refresh = MagicMock()
     handler._schedule_meme_ingest = MagicMock()
     handler._background_tasks = set()
-    handler._collect_message_attachments = AsyncMock(return_value=[])
+    handler._collect_message_attachments = AsyncMock(
+        return_value=RegisteredMessageAttachments(
+            attachments=[{"uid": "pic_direct", "kind": "image"}],
+            normalized_text="hello",
+            forward_refs=[{"uid": "file_forward", "kind": "file"}],
+        )
+    )
     handler._schedule_forward_meme_scan = MagicMock()
     handler.sender = SimpleNamespace()
     handler._extract_bilibili_ids = AsyncMock(return_value=[])
@@ -1889,6 +2103,16 @@ async def test_private_entry_intercepts_ai(monkeypatch: pytest.MonkeyPatch) -> N
         }
     )
     handler.ai_coordinator.scheduler.handle_event.assert_awaited()
+    live_resources = handler.ai_coordinator.scheduler.handle_event.await_args.kwargs[
+        "live_resources"
+    ]
+    assert live_resources["trigger_message_id"] == 1
+    assert [item["uid"] for item in live_resources["attachments"]] == [
+        "pic_direct",
+        "file_forward",
+    ]
+    assert live_resources["queue_lane"] == QUEUE_LANE_PRIVATE
+    assert live_resources["batch_scope"] == "private:20001"
     handler.ai_coordinator.handle_private_reply.assert_not_awaited()
 
 
@@ -1915,18 +2139,31 @@ async def test_wechat_entry_intercepts_ai() -> None:
     )
     handler._run_pipelines = AsyncMock()
     handler._schedule_meme_ingest = MagicMock()
+    reply_context = ReplyContext(
+        title="机器人",
+        message_id="quoted-1",
+        text="quoted text",
+        attachments=({"uid": "pic_quote", "kind": "image"},),
+    )
     await handler.handle_weixin_private_message(
         qq_id=1,
         text="hi",
         message_content=[{"type": "text", "data": {"text": "hi"}}],
-        attachments=[],
+        attachments=[{"uid": "pic_current", "kind": "image"}],
         sender_name="wx",
         message_id="m1",
         account_alias="primary",
+        reply_context=reply_context,
     )
     handler.ai_coordinator.scheduler.handle_event.assert_awaited()
     call = handler.ai_coordinator.scheduler.handle_event.await_args
     assert call.args[0].channel == "wechat"
+    live_resources = call.kwargs["live_resources"]
+    assert live_resources["message_id"] == "m1"
+    assert live_resources["attachments"] == [{"uid": "pic_current", "kind": "image"}]
+    assert live_resources["reply_context"] == reply_context.to_dict()
+    assert live_resources["queue_lane"] == QUEUE_LANE_PRIVATE
+    assert live_resources["batch_scope"] == "private:wechat:1"
     handler.ai_coordinator.handle_private_reply.assert_not_awaited()
 
 
@@ -1993,6 +2230,31 @@ def _api_context(scheduler: Any) -> RuntimeAPIContext:
 class _JsonRequest(SimpleNamespace):
     async def json(self) -> dict[str, Any]:
         return dict(getattr(self, "_json", {}))
+
+
+@pytest.mark.asyncio
+async def test_automations_create_returns_400_for_invalid_schedule() -> None:
+    scheduler = _make_automation_service()
+    server = RuntimeAPIServer(_api_context(scheduler), host="127.0.0.1", port=8788)
+    try:
+        response = await server._automations_create_handler(
+            cast(
+                web.Request,
+                _JsonRequest(
+                    _json={
+                        "task_id": "invalid_schedule",
+                        "kind": "cron",
+                        "cron": "invalid cron",
+                        "prompt": "run",
+                    }
+                ),
+            )
+        )
+        assert response.status == 400
+        assert "invalid_schedule" not in scheduler.tasks
+        assert scheduler._apscheduler.get_job("invalid_schedule") is None
+    finally:
+        scheduler.shutdown()
 
 
 class _FakeAutoScheduler:
@@ -2080,6 +2342,169 @@ def test_collect_automation_issues_reports_multiple_problems() -> None:
     assert "event start requires channels" in messages
     assert "branch.if requires cases" in messages
     assert any("unknown node" in message for message in messages)
+
+
+def _single_node_validation_task(
+    node: dict[str, Any],
+    *,
+    start: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "nodes": [
+            start
+            or {
+                "id": "start",
+                "type": "start",
+                "kind": "message",
+                "channels": ["group"],
+            },
+            node,
+        ],
+        "edges": [{"from": "start", "to": str(node["id"])}],
+    }
+
+
+@pytest.mark.parametrize(
+    ("kind", "field", "value", "path"),
+    [
+        ("cron", "cron", "not a cron", "start.cron"),
+        ("daily", "time", "9:00", "start.time"),
+        ("daily", "time", "24:00", "start.time"),
+        ("daily", "time", "12:60", "start.time"),
+        ("at", "at", "2026-08-19", "start.at"),
+        ("at", "at", "not-a-datetime", "start.at"),
+    ],
+)
+def test_validate_rejects_invalid_time_start_formats(
+    kind: str,
+    field: str,
+    value: str,
+    path: str,
+) -> None:
+    start = {"id": "start", "type": "start", "kind": kind, field: value}
+    issues = collect_automation_issues(
+        _single_node_validation_task(
+            {"id": "done", "type": "template", "template": "ok"},
+            start=start,
+        )
+    )
+    assert any(issue["path"] == path for issue in issues)
+
+
+@pytest.mark.parametrize(
+    ("start",),
+    [
+        ({"id": "start", "type": "start", "kind": "cron", "cron": "0 9 * * *"},),
+        ({"id": "start", "type": "start", "kind": "daily", "time": "09:05"},),
+        (
+            {
+                "id": "start",
+                "type": "start",
+                "kind": "at",
+                "at": "2026-08-20T09:05:00+08:00",
+            },
+        ),
+    ],
+)
+def test_validate_accepts_supported_time_start_formats(
+    start: dict[str, Any],
+) -> None:
+    validate_automation(
+        _single_node_validation_task(
+            {"id": "done", "type": "template", "template": "ok"},
+            start=start,
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    ("node", "path"),
+    [
+        ({"id": "node", "type": "tool"}, "nodes.node.tool_name"),
+        (
+            {"id": "node", "type": "llm.agent", "input": "do it"},
+            "nodes.node.agent",
+        ),
+        (
+            {"id": "node", "type": "llm.agent", "agent": "web"},
+            "nodes.node.input",
+        ),
+        ({"id": "node", "type": "llm.main"}, "nodes.node.prompt"),
+        ({"id": "node", "type": "llm.blank"}, "nodes.node.user_prompt"),
+        (
+            {
+                "id": "node",
+                "type": "branch.llm",
+                "options": [{"id": "a"}, {"id": "b"}],
+            },
+            "nodes.node.input",
+        ),
+    ],
+)
+def test_validate_requires_runtime_node_fields(
+    node: dict[str, Any],
+    path: str,
+) -> None:
+    issues = collect_automation_issues(_single_node_validation_task(node))
+    assert any(issue["path"] == path for issue in issues)
+
+
+def test_validate_requires_complete_branch_edges() -> None:
+    task = {
+        "nodes": [
+            {
+                "id": "start",
+                "type": "start",
+                "kind": "message",
+                "channels": ["group"],
+            },
+            {
+                "id": "if",
+                "type": "branch.if",
+                "cases": [{"id": "hit", "text": "yes"}],
+            },
+            {
+                "id": "llm",
+                "type": "branch.llm",
+                "input": "{{trigger.text}}",
+                "options": [{"id": "left"}, {"id": "right"}],
+            },
+            {"id": "done", "type": "template", "template": "ok"},
+        ],
+        "edges": [
+            {"from": "start", "to": "if"},
+            {"from": "if", "to": "llm", "case": "hit"},
+            {"from": "if", "to": "done", "case": "unknown"},
+            {"from": "llm", "to": "done", "case": "left"},
+        ],
+    }
+    messages = [issue["message"] for issue in collect_automation_issues(task)]
+    assert "unknown branch case: unknown" in messages
+    assert "branch case requires an outgoing edge: else" in messages
+    assert "branch case requires an outgoing edge: right" in messages
+
+
+def test_validate_reachability_understands_loop_bodies() -> None:
+    task = {
+        "nodes": [
+            {"id": "start", "type": "start", "kind": "cron", "cron": "0 9 * * *"},
+            {"id": "loop", "type": "loop.times", "count": 2, "body": ["body"]},
+            {"id": "body", "type": "template", "template": "{{index}}"},
+            {"id": "after", "type": "template", "template": "done"},
+            {"id": "detached", "type": "template", "template": "never"},
+        ],
+        "edges": [
+            {"from": "start", "to": "loop"},
+            {"from": "loop", "to": "after", "kind": "exit"},
+        ],
+    }
+    issues = collect_automation_issues(task)
+    unreachable_paths = {
+        issue["path"]
+        for issue in issues
+        if issue["message"] == "node is not reachable from start"
+    }
+    assert unreachable_paths == {"nodes.detached"}
 
 
 @pytest.mark.asyncio

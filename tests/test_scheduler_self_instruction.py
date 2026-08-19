@@ -14,6 +14,7 @@ from Undefined.automations.address import (
 from Undefined.automations.constants import SELF_CALL_TOOL_NAME
 from Undefined.automations.match import AutomationEvent
 from Undefined.automations.service import AutomationService
+from Undefined.automations.validate import AutomationValidationError
 from Undefined.utils import io as async_io
 
 
@@ -342,6 +343,140 @@ async def test_upsert_automation_refreshes_job_args() -> None:
     stored = service.list_tasks()["task_edit_args"]
     assert stored["address"] == "qq:10002"
     assert stored["target_type"] == "private"
+
+
+@pytest.mark.asyncio
+async def test_disabled_time_automation_removes_and_restores_job() -> None:
+    service = _make_service()
+    try:
+        await service.upsert_automation(
+            "task_toggle",
+            {
+                "task_name": "toggle",
+                "tool_name": "get_current_time",
+                "tool_args": {},
+                "cron": "0 9 * * *",
+                "target_id": 10001,
+                "target_type": "group",
+                "enabled": False,
+            },
+        )
+        assert service._apscheduler.get_job("task_toggle") is None
+        assert service.next_run_iso("task_toggle") is None
+
+        assert await service.set_enabled("task_toggle", True) is True
+        assert service._apscheduler.get_job("task_toggle") is not None
+
+        assert await service.set_enabled("task_toggle", False) is True
+        assert service._apscheduler.get_job("task_toggle") is None
+        assert service.next_run_iso("task_toggle") is None
+    finally:
+        service.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_invalid_cron_is_rejected_before_storage_or_scheduler_update() -> None:
+    service = _make_service()
+    try:
+        with pytest.raises(AutomationValidationError):
+            await service.upsert_automation(
+                "task_invalid_cron",
+                {
+                    "tool_name": "get_current_time",
+                    "tool_args": {},
+                    "cron": "invalid cron",
+                    "target_id": 10001,
+                    "target_type": "group",
+                },
+            )
+        assert "task_invalid_cron" not in service.tasks
+        assert service._apscheduler.get_job("task_invalid_cron") is None
+    finally:
+        service.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_invalid_legacy_automation_can_disable_but_not_enable() -> None:
+    service = _make_service()
+    service.tasks["legacy_invalid"] = {
+        "enabled": False,
+        "nodes": [
+            {
+                "id": "start",
+                "type": "start",
+                "kind": "cron",
+                "cron": "invalid cron",
+            },
+            {"id": "done", "type": "template", "template": "ok"},
+        ],
+        "edges": [{"from": "start", "to": "done"}],
+    }
+    try:
+        assert await service.set_enabled("legacy_invalid", False) is True
+        with pytest.raises(AutomationValidationError):
+            await service.set_enabled("legacy_invalid", True)
+        assert service.tasks["legacy_invalid"]["enabled"] is False
+        assert service._apscheduler.get_job("legacy_invalid") is None
+    finally:
+        service.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_recovery_skips_disabled_time_jobs() -> None:
+    class _LoadedStorage(_DummyStorage):
+        def load_tasks(self) -> dict[str, Any]:
+            return {
+                "enabled": {
+                    "enabled": True,
+                    "nodes": [
+                        {
+                            "id": "start",
+                            "type": "start",
+                            "kind": "cron",
+                            "cron": "0 9 * * *",
+                        },
+                        {"id": "done", "type": "template", "template": "ok"},
+                    ],
+                    "edges": [{"from": "start", "to": "done"}],
+                },
+                "disabled": {
+                    "enabled": False,
+                    "nodes": [
+                        {
+                            "id": "start",
+                            "type": "start",
+                            "kind": "cron",
+                            "cron": "0 10 * * *",
+                        },
+                        {"id": "done", "type": "template", "template": "ok"},
+                    ],
+                    "edges": [{"from": "start", "to": "done"}],
+                },
+            }
+
+    service = AutomationService(
+        SimpleNamespace(
+            ask=AsyncMock(),
+            memory_storage=SimpleNamespace(),
+            runtime_config=SimpleNamespace(),
+        ),
+        SimpleNamespace(
+            send_group_message=AsyncMock(),
+            send_private_message=AsyncMock(),
+        ),
+        SimpleNamespace(
+            send_like=AsyncMock(),
+            get_image=AsyncMock(return_value=None),
+            get_forward_msg=AsyncMock(return_value=[]),
+        ),
+        SimpleNamespace(),
+        storage=cast(Any, _LoadedStorage()),
+    )
+    try:
+        assert service._apscheduler.get_job("enabled") is not None
+        assert service._apscheduler.get_job("disabled") is None
+    finally:
+        service.shutdown()
 
 
 @pytest.mark.asyncio

@@ -7,6 +7,7 @@ import logging
 import os
 import time
 import uuid
+from copy import deepcopy
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
@@ -63,6 +64,38 @@ _AI_SERVICE_CONTEXT_ATTRS: tuple[tuple[str, str], ...] = (
 )
 
 
+class _ResizableConcurrencyLimiter:
+    """Limit concurrent workflows while allowing safe runtime resizing."""
+
+    def __init__(self, limit: int) -> None:
+        self._limit = max(1, int(limit))
+        self._active = 0
+        self._condition = asyncio.Condition()
+
+    @property
+    def limit(self) -> int:
+        return self._limit
+
+    @property
+    def active(self) -> int:
+        return self._active
+
+    async def acquire(self) -> None:
+        async with self._condition:
+            await self._condition.wait_for(lambda: self._active < self._limit)
+            self._active += 1
+
+    async def release(self) -> None:
+        async with self._condition:
+            self._active = max(0, self._active - 1)
+            self._condition.notify_all()
+
+    async def resize(self, limit: int) -> None:
+        async with self._condition:
+            self._limit = max(1, int(limit))
+            self._condition.notify_all()
+
+
 class AutomationService:
     """Load, persist, match and run automation graphs."""
 
@@ -89,7 +122,9 @@ class AutomationService:
         self._running_ids: set[str] = set()
         self._background_tasks: set[asyncio.Task[None]] = set()
         self._run_lock = asyncio.Lock()
-        self._run_sema = asyncio.Semaphore(DEFAULT_MAX_CONCURRENT)
+        self._run_limiter = _ResizableConcurrencyLimiter(
+            int(self._automation_settings()["max_concurrent"])
+        )
 
         if not self._apscheduler.running:
             self._apscheduler.start()
@@ -144,7 +179,7 @@ class AutomationService:
                         address
                     )
                 self._sync_time_job(task_id, info)
-                if build_apscheduler_trigger(info) is not None:
+                if self._apscheduler.get_job(task_id) is not None:
                     count += 1
                     logger.info(
                         "[自动化] 已恢复时间任务: id=%s name=%s kind=%s address=%s next=%s",
@@ -230,8 +265,15 @@ class AutomationService:
         }
 
     def _sync_time_job(self, task_id: str, task_info: dict[str, Any]) -> None:
-        trigger = build_apscheduler_trigger(task_info)
         existing = self._apscheduler.get_job(task_id)
+        if task_info.get("enabled") is False:
+            if existing is not None:
+                try:
+                    self._apscheduler.remove_job(task_id)
+                except Exception:
+                    logger.debug("[自动化] 移除停用任务的时间 job: %s", task_id)
+            return
+        trigger = build_apscheduler_trigger(task_info)
         if trigger is None:
             if existing is not None:
                 try:
@@ -304,7 +346,11 @@ class AutomationService:
         task = self.tasks.get(task_id)
         if not isinstance(task, dict):
             return False
+        if enabled:
+            settings = self._automation_settings()
+            validate_automation(task, max_nodes=int(settings["max_nodes"]))
         task["enabled"] = bool(enabled)
+        self._sync_time_job(task_id, task)
         await self.storage.save_all(self.tasks)
         logger.info(
             "[自动化] 已%s: id=%s name=%s",
@@ -313,6 +359,17 @@ class AutomationService:
             str(task.get("task_name") or ""),
         )
         return True
+
+    async def update_max_concurrent(self, max_concurrent: int) -> None:
+        """Apply a new workflow concurrency limit without restarting the service."""
+        previous = self._run_limiter.limit
+        await self._run_limiter.resize(max_concurrent)
+        logger.info(
+            "[自动化] 并发上限已更新: %s -> %s active=%s",
+            previous,
+            self._run_limiter.limit,
+            self._run_limiter.active,
+        )
 
     def _spawn_event_run(
         self,
@@ -324,7 +381,7 @@ class AutomationService:
     ) -> None:
         """Run a non-blocking automation in the background and return immediately."""
         snapshot_event = replace(event, extra=dict(event.extra))
-        snapshot_resources = dict(live_resources) if live_resources else None
+        snapshot_resources = deepcopy(live_resources) if live_resources else None
         logger.info(
             "[自动化] 非阻塞后台执行: id=%s kind=%s address=%s",
             task_id,
@@ -540,7 +597,8 @@ class AutomationService:
             self._running_ids.add(task_id)
         settings = self._automation_settings()
         try:
-            async with self._run_sema:
+            await self._run_limiter.acquire()
+            try:
                 await self._execute_workflow(
                     task_id,
                     event=event,
@@ -549,6 +607,8 @@ class AutomationService:
                     time_fire=time_fire,
                     settings=settings,
                 )
+            finally:
+                await self._run_limiter.release()
         finally:
             self._running_ids.discard(task_id)
 
@@ -1146,6 +1206,7 @@ class AutomationService:
                             getattr(consume, "stripped", "") or resolved_event.text
                         ),
                         mentions_all=tuple(getattr(consume, "mentions_all", ()) or ()),
+                        trigger_resources=live_resources,
                     )
                 except WorkflowError as exc:
                     logger.exception(

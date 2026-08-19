@@ -671,6 +671,23 @@ Prompt caching 补充：
 
 ---
 
+### 4.10.3 `[automations]` 条件驱动自动化
+
+| 字段 | 默认值 | 说明 | 约束/热更新 |
+|---|---:|---|---|
+| `enabled` | `true` | 自动化总开关 | 关闭后不匹配新事件，执行入口也会跳过；后续事件动态读取 |
+| `max_nodes` | `30` | 单张图的最大节点数（含 start 与 loop body） | 保存时生效，最小为 1 |
+| `max_concurrent` | `16` | 全局同时运行的工作流上限 | 最小为 1；支持热更新，调大立即放行等待任务，调小等待当前任务自然收敛 |
+| `node_timeout_seconds` | `600.0` | 单节点超时 | 最小为 1 秒，后续工作流生效 |
+| `workflow_timeout_seconds` | `1200.0` | 整图超时 | 不小于节点超时，后续工作流生效 |
+| `blank_llm_max_iterations` | `100` | `llm.blank` 工具调用迭代上限 | 最小为 1，后续工作流生效 |
+| `loop_max_iterations` | `25` | loop 迭代硬顶 | 范围 1–25，后续工作流生效 |
+| `default_cooldown_seconds` | `0` | 事件工作流默认冷却秒数 | `0` 表示不冷却，任务自身配置优先 |
+
+任务级 `enabled=false` 与总开关不同：它会立即移除该任务的 APScheduler 时间 job，重新启用时先校验工作流再恢复 job。图结构、时间格式、消息快照和模板变量详见 [条件驱动自动化](automations.md)。
+
+---
+
 ### 4.11 `[skills]` 技能系统与 Agent 介绍
 
 | 字段 | 默认值 | 说明 |
@@ -1329,6 +1346,7 @@ api_key = "replace-with-your-key"
 
 因此：**单独配置 `[models.summary]` 只影响斜杠命令与 SummaryService，不会改变主 AI 对话里 `summary_agent` 的行为。** 若希望对话内总结也使用专用模型，需调整 `[models.agent]` 或模型池，而不是只改 `[models.summary]`。
 - `render.browser_max_concurrency` 会在当前渲染任务空闲后重建渲染并发信号量。
+- `automations.max_concurrent` 会立即调整自动化并发闸门；降低上限不会取消已经运行的工作流。
 - `skills.intro_autogen_*`（Agent intro 生成器配置刷新）
 - `skills.tool_search_*`（主 AI 后续新 `ask()` 的按需工具加载配置刷新）
 - `lxmusic2api.base_url` / `lxmusic2api.api_key`（后续音乐请求与 `music.*` 工具可见性刷新）

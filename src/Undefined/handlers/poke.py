@@ -54,7 +54,12 @@ class PokeMixin:
         ai_coordinator: AICoordinator
         history_manager: MessageHistoryManager
 
-        async def _run_automations(self, event: AutomationEvent) -> bool: ...
+        async def _run_automations(
+            self,
+            event: AutomationEvent,
+            *,
+            live_resources: dict[str, Any] | None = None,
+        ) -> bool: ...
 
         def _schedule_profile_display_name_refresh(
             self,

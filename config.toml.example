@@ -945,8 +945,8 @@ enabled = true
 # zh: 单张图最多节点数（含 start / 分支 / 循环体），建议 30。
 # en: Max nodes per graph including start, branches and loop bodies. Suggested 30.
 max_nodes = 30
-# zh: 同时运行的自动化上限。
-# en: Max concurrent automation runs.
+# zh: 同时运行的自动化上限。支持热更新；调小不会取消正在运行的工作流，而是等待并发自然收敛。
+# en: Max concurrent automation runs. Hot-reloadable; lowering it lets active runs drain without cancellation.
 max_concurrent = 16
 # zh: 单个节点超时（秒）。
 # en: Per-node timeout in seconds.

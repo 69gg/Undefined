@@ -279,6 +279,7 @@ class WorkflowRunner:
         consume_mentions: tuple[str, ...],
         consume_stripped: str,
         mentions_all: tuple[str, ...],
+        trigger_resources: dict[str, Any] | None = None,
     ) -> str:
         self._continue_on_tool_error = bool(task.get("compat_continue_on_tool_error"))
         nodes = task.get("nodes")
@@ -294,21 +295,45 @@ class WorkflowRunner:
             event.channel,
             event.address,
         )
+        trigger: dict[str, Any] = {
+            "text": pass_text,
+            "text_original": event.text,
+            "text_stripped": consume_stripped,
+            "mentions": list(consume_mentions),
+            "mentions_all": list(mentions_all),
+            "channel": event.channel,
+            "sender_id": event.sender_id,
+            "nickname": event.nickname,
+            "address": event.address,
+            "group_id": event.group_id,
+            "user_id": event.user_id,
+            "time": datetime.now().isoformat(timespec="seconds"),
+            "message_id": "",
+            "message_ids": [],
+            "attachments": [],
+            "message_content": [],
+            "reply_context": {},
+            "queue_lane": "",
+            "batch_scope": "",
+            "batched_count": 0,
+            "current_input_is_batched": False,
+        }
+        if trigger_resources:
+            for key in (
+                "message_id",
+                "message_ids",
+                "attachments",
+                "message_content",
+                "reply_context",
+                "queue_lane",
+                "batch_scope",
+                "batched_count",
+                "current_input_is_batched",
+            ):
+                if key in trigger_resources:
+                    trigger[key] = trigger_resources[key]
         variables: dict[str, Any] = {
-            "trigger": {
-                "text": pass_text,
-                "text_original": event.text,
-                "text_stripped": consume_stripped,
-                "mentions": list(consume_mentions),
-                "mentions_all": list(mentions_all),
-                "channel": event.channel,
-                "sender_id": event.sender_id,
-                "nickname": event.nickname,
-                "address": event.address,
-                "group_id": event.group_id,
-                "user_id": event.user_id,
-                "time": datetime.now().isoformat(timespec="seconds"),
-            },
+            "trigger": trigger,
             "nodes": {},
             "vars": {},
             "index": 0,

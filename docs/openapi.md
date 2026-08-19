@@ -262,11 +262,13 @@ curl http://127.0.0.1:8788/openapi.json
 ```
 
 - 新建 ID 只允许字母、数字、`_`、`.`、`:`、`-`，最长 96 字符。
-- `POST /api/v1/automations/validate` 校验全图但不保存，返回 `{ "ok": true, "issues": [{ "path": "start.channels", "message": "..." }] }`。
+- `POST /api/v1/automations/validate` 校验全图但不保存，返回 `{ "ok": true, "issues": [{ "path": "start.channels", "message": "..." }] }`。校验覆盖五段 cron、补零 `HH:MM`、ISO datetime、节点运行必填项、分支 option/case 出边和 start 可达性；创建、更新及重新启用使用相同规则，非法配置返回 400，不会创建 APScheduler job。
 - catalog 额外返回 `node_type_meta`、`tools` / `toolsets` / `agents` 名称列表，供画布节点盘与检查器下拉使用。
 - 工具与 `llm.*` 节点支持 `store_output`（默认 true）和 `output_var`；开启后下游可用 `{{名称}}` 读取该节点输出。
 - `llm.blank` / `llm.agent` / `llm.main` 支持 `extract_vars`（`[{ "name", "description" }]`），注入 `extract_<名称>` 工具供模型写入额外变量。`branch.llm` 不支持。
 - `consume_ai_loop=false` 时事件工作流后台执行，不拦截也不等待主 AI。
+- 普通消息工作流可使用 `trigger.message_id` / `message_ids` / `attachments` / `message_content` / `reply_context` / `queue_lane` / `batch_scope` / `batched_count` / `current_input_is_batched`；它们表示进入 MessageBatcher 前的当前单条消息。
+- `PATCH {"enabled": false}` 会移除时间 job 并令 `next_run_time=null`；重新启用时先校验再恢复 job。
 - 任务可带 `ui`（节点坐标、缩放、平移），运行时忽略该字段。
 - `address` 推荐规范投递地址：`qq:<QQ号>`、`group:<群号>` 或 `wechat:<逻辑QQ号>`。
 - 所有 `/api/v1/automations*` 路由都遵循 Runtime API 的 `X-Undefined-API-Key` 鉴权。
