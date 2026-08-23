@@ -100,7 +100,7 @@ graph TB
             T_BilibiliVideo["bilibili_video<br/>B站视频下载发送 / UID 获取"]
         end
         
-        subgraph Toolsets["工具集 (skills/toolsets/, 11大类)"]
+        subgraph Toolsets["工具集 (skills/toolsets/, 13大类)"]
             TS_Group["group.*<br/>• get_member_list<br/>• get_member_info<br/>• get_honor_info<br/>• get_files"]
             TS_Messages["messages.*<br/>• send_message<br/>• get_recent_messages<br/>• get_forward_msg"]
             TS_Memory["memory.*<br/>• add / delete<br/>• list / update"]
@@ -865,7 +865,7 @@ description: 从 PDF 文件中提取文本和表格，填写表单。当用户�
     自动提取由 `PipelineRegistry` 并行检测、并行处理全部命中的管线；随后 `await` 自动化工作流，未拦截时再进入 AI 自动回复。
 4. **AI 核心能力层**：AIClient (ai/client/ + client.py shim)、PromptBuilder (ai/prompts/ + prompts.py shim)、ModelRequester (ai/llm/ + llm.py shim)、ToolManager (tooling.py)、MultimodalAnalyzer (ai/multimodal/ + multimodal.py shim)、SummaryService (summaries.py)、TokenCounter (tokens.py)。OpenAI Chat Completions / Responses、Anthropic Messages SDK 归一化、CoT 续传与文本 Tool Call 容错见[模型 API 与兼容层](docs/model-compatibility.md)。
 5. **存储与上下文层**：MessageHistoryManager (utils/history.py, 10000条限制)、MemoryStorage (memory.py, 置顶备忘录, 500条上限)、EndSummaryStorage、CognitiveService + JobQueue + HistorianWorker + VectorStore + ProfileStorage、MemeService + MemeWorker + MemeStore + MemeVectorStore (表情包库)、FAQStorage、AutomationStorage (`data/automations.json`；旧 `scheduled_tasks.json` 启动时一次性转为新格式，不删旧文件、不双写)、TokenUsageStorage (自动归档)
-6. **技能系统层**：ToolRegistry (registry.py)、AgentRegistry、7个 Agents、12类 Toolsets
+6. **技能系统层**：ToolRegistry (registry.py)、AgentRegistry、7个 Agents、13类 Toolsets
 7. **异步 IO 层**：统一 IO 工具 (utils/io.py)，包含 write_json、read_json、append_line、跨平台文件锁 (flock/msvcrt)
 8. **数据持久化层**：历史数据目录、FAQ 目录、Token 归档目录、记忆文件、总结文件、自动化文件、微信绑定/游标/隔离/审计状态
 
@@ -898,7 +898,7 @@ description: 从 PDF 文件中提取文本和表格，填写表单。当用户�
 ### Skills 插件系统
 
 - **Tools (基础工具)**：原子化的功能单元，如 `send_message`, `get_history`, `bilibili_video`, `arxiv_paper`。
-- **Toolsets (复合工具集)**：11大类工具集 (group, messages, memory, contacts, group_analysis, notices, render, automation, cognitive, mcp, memes)。
+- **Toolsets (复合工具集)**：13大类工具集 (attachments, group, messages, memory, contacts, group_analysis, music, notices, render, automation, cognitive, mcp, memes)。
 - **注册表延迟导入 + 热重载**：启动时读取 `config.json` 建立本地 schema，`handler.py` 仅在首次执行工具时导入；当 `skills/` 下的 `config.json`/`handler.py` 发生变更时会自动重新加载。
 - **模型 schema 按需投影**：启用 `skills.tool_search_enabled` 后，主 AI 的请求级 `ToolSearchSession` 只投影配置为始终加载的工具、虚拟 `tool_search` 和本轮已检索工具的 schema，其余工具仅注入规范名称；搜索命中的 schema 从下一模型轮开始可用，新 `ask()` 会重置。该机制不改变本地完整注册表、handler 导入时机或子 Agent 工具集。
 - **Agent 自我介绍自动生成**：启动时按 Agent 代码/配置 hash 生成 `intro.generated.md` 并与 `intro.md` 合并。

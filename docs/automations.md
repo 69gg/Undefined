@@ -1,96 +1,93 @@
-# 条件驱动自动化（青春版工作流）
+# 自动化工作流（Automations）
 
-对外名称：**自动化 / Automations**。一张小图把工具、模板、LLM、if/else 与有上限的循环串起来；消息命中后可以接管本轮主 AI。
+自动化让你用一张可视化流程图描述「**满足什么条件时，机器人自动做什么**」：消息命中关键词或 @、有人拍一拍、成员进退群、到达设定时间，都会按图中节点依次执行工具调用、模板加工、LLM 生成与条件分支，还能直接接管本轮 AI 回复。
 
-详细设计约束：不做 HTTP/代码节点、独立子工作流文件、人工审批、Console/Chat 独立编辑器。WebUI 提供画布编辑器；图数据仍是 `nodes` / `edges`。
+每张图由三部分组成：
 
-## 存储与兼容
+- **触发器（start）**：什么时候运行；
+- **节点**：每一步做什么（调用工具、整理文本、生成内容、判断分支、循环）；
+- **连线（edges）**：节点之间的先后顺序。
 
-- 运行时只读写 `data/automations.json`
-- 启动时若还没有新文件、但存在旧 `data/scheduled_tasks.json`：读取并转为 start + 节点，写入 `automations.json`；**不删除**旧文件，之后也**不双写**
-- 已有 `automations.json` 时不再读取旧文件
-- 运行时由 `AutomationService`（`automations/service.py`）加载图、匹配事件、跑 DAG，并用 APScheduler 触发时间类 start。工具上下文注入 `automations` 与兼容别名 `scheduler`
-- 对外入口只有 `/api/v1/automations` 与 `automation.*`；不再提供 `/schedules` 或 `scheduler.*`
+能力边界：自动化不提供 HTTP 请求节点、代码执行节点、人工审批和独立子工作流文件；需要更复杂的外部调用时，请封装成工具后在工作流里使用。
 
-## 挂载点
+## 典型用途
 
-统一在 **pipeline 之后、对应 AI loop 之前接入工作流**。`consume_ai_loop=true` 时 await 该图并拦截本轮主 AI；`false`（**全局默认值**）时后台执行、立刻放行主 AI——即默认情况下命中自动化的消息仍会走 AI 回复，需要工作流接管本轮时必须显式设置 `consume_ai_loop=true`。匹配失败仍继续后续流程。「是否处理消息」门控是硬前提：群聊/私聊未过 `should_process_*` 门控、或 core 的 `process_poke_message` 关闭时，事件直接跳过，不做任何自动化匹配。Bot 自身消息不匹配。自动化看单条消息，发生在 MessageBatcher 之前。
-
-| 入口 | 顺序 |
+| 场景 | 推荐做法 |
 |---|---|
-| 群聊 | `_run_pipelines` → 自动化 → `handle_auto_reply` |
-| QQ 私聊 | pipeline → 自动化 → `handle_private_reply` |
-| 微信私聊 | pipeline → 自动化 → `handle_private_reply`（channel=`wechat`） |
-| 拍一拍 | 仅当 core `process_poke_message` 开启：写历史 → 自动化 → 原 poke AI |
-| 入退群 | OneBot `group_increase` / `group_decrease`，无 AI 可拦 |
-| 时间 | APScheduler |
+| 定时提醒 / 每日播报 | `cron` / `daily` 触发 + 一个 LLM 或模板节点 |
+| 关键词 / @ 应答 | `message` 触发，配置 `mentions` 与文本匹配，需要时开启「接管本轮 AI 回复」 |
+| 入群欢迎 / 退群提示 | `member_join` / `member_leave` 触发，`{{trigger.nickname}}` 直接可用 |
+| 拍一拍彩蛋 | `poke` 触发 |
+| 多步骤任务链 | 多个节点串成一条线，中间用变量传递结果 |
 
-事件用当前会话上下文（`request_type` / `group_id` / `user_id` / `sender_id` / `address` / `channel` 写入工具 context）；普通消息还会把当前消息 ID、附件、原始消息段、引用摘要、队列 lane 与单消息批次信息作为 live resources 注入。后台工作流会先深拷贝这些资源，避免消息处理返回后读到被修改的数据。时间触发才使用持久化 snapshot。工具节点同时注入主 AI 持有的 `cognitive_service` / `knowledge_manager` / `meme_service` / `attachment_registry`。出站走 `MessageSender`，受 `[access]` 约束。`send_message` 只填 `message` 时按该会话推断目标。
+## 三种创建方式
 
-## Start：场景多选 + @ 专项
+1. **对话创建**：直接告诉 AI 要什么，例如「每天早上八点半给我发一条待办提醒」，AI 会调用 `automation.create` 帮你建好。
+2. **WebUI 画布编辑器**：在「自动化」页新建或编辑，从节点盘添加节点、点选出点和目标完成连线，在右侧检查器填写参数。详见 [WebUI 指南](webui-guide.md)。
+3. **API 调用**：通过 Runtime API 的 `/api/v1/automations` 系列端点增删改查，字段说明见 [OpenAPI 说明](openapi.md)。
 
-恰好一个 `id="start"`。事件类必须带 `channels`（多选，至少一项）：`group` | `private` | `wechat`。可再收窄 `group_ids` / `user_ids`。时间类不看 channels，投递仍用 `address`。
+管理入口统一为六个工具 / API 动作：`automation.list` / `get` / `create` / `update` / `delete` / `set_enabled`。除了画完整流程图（提交 `nodes` + `edges`），简单场景还可以用「短命令」写法——只声明触发条件加一个动作（一段 prompt、一个工具或一个 Agent）。
 
-`kind`：`message` | `cron` | `daily` | `at` | `interval` | `poke` | `member_join` | `member_leave`。poke 只能 group/private；入退群只能 group。
+## 触发器（start）
 
-时间类格式在保存和启用时就会校验，并与实际 APScheduler 建 job 复用同一解析逻辑：`cron` 使用五段 crontab；`daily.time` 必须是补零后的 `HH:MM`（`00:00`–`23:59`）；`at` 必须是同时包含日期与时间的 ISO-8601 datetime，时区可选；`interval_seconds` 必须为正整数。非法配置返回校验错误，不会先保存再在建 job 时失败。
+每张图有且只有一个 `start` 节点。消息类触发必须选择生效场景 `channels`（可多选）：`group`（QQ 群聊）、`private`（QQ 私聊）、`wechat`（微信私聊），并可用 `group_ids` / `user_ids` 进一步收窄。时间类触发不看场景，发送目标由任务的 `address` 决定（如 `qq:<QQ号>`、`group:<群号>`、`wechat:<逻辑QQ号>`）。
 
-### @ 消费规则（仅 message）
+| kind | 含义 | 备注 |
+|---|---|---|
+| `message` | 群聊 / 私聊 / 微信消息 | 需选 `channels` |
+| `poke` | 拍一拍 | 仅群聊、QQ 私聊 |
+| `member_join` / `member_leave` | 入群 / 退群 | 仅群聊 |
+| `cron` | 五段 crontab 定时 | 如 `0 9 * * *` |
+| `daily` | 每天固定时刻 | 补零的 `HH:MM`（`00:00`–`23:59`） |
+| `at` | 单次定时 | ISO-8601 日期时间，时区可选 |
+| `interval` | 固定间隔循环 | 正整数秒 |
 
-归一化入站 at 已是 `[@qq]` / `[@qq(昵称)]`。匹配时抽出 mention 列表，**按条件条款消费，而不是整段当普通字符串搜 `[@`。**
+时间格式在保存时即校验，非法配置会直接报错，不会出现「保存成功却从不执行」的情况。
 
-`mentions: string[]`：
+### @ 匹配规则（仅 message）
 
-- `"10001"`：必须出现该 id，并只剥这一枚 token
-- `"*"`：从左到右消费一枚尚未被消费的任意 mention
-- 可写多条：`["10001", "10002", "*"]`
-- 空或缺省：**不做 @ 条件**，全文原样匹配、原样传入
+消息里的 at 在匹配前形如 `[@10001]` 或 `[@10001(昵称)]`：
 
-剥除：只有写入且匹配到的 token 才删。若 token 右侧紧邻空白（半角/全角 `\u3000`/tab），空白一起删。`[@10001] 你好` → `你好`；`[@xxx]你好` 只删 token。未写入的 `@` 留在剩余文本。
+- `mentions: ["10001"]` 表示这条工作流要求出现 @10001，并把这一枚 @ 从文本中剥掉；`"*"` 表示消费任意一枚尚未被消费的 @；可写多条依次消费。
+- 只有写入且匹配到的 @ 才会被剥除，其余 @ 原样保留在文本里。
+- 不写 `mentions` 就不设 @ 条件，整段原文参与匹配。
+- `pass_text` 决定下游拿到的 `{{trigger.text}}` 是原始全文（`original`）还是剥完 @ 的文本（`stripped`）；写了 `mentions` 时默认 `stripped`。
+- 文本匹配支持 contains / keyword / regex 三种方式（`text_match` + `text`）。
 
-然后对剩余文本做 `text_match`（contains / keyword / regex）+ `text`。
+### 是否接管本轮 AI 回复
 
-`pass_text`：`original` | `stripped`（写了 mentions 时默认 stripped，否则 original）。
+默认情况下，命中工作流的消息仍会照常交给主 AI 回复，工作流只在后台运行。如果希望这条消息完全交给工作流处理、避免重复回复，请在 start 中显式开启「接管本轮 AI 回复」（`consume_ai_loop=true`）。WebUI 新建的任务默认既不拦截主 AI，也不自动发送最终值。
 
-下游变量：
+两点硬性前提：对应消息处理开关必须打开（群聊 / 私聊各自的 `should_process_*`、拍一拍的 `process_poke_message`），否则事件不会进入自动化匹配；机器人自己的消息也不会触发自动化。另外自动化逐条处理消息，发生在同 sender 消息合并之前，详见 [消息合并](message-batching.md)。
 
-- `{{trigger.text}}`：由 `pass_text` 决定
-- `{{trigger.text_original}}` / `{{trigger.text_stripped}}`
-- `{{trigger.mentions}}` / `{{trigger.mentions_all}}`
-- `{{trigger.channel}}` `{{trigger.sender_id}}` `{{trigger.nickname}}` `{{trigger.address}}` `{{trigger.group_id}}` `{{trigger.time}}`
-- 当前普通消息还提供：`{{trigger.message_id}}`、`{{trigger.message_ids}}`、`{{trigger.attachments}}`、`{{trigger.message_content}}`、`{{trigger.reply_context}}`、`{{trigger.queue_lane}}`、`{{trigger.batch_scope}}`、`{{trigger.batched_count}}`、`{{trigger.current_input_is_batched}}`
-
-自动化发生在 MessageBatcher 之前，因此普通消息的批次变量固定表示当前单条消息：`batched_count=1`、`current_input_is_batched=false`。直接附件与合并转发引用都会进入 `trigger.attachments`；结构化引用消息位于 `trigger.reply_context`。时间、拍一拍和成员事件没有对应资源时使用空字符串、空数组或空对象，`batched_count=0`。节点模板可自行选用带 @ / 不带 @ 的变量。分支 `branch.if` 用同一套 mentions 规则做 case 文本匹配，**不改**全局 `trigger.*`。
-
-## 节点
-
-多上游 AND join：所有入边都满足后才启动；无相互依赖的分支一旦依赖就绪就立刻并行，不等整波齐头。默认可用 `{{节点id}}` 引用上游输出。工具与三种 LLM 节点还可设置 `store_output` + `output_var`：勾选存储后，下游用 `{{名称}}`（或 `{{vars.名称}}`）读取；关掉则不写入变量。未填名称时仍按节点 ID 存储。禁止占用 `trigger` / `nodes` / `index` / `item` / `vars` / `start` / `else`。循环硬顶 **25** 次。禁止 loop 外回边。
+## 节点类型
 
 | 类型 | 作用 |
 |---|---|
-| `tool` | 工具或主注册表 agent 名；args 做 `{{ }}`；可命名存储输出 |
-| `template` | 无模型整形 |
-| `llm.blank` | agent 模型 + 白名单 tools/toolsets/agents；可命名存储输出；可配置 `extract_vars` |
-| `llm.agent` | 现成 Agent；可命名存储输出；可配置 `extract_vars` |
-| `llm.main` | `AIClient.ask()`，原自我督办；可命名存储输出；可配置 `extract_vars` |
-| `branch.if` | if / else if + 必填 else 出边 |
-| `branch.llm` | 选项做成强制 tool `choose_<id>`，用选中 tool 走出边 |
-| `loop.times` / `loop.each` | 体为子节点 id 列表；`{{index}}` / `{{item}}` |
+| `tool` | 调用一个工具或 Agent，参数支持 `{{ }}` 变量 |
+| `template` | 用模板整理文本，不消耗模型 |
+| `llm.blank` | 自由 LLM：从工具 / 工具集 / Agent 中挑一份白名单供其调用 |
+| `llm.agent` | 交给某个现成 Agent 处理 |
+| `llm.main` | 走主 AI 完整流程（原「自我督办」模式） |
+| `branch.if` | if / else if 条件分支，else 出边必填 |
+| `branch.llm` | 由模型在若干选项中单选，选中项决定走向 |
+| `loop.times` / `loop.each` | 循环执行一组子节点（最多 25 次），可用 `{{index}}` / `{{item}}` |
 
-`llm.blank` / `llm.agent` / `llm.main` 可设 `extract_vars: [{ "name", "description" }, ...]`（不含 `branch.llm`）。运行时注入 `extract_<名称>` 工具，模型调用后写入 `{{名称}}` / `{{vars.名称}}`。
+执行规则一句话版：有依赖就等待——某节点的所有上游都完成后它才启动；无依赖的分支一旦就绪就立即并行执行。LLM 与模板节点默认只产出内容不发消息，勾选 `emit` 后才会发送（消息触发发到当前会话，时间触发发到任务地址）。任一节点失败则整图停止。
 
-LLM/template 默认不发群，`emit: true` 才发。`consume_ai_loop` 默认 `false`（新建任务、旧数据补齐与 WebUI 新建一致），显式设为 `true` 才会拦截本轮主 AI；WebUI 新建的 `auto_send_final` 同样默认关闭。失败即停；未拦截主 AI 时工作流后台执行，主 AI 照常继续。
+## 变量系统
 
-保存前还会校验运行所需字段（`tool_name`、Agent 名及各类 LLM prompt/input）、分支声明与出边的一致性，以及所有节点是否能从 start 到达。`branch.if` 的每个 case 和 `else`、`branch.llm` 的每个 option 都必须至少有一条对应出边；未知或无 case 标签的分支出边会被拒绝。loop body 由所属 loop 的可达性带入，不会被误判为孤立节点。这里只校验名称非空，不要求工具或 Agent 已经完成运行时注册。
+- 上游输出默认可用 `{{节点id}}` 引用。
+- 工具与 LLM 节点可勾选「存储为变量」（`store_output` + `output_var`），下游用 `{{名称}}` 读取；名称不能占用保留字 `trigger` / `nodes` / `index` / `item` / `vars` / `start` / `else`。
+- 三种 LLM 节点还支持变量提取（`extract_vars`）：声明若干「名称 + 说明」，运行时会注入对应的 `extract_<名称>` 工具，由模型在回答时调用写入。
+- 所有触发器都提供 `{{trigger.*}}`：`channel`、`sender_id`、`nickname`、`group_id`、`address`、`time` 等；普通消息额外附带当前消息的 `message_id`、`attachments`、`message_content`、`reply_context`。入退群事件的 `{{trigger.nickname}}` 会解析为新成员的群名片 / QQ 昵称。
 
-## 配置 `[automations]`
+## 从旧定时任务升级
 
-`enabled`、`max_nodes`（建议 30）、`max_concurrent`（默认 16）、节点超时 600s、整图超时 1200s、`blank_llm_max_iterations`（默认 100）、`loop_max_iterations`（默认与上限 25）、`default_cooldown_seconds`（事件类默认 0，不冷却）。`max_concurrent` 支持热更新：调大后立即放行等待任务；调小不会取消运行中的图，新任务会等待当前并发自然降到新上限以下。
+启动时若还没有 `data/automations.json` 但存在旧的 `scheduled_tasks.json`，会自动把旧任务转换为流程图格式写入新文件；旧文件保留不动，之后也不再双写。旧 `/api/v1/schedules` 接口与 `scheduler.*` 工具已下线，统一使用 `/api/v1/automations` 与 `automation.*`。
 
-任务级 `enabled=false` 会立即移除对应 APScheduler job，列表中的 `next_run_time` 变为 `null`；重新启用时先执行完整校验，再恢复时间 job。启动恢复同样不会为停用任务创建 job。历史非法任务不会被自动删除或重写，仍可停用，但编辑或重新启用时必须通过当前校验。
+## 配置与限制
 
-## 工具
+`[automations]` 配置节控制总开关、最大节点数（30）、全局并发（16，支持热更新）、节点 / 整图超时（600s / 1200s）、循环上限（25 次）等，完整字段见 [配置说明](configuration.md)。事件类工作流默认不设冷却时间。
 
-`automation.list` / `get` / `create` / `update` / `delete` / `set_enabled`。短命令能表达 channels、group_ids、user_ids、mentions、text、pass_text。
-
-WebUI「自动化」页把列表与画布做成上下两屏：上面是总数与选择，滚下去是节点盘 / 画布 / 检查器。点选卡片会滚到画布，不把列表藏掉。连线是先点出点再点目标；空白 LLM 白名单用搜索点选。工具与 LLM 检查器可勾选存储输出并填写变量名；三种 LLM 节点还可配置变量提取。图数据仍读写 `nodes` / `edges`，布局存在任务顶层 `ui`。
+停用的任务会立即取消下次执行计划，重新启用前会先做一次完整校验；校验不过的历史任务不会被删除或改写，但必须修正到合法后才能再次启用或保存编辑。
