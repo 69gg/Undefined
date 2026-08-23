@@ -19,7 +19,10 @@ from Undefined.api.routes.schedules import (
     serialize_schedule_task,
 )
 from Undefined.automations.catalog import build_catalog
-from Undefined.automations.constants import DEFAULT_MAX_NODES
+from Undefined.automations.constants import (
+    DEFAULT_LOOP_MAX_ITERATIONS,
+    DEFAULT_MAX_NODES,
+)
 from Undefined.automations.runner import find_start_node, start_kind
 from Undefined.automations.short import build_short_automation, patch_nodes
 from Undefined.automations.validate import (
@@ -139,6 +142,27 @@ def _max_nodes(ctx: RuntimeAPIContext) -> int:
         return DEFAULT_MAX_NODES
 
 
+def _loop_max_iterations(ctx: RuntimeAPIContext) -> int:
+    getter = getattr(ctx, "config_getter", None)
+    if not callable(getter):
+        return DEFAULT_LOOP_MAX_ITERATIONS
+    try:
+        cfg = getter()
+        automations_cfg = getattr(cfg, "automations", None)
+        return max(
+            1,
+            int(
+                getattr(
+                    automations_cfg,
+                    "loop_max_iterations",
+                    DEFAULT_LOOP_MAX_ITERATIONS,
+                )
+            ),
+        )
+    except Exception:
+        return DEFAULT_LOOP_MAX_ITERATIONS
+
+
 async def automations_catalog_handler(
     ctx: RuntimeAPIContext, request: web.Request
 ) -> Response:
@@ -151,7 +175,13 @@ async def automations_catalog_handler(
             bot_qq = int(getattr(cfg, "bot_qq", 0) or 0) or None
         except Exception:
             bot_qq = None
-    return web.json_response(build_catalog(bot_qq=bot_qq, ai=getattr(ctx, "ai", None)))
+    return web.json_response(
+        build_catalog(
+            bot_qq=bot_qq,
+            ai=getattr(ctx, "ai", None),
+            loop_max_iterations=_loop_max_iterations(ctx),
+        )
+    )
 
 
 async def automations_validate_handler(
@@ -166,7 +196,11 @@ async def automations_validate_handler(
         return _json_error(str(exc), status=400)
     except Exception:
         return _json_error("Invalid JSON", status=400)
-    issues = collect_automation_issues(payload, max_nodes=_max_nodes(ctx))
+    issues = collect_automation_issues(
+        payload,
+        max_nodes=_max_nodes(ctx),
+        loop_max_iterations=_loop_max_iterations(ctx),
+    )
     return web.json_response({"ok": not issues, "issues": issues})
 
 

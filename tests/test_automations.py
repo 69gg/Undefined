@@ -298,6 +298,38 @@ def test_validate_rejects_loop_cross_edge() -> None:
         validate_automation(task)
 
 
+def _loop_cap_task(*, count: int, max_iterations: int) -> dict[str, Any]:
+    return {
+        "auto_send_final": False,
+        "nodes": [
+            {"id": "start", "type": "start", "kind": "cron", "cron": "0 9 * * *"},
+            {
+                "id": "loop",
+                "type": "loop.times",
+                "count": count,
+                "max_iterations": max_iterations,
+                "body": ["body"],
+            },
+            {"id": "body", "type": "template", "template": "{{index}}"},
+        ],
+        "edges": [{"from": "start", "to": "loop"}],
+    }
+
+
+def test_validate_loop_iterations_follow_configured_cap() -> None:
+    task = _loop_cap_task(count=60, max_iterations=60)
+    with pytest.raises(AutomationValidationError, match=r"must be 1\.\.25"):
+        validate_automation(task)
+    with pytest.raises(AutomationValidationError, match=r"must be 1\.\.50"):
+        validate_automation(task, loop_max_iterations=50)
+    validate_automation(task, loop_max_iterations=60)
+    validate_automation(task, loop_max_iterations=200)
+
+    invalid = _loop_cap_task(count=3, max_iterations=-3)
+    with pytest.raises(AutomationValidationError, match="must be 1"):
+        validate_automation(invalid, loop_max_iterations=200)
+
+
 def _runner(
     *,
     execute_tool: Any = None,
@@ -305,11 +337,15 @@ def _runner(
     send_message: Any = None,
     ask_main: Any = None,
     tool_context: dict[str, Any] | None = None,
+    loop_max_iterations: int | None = None,
 ) -> WorkflowRunner:
     async def _send(text: str) -> None:
         if send_message is not None:
             await send_message(text)
 
+    kwargs: dict[str, Any] = {}
+    if loop_max_iterations is not None:
+        kwargs["loop_max_iterations"] = loop_max_iterations
     return WorkflowRunner(
         execute_tool=execute_tool or AsyncMock(return_value=""),
         ask_main=ask_main or AsyncMock(return_value=""),
@@ -318,6 +354,7 @@ def _runner(
         get_openai_tools=lambda: [],
         agent_config=SimpleNamespace(max_tokens=16),
         tool_context=tool_context if tool_context is not None else {},
+        **kwargs,
     )
 
 
@@ -528,7 +565,7 @@ async def test_runner_time_trigger_message_resources_use_empty_defaults() -> Non
 
 
 @pytest.mark.asyncio
-async def test_loop_each_hard_cap_25() -> None:
+async def test_loop_each_default_cap_is_25() -> None:
     seen: list[int] = []
 
     async def execute_tool(
@@ -565,6 +602,50 @@ async def test_loop_each_hard_cap_25() -> None:
         mentions_all=(),
     )
     assert seen == list(range(25))
+
+
+@pytest.mark.asyncio
+async def test_loop_each_follows_configured_cap_without_hard_limit() -> None:
+    seen: list[int] = []
+
+    async def execute_tool(
+        name: str, args: dict[str, Any], context: dict[str, Any]
+    ) -> str:
+        _ = name, context
+        seen.append(int(args["index"]))
+        return str(args["index"])
+
+    runner = _runner(
+        execute_tool=execute_tool,
+        send_message=AsyncMock(),
+        loop_max_iterations=40,
+    )
+    items = json.dumps(list(range(40)))
+    task = {
+        "auto_send_final": False,
+        "nodes": [
+            {"id": "start", "type": "start", "kind": "cron", "cron": "0 9 * * *"},
+            {"id": "loop", "type": "loop.each", "source": items, "body": ["body"]},
+            {
+                "id": "body",
+                "type": "tool",
+                "tool_name": "echo",
+                "args": {"index": "{{index}}"},
+            },
+        ],
+        "edges": [{"from": "start", "to": "loop"}],
+    }
+    validate_automation(task, loop_max_iterations=40)
+    event = AutomationEvent(kind="time", channel="group")
+    await runner.run(
+        task,
+        event=event,
+        pass_text="",
+        consume_mentions=(),
+        consume_stripped="",
+        mentions_all=(),
+    )
+    assert seen == list(range(40))
 
 
 @pytest.mark.asyncio
@@ -1641,6 +1722,7 @@ def test_automations_config_defaults() -> None:
     from Undefined.automations.constants import (
         DEFAULT_BLANK_LLM_MAX_ITERATIONS,
         DEFAULT_EVENT_COOLDOWN_SECONDS,
+        DEFAULT_LOOP_MAX_ITERATIONS,
         DEFAULT_MAX_CONCURRENT,
         DEFAULT_NODE_TIMEOUT_SECONDS,
         DEFAULT_WORKFLOW_TIMEOUT_SECONDS,
@@ -1652,11 +1734,13 @@ def test_automations_config_defaults() -> None:
     assert DEFAULT_NODE_TIMEOUT_SECONDS == 600.0
     assert DEFAULT_WORKFLOW_TIMEOUT_SECONDS == 1200.0
     assert DEFAULT_BLANK_LLM_MAX_ITERATIONS == 100
+    assert DEFAULT_LOOP_MAX_ITERATIONS == 25
     assert DEFAULT_EVENT_COOLDOWN_SECONDS == 0
     assert cfg.max_concurrent == 16
     assert cfg.node_timeout_seconds == 600.0
     assert cfg.workflow_timeout_seconds == 1200.0
     assert cfg.blank_llm_max_iterations == 100
+    assert cfg.loop_max_iterations == 25
     assert cfg.default_cooldown_seconds == 0
 
 

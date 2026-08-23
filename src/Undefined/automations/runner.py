@@ -14,10 +14,10 @@ from Undefined.automations.clock import clock_matches
 from Undefined.automations.constants import (
     BRANCH_ELSE_CASE,
     DEFAULT_BLANK_LLM_MAX_ITERATIONS,
+    DEFAULT_LOOP_MAX_ITERATIONS,
     DEFAULT_NODE_TIMEOUT_SECONDS,
     DEFAULT_WORKFLOW_TIMEOUT_SECONDS,
     LOOP_EXIT_KIND,
-    LOOP_MAX_ITERATIONS,
     START_NODE_ID,
 )
 from Undefined.automations.extract import (
@@ -226,7 +226,7 @@ class WorkflowRunner:
         node_timeout_seconds: float = DEFAULT_NODE_TIMEOUT_SECONDS,
         workflow_timeout_seconds: float = DEFAULT_WORKFLOW_TIMEOUT_SECONDS,
         blank_llm_max_iterations: int = DEFAULT_BLANK_LLM_MAX_ITERATIONS,
-        loop_max_iterations: int = LOOP_MAX_ITERATIONS,
+        loop_max_iterations: int = DEFAULT_LOOP_MAX_ITERATIONS,
     ) -> None:
         self.execute_tool = execute_tool
         self.ask_main = ask_main
@@ -238,9 +238,7 @@ class WorkflowRunner:
         self.node_timeout_seconds = node_timeout_seconds
         self.workflow_timeout_seconds = workflow_timeout_seconds
         self.blank_llm_max_iterations = blank_llm_max_iterations
-        self.loop_max_iterations = max(
-            1, min(int(loop_max_iterations), LOOP_MAX_ITERATIONS)
-        )
+        self.loop_max_iterations = max(1, int(loop_max_iterations))
         self._continue_on_tool_error = False
 
     def _task_id(self) -> str:

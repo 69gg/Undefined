@@ -254,11 +254,7 @@ def _parse_automations_config(data: dict[str, Any]) -> AutomationsConfig:
         node_timeout, _coerce_float(section.get("workflow_timeout_seconds"), 1200.0)
     )
     blank_iters = max(1, _coerce_int(section.get("blank_llm_max_iterations"), 100))
-    loop_iters = _coerce_int(section.get("loop_max_iterations"), 25)
-    if loop_iters < 1:
-        loop_iters = 1
-    if loop_iters > 25:
-        loop_iters = 25
+    loop_iters = max(1, _coerce_int(section.get("loop_max_iterations"), 25))
     cooldown = max(0, _coerce_int(section.get("default_cooldown_seconds"), 0))
     return AutomationsConfig(
         enabled=_coerce_bool(section.get("enabled"), True),

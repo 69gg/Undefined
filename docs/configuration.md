@@ -681,7 +681,7 @@ Prompt caching 补充：
 | `node_timeout_seconds` | `600.0` | 单节点超时 | 最小为 1 秒，后续工作流生效 |
 | `workflow_timeout_seconds` | `1200.0` | 整图超时 | 不小于节点超时，后续工作流生效 |
 | `blank_llm_max_iterations` | `100` | `llm.blank` 工具调用迭代上限 | 最小为 1，后续工作流生效 |
-| `loop_max_iterations` | `25` | loop 迭代硬顶 | 范围 1–25，后续工作流生效 |
+| `loop_max_iterations` | `25` | 循环迭代上限；节点可用 `max_iterations` 收窄 | 最小为 1，无内置上限，后续工作流生效 |
 | `default_cooldown_seconds` | `0` | 事件工作流默认冷却秒数 | `0` 表示不冷却，任务自身配置优先 |
 
 任务级 `enabled=false` 与总开关不同：它会立即移除该任务的 APScheduler 时间 job，重新启用时先校验工作流再恢复 job。图结构、时间格式、消息快照和模板变量详见 [条件驱动自动化](automations.md)。

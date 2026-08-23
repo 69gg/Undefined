@@ -7,10 +7,10 @@ from typing import Any
 from Undefined.automations.constants import (
     BRANCH_ELSE_CASE,
     CHANNELS,
+    DEFAULT_LOOP_MAX_ITERATIONS,
     DEFAULT_MAX_NODES,
     EVENT_KINDS,
     EXTRACT_VAR_NODE_TYPES,
-    LOOP_MAX_ITERATIONS,
     NODE_TYPES,
     RESERVED_VARIABLE_NAMES,
     START_KINDS,
@@ -76,9 +76,11 @@ def collect_automation_issues(
     task: dict[str, Any],
     *,
     max_nodes: int = DEFAULT_MAX_NODES,
+    loop_max_iterations: int = DEFAULT_LOOP_MAX_ITERATIONS,
 ) -> list[dict[str, str]]:
     """Return every graph problem the editor can highlight."""
     issues: list[dict[str, str]] = []
+    loop_cap = max(1, int(loop_max_iterations))
     nodes_raw = task.get("nodes")
     if not isinstance(nodes_raw, list) or not nodes_raw:
         return [_issue("nodes", "nodes must be a non-empty array")]
@@ -222,14 +224,14 @@ def collect_automation_issues(
             )
         if node_type in {"loop.times", "loop.each"}:
             try:
-                max_iterations = int(node.get("max_iterations") or LOOP_MAX_ITERATIONS)
+                max_iterations = int(node.get("max_iterations") or loop_cap)
             except (TypeError, ValueError):
                 max_iterations = 0
-            if max_iterations < 1 or max_iterations > LOOP_MAX_ITERATIONS:
+            if max_iterations < 1 or max_iterations > loop_cap:
                 issues.append(
                     _issue(
                         f"{prefix}.max_iterations",
-                        f"loop max_iterations must be 1..{LOOP_MAX_ITERATIONS}",
+                        f"loop max_iterations must be 1..{loop_cap}",
                     )
                 )
             body = _body_ids(node)
@@ -558,8 +560,13 @@ def validate_automation(
     task: dict[str, Any],
     *,
     max_nodes: int = DEFAULT_MAX_NODES,
+    loop_max_iterations: int = DEFAULT_LOOP_MAX_ITERATIONS,
 ) -> None:
     """Raise AutomationValidationError if the graph cannot run."""
-    issues = collect_automation_issues(task, max_nodes=max_nodes)
+    issues = collect_automation_issues(
+        task,
+        max_nodes=max_nodes,
+        loop_max_iterations=loop_max_iterations,
+    )
     if issues:
         raise AutomationValidationError(issues[0]["message"])

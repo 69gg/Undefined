@@ -381,13 +381,13 @@
                 )}`;
         }
         if (node.type === "loop.times") {
-            return `${field("schedules.count", input("count", node.count || 3, `type="number" min="1" max="25"`))}
-                ${field("schedules.max_iterations", input("max_iterations", node.max_iterations || 25, `type="number" min="1" max="25"`))}
+            return `${field("schedules.count", input("count", node.count || 3, `type="number" min="1"`))}
+                ${field("schedules.max_iterations", input("max_iterations", node.max_iterations || 25, `type="number" min="1"`))}
                 ${field("schedules.body", `<code>${escapeHtml((node.body || []).join(", ") || "—")}</code>`)}`;
         }
         if (node.type === "loop.each") {
             return `${field("schedules.source", input("source", node.source || "", `data-var-target="1"`))}
-                ${field("schedules.max_iterations", input("max_iterations", node.max_iterations || 25, `type="number" min="1" max="25"`))}
+                ${field("schedules.max_iterations", input("max_iterations", node.max_iterations || 25, `type="number" min="1"`))}
                 ${field("schedules.body", `<code>${escapeHtml((node.body || []).join(", ") || "—")}</code>`)}`;
         }
         return "";

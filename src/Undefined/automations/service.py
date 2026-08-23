@@ -23,11 +23,11 @@ from Undefined.automations.address import (
 from Undefined.automations.constants import (
     DEFAULT_BLANK_LLM_MAX_ITERATIONS,
     DEFAULT_EVENT_COOLDOWN_SECONDS,
+    DEFAULT_LOOP_MAX_ITERATIONS,
     DEFAULT_MAX_CONCURRENT,
     DEFAULT_MAX_NODES,
     DEFAULT_NODE_TIMEOUT_SECONDS,
     DEFAULT_WORKFLOW_TIMEOUT_SECONDS,
-    LOOP_MAX_ITERATIONS,
     SELF_CALL_TOOL_NAME,
 )
 from Undefined.automations.engine import iter_matching_tasks
@@ -254,9 +254,9 @@ class AutomationService:
                     cfg, "blank_llm_max_iterations", DEFAULT_BLANK_LLM_MAX_ITERATIONS
                 )
             ),
-            "loop_max_iterations": min(
-                LOOP_MAX_ITERATIONS,
-                int(getattr(cfg, "loop_max_iterations", LOOP_MAX_ITERATIONS)),
+            "loop_max_iterations": max(
+                1,
+                int(getattr(cfg, "loop_max_iterations", DEFAULT_LOOP_MAX_ITERATIONS)),
             ),
             "cooldown_seconds": int(
                 getattr(cfg, "default_cooldown_seconds", DEFAULT_EVENT_COOLDOWN_SECONDS)
@@ -300,7 +300,11 @@ class AutomationService:
         payload = build_short_automation(dict(task))
         payload["task_id"] = task_id
         settings = self._automation_settings()
-        validate_automation(payload, max_nodes=int(settings["max_nodes"]))
+        validate_automation(
+            payload,
+            max_nodes=int(settings["max_nodes"]),
+            loop_max_iterations=int(settings["loop_max_iterations"]),
+        )
         raw_target = payload.get("target_id")
         address = resolve_task_address(
             payload.get("address"),
@@ -348,7 +352,11 @@ class AutomationService:
             return False
         if enabled:
             settings = self._automation_settings()
-            validate_automation(task, max_nodes=int(settings["max_nodes"]))
+            validate_automation(
+                task,
+                max_nodes=int(settings["max_nodes"]),
+                loop_max_iterations=int(settings["loop_max_iterations"]),
+            )
         task["enabled"] = bool(enabled)
         self._sync_time_job(task_id, task)
         await self.storage.save_all(self.tasks)

@@ -2,14 +2,14 @@
 
 本版本将「定时任务」整体升级为条件驱动的「自动化 / Automations」工作流：消息与时间事件命中后按 DAG 执行工具、模板与 LLM 节点，可选择接管本轮 AI；WebUI 配套 Dify 式画布编辑器，旧定时任务数据在启动时自动迁移。
 
-- 新的工作流引擎 `src/Undefined/automations/`：支持场景多选与 @ 专项消费，节点覆盖 tool / template / 三种 LLM，可自动派生 if-else 与 LLM 分支（分支选项即工具调用），循环最多 25 次。运行时只写 `data/automations.json`；启动时若发现旧 `scheduled_tasks.json` 则自动转为新格式写入新文件，旧文件保留、不双写。
+- 新的工作流引擎 `src/Undefined/automations/`：支持场景多选与 @ 专项消费，节点覆盖 tool / template / 三种 LLM，可自动派生 if-else 与 LLM 分支（分支选项即工具调用），循环次数默认上限 25 且可配置调大。运行时只写 `data/automations.json`；启动时若发现旧 `scheduled_tasks.json` 则自动转为新格式写入新文件，旧文件保留、不双写。
 - 运行时由 `AutomationService` 取代原调度服务，时间 job 只携带 `task_id`；`/api/v1/schedules` 与 `scheduler.*` 随之下线，对外只剩 `/api/v1/automations` 与 `automation.*` 的增删改查加启停共六个工具。
 - 工作流接入群聊、QQ 私聊、微信、拍一拍、入退群五类消息入口，都在 pipeline 之后、对应 AI loop 之前触发；`consume_ai_loop=true` 时等工作流完成并拦截该入口的 AI 回复，否则后台执行、立刻放行主 AI。core 的「是否处理消息」开关是硬前提：未过群聊 / 私聊门控或 `process_poke_message` 关闭时事件直接跳过，不做自动化匹配，拍一拍也不再写历史。
 - 执行模型面向实时对话优化：无相互依赖的分支依赖就绪即并行，不再整波等齐（多上游仍 AND join）；消息触发的工具与 LLM 直接使用当前会话上下文，`send_message` 只填 `message` 即发往当前会话；工具节点自动注入认知记忆、知识库、表情包与附件注册表，避免已启用能力被误报未启用。
 - 统一的变量系统：节点输出可存成命名变量供下游以 `{{名称}}` 引用；三种 LLM 还支持 `extract_vars`，把待抽取变量变成 `extract_<名称>` 工具由模型调用后写入；入退群事件会解析群名片 / QQ 昵称写入 `{{trigger.nickname}}`，入群欢迎预设直接可用。
 - 管理能力完整开放：新增 catalog 端点与 CRUD，`POST /api/v1/automations/validate` 一次性返回全部问题；配置节 `[automations]` 支持热更新。
 - WebUI 自动化页重做为 Dify 式画布编辑器：节点盘添加节点，先点出点再点目标即可连线，类型化检查器编辑参数；列表与画布上下两屏滚动切换，布局随任务保存；空白 LLM 白名单改为搜索点选。
-- 运行默认放宽且全程可观测：事件类工作流默认不再冷却（`default_cooldown_seconds = 0`），并发与节点 / 工作流超时上限提高，空白 LLM 迭代上限放宽到 100；自动化默认不拦截主 AI（`consume_ai_loop` 默认 `false`，新建与旧数据缺省一致），WebUI 新建同样默认不自动发送终值；事件匹配、时间触发、节点执行、出站发送与超时均有详细日志。
+- 运行默认放宽且全程可观测：事件类工作流默认不再冷却（`default_cooldown_seconds = 0`），并发与节点 / 工作流超时上限提高，空白 LLM 迭代上限放宽到 100；自动化各项配置只保留下限，不再有内置硬顶（如 `loop_max_iterations` 可任意调大）；自动化默认不拦截主 AI（`consume_ai_loop` 默认 `false`，新建与旧数据缺省一致），WebUI 新建同样默认不自动发送终值；事件匹配、时间触发、节点执行、出站发送与超时均有详细日志。
 
 ---
 

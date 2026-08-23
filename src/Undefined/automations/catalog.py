@@ -6,7 +6,7 @@ from typing import Any
 
 from Undefined.automations.constants import (
     CHANNELS,
-    LOOP_MAX_ITERATIONS,
+    DEFAULT_LOOP_MAX_ITERATIONS,
     NODE_TYPES,
     PASS_TEXT_MODES,
     START_KINDS,
@@ -135,10 +135,22 @@ def _palette_from_ai(ai: Any) -> dict[str, Any]:
     return {"tools": tools, "toolsets": toolset_names, "agents": agents}
 
 
-def build_catalog(*, bot_qq: int | None = None, ai: Any = None) -> dict[str, Any]:
+def build_catalog(
+    *,
+    bot_qq: int | None = None,
+    ai: Any = None,
+    loop_max_iterations: int | None = None,
+) -> dict[str, Any]:
     """Return node types, match modes, palette names, and example presets."""
     bot_mention = str(bot_qq) if bot_qq else "*"
     palette = _palette_from_ai(ai)
+    if loop_max_iterations is None:
+        loop_cap = DEFAULT_LOOP_MAX_ITERATIONS
+    else:
+        try:
+            loop_cap = max(1, int(loop_max_iterations))
+        except (TypeError, ValueError):
+            loop_cap = DEFAULT_LOOP_MAX_ITERATIONS
     return {
         "node_types": sorted(NODE_TYPES),
         "node_type_meta": [dict(item) for item in NODE_TYPE_META],
@@ -146,7 +158,7 @@ def build_catalog(*, bot_qq: int | None = None, ai: Any = None) -> dict[str, Any
         "channels": sorted(CHANNELS),
         "text_match_modes": sorted(TEXT_MATCH_MODES),
         "pass_text_modes": sorted(PASS_TEXT_MODES),
-        "loop_max_iterations": LOOP_MAX_ITERATIONS,
+        "loop_max_iterations": loop_cap,
         "tools": palette["tools"],
         "toolsets": palette["toolsets"],
         "agents": palette["agents"],

@@ -295,3 +295,23 @@ show_process = false
     assert cfg.prompt_system_info.show_network is False
     assert cfg.prompt_system_info.show_disks is False
     assert cfg.prompt_system_info.show_process is False
+
+
+def test_automations_loop_iterations_have_no_hard_cap(tmp_path: Path) -> None:
+    cfg = _load_config(
+        tmp_path / "config.toml",
+        """
+[automations]
+loop_max_iterations = 500
+""",
+    )
+    assert cfg.automations.loop_max_iterations == 500
+
+    fallback = _load_config(
+        tmp_path / "config.toml",
+        """
+[automations]
+loop_max_iterations = 0
+""",
+    )
+    assert fallback.automations.loop_max_iterations == 1
