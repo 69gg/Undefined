@@ -49,8 +49,11 @@ def build_short_automation(body: dict[str, Any]) -> dict[str, Any]:
     Short commands may specify ``kind`` / ``channels`` / ``mentions`` / ``text``
     plus one of ``prompt`` / ``self_instruction`` / ``tool_name`` / ``agent``.
     """
-    if isinstance(body.get("nodes"), list) and body["nodes"]:
-        return migrate_legacy_task(deepcopy(body))
+    if "nodes" in body:
+        submitted_nodes = body.get("nodes")
+        if isinstance(submitted_nodes, list):
+            return migrate_legacy_task(deepcopy(body))
+        return deepcopy(body)
 
     kind = str(body.get("kind") or "").strip()
     cron = str(body.get("cron") or body.get("cron_expression") or "").strip()
@@ -61,7 +64,7 @@ def build_short_automation(body: dict[str, Any]) -> dict[str, Any]:
             kind = "daily"
         elif body.get("at"):
             kind = "at"
-        elif body.get("interval_seconds"):
+        elif body.get("interval_seconds") is not None:
             kind = "interval"
         else:
             kind = "message"

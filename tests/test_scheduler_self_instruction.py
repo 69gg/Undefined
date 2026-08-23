@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -156,6 +157,29 @@ async def test_execute_tool_keeps_explicit_cognitive_service() -> None:
         service.shutdown()
 
     assert captured == [injected]
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_prefers_strict_tool_manager_path() -> None:
+    strict_execute = AsyncMock(side_effect=RuntimeError("tool failed"))
+    permissive_execute = AsyncMock(return_value="执行 tool 时出错: tool failed")
+    ai = SimpleNamespace(
+        tool_manager=SimpleNamespace(
+            execute_tool=permissive_execute,
+            execute_tool_strict=strict_execute,
+        ),
+        memory_storage=SimpleNamespace(),
+        runtime_config=SimpleNamespace(),
+    )
+    service = _make_service(ai=ai)
+    try:
+        with pytest.raises(RuntimeError, match="tool failed"):
+            await service._execute_tool("tool", {}, {})
+    finally:
+        service.shutdown()
+
+    strict_execute.assert_awaited_once()
+    permissive_execute.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -343,6 +367,72 @@ async def test_upsert_automation_refreshes_job_args() -> None:
     stored = service.list_tasks()["task_edit_args"]
     assert stored["address"] == "qq:10002"
     assert stored["target_type"] == "private"
+
+
+@pytest.mark.asyncio
+async def test_upsert_automation_ignores_external_context_id_on_update() -> None:
+    service = _make_service()
+    saved_context_id = uuid.uuid4().hex
+    service.tasks["safe_context"] = {
+        "context_id": saved_context_id,
+        "nodes": [
+            {
+                "id": "start",
+                "type": "start",
+                "kind": "message",
+                "channels": ["group"],
+            },
+            {"id": "done", "type": "template", "template": "ok"},
+        ],
+        "edges": [{"from": "start", "to": "done"}],
+    }
+    try:
+        await service.upsert_automation(
+            "safe_context",
+            {
+                "context_id": "../automations",
+                "nodes": [
+                    {
+                        "id": "start",
+                        "type": "start",
+                        "kind": "message",
+                        "channels": ["group"],
+                    },
+                    {"id": "done", "type": "template", "template": "updated"},
+                ],
+                "edges": [{"from": "start", "to": "done"}],
+            },
+        )
+    finally:
+        service.shutdown()
+
+    assert service.tasks["safe_context"]["context_id"] == saved_context_id
+
+
+@pytest.mark.asyncio
+async def test_upsert_automation_rejects_invalid_saved_context_id() -> None:
+    service = _make_service()
+    original = {
+        "context_id": "../automations",
+        "nodes": [
+            {
+                "id": "start",
+                "type": "start",
+                "kind": "message",
+                "channels": ["group"],
+            },
+            {"id": "done", "type": "template", "template": "ok"},
+        ],
+        "edges": [{"from": "start", "to": "done"}],
+    }
+    service.tasks["unsafe_context"] = original
+    try:
+        with pytest.raises(ValueError, match="context_id must be a valid UUID"):
+            await service.upsert_automation("unsafe_context", dict(original))
+    finally:
+        service.shutdown()
+
+    assert service.tasks["unsafe_context"] is original
 
 
 @pytest.mark.asyncio

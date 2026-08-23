@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from Undefined.automations.clock import is_valid_clock_time
 from Undefined.automations.constants import (
     BRANCH_ELSE_CASE,
     CHANNELS,
@@ -65,11 +66,46 @@ def _index_nodes(
         if not node_id:
             issues.append(_issue(f"nodes[{index}]", "node id is required"))
             continue
+        if not OUTPUT_VAR_PATTERN.fullmatch(node_id):
+            issues.append(
+                _issue(
+                    f"nodes[{index}].id",
+                    "node id must start with a letter or underscore",
+                )
+            )
+        elif node_id in RESERVED_VARIABLE_NAMES and node_id != START_NODE_ID:
+            issues.append(
+                _issue(f"nodes[{index}].id", f"node id '{node_id}' is reserved")
+            )
         if node_id in mapping:
             issues.append(_issue(f"nodes.{node_id}", f"duplicate node id: {node_id}"))
             continue
         mapping[node_id] = item
     return mapping
+
+
+def _validate_clock(
+    raw: Any,
+    *,
+    path: str,
+    issues: list[dict[str, str]],
+) -> None:
+    if raw is None:
+        return
+    if not isinstance(raw, dict):
+        issues.append(_issue(path, "clock must be an object"))
+        return
+    for field_name in ("after", "before"):
+        value = raw.get(field_name)
+        if value is None or not str(value).strip():
+            continue
+        if not is_valid_clock_time(value):
+            issues.append(
+                _issue(
+                    f"{path}.{field_name}",
+                    f"clock.{field_name} must be a valid HH:MM time",
+                )
+            )
 
 
 def collect_automation_issues(
@@ -89,6 +125,18 @@ def collect_automation_issues(
             _issue("nodes", f"automations can contain at most {max_nodes} nodes")
         )
 
+    if "max_executions" in task:
+        max_executions = task.get("max_executions")
+        if max_executions is not None and (
+            type(max_executions) is not int or max_executions < 1
+        ):
+            issues.append(
+                _issue(
+                    "max_executions",
+                    "max_executions must be a positive integer or null",
+                )
+            )
+
     nodes = _index_nodes(nodes_raw, issues)
     starts = [
         node
@@ -104,6 +152,7 @@ def collect_automation_issues(
         if str(start.get("id") or "") != START_NODE_ID:
             issues.append(_issue("start", "start node id must be 'start'"))
     if start is not None:
+        _validate_clock(start.get("clock"), path="start.clock", issues=issues)
         kind = str(start.get("kind") or "").strip()
         if kind not in START_KINDS:
             issues.append(_issue("start.kind", "start.kind is invalid"))
@@ -309,6 +358,11 @@ def collect_automation_issues(
                             _issue(case_path, "branch.if cases must be objects")
                         )
                         continue
+                    _validate_clock(
+                        case.get("clock"),
+                        path=f"{case_path}.clock",
+                        issues=issues,
+                    )
                     case_id = str(case.get("id") or "").strip()
                     if not case_id or case_id == BRANCH_ELSE_CASE:
                         issues.append(_issue(case_path, "branch.if case id is invalid"))

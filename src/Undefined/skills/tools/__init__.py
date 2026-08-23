@@ -274,3 +274,12 @@ class ToolRegistry(BaseRegistry):
         if resolved != tool_name:
             logger.info("[tool.alias] %s -> %s", tool_name, resolved)
         return await self.execute(resolved, args, context)
+
+    async def execute_tool_strict(
+        self, tool_name: str, args: Dict[str, Any], context: Dict[str, Any]
+    ) -> str:
+        """Execute a tool without converting registry failures into strings."""
+        resolved = self._resolve_compat_tool_name(tool_name)
+        if resolved != tool_name:
+            logger.info("[tool.alias] %s -> %s", tool_name, resolved)
+        return await self.execute_strict(resolved, args, context)

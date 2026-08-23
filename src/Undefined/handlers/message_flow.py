@@ -1492,6 +1492,14 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
         )
         if group_id is None:
             return
+        if not self.config.is_group_allowed(group_id):
+            logger.debug(
+                "[访问控制] 忽略群成员通知: group=%s user=%s kind=%s",
+                group_id,
+                user_id,
+                kind,
+            )
+            return
         nickname = await self._resolve_member_nickname(group_id, user_id)
         await self._run_automations(
             AutomationEvent(

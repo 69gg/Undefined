@@ -64,6 +64,16 @@ _AI_SERVICE_CONTEXT_ATTRS: tuple[tuple[str, str], ...] = (
 )
 
 
+def _validated_context_id(value: object) -> str | None:
+    """Return a canonical UUID hex string, rejecting unsafe snapshot identifiers."""
+    if value is None or not str(value).strip():
+        return None
+    try:
+        return uuid.UUID(str(value).strip()).hex
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise ValueError("context_id must be a valid UUID") from exc
+
+
 class _ResizableConcurrencyLimiter:
     """Limit concurrent workflows while allowing safe runtime resizing."""
 
@@ -211,7 +221,7 @@ class AutomationService:
         existed = task_id in self.tasks
         context_id = None
         if existed:
-            context_id = self.tasks[task_id].get("context_id")
+            context_id = _validated_context_id(self.tasks[task_id].get("context_id"))
         job_removed = False
         try:
             self._apscheduler.remove_job(task_id)
@@ -319,7 +329,7 @@ class AutomationService:
             payload["context_id"] = await self._save_context_snapshot()
         else:
             existing = self.tasks[task_id]
-            payload.setdefault("context_id", existing.get("context_id"))
+            payload["context_id"] = _validated_context_id(existing.get("context_id"))
             for key in (
                 "last_status",
                 "last_run_at",
@@ -647,14 +657,18 @@ class AutomationService:
     async def _load_context_snapshot(
         self, context_id: str | None
     ) -> dict[str, Any] | None:
-        if not context_id:
+        safe_context_id = _validated_context_id(context_id)
+        if safe_context_id is None:
             return None
-        return await io.read_json(CONTEXT_DIR / f"{context_id}.json", use_lock=False)
+        return await io.read_json(
+            CONTEXT_DIR / f"{safe_context_id}.json", use_lock=False
+        )
 
     async def _delete_context_snapshot(self, context_id: str | None) -> None:
-        if not context_id:
+        safe_context_id = _validated_context_id(context_id)
+        if safe_context_id is None:
             return
-        await io.delete_file(CONTEXT_DIR / f"{context_id}.json")
+        await io.delete_file(CONTEXT_DIR / f"{safe_context_id}.json")
 
     def _inject_ai_services(self, tool_context: dict[str, Any]) -> None:
         """Fill AI-owned services that tool handlers read from context."""
@@ -693,6 +707,9 @@ class AutomationService:
         tool_manager = getattr(ai_client, "tool_manager", None)
         if tool_manager is not None and hasattr(tool_manager, "execute_tool"):
             logger.debug("[自动化] 使用 ToolManager 执行工具: %s", tool_name)
+            strict_execute = getattr(tool_manager, "execute_tool_strict", None)
+            if callable(strict_execute):
+                return await strict_execute(tool_name, tool_args, tool_context)
             return await tool_manager.execute_tool(tool_name, tool_args, tool_context)
 
         for attr in ("execute_tool", "_execute_tool"):

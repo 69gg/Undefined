@@ -8,7 +8,6 @@ from typing import Any
 from Undefined.automations.constants import (
     SELF_CALL_TOOL_NAME,
     START_NODE_ID,
-    TIME_KINDS,
 )
 
 
@@ -45,44 +44,27 @@ def _legacy_tools(data: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _self_instruction(data: dict[str, Any], tools: list[dict[str, Any]]) -> str:
     raw = str(data.get("self_instruction") or "").strip()
+    if not tools:
+        return raw
+    if len(tools) != 1 or tools[0].get("tool_name") != SELF_CALL_TOOL_NAME:
+        return ""
     if raw:
         return raw
-    if tools and tools[0].get("tool_name") == SELF_CALL_TOOL_NAME:
-        args = tools[0].get("tool_args")
-        if isinstance(args, dict):
-            return str(args.get("prompt") or "").strip()
-    if str(data.get("tool_name") or "") == SELF_CALL_TOOL_NAME:
-        args = data.get("tool_args")
-        if isinstance(args, dict):
-            return str(args.get("prompt") or "").strip()
+    args = tools[0].get("tool_args")
+    if isinstance(args, dict):
+        return str(args.get("prompt") or "").strip()
     return ""
-
-
-def _start_node(task: dict[str, Any]) -> dict[str, Any] | None:
-    nodes = task.get("nodes")
-    if not isinstance(nodes, list):
-        return None
-    for node in nodes:
-        if isinstance(node, dict) and str(node.get("id") or "") == START_NODE_ID:
-            return node
-    return None
 
 
 def migrate_legacy_task(data: dict[str, Any]) -> dict[str, Any]:
     """Ensure a task dict has a start node and edges. Idempotent."""
     task = deepcopy(data)
     nodes = task.get("nodes")
-    if isinstance(nodes, list) and nodes:
+    if isinstance(nodes, list):
         task.setdefault("enabled", True)
         task.setdefault("consume_ai_loop", False)
         task.setdefault("auto_send_final", True)
         task.setdefault("edges", [])
-        if "compat_continue_on_tool_error" not in task:
-            start = _start_node(task)
-            kind = str((start or {}).get("kind") or "").strip()
-            task["compat_continue_on_tool_error"] = (
-                kind in TIME_KINDS and task.get("auto_send_final") is False
-            )
         return task
 
     cron = str(task.get("cron") or "").strip()

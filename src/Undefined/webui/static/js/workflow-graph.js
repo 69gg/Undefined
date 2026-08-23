@@ -688,14 +688,23 @@
                     max_executions: maxExecutions,
                     cooldown_seconds: cooldownSeconds,
                     address,
+                    target_id: targetId,
+                    target_type: targetType,
                     ...rest
                 } = copy;
                 const next = { ...rest };
-                if (maxExecutions) next.max_executions = maxExecutions;
-                if (cooldownSeconds != null && cooldownSeconds !== "") {
+                if (Object.hasOwn(copy, "max_executions"))
+                    next.max_executions = maxExecutions;
+                if (Object.hasOwn(copy, "cooldown_seconds"))
                     next.cooldown_seconds = cooldownSeconds;
+                if (Object.hasOwn(copy, "address")) {
+                    next.address = address;
+                } else {
+                    if (Object.hasOwn(copy, "target_id"))
+                        next.target_id = targetId;
+                    if (Object.hasOwn(copy, "target_type"))
+                        next.target_type = targetType;
                 }
-                if (address) next.address = address;
                 return next;
             },
         };

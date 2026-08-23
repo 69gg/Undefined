@@ -20,6 +20,12 @@ def _parse_hhmm(value: str) -> int | None:
     return hour * 60 + minute
 
 
+def is_valid_clock_time(value: object) -> bool:
+    """Return whether a configured clock boundary is a valid ``HH:MM`` value."""
+    text = str(value or "").strip()
+    return bool(text) and _parse_hhmm(text) is not None
+
+
 def clock_matches(
     now: datetime,
     *,

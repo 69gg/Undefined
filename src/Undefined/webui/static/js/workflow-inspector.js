@@ -76,6 +76,15 @@
             .filter(Boolean);
     }
 
+    function jsonEditorValue(value) {
+        try {
+            const encoded = JSON.stringify(value);
+            return encoded === undefined ? "" : encoded;
+        } catch (_error) {
+            return String(value ?? "");
+        }
+    }
+
     function renderStart(node, task) {
         const kind = String(node.kind || "message");
         const event = G.EVENT_KINDS.has(kind);
@@ -313,7 +322,7 @@
                             ([key, value]) => `
                     <div class="wf-kv-row">
                         <input class="form-control" data-kv-key="1" value="${escapeHtml(key)}" placeholder="key" />
-                        <input class="form-control" data-kv-value="1" data-var-target="1" value="${escapeHtml(String(value ?? ""))}" placeholder="value" />
+                        <input class="form-control" data-kv-value="1" data-var-target="1" value="${escapeHtml(jsonEditorValue(value))}" placeholder="JSON value" />
                         <button type="button" class="btn ghost" data-kv-remove="1">×</button>
                     </div>`,
                         )
@@ -352,7 +361,7 @@
                     `<div data-cases="1">${cases
                         .map(
                             (item, index) => `
-                    <div class="wf-case-row" data-case-index="${index}">
+                    <div class="wf-case-row" data-case-index="${index}" data-case-json="${escapeHtml(encodeURIComponent(JSON.stringify(item)))}">
                         <input class="form-control" data-case-id="1" value="${escapeHtml(item.id || "")}" placeholder="id" />
                         <input class="form-control" data-case-text="1" data-var-target="1" value="${escapeHtml(item.text || "")}" placeholder="text" />
                         <button type="button" class="btn ghost" data-case-remove="1">×</button>
@@ -473,10 +482,35 @@
             const key = String(
                 row.querySelector("[data-kv-key]")?.value || "",
             ).trim();
-            const value = row.querySelector("[data-kv-value]")?.value;
-            if (key) args[key] = value;
+            const value = String(
+                row.querySelector("[data-kv-value]")?.value ?? "",
+            );
+            if (!key) return;
+            try {
+                args[key] = JSON.parse(value);
+            } catch (_error) {
+                args[key] = value;
+            }
         });
         return args;
+    }
+
+    function readCaseRow(row) {
+        let current = {};
+        try {
+            current = JSON.parse(
+                decodeURIComponent(
+                    row.getAttribute("data-case-json") || "%7B%7D",
+                ),
+            );
+        } catch (_error) {
+            current = {};
+        }
+        return {
+            ...(current && typeof current === "object" ? current : {}),
+            id: row.querySelector("[data-case-id]")?.value.trim() || "",
+            text: row.querySelector("[data-case-text]")?.value || "",
+        };
     }
 
     function variableItems(task, nodeId) {
@@ -613,10 +647,7 @@
             if (node.type === "branch.if") {
                 patch.cases = Array.from(
                     root.querySelectorAll("[data-case-index]"),
-                ).map((row) => ({
-                    id: row.querySelector("[data-case-id]")?.value.trim() || "",
-                    text: row.querySelector("[data-case-text]")?.value || "",
-                }));
+                ).map(readCaseRow);
             }
             if (node.type === "branch.llm") {
                 patch.options = Array.from(
@@ -752,7 +783,7 @@
             if (event.target.closest("[data-kv-add]")) {
                 root.querySelector("[data-kv]")?.insertAdjacentHTML(
                     "beforeend",
-                    `<div class="wf-kv-row"><input class="form-control" data-kv-key="1" /><input class="form-control" data-kv-value="1" data-var-target="1" /><button type="button" class="btn ghost" data-kv-remove="1">×</button></div>`,
+                    `<div class="wf-kv-row"><input class="form-control" data-kv-key="1" /><input class="form-control" data-kv-value="1" data-var-target="1" placeholder="JSON value" /><button type="button" class="btn ghost" data-kv-remove="1">×</button></div>`,
                 );
                 return;
             }
@@ -764,7 +795,7 @@
             if (event.target.closest("[data-case-add]")) {
                 root.querySelector("[data-cases]")?.insertAdjacentHTML(
                     "beforeend",
-                    `<div class="wf-case-row" data-case-index="x"><input class="form-control" data-case-id="1" /><input class="form-control" data-case-text="1" data-var-target="1" /><button type="button" class="btn ghost" data-case-remove="1">×</button></div>`,
+                    `<div class="wf-case-row" data-case-index="x" data-case-json="%7B%7D"><input class="form-control" data-case-id="1" /><input class="form-control" data-case-text="1" data-var-target="1" /><button type="button" class="btn ghost" data-case-remove="1">×</button></div>`,
                 );
                 return;
             }

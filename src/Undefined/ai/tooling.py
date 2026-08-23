@@ -200,6 +200,8 @@ class ToolManager:
         function_name: str,
         function_args: dict[str, Any],
         context: dict[str, Any],
+        *,
+        _strict: bool = False,
     ) -> Any:
         """执行指定的工具或 Agent 项
 
@@ -368,9 +370,14 @@ class ToolManager:
                 agent_context["agent_name"] = function_name
 
                 try:
-                    result = await self.agent_registry.execute_agent(
-                        function_name, function_args, agent_context
-                    )
+                    if _strict:
+                        result = await self.agent_registry.execute_agent_strict(
+                            function_name, function_args, agent_context
+                        )
+                    else:
+                        result = await self.agent_registry.execute_agent(
+                            function_name, function_args, agent_context
+                        )
                 finally:
                     if registry_token is not None:
                         self._agent_mcp_registry_var.reset(registry_token)
@@ -386,9 +393,14 @@ class ToolManager:
                 await self._maybe_send_call_easter_egg(
                     function_name, is_agent=False, context=context
                 )
-                result = await self.tool_registry.execute_tool(
-                    function_name, function_args, context
-                )
+                if _strict:
+                    result = await self.tool_registry.execute_tool_strict(
+                        function_name, function_args, context
+                    )
+                else:
+                    result = await self.tool_registry.execute_tool(
+                        function_name, function_args, context
+                    )
 
             duration = time.perf_counter() - start_time
             result_text = redact_string(str(result))
@@ -415,3 +427,17 @@ class ToolManager:
                 redact_string(str(exc)),
             )
             raise
+
+    async def execute_tool_strict(
+        self,
+        function_name: str,
+        function_args: dict[str, Any],
+        context: dict[str, Any],
+    ) -> Any:
+        """Execute a tool while preserving registry exceptions for callers."""
+        return await self.execute_tool(
+            function_name,
+            function_args,
+            context,
+            _strict=True,
+        )

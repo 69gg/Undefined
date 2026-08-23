@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import logging
-import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
+
+import regex
 
 from Undefined.automations.clock import clock_matches
 from Undefined.automations.constants import (
@@ -80,17 +81,19 @@ def _regex_search(
     pattern: str, haystack: str, timeout: float = DEFAULT_REGEX_TIMEOUT_SECONDS
 ) -> bool:
     """Search with length caps and a wall-clock timeout to limit ReDoS."""
-    _ = timeout
     if len(pattern) > 256 or len(haystack) > 20_000:
         logger.warning("[自动化] 正则过长，已拒绝")
         return False
     try:
-        compiled = re.compile(pattern)
-    except re.error:
+        compiled = regex.compile(pattern)
+    except regex.error:
         logger.warning("[自动化] 无效正则: %s", pattern)
         return False
     try:
-        return compiled.search(haystack) is not None
+        return compiled.search(haystack, timeout=max(float(timeout), 0.001)) is not None
+    except TimeoutError:
+        logger.warning("[自动化] 正则匹配超时，已按不匹配处理")
+        return False
     except Exception:
         logger.warning("[自动化] 正则匹配失败: %s", pattern)
         return False

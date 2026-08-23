@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import re
@@ -17,7 +18,6 @@ from Undefined.automations.constants import (
     DEFAULT_LOOP_MAX_ITERATIONS,
     DEFAULT_NODE_TIMEOUT_SECONDS,
     DEFAULT_WORKFLOW_TIMEOUT_SECONDS,
-    LOOP_EXIT_KIND,
     START_NODE_ID,
 )
 from Undefined.automations.extract import (
@@ -123,15 +123,8 @@ def collect_session_identity(source: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
-def _tool_name_aliases(name: str) -> set[str]:
-    internal = name.replace("-_-", ".")
-    aliases = {name, internal}
-    if "." in internal:
-        aliases.add(internal.rsplit(".", 1)[-1])
-    if "." in name:
-        aliases.add(name.rsplit(".", 1)[-1])
-    aliases.discard("")
-    return aliases
+def _internal_tool_name(name: str) -> str:
+    return name.replace("-_-", ".")
 
 
 def filter_openai_tools(
@@ -141,19 +134,38 @@ def filter_openai_tools(
     toolsets: list[str] | None,
     agents: list[str] | None,
 ) -> list[dict[str, Any]]:
-    allow_tools = {str(name).strip() for name in (tools or []) if str(name).strip()}
+    allow_tools = {
+        _internal_tool_name(str(name).strip())
+        for name in (tools or [])
+        if str(name).strip()
+    }
     allow_sets = {str(name).strip() for name in (toolsets or []) if str(name).strip()}
     allow_agents = {str(name).strip() for name in (agents or []) if str(name).strip()}
     if not allow_tools and not allow_sets and not allow_agents:
         return []
-    allow_tool_aliases = {
-        alias for item in allow_tools for alias in _tool_name_aliases(item)
+    registered_tools: set[str] = set()
+    short_candidates: dict[str, set[str]] = {}
+    for schema in all_tools:
+        internal = _internal_tool_name(_tool_function_name(schema))
+        if not internal:
+            continue
+        registered_tools.add(internal)
+        short_candidates.setdefault(internal.rsplit(".", 1)[-1], set()).add(internal)
+    exact_tools = allow_tools & registered_tools
+    unresolved_short_tools = {
+        name for name in allow_tools - exact_tools if "." not in name
     }
     selected: list[dict[str, Any]] = []
     for schema in all_tools:
         name = _tool_function_name(schema)
-        internal = name.replace("-_-", ".")
-        if _tool_name_aliases(name) & allow_tool_aliases:
+        internal = _internal_tool_name(name)
+        short_name = internal.rsplit(".", 1)[-1]
+        if internal in exact_tools:
+            selected.append(schema)
+            continue
+        if short_name in unresolved_short_tools and short_candidates.get(
+            short_name
+        ) == {internal}:
             selected.append(schema)
             continue
         prefix = internal.split(".", 1)[0]
@@ -202,12 +214,21 @@ def _parse_each_source(raw: str) -> list[Any]:
     return [line for line in text.splitlines() if line.strip()]
 
 
+def _merge_scoped_variables(target: dict[str, Any], scoped: dict[str, Any]) -> None:
+    """Propagate workflow outputs without leaking loop-local index/item values."""
+    for key, value in scoped.items():
+        if key not in {"index", "item"}:
+            target[key] = value
+
+
 _OPTION_ID_RE = re.compile(r"[^A-Za-z0-9_]+")
 
 
 def option_tool_name(option_id: str) -> str:
-    cleaned = _OPTION_ID_RE.sub("_", str(option_id).strip()) or "option"
-    return f"choose_{cleaned}"
+    raw = str(option_id).strip()
+    cleaned = _OPTION_ID_RE.sub("_", raw).strip("_") or "option"
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:10]
+    return f"choose_{cleaned[:40]}_{digest}"
 
 
 class WorkflowRunner:
@@ -418,54 +439,78 @@ class WorkflowRunner:
                 variables.get("trigger", {}).get("text") or ""
             )
 
-        activated: set[tuple[str, str, str]] = set()
+        eligible_edges: dict[int, tuple[str, str, str]] = {}
+        incoming_edges: dict[str, list[int]] = {node_id: [] for node_id in active_ids}
+        outgoing_edges: dict[str, list[int]] = {node_id: [] for node_id in active_ids}
+        for edge_index, edge in enumerate(edges):
+            source = str(edge.get("from") or "")
+            target = str(edge.get("to") or "")
+            if source in active_ids and target in active_ids:
+                eligible_edges[edge_index] = (
+                    source,
+                    target,
+                    str(edge.get("case") or ""),
+                )
+                outgoing_edges[source].append(edge_index)
+                incoming_edges[target].append(edge_index)
 
-        def activate_from(source_id: str, case: str | None = None) -> None:
-            for edge in edges:
-                if str(edge.get("from") or "") != source_id:
+        resolved_edges: set[int] = set()
+        activated_edges: set[int] = set()
+        skipped: set[str] = set()
+
+        def resolve_from(
+            source_id: str,
+            *,
+            case: str | None = None,
+            activate: bool,
+        ) -> None:
+            source_type = str(nodes.get(source_id, {}).get("type") or "")
+            for edge_index in outgoing_edges.get(source_id, []):
+                _source, _target, edge_case = eligible_edges[edge_index]
+                resolved_edges.add(edge_index)
+                if not activate:
                     continue
-                target = str(edge.get("to") or "")
-                if target not in active_ids:
-                    kind = str(edge.get("kind") or "")
-                    if kind == LOOP_EXIT_KIND and target in nodes:
-                        pass
-                    elif only_ids is not None and target not in only_ids:
-                        continue
-                    elif target not in active_ids and kind != LOOP_EXIT_KIND:
-                        continue
-                edge_case = str(edge.get("case") or "")
-                if case is not None:
-                    if edge_case and edge_case != case:
-                        continue
-                    if not edge_case and case != BRANCH_ELSE_CASE:
-                        # unlabeled edges from a branch are ignored when a case is chosen
-                        source_type = str(nodes.get(source_id, {}).get("type") or "")
-                        if source_type.startswith("branch."):
-                            continue
-                activated.add((source_id, target, edge_case))
+                if source_type.startswith("branch.") and edge_case != str(case or ""):
+                    continue
+                activated_edges.add(edge_index)
 
         if START_NODE_ID in completed:
-            activate_from(START_NODE_ID)
+            resolve_from(START_NODE_ID, activate=True)
 
         last_output = completed.get(START_NODE_ID, "")
         in_flight: dict[str, asyncio.Task[tuple[str, str, str | None]]] = {}
 
-        def graph_incoming(node_id: str) -> list[tuple[str, str]]:
-            found: list[tuple[str, str]] = []
-            for edge in edges:
-                if str(edge.get("to") or "") != node_id:
-                    continue
-                source = str(edge.get("from") or "")
-                if source not in active_ids:
-                    continue
-                found.append((source, str(edge.get("case") or "")))
-            return found
+        def graph_incoming(node_id: str) -> list[int]:
+            return incoming_edges.get(node_id, [])
 
         def collect_ready() -> list[str]:
+            changed = True
+            while changed:
+                changed = False
+                for node_id in active_ids:
+                    if (
+                        node_id in completed
+                        or node_id in skipped
+                        or node_id in in_flight
+                        or node_id == START_NODE_ID
+                    ):
+                        continue
+                    incoming = graph_incoming(node_id)
+                    if not incoming or not all(
+                        edge_index in resolved_edges for edge_index in incoming
+                    ):
+                        continue
+                    if any(edge_index in activated_edges for edge_index in incoming):
+                        continue
+                    skipped.add(node_id)
+                    resolve_from(node_id, activate=False)
+                    changed = True
+
             ready: list[str] = []
             for node_id in active_ids:
                 if (
                     node_id in completed
+                    or node_id in skipped
                     or node_id in in_flight
                     or node_id == START_NODE_ID
                 ):
@@ -475,15 +520,9 @@ class WorkflowRunner:
                     if only_ids is not None:
                         ready.append(node_id)
                     continue
-                satisfied = 0
-                blocked = False
-                for source, edge_case in incoming:
-                    if source not in completed:
-                        blocked = True
-                        break
-                    if (source, node_id, edge_case) in activated:
-                        satisfied += 1
-                if not blocked and satisfied == len(incoming):
+                if all(edge_index in resolved_edges for edge_index in incoming) and any(
+                    edge_index in activated_edges for edge_index in incoming
+                ):
                     ready.append(node_id)
             return ready
 
@@ -513,9 +552,7 @@ class WorkflowRunner:
             return node_id, output, case
 
         try:
-            guard = 0
-            while guard < 200:
-                guard += 1
+            while True:
                 ready = collect_ready()
                 if ready:
                     logger.info(
@@ -530,6 +567,12 @@ class WorkflowRunner:
                             name=f"automation:{self._task_id()}:{node_id}",
                         )
                 if not in_flight:
+                    unresolved = active_ids - set(completed) - skipped
+                    if unresolved:
+                        blocked_nodes = ",".join(sorted(unresolved))
+                        raise WorkflowError(
+                            f"workflow stalled with unresolved nodes: {blocked_nodes}"
+                        )
                     break
                 done, _pending = await asyncio.wait(
                     set(in_flight.values()),
@@ -556,7 +599,7 @@ class WorkflowRunner:
                     completed[node_id] = output
                     last_output = output
                     assign_node_output(variables, nodes.get(node_id) or {}, output)
-                    activate_from(node_id, case)
+                    resolve_from(node_id, case=case, activate=True)
         finally:
             if in_flight:
                 await _cancel_inflight(in_flight)
@@ -894,7 +937,12 @@ class WorkflowRunner:
             option_id = str(option.get("id") or "").strip()
             if not option_id:
                 continue
-            tool_name = option_tool_name(option_id)
+            base_tool_name = option_tool_name(option_id)
+            tool_name = base_tool_name
+            collision_index = 2
+            while tool_name in id_by_tool:
+                tool_name = f"{base_tool_name[:55]}_{collision_index}"
+                collision_index += 1
             id_by_tool[tool_name] = option_id
             tools.append(
                 {
@@ -929,9 +977,6 @@ class WorkflowRunner:
             mapped = id_by_tool.get(raw_name)
             if mapped:
                 return mapped
-            prefix = "choose_"
-            if raw_name.startswith(prefix):
-                return raw_name[len(prefix) :]
         return (
             str(options[0].get("id") or BRANCH_ELSE_CASE)
             if options
@@ -964,11 +1009,12 @@ class WorkflowRunner:
         )
         until = node.get("until") if isinstance(node.get("until"), dict) else None
         last = ""
+        loop_variables = dict(variables)
         for index in range(count):
             if until is not None:
                 source = str(until.get("input") or "{{trigger.text_original}}")
-                text = render_template(source, variables)
-                sender_raw = variables.get("trigger", {})
+                text = render_template(source, loop_variables)
+                sender_raw = loop_variables.get("trigger", {})
                 sender_id: int | None = None
                 if (
                     isinstance(sender_raw, dict)
@@ -996,14 +1042,17 @@ class WorkflowRunner:
                 index,
                 count,
             )
-            variables["index"] = index
+            iteration_variables = dict(loop_variables)
+            iteration_variables["index"] = index
             last = await self._run_graph(
                 task,
-                variables=variables,
+                variables=iteration_variables,
                 emit_if_needed=emit_if_needed,
                 include_bodies=True,
                 only_ids=body,
             )
+            _merge_scoped_variables(loop_variables, iteration_variables)
+            _merge_scoped_variables(variables, iteration_variables)
         return last
 
     async def _run_loop_each(
@@ -1032,14 +1081,18 @@ class WorkflowRunner:
             ",".join(sorted(body)) or "-",
         )
         last = ""
+        loop_variables = dict(variables)
         for index, item in enumerate(items):
-            variables["index"] = index
-            variables["item"] = item
+            iteration_variables = dict(loop_variables)
+            iteration_variables["index"] = index
+            iteration_variables["item"] = item
             last = await self._run_graph(
                 task,
-                variables=variables,
+                variables=iteration_variables,
                 emit_if_needed=emit_if_needed,
                 include_bodies=True,
                 only_ids=body,
             )
+            _merge_scoped_variables(loop_variables, iteration_variables)
+            _merge_scoped_variables(variables, iteration_variables)
         return last

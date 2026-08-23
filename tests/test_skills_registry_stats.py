@@ -2,7 +2,16 @@
 
 from __future__ import annotations
 
-from Undefined.skills.registry import SkillStats
+import asyncio
+from typing import Any
+
+import pytest
+
+from Undefined.skills.registry import (
+    BaseRegistry,
+    RegistryExecutionTimeoutError,
+    SkillStats,
+)
 
 
 class TestSkillStats:
@@ -98,3 +107,61 @@ class TestSkillStats:
         assert stats.total_duration == 0.0
         assert stats.last_duration == 0.0
         assert stats.count == 1
+
+
+def _schema(name: str) -> dict[str, Any]:
+    return {
+        "type": "function",
+        "function": {
+            "name": name,
+            "parameters": {"type": "object", "properties": {}},
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_registry_strict_execution_preserves_handler_error() -> None:
+    async def fail(args: dict[str, Any], context: dict[str, Any]) -> str:
+        _ = args, context
+        raise RuntimeError("boom")
+
+    registry = BaseRegistry(kind="tool")
+    registry.register_external_item("fail", _schema("fail"), fail)
+
+    assert "执行 fail 时出错: boom" == await registry.execute("fail", {}, {})
+    with pytest.raises(RuntimeError, match="boom"):
+        await registry.execute_strict("fail", {}, {})
+
+
+@pytest.mark.asyncio
+async def test_registry_strict_execution_preserves_timeout() -> None:
+    async def slow(args: dict[str, Any], context: dict[str, Any]) -> str:
+        _ = args, context
+        await asyncio.sleep(1)
+        return "late"
+
+    registry = BaseRegistry(kind="tool", timeout_seconds=0.001)
+    registry.register_external_item("slow", _schema("slow"), slow)
+
+    with pytest.raises(RegistryExecutionTimeoutError):
+        await registry.execute_strict("slow", {}, {})
+
+
+@pytest.mark.asyncio
+async def test_registry_strict_execution_preserves_cancellation() -> None:
+    started = asyncio.Event()
+
+    async def wait_forever(args: dict[str, Any], context: dict[str, Any]) -> str:
+        _ = args, context
+        started.set()
+        await asyncio.Event().wait()
+        return "unreachable"
+
+    registry = BaseRegistry(kind="tool", timeout_seconds=0)
+    registry.register_external_item("wait", _schema("wait"), wait_forever)
+    task = asyncio.create_task(registry.execute_strict("wait", {}, {}))
+    await started.wait()
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task

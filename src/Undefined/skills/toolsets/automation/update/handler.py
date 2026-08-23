@@ -40,9 +40,13 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     if not isinstance(existing, dict):
         return f"找不到自动化 {task_id}"
     payload = deepcopy(existing)
+    merge = args.get("merge")
+    overrides_address = "address" in args or (
+        isinstance(merge, dict) and "address" in merge
+    )
     skip = {"task_id", "patch_nodes", "merge"}
     for key, value in args.items():
-        if key in skip or value is None:
+        if key in skip or (value is None and key != "address"):
             continue
         if key in {
             "kind",
@@ -61,7 +65,6 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             continue
         payload[key] = value
     _apply_start_fields(payload, args)
-    merge = args.get("merge")
     if isinstance(merge, dict):
         payload.update(merge)
     patches = args.get("patch_nodes")
@@ -83,6 +86,9 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                 order.append(node_id)
             by_id[node_id] = current
         payload["nodes"] = [by_id[node_id] for node_id in order]
+    if overrides_address:
+        payload.pop("target_id", None)
+        payload.pop("target_type", None)
     try:
         await service.upsert_automation(task_id, payload)
     except Exception as exc:

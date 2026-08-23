@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -106,3 +107,29 @@ async def test_tool_manager_injects_delivery_address_callables() -> None:
     assert captured_context["parse_delivery_address"] is parse_delivery_address
     assert captured_context["resolve_delivery_address"] is resolve_delivery_address
     assert captured_context["format_message_xml"] is format_message_xml
+
+
+@pytest.mark.asyncio
+async def test_tool_manager_strict_path_uses_registry_strict_execution() -> None:
+    strict_execute = AsyncMock(side_effect=RuntimeError("boom"))
+    permissive_execute = AsyncMock(return_value="执行 tool 时出错: boom")
+    tool_registry = SimpleNamespace(
+        execute_tool=permissive_execute,
+        execute_tool_strict=strict_execute,
+    )
+    agent_registry = SimpleNamespace(get_agents_schema=lambda: [])
+    manager = ToolManager(cast(Any, tool_registry), cast(Any, agent_registry))
+
+    with pytest.raises(RuntimeError, match="boom"):
+        await manager.execute_tool_strict(
+            "tool",
+            {},
+            {
+                "runtime_config": SimpleNamespace(
+                    easter_egg_agent_call_message_mode="none"
+                )
+            },
+        )
+
+    strict_execute.assert_awaited_once()
+    permissive_execute.assert_not_awaited()

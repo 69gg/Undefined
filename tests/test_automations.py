@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -17,13 +18,14 @@ import Undefined.handlers as handlers_module
 from Undefined.api import RuntimeAPIContext, RuntimeAPIServer
 from Undefined.attachments.models import RegisteredMessageAttachments
 from Undefined.automations.engine import iter_matching_tasks
-from Undefined.automations.match import AutomationEvent, match_start_node
+from Undefined.automations.match import AutomationEvent, _regex_search, match_start_node
 from Undefined.automations.mentions import consume_mentions
 from Undefined.automations.migrate import migrate_legacy_task
 from Undefined.automations.runner import (
     WorkflowError,
     WorkflowRunner,
     filter_openai_tools,
+    option_tool_name,
 )
 from Undefined.automations.short import build_short_automation
 from Undefined.automations.storage import AutomationStorage
@@ -693,6 +695,7 @@ async def test_legacy_tool_error_continues_serial_chain() -> None:
     task = migrate_legacy_task(
         {
             "cron": "0 9 * * *",
+            "self_instruction": "先复盘",
             "tools": [
                 {"tool_name": "first", "tool_args": {}},
                 {"tool_name": "second", "tool_args": {}},
@@ -2873,3 +2876,492 @@ async def test_automations_validate_and_ui_roundtrip() -> None:
     valid_body = json.loads(valid.text or "{}")
     assert valid_body["ok"] is True
     assert valid_body["issues"] == []
+
+
+def test_regex_search_enforces_engine_timeout() -> None:
+    started = time.perf_counter()
+    matched = _regex_search("(a+)+$", f"{'a' * 10_000}!", timeout=0.001)
+
+    assert matched is False
+    assert time.perf_counter() - started < 0.5
+
+
+def test_filter_openai_tools_keeps_qualified_names_exact() -> None:
+    tools = [
+        {"type": "function", "function": {"name": "memory.delete"}},
+        {"type": "function", "function": {"name": "automation.delete"}},
+    ]
+
+    qualified = filter_openai_tools(
+        tools,
+        tools=["memory.delete"],
+        toolsets=None,
+        agents=None,
+    )
+    ambiguous_short = filter_openai_tools(
+        tools,
+        tools=["delete"],
+        toolsets=None,
+        agents=None,
+    )
+
+    assert [item["function"]["name"] for item in qualified] == ["memory.delete"]
+    assert ambiguous_short == []
+
+
+def test_filter_openai_tools_prefers_exact_short_registry_name() -> None:
+    tools = [
+        {"type": "function", "function": {"name": "messages.send_message"}},
+        {"type": "function", "function": {"name": "send_message"}},
+    ]
+
+    selected = filter_openai_tools(
+        tools,
+        tools=["send_message"],
+        toolsets=None,
+        agents=None,
+    )
+
+    assert [item["function"]["name"] for item in selected] == ["send_message"]
+
+
+def test_migrate_existing_graph_does_not_enable_tool_error_compatibility() -> None:
+    migrated = migrate_legacy_task(
+        {
+            "auto_send_final": False,
+            "nodes": [
+                {"id": "start", "type": "start", "kind": "cron", "cron": "0 9 * * *"},
+                {"id": "tool", "type": "tool", "tool_name": "failing", "args": {}},
+            ],
+            "edges": [{"from": "start", "to": "tool"}],
+        }
+    )
+
+    assert "compat_continue_on_tool_error" not in migrated
+
+
+def test_migrate_legacy_multiple_tools_keeps_call_self_and_following_actions() -> None:
+    migrated = migrate_legacy_task(
+        {
+            "cron": "0 9 * * *",
+            "tools": [
+                {
+                    "tool_name": "scheduler.call_self",
+                    "tool_args": {"prompt": "先复盘"},
+                },
+                {
+                    "tool_name": "messages.send_message",
+                    "tool_args": {"message": "完成"},
+                },
+            ],
+        }
+    )
+
+    actions = [node for node in migrated["nodes"] if node["id"] != "start"]
+    assert [node["type"] for node in actions] == ["tool", "tool"]
+    assert [node["tool_name"] for node in actions] == [
+        "scheduler.call_self",
+        "messages.send_message",
+    ]
+
+
+def test_explicit_empty_nodes_are_not_expanded_as_short_command() -> None:
+    payload = build_short_automation({"nodes": [], "edges": []})
+
+    assert payload["nodes"] == []
+    assert collect_automation_issues(payload) == [
+        {"path": "nodes", "message": "nodes must be a non-empty array"}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_runner_branch_cases_can_share_a_target() -> None:
+    called: list[str] = []
+
+    async def execute_tool(
+        name: str, args: dict[str, Any], context: dict[str, Any]
+    ) -> str:
+        _ = args, context
+        called.append(name)
+        return name
+
+    runner = _runner(execute_tool=execute_tool, send_message=AsyncMock())
+    task = {
+        "auto_send_final": False,
+        "nodes": [
+            {"id": "start", "type": "start", "kind": "message", "channels": ["group"]},
+            {
+                "id": "choice",
+                "type": "branch.if",
+                "input": "{{trigger.text}}",
+                "cases": [{"id": "hit", "text": "go"}],
+            },
+            {"id": "join", "type": "tool", "tool_name": "join", "args": {}},
+        ],
+        "edges": [
+            {"from": "start", "to": "choice"},
+            {"from": "choice", "to": "join", "case": "hit"},
+            {"from": "choice", "to": "join", "case": "else"},
+        ],
+    }
+    validate_automation(task)
+
+    result = await runner.run(
+        task,
+        event=AutomationEvent(kind="message", channel="group", text="go"),
+        pass_text="go",
+        consume_mentions=(),
+        consume_stripped="go",
+        mentions_all=(),
+    )
+
+    assert result == "join"
+    assert called == ["join"]
+
+
+@pytest.mark.asyncio
+async def test_runner_branch_paths_can_converge_downstream() -> None:
+    called: list[str] = []
+
+    async def execute_tool(
+        name: str, args: dict[str, Any], context: dict[str, Any]
+    ) -> str:
+        _ = args, context
+        called.append(name)
+        return name
+
+    runner = _runner(execute_tool=execute_tool, send_message=AsyncMock())
+    task = {
+        "auto_send_final": False,
+        "nodes": [
+            {"id": "start", "type": "start", "kind": "message", "channels": ["group"]},
+            {
+                "id": "choice",
+                "type": "branch.if",
+                "input": "{{trigger.text}}",
+                "cases": [{"id": "left", "text": "go"}],
+            },
+            {"id": "left", "type": "tool", "tool_name": "left", "args": {}},
+            {"id": "right", "type": "tool", "tool_name": "right", "args": {}},
+            {"id": "join", "type": "tool", "tool_name": "join", "args": {}},
+        ],
+        "edges": [
+            {"from": "start", "to": "choice"},
+            {"from": "choice", "to": "left", "case": "left"},
+            {"from": "choice", "to": "right", "case": "else"},
+            {"from": "left", "to": "join"},
+            {"from": "right", "to": "join"},
+        ],
+    }
+    validate_automation(task)
+
+    await runner.run(
+        task,
+        event=AutomationEvent(kind="message", channel="group", text="go"),
+        pass_text="go",
+        consume_mentions=(),
+        consume_stripped="go",
+        mentions_all=(),
+    )
+
+    assert called == ["left", "join"]
+
+
+@pytest.mark.asyncio
+async def test_nested_loop_restores_outer_item_scope() -> None:
+    seen: list[tuple[str, str]] = []
+
+    async def execute_tool(
+        name: str, args: dict[str, Any], context: dict[str, Any]
+    ) -> str:
+        _ = context
+        seen.append((name, str(args["item"])))
+        return str(args["item"])
+
+    runner = _runner(execute_tool=execute_tool, send_message=AsyncMock())
+    task = {
+        "auto_send_final": False,
+        "nodes": [
+            {"id": "start", "type": "start", "kind": "cron", "cron": "0 9 * * *"},
+            {
+                "id": "outer",
+                "type": "loop.each",
+                "source": json.dumps(["outer-item"]),
+                "body": ["inner", "after"],
+            },
+            {
+                "id": "inner",
+                "type": "loop.each",
+                "source": json.dumps(["inner-item"]),
+                "body": ["inside"],
+            },
+            {
+                "id": "inside",
+                "type": "tool",
+                "tool_name": "inside",
+                "args": {"item": "{{item}}"},
+            },
+            {
+                "id": "after",
+                "type": "tool",
+                "tool_name": "after",
+                "args": {"item": "{{item}}"},
+            },
+        ],
+        "edges": [
+            {"from": "start", "to": "outer"},
+            {"from": "inner", "to": "after"},
+        ],
+    }
+    validate_automation(task)
+
+    await runner.run(
+        task,
+        event=AutomationEvent(kind="time", channel="group"),
+        pass_text="",
+        consume_mentions=(),
+        consume_stripped="",
+        mentions_all=(),
+    )
+
+    assert seen == [("inside", "inner-item"), ("after", "outer-item")]
+
+
+@pytest.mark.asyncio
+async def test_runner_executes_valid_chain_longer_than_200_nodes() -> None:
+    nodes: list[dict[str, Any]] = [
+        {"id": "start", "type": "start", "kind": "cron", "cron": "0 9 * * *"}
+    ]
+    edges: list[dict[str, str]] = []
+    previous = "start"
+    for index in range(205):
+        node_id = f"node_{index}"
+        nodes.append({"id": node_id, "type": "template", "template": str(index)})
+        edges.append({"from": previous, "to": node_id})
+        previous = node_id
+    task = {"auto_send_final": False, "nodes": nodes, "edges": edges}
+    validate_automation(task, max_nodes=300)
+
+    result = await _runner(send_message=AsyncMock()).run(
+        task,
+        event=AutomationEvent(kind="time", channel="group"),
+        pass_text="",
+        consume_mentions=(),
+        consume_stripped="",
+        mentions_all=(),
+    )
+
+    assert result == "204"
+
+
+@pytest.mark.parametrize(
+    "node_id", ["trigger", "nodes", "vars", "index", "item", "bad.id"]
+)
+def test_validate_rejects_runtime_or_unaddressable_node_ids(node_id: str) -> None:
+    issues = collect_automation_issues(
+        _single_node_validation_task(
+            {"id": node_id, "type": "template", "template": "ok"}
+        )
+    )
+
+    assert any(issue["path"] == "nodes[1].id" for issue in issues)
+
+
+def test_branch_llm_option_tool_names_are_unique_after_sanitizing() -> None:
+    option_ids = ["搜索", "聊天", "a-b", "a b"]
+    tool_names = [option_tool_name(option_id) for option_id in option_ids]
+
+    assert len(set(tool_names)) == len(option_ids)
+    assert all(len(tool_name) <= 64 for tool_name in tool_names)
+
+
+def test_validate_rejects_invalid_start_and_branch_clock_boundaries() -> None:
+    task = {
+        "nodes": [
+            {
+                "id": "start",
+                "type": "start",
+                "kind": "message",
+                "channels": ["group"],
+                "clock": {"after": "99:99"},
+            },
+            {
+                "id": "choice",
+                "type": "branch.if",
+                "input": "{{trigger.text}}",
+                "cases": [{"id": "work", "text": "go", "clock": {"before": "25:00"}}],
+            },
+            {"id": "done", "type": "template", "template": "ok"},
+        ],
+        "edges": [
+            {"from": "start", "to": "choice"},
+            {"from": "choice", "to": "done", "case": "work"},
+            {"from": "choice", "to": "done", "case": "else"},
+        ],
+    }
+    paths = {issue["path"] for issue in collect_automation_issues(task)}
+
+    assert "start.clock.after" in paths
+    assert "nodes.choice.cases[0].clock.before" in paths
+
+
+@pytest.mark.parametrize("value", [0, -1, "2", True])
+def test_validate_rejects_non_positive_integer_max_executions(value: Any) -> None:
+    task = _single_node_validation_task(
+        {"id": "done", "type": "template", "template": "ok"}
+    )
+    task["max_executions"] = value
+
+    issues = collect_automation_issues(task)
+
+    assert any(issue["path"] == "max_executions" for issue in issues)
+
+
+@pytest.mark.asyncio
+async def test_member_notice_checks_group_access_before_nickname_lookup() -> None:
+    handler = _group_handler()
+    handler.config.is_group_allowed = lambda _group_id: False
+    handler.onebot.get_group_member_info = AsyncMock()
+    handler.onebot.get_stranger_info = AsyncMock()
+
+    await handler._handle_member_notice(
+        {
+            "notice_type": "group_increase",
+            "group_id": 30001,
+            "user_id": 20001,
+        }
+    )
+
+    handler.onebot.get_group_member_info.assert_not_awaited()
+    handler.onebot.get_stranger_info.assert_not_awaited()
+    handler.ai_coordinator.scheduler.handle_event.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_automation_update_address_replaces_inherited_legacy_target() -> None:
+    scheduler = _make_automation_service()
+    server = RuntimeAPIServer(_api_context(scheduler), host="127.0.0.1", port=8788)
+    try:
+        await scheduler.upsert_automation(
+            "move",
+            {
+                "kind": "message",
+                "channels": ["group"],
+                "prompt": "ok",
+                "address": "group:10001",
+            },
+        )
+        detail = await server._automation_detail_handler(
+            cast(web.Request, _JsonRequest(match_info={"task_id": "move"}))
+        )
+        full_payload = json.loads(detail.text or "{}")["task"]
+        assert full_payload["target_id"] == 10001
+        assert full_payload["target_type"] == "group"
+        full_payload["address"] = "qq:20002"
+
+        response = await server._automation_update_handler(
+            cast(
+                web.Request,
+                _JsonRequest(match_info={"task_id": "move"}, _json=full_payload),
+            )
+        )
+
+        assert response.status == 200, response.text
+        assert scheduler.tasks["move"]["address"] == "qq:20002"
+        assert scheduler.tasks["move"]["target_id"] == 20002
+        assert scheduler.tasks["move"]["target_type"] == "private"
+    finally:
+        scheduler.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_automation_update_can_explicitly_clear_address() -> None:
+    scheduler = _make_automation_service()
+    server = RuntimeAPIServer(_api_context(scheduler), host="127.0.0.1", port=8788)
+    try:
+        await scheduler.upsert_automation(
+            "clear",
+            {
+                "kind": "message",
+                "channels": ["group"],
+                "prompt": "ok",
+                "address": "group:10001",
+            },
+        )
+        detail = await server._automation_detail_handler(
+            cast(web.Request, _JsonRequest(match_info={"task_id": "clear"}))
+        )
+        full_payload = json.loads(detail.text or "{}")["task"]
+        assert full_payload["target_id"] == 10001
+        assert full_payload["target_type"] == "group"
+        full_payload["address"] = None
+
+        response = await server._automation_update_handler(
+            cast(
+                web.Request,
+                _JsonRequest(match_info={"task_id": "clear"}, _json=full_payload),
+            )
+        )
+
+        assert response.status == 200, response.text
+        assert scheduler.tasks["clear"]["address"] is None
+        assert "target_id" not in scheduler.tasks["clear"]
+        assert "target_type" not in scheduler.tasks["clear"]
+    finally:
+        scheduler.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_automation_tool_update_address_clears_inherited_target() -> None:
+    from Undefined.skills.toolsets.automation.update.handler import execute
+
+    scheduler = _make_automation_service()
+    try:
+        await scheduler.upsert_automation(
+            "move",
+            {
+                "kind": "message",
+                "channels": ["group"],
+                "prompt": "ok",
+                "address": "group:10001",
+            },
+        )
+        full_merge = deepcopy(scheduler.tasks["move"])
+        assert full_merge["target_id"] == 10001
+        assert full_merge["target_type"] == "group"
+        full_merge["address"] = "qq:20002"
+
+        result = await execute(
+            {"task_id": "move", "merge": full_merge},
+            {"scheduler": scheduler},
+        )
+
+        assert result == "已更新自动化 move"
+        assert scheduler.tasks["move"]["address"] == "qq:20002"
+        assert scheduler.tasks["move"]["target_id"] == 20002
+        assert scheduler.tasks["move"]["target_type"] == "private"
+    finally:
+        scheduler.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_automations_create_returns_400_for_invalid_interval_value() -> None:
+    scheduler = _FakeAutoScheduler()
+    server = RuntimeAPIServer(_api_context(scheduler), host="127.0.0.1", port=8788)
+
+    response = await server._automations_create_handler(
+        cast(
+            web.Request,
+            _JsonRequest(
+                _json={
+                    "task_id": "bad_interval",
+                    "kind": "interval",
+                    "interval_seconds": "not-a-number",
+                    "prompt": "run",
+                }
+            ),
+        )
+    )
+
+    assert response.status == 400
+    assert "bad_interval" not in scheduler.tasks

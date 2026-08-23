@@ -80,6 +80,13 @@ def _payload_task(body: dict[str, Any]) -> dict[str, Any]:
     return body
 
 
+def _overrides_address(payload: dict[str, Any]) -> bool:
+    if "address" in payload:
+        return True
+    merge = payload.get("merge")
+    return isinstance(merge, dict) and "address" in merge
+
+
 async def _upsert(
     ctx: RuntimeAPIContext,
     task_id: str,
@@ -94,6 +101,7 @@ async def _upsert(
     existing = scheduler.list_tasks().get(task_id) if merge_existing else None
     if merge_existing and isinstance(existing, dict):
         merged = deepcopy(existing)
+        overrides_address = _overrides_address(payload)
         skip = {"task_id", "patch_nodes", "merge"}
         for key, value in payload.items():
             if key in skip:
@@ -106,6 +114,9 @@ async def _upsert(
         patches = payload.get("patch_nodes")
         if isinstance(patches, list) and patches:
             merged = patch_nodes(merged, patches)
+        if overrides_address:
+            merged.pop("target_id", None)
+            merged.pop("target_type", None)
         if not isinstance(payload.get("nodes"), list):
             payload = merged
         else:
@@ -264,6 +275,8 @@ async def automations_create_handler(
         return _json_error(str(exc), status=400)
     except AutomationValidationError as exc:
         return _json_error(str(exc), status=400)
+    except (TypeError, ValueError) as exc:
+        return _json_error(str(exc), status=400)
     return web.json_response({"ok": True, "task": task}, status=201)
 
 
@@ -297,6 +310,8 @@ async def automation_update_handler(
     except SchedulePayloadError as exc:
         return _json_error(str(exc), status=400)
     except AutomationValidationError as exc:
+        return _json_error(str(exc), status=400)
+    except (TypeError, ValueError) as exc:
         return _json_error(str(exc), status=400)
     except Exception:
         return _json_error("Invalid JSON", status=400)
