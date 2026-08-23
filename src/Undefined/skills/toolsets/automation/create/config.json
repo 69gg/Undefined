@@ -100,7 +100,7 @@
                     "type": "array",
                     "description": "全图边 {from,to,case?,kind?}。禁止 loop 外回边。branch.llm 选项 id 对应出边 case；loop body 为子节点 id 列表"
                 },
-                "consume_ai_loop": { "type": "boolean" },
+                "consume_ai_loop": { "type": "boolean", "description": "命中后是否拦截本轮主 AI（默认 false，不拦截、主 AI 照常回复）" },
                 "auto_send_final": { "type": "boolean" },
                 "enabled": { "type": "boolean" }
             }

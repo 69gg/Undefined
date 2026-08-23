@@ -782,18 +782,6 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
                 "[消息策略] 已关闭私聊处理: user=%s",
                 private_sender_id,
             )
-            await self._run_automations(
-                AutomationEvent(
-                    kind="message",
-                    channel="private",
-                    text=str(parsed_content_raw or text),
-                    sender_id=private_sender_id,
-                    user_id=private_sender_id,
-                    nickname=str(user_name or private_sender_nickname or ""),
-                    address=f"qq:{private_sender_id}",
-                ),
-                live_resources=private_live_resources,
-            )
             return
 
         # 多模型池控制指令优先于斜杠命令与 AI 回复
@@ -927,18 +915,6 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
             batch_scope=batch_scope,
         )
         if not self.config.should_process_private_message():
-            await self._run_automations(
-                AutomationEvent(
-                    kind="message",
-                    channel="wechat",
-                    text=str(text),
-                    sender_id=qq_id,
-                    user_id=qq_id,
-                    nickname=str(sender_name or ""),
-                    address=address.canonical,
-                ),
-                live_resources=wechat_live_resources,
-            )
             return
 
         if (
@@ -1283,18 +1259,6 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
                 sender_id,
                 self.config.process_every_message,
                 is_at_bot,
-            )
-            await self._run_automations(
-                AutomationEvent(
-                    kind="message",
-                    channel="group",
-                    text=str(parsed_content_raw or text),
-                    sender_id=sender_id,
-                    nickname=str(sender_card or sender_nickname or ""),
-                    group_id=group_id,
-                    address=f"group:{group_id}",
-                ),
-                live_resources=group_live_resources,
             )
             return
 

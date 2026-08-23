@@ -42,7 +42,7 @@ def serialize_automation(
     start = find_start_node(task_info)
     task["start_kind"] = start_kind(task_info)
     task["enabled"] = bool(task_info.get("enabled", True))
-    task["consume_ai_loop"] = bool(task_info.get("consume_ai_loop", True))
+    task["consume_ai_loop"] = bool(task_info.get("consume_ai_loop", False))
     task["auto_send_final"] = bool(task_info.get("auto_send_final", True))
     task["last_status"] = task_info.get("last_status")
     task["last_run_at"] = task_info.get("last_run_at")

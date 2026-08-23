@@ -164,7 +164,7 @@ def build_short_automation(body: dict[str, Any]) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "task_name": str(body.get("task_name") or "").strip(),
         "enabled": body.get("enabled", True),
-        "consume_ai_loop": body.get("consume_ai_loop", True),
+        "consume_ai_loop": body.get("consume_ai_loop", False),
         "auto_send_final": body.get("auto_send_final", True),
         "nodes": nodes,
         "edges": edges,

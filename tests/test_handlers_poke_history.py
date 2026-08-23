@@ -125,6 +125,42 @@ async def test_group_poke_writes_history_and_triggers_reply() -> None:
 
 
 @pytest.mark.asyncio
+async def test_poke_processing_disabled_skips_everything() -> None:
+    handler = _build_handler()
+    handler.config.should_process_poke_message = lambda: False
+    handler.ai_coordinator.scheduler = SimpleNamespace(
+        handle_event=AsyncMock(return_value=True)
+    )
+
+    await handler.handle_message(
+        {
+            "post_type": "notice",
+            "notice_type": "poke",
+            "target_id": 10000,
+            "group_id": 0,
+            "user_id": 20001,
+            "sender": {"user_id": 20001},
+        }
+    )
+    await handler.handle_message(
+        {
+            "post_type": "notice",
+            "notice_type": "poke",
+            "target_id": 10000,
+            "group_id": 30001,
+            "user_id": 20001,
+            "sender": {"user_id": 20001, "card": "群名片"},
+        }
+    )
+
+    handler.history_manager.add_private_message.assert_not_called()
+    handler.history_manager.add_group_message.assert_not_called()
+    handler.ai_coordinator.scheduler.handle_event.assert_not_awaited()
+    handler.ai_coordinator.handle_private_reply.assert_not_called()
+    handler.ai_coordinator.handle_auto_reply.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_private_poke_skips_profile_refresh_for_placeholder_name() -> None:
     handler = _build_handler()
     handler.ai = SimpleNamespace(_cognitive_service=SimpleNamespace(enabled=True))

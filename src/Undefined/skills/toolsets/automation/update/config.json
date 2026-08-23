@@ -36,7 +36,7 @@
                 },
                 "merge": { "type": "object" },
                 "address": { "type": "string" },
-                "consume_ai_loop": { "type": "boolean" }
+                "consume_ai_loop": { "type": "boolean", "description": "命中后是否拦截本轮主 AI（默认 false，不拦截、主 AI 照常回复）" }
             },
             "required": ["task_id"]
         }

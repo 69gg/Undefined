@@ -14,14 +14,14 @@
 
 ## 挂载点
 
-统一在 **pipeline 之后、对应 AI loop 之前接入工作流**。`consume_ai_loop=true` 时 await 该图并拦截本轮主 AI；`false` 时后台执行、立刻放行主 AI。匹配失败仍继续后续流程。未过「是否处理消息」门控时仍做匹配旁路。Bot 自身消息不匹配。自动化看单条消息，发生在 MessageBatcher 之前。
+统一在 **pipeline 之后、对应 AI loop 之前接入工作流**。`consume_ai_loop=true` 时 await 该图并拦截本轮主 AI；`false`（**全局默认值**）时后台执行、立刻放行主 AI——即默认情况下命中自动化的消息仍会走 AI 回复，需要工作流接管本轮时必须显式设置 `consume_ai_loop=true`。匹配失败仍继续后续流程。「是否处理消息」门控是硬前提：群聊/私聊未过 `should_process_*` 门控、或 core 的 `process_poke_message` 关闭时，事件直接跳过，不做任何自动化匹配。Bot 自身消息不匹配。自动化看单条消息，发生在 MessageBatcher 之前。
 
 | 入口 | 顺序 |
 |---|---|
 | 群聊 | `_run_pipelines` → 自动化 → `handle_auto_reply` |
 | QQ 私聊 | pipeline → 自动化 → `handle_private_reply` |
 | 微信私聊 | pipeline → 自动化 → `handle_private_reply`（channel=`wechat`） |
-| 拍一拍 | 写历史 → 自动化 → 原 poke AI |
+| 拍一拍 | 仅当 core `process_poke_message` 开启：写历史 → 自动化 → 原 poke AI |
 | 入退群 | OneBot `group_increase` / `group_decrease`，无 AI 可拦 |
 | 时间 | APScheduler |
 
@@ -79,7 +79,7 @@
 
 `llm.blank` / `llm.agent` / `llm.main` 可设 `extract_vars: [{ "name", "description" }, ...]`（不含 `branch.llm`）。运行时注入 `extract_<名称>` 工具，模型调用后写入 `{{名称}}` / `{{vars.名称}}`。
 
-LLM/template 默认不发群，`emit: true` 才发。WebUI 新建默认关闭 `consume_ai_loop` 与 `auto_send_final`。失败即停；未拦截主 AI 时工作流后台执行，主 AI 照常继续。
+LLM/template 默认不发群，`emit: true` 才发。`consume_ai_loop` 默认 `false`（新建任务、旧数据补齐与 WebUI 新建一致），显式设为 `true` 才会拦截本轮主 AI；WebUI 新建的 `auto_send_final` 同样默认关闭。失败即停；未拦截主 AI 时工作流后台执行，主 AI 照常继续。
 
 保存前还会校验运行所需字段（`tool_name`、Agent 名及各类 LLM prompt/input）、分支声明与出边的一致性，以及所有节点是否能从 start 到达。`branch.if` 的每个 case 和 `else`、`branch.llm` 的每个 option 都必须至少有一条对应出边；未知或无 case 标签的分支出边会被拒绝。loop body 由所属 loop 的可达性带入，不会被误判为孤立节点。这里只校验名称非空，不要求工具或 Agent 已经完成运行时注册。
 

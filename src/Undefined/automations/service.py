@@ -478,7 +478,7 @@ class AutomationService:
         consumed = False
         blocking: list[tuple[str, Any]] = []
         for task_id, task, start_match in matches:
-            consume_ai = bool(task.get("consume_ai_loop", True))
+            consume_ai = bool(task.get("consume_ai_loop", False))
             logger.info(
                 "[自动化] 命中执行: id=%s name=%s kind=%s consume_ai=%s pass_len=%s preview=%s",
                 task_id,
@@ -836,7 +836,7 @@ class AutomationService:
                 or task_info.get("address")
                 or ""
             ),
-            bool(task_info.get("consume_ai_loop", True)),
+            bool(task_info.get("consume_ai_loop", False)),
         )
         try:
             context_snapshot = await self._load_context_snapshot(

@@ -74,7 +74,7 @@ def migrate_legacy_task(data: dict[str, Any]) -> dict[str, Any]:
     nodes = task.get("nodes")
     if isinstance(nodes, list) and nodes:
         task.setdefault("enabled", True)
-        task.setdefault("consume_ai_loop", True)
+        task.setdefault("consume_ai_loop", False)
         task.setdefault("auto_send_final", True)
         task.setdefault("edges", [])
         if "compat_continue_on_tool_error" not in task:
@@ -147,7 +147,7 @@ def migrate_legacy_task(data: dict[str, Any]) -> dict[str, Any]:
     task["nodes"] = new_nodes
     task["edges"] = edges
     task.setdefault("enabled", True)
-    task.setdefault("consume_ai_loop", True)
+    task.setdefault("consume_ai_loop", False)
     # 旧定时任务由工具自己出站；自我督办节点带 emit=true。
     task.setdefault("auto_send_final", False)
     task.setdefault("compat_continue_on_tool_error", True)

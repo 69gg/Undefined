@@ -82,6 +82,11 @@ class PokeMixin:
             )
             return
 
+        # core 层全局开关：关闭时完全忽略 poke（不写历史、不跑自动化、不回复）
+        if not self.config.should_process_poke_message():
+            logger.debug("[消息策略] 已关闭拍一拍处理，忽略此次 poke 事件")
+            return
+
         poke_group_id: int = event.get("group_id", 0)
         poke_sender_id: int = event.get("user_id", 0)
 
@@ -135,9 +140,7 @@ class PokeMixin:
                     address=f"qq:{poke_sender_id}",
                 )
             )
-            if consumed or not self.config.should_process_poke_message():
-                if not consumed and not self.config.should_process_poke_message():
-                    logger.debug("[消息策略] 已关闭拍一拍处理，忽略此次 poke 事件")
+            if consumed:
                 return
             logger.info("[通知] 私聊拍一拍，触发私聊回复")
             # 拍一拍旁路 MessageBatcher，直接走 mention 级队列
@@ -165,9 +168,7 @@ class PokeMixin:
                     address=f"group:{poke_group_id}",
                 )
             )
-            if consumed or not self.config.should_process_poke_message():
-                if not consumed and not self.config.should_process_poke_message():
-                    logger.debug("[消息策略] 已关闭拍一拍处理，忽略此次 poke 事件")
+            if consumed:
                 return
             logger.info(
                 "[通知] 群聊拍一拍，触发群聊回复: group=%s",

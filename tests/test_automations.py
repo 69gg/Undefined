@@ -227,6 +227,26 @@ def test_migrate_legacy_parallel_tools() -> None:
     ]
 
 
+def test_migrate_defaults_consume_ai_loop_to_false() -> None:
+    graph_task = migrate_legacy_task(
+        {
+            "nodes": [
+                {"id": "start", "type": "start", "kind": "cron", "cron": "0 9 * * *"}
+            ],
+            "edges": [],
+        }
+    )
+    legacy_task = migrate_legacy_task(
+        {"task_id": "old", "cron": "0 9 * * *", "self_instruction": "早安"}
+    )
+    short_task = build_short_automation(
+        {"kind": "cron", "cron": "0 9 * * *", "prompt": "早安"}
+    )
+    assert graph_task["consume_ai_loop"] is False
+    assert legacy_task["consume_ai_loop"] is False
+    assert short_task["consume_ai_loop"] is False
+
+
 def test_short_command_create_graph() -> None:
     task = build_short_automation(
         {
@@ -1801,6 +1821,31 @@ async def test_handle_event_blocking_waits_for_workflow() -> None:
 
 
 @pytest.mark.asyncio
+async def test_handle_event_defaults_nonblocking_when_consume_flag_missing() -> None:
+    service = _make_automation_service()
+    finished = asyncio.Event()
+
+    async def execute(*_args: Any, **_kwargs: Any) -> None:
+        finished.set()
+
+    setattr(service, "_execute_workflow", execute)
+    task = _group_message_task(consume_ai_loop=False)
+    task.pop("consume_ai_loop")
+    service.tasks["default"] = task
+    event = AutomationEvent(kind="message", channel="group", text="hi", group_id=1)
+    try:
+        consumed = await service.handle_event(event)
+        assert consumed is False
+        assert finished.is_set() is False
+        await asyncio.wait_for(
+            asyncio.gather(*list(service._background_tasks)), timeout=1
+        )
+        assert finished.is_set()
+    finally:
+        service.shutdown()
+
+
+@pytest.mark.asyncio
 async def test_handle_event_mixed_spawns_nonblocking_and_awaits_blocking() -> None:
     service = _make_automation_service()
     bg_started = asyncio.Event()
@@ -2164,7 +2209,43 @@ async def test_wechat_entry_intercepts_ai() -> None:
     assert live_resources["reply_context"] == reply_context.to_dict()
     assert live_resources["queue_lane"] == QUEUE_LANE_PRIVATE
     assert live_resources["batch_scope"] == "private:wechat:1"
-    handler.ai_coordinator.handle_private_reply.assert_not_awaited()
+    handler.ai_coordinator.handle_private_reply.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_wechat_message_skips_automations_when_processing_disabled() -> None:
+    handler: Any = MessageHandler.__new__(MessageHandler)
+    handler.config = SimpleNamespace(
+        is_private_allowed=lambda _uid: True,
+        should_process_private_message=lambda: False,
+        model_pool_enabled=False,
+    )
+    handler.sender = SimpleNamespace()
+    handler.history_manager = SimpleNamespace(
+        find_private_message_by_id=AsyncMock(return_value=None),
+        find_private_bot_messages_for_reference=AsyncMock(return_value=[]),
+        add_private_message=AsyncMock(),
+    )
+    handler.ai_coordinator = SimpleNamespace(
+        handle_private_reply=AsyncMock(),
+        scheduler=SimpleNamespace(handle_event=AsyncMock(return_value=True)),
+    )
+    handler.command_dispatcher = SimpleNamespace(
+        parse_command=MagicMock(return_value=None)
+    )
+    handler._run_pipelines = AsyncMock()
+    handler._schedule_meme_ingest = MagicMock()
+    await handler.handle_weixin_private_message(
+        qq_id=1,
+        text="hi",
+        message_content=[{"type": "text", "data": {"text": "hi"}}],
+        attachments=[],
+        sender_name="wx",
+        message_id="m1",
+        account_alias="primary",
+    )
+    handler.ai_coordinator.scheduler.handle_event.assert_not_awaited()
+    handler.ai_coordinator.handle_private_reply.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -2203,6 +2284,99 @@ async def test_poke_entry_intercepts_ai() -> None:
         },
     )
     handler.ai_coordinator.scheduler.handle_event.assert_awaited()
+    handler.ai_coordinator.handle_private_reply.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_group_message_skips_automations_when_processing_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        handlers_module,
+        "parse_message_content_for_history",
+        AsyncMock(return_value="[@10000] 热点"),
+    )
+    handler = _group_handler()
+    handler.config.should_process_group_message = lambda is_at_bot=False: False
+    event = {
+        "post_type": "message",
+        "message_type": "group",
+        "group_id": 30001,
+        "user_id": 20001,
+        "message_id": 1,
+        "sender": {"user_id": 20001, "card": "用户", "nickname": "用户"},
+        "message": [{"type": "text", "data": {"text": "热点"}}],
+    }
+    await handler.handle_message(event)
+    handler.ai_coordinator.scheduler.handle_event.assert_not_awaited()
+    handler.ai_coordinator.handle_auto_reply.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_private_message_skips_automations_when_processing_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        handlers_module,
+        "parse_message_content_for_history",
+        AsyncMock(return_value="hello"),
+    )
+    handler: Any = MessageHandler.__new__(MessageHandler)
+    handler.config = SimpleNamespace(
+        bot_qq=10000,
+        is_private_allowed=lambda _uid: True,
+        access_control_enabled=lambda: False,
+        should_process_private_message=lambda: False,
+        model_pool_enabled=False,
+    )
+    handler.onebot = SimpleNamespace(
+        get_stranger_info=AsyncMock(return_value={"nickname": "测"}),
+        get_msg=AsyncMock(),
+        get_forward_msg=AsyncMock(),
+    )
+    handler.history_manager = SimpleNamespace(add_private_message=AsyncMock())
+    handler.ai_coordinator = SimpleNamespace(
+        handle_private_reply=AsyncMock(),
+        model_pool=SimpleNamespace(
+            handle_private_message=AsyncMock(return_value=False)
+        ),
+        scheduler=SimpleNamespace(handle_event=AsyncMock(return_value=True)),
+    )
+    handler.command_dispatcher = SimpleNamespace(
+        parse_command=MagicMock(return_value=None),
+        dispatch_private=AsyncMock(),
+    )
+    handler.pipeline_registry = SimpleNamespace(run=AsyncMock(return_value=[]))
+    handler._pipelines_initialized = True
+    handler._schedule_profile_display_name_refresh = MagicMock()
+    handler._schedule_meme_ingest = MagicMock()
+    handler._background_tasks = set()
+    handler._collect_message_attachments = AsyncMock(
+        return_value=RegisteredMessageAttachments(
+            attachments=[], normalized_text="hello", forward_refs=[]
+        )
+    )
+    handler._schedule_forward_meme_scan = MagicMock()
+    handler.sender = SimpleNamespace()
+    handler._extract_bilibili_ids = AsyncMock(return_value=[])
+    handler._extract_douyin_ids = AsyncMock(return_value=[])
+    handler._extract_arxiv_ids = AsyncMock(return_value=[])
+    handler._extract_github_repo_ids = AsyncMock(return_value=[])
+    handler._handle_bilibili_extract = AsyncMock()
+    handler._handle_douyin_extract = AsyncMock()
+    handler._handle_arxiv_extract = AsyncMock()
+    handler._handle_github_extract = AsyncMock()
+    await handler.handle_message(
+        {
+            "post_type": "message",
+            "message_type": "private",
+            "user_id": 20001,
+            "message_id": 1,
+            "message": [{"type": "text", "data": {"text": "hello"}}],
+            "sender": {"user_id": 20001, "nickname": "测"},
+        }
+    )
+    handler.ai_coordinator.scheduler.handle_event.assert_not_awaited()
     handler.ai_coordinator.handle_private_reply.assert_not_called()
 
 
