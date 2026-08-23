@@ -529,7 +529,8 @@ async def test_build_messages_keeps_current_input_batch_as_last_item(
     assert "不能作为 end.observations 的新事实来源" in current_content
     assert "【本轮指令优先级】" in current_content
     assert "必须以当前输入批次与当前会话元数据为准" in current_content
-    assert "旧定时任务及旧工具调用" in current_content
+    assert "旧自动化任务及旧工具调用" in current_content
+    assert "已经被自动化工作流接管" in current_content
     assert "不能独立成为本轮指令" in current_content
     assert "默认在当前会话回应或发送" in current_content
     assert "不得从记忆或旧任务猜测、继承、套用其他群聊或私聊地址" in current_content

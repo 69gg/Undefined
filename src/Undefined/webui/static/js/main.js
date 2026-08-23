@@ -49,14 +49,20 @@ function syncMainContentLayout() {
     const mainContent = document.querySelector(".main-content");
     if (mainContent) {
         mainContent.classList.toggle("chat-layout", state.tab === "chat");
+        mainContent.classList.toggle(
+            "workflow-layout",
+            state.tab === "schedules",
+        );
     }
 
     const appContent = get("appContent");
     if (appContent && state.authenticated) {
-        if (state.view === "app") {
-            appContent.style.display = state.tab === "chat" ? "grid" : "block";
-        } else {
+        if (state.view !== "app") {
             appContent.style.display = "none";
+        } else if (state.tab === "chat" || state.tab === "schedules") {
+            appContent.style.display = "grid";
+        } else {
+            appContent.style.display = "block";
         }
     }
 }
@@ -193,6 +199,15 @@ function refreshUI() {
 }
 
 function switchTab(tab) {
+    if (
+        state.tab === "schedules" &&
+        tab !== "schedules" &&
+        window.SchedulesController &&
+        typeof window.SchedulesController.confirmLeave === "function" &&
+        !window.SchedulesController.confirmLeave()
+    ) {
+        return;
+    }
     abortPendingRequests(); // Cancel pending requests from previous tab
     state.tab = tab;
     state.mobileDrawerOpen = false;
@@ -666,6 +681,14 @@ async function init() {
             const v = el.getAttribute("data-view");
             const tab = el.getAttribute("data-tab");
             if (v === "landing") {
+                if (
+                    window.SchedulesController &&
+                    typeof window.SchedulesController.confirmLeave ===
+                        "function" &&
+                    !window.SchedulesController.confirmLeave()
+                ) {
+                    return;
+                }
                 state.view = "landing";
                 refreshUI();
             } else if (tab) switchTab(tab);

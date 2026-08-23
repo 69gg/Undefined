@@ -9,6 +9,8 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from Undefined.automations.match import AutomationEvent
+
 if TYPE_CHECKING:
     from Undefined.config import Config
     from Undefined.onebot import OneBotClient
@@ -52,6 +54,13 @@ class PokeMixin:
         ai_coordinator: AICoordinator
         history_manager: MessageHistoryManager
 
+        async def _run_automations(
+            self,
+            event: AutomationEvent,
+            *,
+            live_resources: dict[str, Any] | None = None,
+        ) -> bool: ...
+
         def _schedule_profile_display_name_refresh(
             self,
             *,
@@ -73,6 +82,7 @@ class PokeMixin:
             )
             return
 
+        # core 层全局开关：关闭时完全忽略 poke（不写历史、不跑自动化、不回复）
         if not self.config.should_process_poke_message():
             logger.debug("[消息策略] 已关闭拍一拍处理，忽略此次 poke 事件")
             return
@@ -119,6 +129,19 @@ class PokeMixin:
             private_poke = await self._record_private_poke_history(
                 poke_sender_id, event
             )
+            consumed = await self._run_automations(
+                AutomationEvent(
+                    kind="poke",
+                    channel="private",
+                    text=private_poke.poke_text,
+                    sender_id=poke_sender_id,
+                    user_id=poke_sender_id,
+                    nickname=private_poke.sender_name,
+                    address=f"qq:{poke_sender_id}",
+                )
+            )
+            if consumed:
+                return
             logger.info("[通知] 私聊拍一拍，触发私聊回复")
             # 拍一拍旁路 MessageBatcher，直接走 mention 级队列
             await self.ai_coordinator.handle_private_reply(
@@ -134,6 +157,19 @@ class PokeMixin:
                 poke_sender_id,
                 event,
             )
+            consumed = await self._run_automations(
+                AutomationEvent(
+                    kind="poke",
+                    channel="group",
+                    text=group_poke.poke_text,
+                    sender_id=poke_sender_id,
+                    nickname=group_poke.sender_name,
+                    group_id=poke_group_id,
+                    address=f"group:{poke_group_id}",
+                )
+            )
+            if consumed:
+                return
             logger.info(
                 "[通知] 群聊拍一拍，触发群聊回复: group=%s",
                 poke_group_id,

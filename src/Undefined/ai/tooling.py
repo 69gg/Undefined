@@ -10,6 +10,7 @@ from typing import Any
 
 from Undefined.context import RequestContext
 from Undefined.attachments import scope_from_context
+from Undefined.automations.extract import apply_extract_tool_from_context
 from Undefined.skills.agents import AgentRegistry
 from Undefined.skills.anthropic_skills import AnthropicSkillRegistry
 from Undefined.skills.tools import ToolRegistry
@@ -199,6 +200,8 @@ class ToolManager:
         function_name: str,
         function_args: dict[str, Any],
         context: dict[str, Any],
+        *,
+        _strict: bool = False,
     ) -> Any:
         """执行指定的工具或 Agent 项
 
@@ -211,6 +214,12 @@ class ToolManager:
             执行结果
         """
         start_time = time.perf_counter()
+
+        extract_result = apply_extract_tool_from_context(
+            function_name, function_args, context
+        )
+        if extract_result is not None:
+            return extract_result
 
         # 先注入 RequestContext，再做会话级策略判定（避免缺 group_id/user_id）
         # 身份字段以活跃 RequestContext 为准（覆盖 context 中可能被污染的值）
@@ -361,9 +370,14 @@ class ToolManager:
                 agent_context["agent_name"] = function_name
 
                 try:
-                    result = await self.agent_registry.execute_agent(
-                        function_name, function_args, agent_context
-                    )
+                    if _strict:
+                        result = await self.agent_registry.execute_agent_strict(
+                            function_name, function_args, agent_context
+                        )
+                    else:
+                        result = await self.agent_registry.execute_agent(
+                            function_name, function_args, agent_context
+                        )
                 finally:
                     if registry_token is not None:
                         self._agent_mcp_registry_var.reset(registry_token)
@@ -379,9 +393,14 @@ class ToolManager:
                 await self._maybe_send_call_easter_egg(
                     function_name, is_agent=False, context=context
                 )
-                result = await self.tool_registry.execute_tool(
-                    function_name, function_args, context
-                )
+                if _strict:
+                    result = await self.tool_registry.execute_tool_strict(
+                        function_name, function_args, context
+                    )
+                else:
+                    result = await self.tool_registry.execute_tool(
+                        function_name, function_args, context
+                    )
 
             duration = time.perf_counter() - start_time
             result_text = redact_string(str(result))
@@ -408,3 +427,17 @@ class ToolManager:
                 redact_string(str(exc)),
             )
             raise
+
+    async def execute_tool_strict(
+        self,
+        function_name: str,
+        function_args: dict[str, Any],
+        context: dict[str, Any],
+    ) -> Any:
+        """Execute a tool while preserving registry exceptions for callers."""
+        return await self.execute_tool(
+            function_name,
+            function_args,
+            context,
+            _strict=True,
+        )

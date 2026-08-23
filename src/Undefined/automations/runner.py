@@ -1,0 +1,1098 @@
+"""Execute an automation DAG with variable interpolation."""
+
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import json
+import logging
+import re
+import time
+from datetime import datetime
+from typing import Any, Awaitable, Callable
+
+from Undefined.automations.clock import clock_matches
+from Undefined.automations.constants import (
+    BRANCH_ELSE_CASE,
+    DEFAULT_BLANK_LLM_MAX_ITERATIONS,
+    DEFAULT_LOOP_MAX_ITERATIONS,
+    DEFAULT_NODE_TIMEOUT_SECONDS,
+    DEFAULT_WORKFLOW_TIMEOUT_SECONDS,
+    START_NODE_ID,
+)
+from Undefined.automations.extract import (
+    apply_extract_tool_call,
+    assign_extracted_vars,
+    build_extract_tools,
+    extract_prompt_hint,
+    merge_extract_tools,
+    parse_extract_vars,
+)
+from Undefined.automations.logutil import preview_text
+from Undefined.automations.match import AutomationEvent, match_condition_on_text
+from Undefined.automations.template import (
+    assign_node_output,
+    render_template,
+    render_value,
+)
+
+logger = logging.getLogger(__name__)
+
+ExecuteTool = Callable[[str, dict[str, Any], dict[str, Any]], Awaitable[Any]]
+SubmitLLM = Callable[..., Awaitable[dict[str, Any]]]
+SendMessage = Callable[[str], Awaitable[None]]
+AskMain = Callable[[str, dict[str, Any]], Awaitable[str]]
+
+
+class WorkflowError(RuntimeError):
+    """Raised when a workflow node fails."""
+
+    def __init__(self, message: str, *, node_id: str = "") -> None:
+        super().__init__(message)
+        self.node_id = node_id
+
+
+def find_start_node(task: dict[str, Any]) -> dict[str, Any] | None:
+    nodes = task.get("nodes")
+    if not isinstance(nodes, list):
+        return None
+    for node in nodes:
+        if isinstance(node, dict) and str(node.get("id") or "") == START_NODE_ID:
+            return node
+    return None
+
+
+def start_kind(task: dict[str, Any]) -> str:
+    start = find_start_node(task)
+    if start is None:
+        return ""
+    return str(start.get("kind") or "").strip()
+
+
+def _node_map(task: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    mapping: dict[str, dict[str, Any]] = {}
+    for node in task.get("nodes") or []:
+        if isinstance(node, dict) and node.get("id"):
+            mapping[str(node["id"])] = node
+    return mapping
+
+
+def _loop_bodies(nodes: dict[str, dict[str, Any]]) -> dict[str, set[str]]:
+    bodies: dict[str, set[str]] = {}
+    for node_id, node in nodes.items():
+        if str(node.get("type") or "") not in {"loop.times", "loop.each"}:
+            continue
+        body = node.get("body")
+        if not isinstance(body, list):
+            bodies[node_id] = set()
+            continue
+        bodies[node_id] = {str(item).strip() for item in body if str(item).strip()}
+    return bodies
+
+
+def _edges(task: dict[str, Any]) -> list[dict[str, Any]]:
+    raw = task.get("edges")
+    if not isinstance(raw, list):
+        return []
+    return [item for item in raw if isinstance(item, dict)]
+
+
+def _tool_function_name(schema: dict[str, Any]) -> str:
+    function = schema.get("function")
+    if isinstance(function, dict):
+        return str(function.get("name") or "")
+    return ""
+
+
+SESSION_IDENTITY_KEYS = (
+    "request_type",
+    "group_id",
+    "user_id",
+    "sender_id",
+    "address",
+    "channel",
+)
+
+
+def collect_session_identity(source: dict[str, Any]) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    for key in SESSION_IDENTITY_KEYS:
+        value = source.get(key)
+        if value is not None and value != "":
+            payload[key] = value
+    return payload
+
+
+def _internal_tool_name(name: str) -> str:
+    return name.replace("-_-", ".")
+
+
+def filter_openai_tools(
+    all_tools: list[dict[str, Any]],
+    *,
+    tools: list[str] | None,
+    toolsets: list[str] | None,
+    agents: list[str] | None,
+) -> list[dict[str, Any]]:
+    allow_tools = {
+        _internal_tool_name(str(name).strip())
+        for name in (tools or [])
+        if str(name).strip()
+    }
+    allow_sets = {str(name).strip() for name in (toolsets or []) if str(name).strip()}
+    allow_agents = {str(name).strip() for name in (agents or []) if str(name).strip()}
+    if not allow_tools and not allow_sets and not allow_agents:
+        return []
+    registered_tools: set[str] = set()
+    short_candidates: dict[str, set[str]] = {}
+    for schema in all_tools:
+        internal = _internal_tool_name(_tool_function_name(schema))
+        if not internal:
+            continue
+        registered_tools.add(internal)
+        short_candidates.setdefault(internal.rsplit(".", 1)[-1], set()).add(internal)
+    exact_tools = allow_tools & registered_tools
+    unresolved_short_tools = {
+        name for name in allow_tools - exact_tools if "." not in name
+    }
+    selected: list[dict[str, Any]] = []
+    for schema in all_tools:
+        name = _tool_function_name(schema)
+        internal = _internal_tool_name(name)
+        short_name = internal.rsplit(".", 1)[-1]
+        if internal in exact_tools:
+            selected.append(schema)
+            continue
+        if short_name in unresolved_short_tools and short_candidates.get(
+            short_name
+        ) == {internal}:
+            selected.append(schema)
+            continue
+        prefix = internal.split(".", 1)[0]
+        if prefix in allow_sets:
+            selected.append(schema)
+            continue
+        if internal in allow_agents or name in allow_agents:
+            selected.append(schema)
+    return selected
+
+
+async def _cancel_inflight(
+    tasks: dict[str, asyncio.Task[tuple[str, str, str | None]]],
+) -> None:
+    pending = [task for task in tasks.values() if not task.done()]
+    tasks.clear()
+    for task in pending:
+        task.cancel()
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
+
+
+def _stringify(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (dict, list)):
+        try:
+            return json.dumps(value, ensure_ascii=False)
+        except TypeError:
+            return str(value)
+    return str(value)
+
+
+def _parse_each_source(raw: str) -> list[Any]:
+    text = raw.strip()
+    if not text:
+        return []
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, list):
+            return list(parsed)
+    except json.JSONDecodeError:
+        pass
+    return [line for line in text.splitlines() if line.strip()]
+
+
+def _merge_scoped_variables(target: dict[str, Any], scoped: dict[str, Any]) -> None:
+    """Propagate workflow outputs without leaking loop-local index/item values."""
+    for key, value in scoped.items():
+        if key not in {"index", "item"}:
+            target[key] = value
+
+
+_OPTION_ID_RE = re.compile(r"[^A-Za-z0-9_]+")
+
+
+def option_tool_name(option_id: str) -> str:
+    raw = str(option_id).strip()
+    cleaned = _OPTION_ID_RE.sub("_", raw).strip("_") or "option"
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:10]
+    return f"choose_{cleaned[:40]}_{digest}"
+
+
+class WorkflowRunner:
+    """Run one automation graph to completion."""
+
+    def __init__(
+        self,
+        *,
+        execute_tool: ExecuteTool,
+        ask_main: AskMain,
+        submit_llm: SubmitLLM,
+        send_message: SendMessage,
+        get_openai_tools: Callable[[], list[dict[str, Any]]],
+        agent_config: Any,
+        tool_context: dict[str, Any],
+        node_timeout_seconds: float = DEFAULT_NODE_TIMEOUT_SECONDS,
+        workflow_timeout_seconds: float = DEFAULT_WORKFLOW_TIMEOUT_SECONDS,
+        blank_llm_max_iterations: int = DEFAULT_BLANK_LLM_MAX_ITERATIONS,
+        loop_max_iterations: int = DEFAULT_LOOP_MAX_ITERATIONS,
+    ) -> None:
+        self.execute_tool = execute_tool
+        self.ask_main = ask_main
+        self.submit_llm = submit_llm
+        self.send_message = send_message
+        self.get_openai_tools = get_openai_tools
+        self.agent_config = agent_config
+        self.tool_context = tool_context
+        self.node_timeout_seconds = node_timeout_seconds
+        self.workflow_timeout_seconds = workflow_timeout_seconds
+        self.blank_llm_max_iterations = blank_llm_max_iterations
+        self.loop_max_iterations = max(1, int(loop_max_iterations))
+        self._continue_on_tool_error = False
+
+    def _task_id(self) -> str:
+        return str(self.tool_context.get("scheduled_task_id") or "")
+
+    def _tool_context_copy(self) -> dict[str, Any]:
+        return dict(self.tool_context)
+
+    def _bind_extract(
+        self, node: dict[str, Any]
+    ) -> tuple[dict[str, Any], dict[str, str]]:
+        specs = parse_extract_vars(node)
+        sink: dict[str, str] = {}
+        ctx = self._tool_context_copy()
+        if specs:
+            ctx["automation_extract_tools"] = build_extract_tools(specs)
+            ctx["automation_extract_sink"] = sink
+            ctx["automation_extract_names"] = {item.name for item in specs}
+        return ctx, sink
+
+    def _with_extract_hint(self, prompt: str, node: dict[str, Any]) -> str:
+        hint = extract_prompt_hint(parse_extract_vars(node))
+        if not hint:
+            return prompt
+        text = str(prompt or "").rstrip()
+        if text:
+            return f"{text}\n\n{hint}"
+        return hint
+
+    async def run(
+        self,
+        task: dict[str, Any],
+        *,
+        event: AutomationEvent,
+        pass_text: str,
+        consume_mentions: tuple[str, ...],
+        consume_stripped: str,
+        mentions_all: tuple[str, ...],
+        trigger_resources: dict[str, Any] | None = None,
+    ) -> str:
+        self._continue_on_tool_error = bool(task.get("compat_continue_on_tool_error"))
+        nodes = task.get("nodes")
+        edges = task.get("edges")
+        logger.info(
+            "[自动化] DAG 开始: id=%s name=%s nodes=%s edges=%s pass_len=%s mentions=%s channel=%s address=%s",
+            self._task_id(),
+            str(task.get("task_name") or ""),
+            len(nodes) if isinstance(nodes, list) else 0,
+            len(edges) if isinstance(edges, list) else 0,
+            len(pass_text),
+            ",".join(consume_mentions) or "-",
+            event.channel,
+            event.address,
+        )
+        trigger: dict[str, Any] = {
+            "text": pass_text,
+            "text_original": event.text,
+            "text_stripped": consume_stripped,
+            "mentions": list(consume_mentions),
+            "mentions_all": list(mentions_all),
+            "channel": event.channel,
+            "sender_id": event.sender_id,
+            "nickname": event.nickname,
+            "address": event.address,
+            "group_id": event.group_id,
+            "user_id": event.user_id,
+            "time": datetime.now().isoformat(timespec="seconds"),
+            "message_id": "",
+            "message_ids": [],
+            "attachments": [],
+            "message_content": [],
+            "reply_context": {},
+            "queue_lane": "",
+            "batch_scope": "",
+            "batched_count": 0,
+            "current_input_is_batched": False,
+        }
+        if trigger_resources:
+            for key in (
+                "message_id",
+                "message_ids",
+                "attachments",
+                "message_content",
+                "reply_context",
+                "queue_lane",
+                "batch_scope",
+                "batched_count",
+                "current_input_is_batched",
+            ):
+                if key in trigger_resources:
+                    trigger[key] = trigger_resources[key]
+        variables: dict[str, Any] = {
+            "trigger": trigger,
+            "nodes": {},
+            "vars": {},
+            "index": 0,
+            "item": "",
+        }
+        emitted = False
+
+        async def emit_if_needed(node: dict[str, Any], output: str) -> None:
+            nonlocal emitted
+            if bool(node.get("emit")) and output.strip():
+                logger.info(
+                    "[自动化] 节点出站: id=%s node=%s len=%s preview=%s",
+                    self._task_id(),
+                    node.get("id"),
+                    len(output),
+                    preview_text(output),
+                )
+                await self.send_message(output)
+                emitted = True
+
+        async def wrapped() -> str:
+            last = await self._run_graph(
+                task,
+                variables=variables,
+                emit_if_needed=emit_if_needed,
+                include_bodies=False,
+            )
+            if not emitted and bool(task.get("auto_send_final", True)) and last.strip():
+                logger.info(
+                    "[自动化] 自动发送终态: id=%s len=%s preview=%s",
+                    self._task_id(),
+                    len(last),
+                    preview_text(last),
+                )
+                await self.send_message(last)
+            return last
+
+        try:
+            result = await asyncio.wait_for(
+                wrapped(), timeout=self.workflow_timeout_seconds
+            )
+        except TimeoutError as exc:
+            logger.error(
+                "[自动化] 工作流超时: id=%s timeout=%.0fs",
+                self._task_id(),
+                self.workflow_timeout_seconds,
+            )
+            raise WorkflowError(
+                f"workflow timeout after {self.workflow_timeout_seconds}s"
+            ) from exc
+        logger.info(
+            "[自动化] DAG 结束: id=%s out_len=%s preview=%s",
+            self._task_id(),
+            len(result),
+            preview_text(result),
+        )
+        return result
+
+    async def _run_graph(
+        self,
+        task: dict[str, Any],
+        *,
+        variables: dict[str, Any],
+        emit_if_needed: Callable[[dict[str, Any], str], Awaitable[None]],
+        include_bodies: bool,
+        only_ids: set[str] | None = None,
+    ) -> str:
+        nodes = _node_map(task)
+        bodies = _loop_bodies(nodes)
+        body_ids: set[str] = set()
+        for members in bodies.values():
+            body_ids.update(members)
+        edges = _edges(task)
+        if only_ids is not None:
+            active_ids = set(only_ids)
+        elif include_bodies:
+            active_ids = set(nodes)
+        else:
+            active_ids = {node_id for node_id in nodes if node_id not in body_ids}
+
+        completed: dict[str, str] = {}
+        if START_NODE_ID in active_ids:
+            completed[START_NODE_ID] = str(
+                variables.get("trigger", {}).get("text") or ""
+            )
+
+        eligible_edges: dict[int, tuple[str, str, str]] = {}
+        incoming_edges: dict[str, list[int]] = {node_id: [] for node_id in active_ids}
+        outgoing_edges: dict[str, list[int]] = {node_id: [] for node_id in active_ids}
+        for edge_index, edge in enumerate(edges):
+            source = str(edge.get("from") or "")
+            target = str(edge.get("to") or "")
+            if source in active_ids and target in active_ids:
+                eligible_edges[edge_index] = (
+                    source,
+                    target,
+                    str(edge.get("case") or ""),
+                )
+                outgoing_edges[source].append(edge_index)
+                incoming_edges[target].append(edge_index)
+
+        resolved_edges: set[int] = set()
+        activated_edges: set[int] = set()
+        skipped: set[str] = set()
+
+        def resolve_from(
+            source_id: str,
+            *,
+            case: str | None = None,
+            activate: bool,
+        ) -> None:
+            source_type = str(nodes.get(source_id, {}).get("type") or "")
+            for edge_index in outgoing_edges.get(source_id, []):
+                _source, _target, edge_case = eligible_edges[edge_index]
+                resolved_edges.add(edge_index)
+                if not activate:
+                    continue
+                if source_type.startswith("branch.") and edge_case != str(case or ""):
+                    continue
+                activated_edges.add(edge_index)
+
+        if START_NODE_ID in completed:
+            resolve_from(START_NODE_ID, activate=True)
+
+        last_output = completed.get(START_NODE_ID, "")
+        in_flight: dict[str, asyncio.Task[tuple[str, str, str | None]]] = {}
+
+        def graph_incoming(node_id: str) -> list[int]:
+            return incoming_edges.get(node_id, [])
+
+        def collect_ready() -> list[str]:
+            changed = True
+            while changed:
+                changed = False
+                for node_id in active_ids:
+                    if (
+                        node_id in completed
+                        or node_id in skipped
+                        or node_id in in_flight
+                        or node_id == START_NODE_ID
+                    ):
+                        continue
+                    incoming = graph_incoming(node_id)
+                    if not incoming or not all(
+                        edge_index in resolved_edges for edge_index in incoming
+                    ):
+                        continue
+                    if any(edge_index in activated_edges for edge_index in incoming):
+                        continue
+                    skipped.add(node_id)
+                    resolve_from(node_id, activate=False)
+                    changed = True
+
+            ready: list[str] = []
+            for node_id in active_ids:
+                if (
+                    node_id in completed
+                    or node_id in skipped
+                    or node_id in in_flight
+                    or node_id == START_NODE_ID
+                ):
+                    continue
+                incoming = graph_incoming(node_id)
+                if not incoming:
+                    if only_ids is not None:
+                        ready.append(node_id)
+                    continue
+                if all(edge_index in resolved_edges for edge_index in incoming) and any(
+                    edge_index in activated_edges for edge_index in incoming
+                ):
+                    ready.append(node_id)
+            return ready
+
+        async def run_one(node_id: str) -> tuple[str, str, str | None]:
+            node = nodes[node_id]
+            try:
+                output, case = await asyncio.wait_for(
+                    self._execute_node(
+                        node,
+                        task=task,
+                        variables=variables,
+                        emit_if_needed=emit_if_needed,
+                    ),
+                    timeout=self.node_timeout_seconds,
+                )
+            except TimeoutError as exc:
+                logger.error(
+                    "[自动化] 节点超时: id=%s node=%s timeout=%.0fs",
+                    self._task_id(),
+                    node_id,
+                    self.node_timeout_seconds,
+                )
+                raise WorkflowError(
+                    f"node timeout after {self.node_timeout_seconds}s",
+                    node_id=node_id,
+                ) from exc
+            return node_id, output, case
+
+        try:
+            while True:
+                ready = collect_ready()
+                if ready:
+                    logger.info(
+                        "[自动化] 并行调度: id=%s nodes=%s inflight=%s",
+                        self._task_id(),
+                        ",".join(ready),
+                        ",".join(sorted(in_flight)) or "-",
+                    )
+                    for node_id in ready:
+                        in_flight[node_id] = asyncio.create_task(
+                            run_one(node_id),
+                            name=f"automation:{self._task_id()}:{node_id}",
+                        )
+                if not in_flight:
+                    unresolved = active_ids - set(completed) - skipped
+                    if unresolved:
+                        blocked_nodes = ",".join(sorted(unresolved))
+                        raise WorkflowError(
+                            f"workflow stalled with unresolved nodes: {blocked_nodes}"
+                        )
+                    break
+                done, _pending = await asyncio.wait(
+                    set(in_flight.values()),
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                finished_ids = [
+                    node_id
+                    for node_id, running in list(in_flight.items())
+                    if running in done
+                ]
+                for node_id in finished_ids:
+                    task_result = in_flight.pop(node_id)
+                    try:
+                        _nid, output, case = task_result.result()
+                    except asyncio.CancelledError:
+                        await _cancel_inflight(in_flight)
+                        raise
+                    except WorkflowError:
+                        await _cancel_inflight(in_flight)
+                        raise
+                    except BaseException as exc:
+                        await _cancel_inflight(in_flight)
+                        raise WorkflowError(str(exc), node_id=node_id) from exc
+                    completed[node_id] = output
+                    last_output = output
+                    assign_node_output(variables, nodes.get(node_id) or {}, output)
+                    resolve_from(node_id, case=case, activate=True)
+        finally:
+            if in_flight:
+                await _cancel_inflight(in_flight)
+        return last_output
+
+    async def _execute_node(
+        self,
+        node: dict[str, Any],
+        *,
+        task: dict[str, Any],
+        variables: dict[str, Any],
+        emit_if_needed: Callable[[dict[str, Any], str], Awaitable[None]],
+    ) -> tuple[str, str | None]:
+        node_id = str(node.get("id") or "")
+        node_type = str(node.get("type") or "")
+        started = time.perf_counter()
+        logger.info(
+            "[自动化] 节点开始: id=%s node=%s type=%s",
+            self._task_id(),
+            node_id,
+            node_type,
+        )
+        output = ""
+        case: str | None = None
+        try:
+            if node_type == "tool":
+                try:
+                    output = await self._run_tool(node, variables)
+                except Exception as exc:
+                    if self._continue_on_tool_error:
+                        logger.warning(
+                            "[自动化] 工具失败但继续: id=%s node=%s error=%s",
+                            self._task_id(),
+                            node_id,
+                            exc,
+                        )
+                        output = f"执行失败: {exc}"
+                    else:
+                        raise
+            elif node_type == "template":
+                output = render_template(str(node.get("template") or ""), variables)
+            elif node_type == "llm.blank":
+                output = await self._run_blank_llm(node, variables)
+            elif node_type == "llm.agent":
+                output = await self._run_agent(node, variables)
+            elif node_type == "llm.main":
+                output = await self._run_main(node, variables)
+            elif node_type == "branch.if":
+                case = self._eval_branch_if(node, variables)
+                logger.info(
+                    "[自动化] 分支: id=%s node=%s type=%s case=%s",
+                    self._task_id(),
+                    node_id,
+                    node_type,
+                    case,
+                )
+                await emit_if_needed(node, "")
+            elif node_type == "branch.llm":
+                case = await self._eval_branch_llm(node, variables)
+                logger.info(
+                    "[自动化] 分支: id=%s node=%s type=%s case=%s",
+                    self._task_id(),
+                    node_id,
+                    node_type,
+                    case,
+                )
+            elif node_type == "loop.times":
+                output = await self._run_loop_times(
+                    node, task=task, variables=variables, emit_if_needed=emit_if_needed
+                )
+            elif node_type == "loop.each":
+                output = await self._run_loop_each(
+                    node, task=task, variables=variables, emit_if_needed=emit_if_needed
+                )
+            else:
+                raise WorkflowError(f"unknown node type: {node_type}", node_id=node_id)
+            if case is None:
+                await emit_if_needed(node, output)
+            else:
+                output = case
+        except WorkflowError:
+            raise
+        except Exception as exc:
+            raise WorkflowError(str(exc), node_id=node_id) from exc
+
+        logger.info(
+            "[自动化] 节点完成: id=%s node=%s type=%s elapsed=%.2fs out_len=%s case=%s preview=%s",
+            self._task_id(),
+            node_id,
+            node_type,
+            time.perf_counter() - started,
+            len(output),
+            case or "-",
+            preview_text(output),
+        )
+        return output, case
+
+    async def _run_tool(self, node: dict[str, Any], variables: dict[str, Any]) -> str:
+        tool_name = render_template(str(node.get("tool_name") or ""), variables).strip()
+        if not tool_name:
+            raise WorkflowError(
+                "tool_name is required", node_id=str(node.get("id") or "")
+            )
+        args_raw = node.get("args")
+        if args_raw is None:
+            args_raw = node.get("tool_args") or {}
+        args = render_value(args_raw, variables)
+        if not isinstance(args, dict):
+            args = {}
+        result = await self.execute_tool(tool_name, args, self._tool_context_copy())
+        logger.debug(
+            "[自动化] 工具返回: id=%s node=%s tool=%s preview=%s",
+            self._task_id(),
+            str(node.get("id") or ""),
+            tool_name,
+            preview_text(result, limit=200),
+        )
+        return _stringify(result)
+
+    async def _run_agent(self, node: dict[str, Any], variables: dict[str, Any]) -> str:
+        agent = render_template(str(node.get("agent") or ""), variables).strip()
+        if not agent:
+            raise WorkflowError("agent is required", node_id=str(node.get("id") or ""))
+        prompt = self._with_extract_hint(
+            render_template(
+                str(node.get("input") or node.get("prompt") or ""), variables
+            ),
+            node,
+        )
+        ctx, sink = self._bind_extract(node)
+        result = await self.execute_tool(agent, {"prompt": prompt}, ctx)
+        assign_extracted_vars(variables, sink)
+        return _stringify(result)
+
+    async def _run_main(self, node: dict[str, Any], variables: dict[str, Any]) -> str:
+        prompt = self._with_extract_hint(
+            render_template(str(node.get("prompt") or ""), variables),
+            node,
+        )
+        extra = {
+            "scheduled_self_call": True,
+            "automation_id": str(self.tool_context.get("scheduled_task_id") or ""),
+            "automation_name": str(self.tool_context.get("scheduled_task_name") or ""),
+        }
+        extra.update(collect_session_identity(self.tool_context))
+        ctx, sink = self._bind_extract(node)
+        if "automation_extract_tools" in ctx:
+            extra["automation_extract_tools"] = ctx["automation_extract_tools"]
+            extra["automation_extract_sink"] = sink
+            extra["automation_extract_names"] = ctx["automation_extract_names"]
+        result = await self.ask_main(prompt, extra)
+        assign_extracted_vars(variables, sink)
+        return result
+
+    async def _run_blank_llm(
+        self, node: dict[str, Any], variables: dict[str, Any]
+    ) -> str:
+        system_prompt = render_template(str(node.get("system_prompt") or ""), variables)
+        user_prompt = render_template(str(node.get("user_prompt") or ""), variables)
+        selected = filter_openai_tools(
+            self.get_openai_tools(),
+            tools=list(node.get("tools") or [])
+            if isinstance(node.get("tools"), list)
+            else None,
+            toolsets=list(node.get("toolsets") or [])
+            if isinstance(node.get("toolsets"), list)
+            else None,
+            agents=list(node.get("agents") or [])
+            if isinstance(node.get("agents"), list)
+            else None,
+        )
+        ctx, sink = self._bind_extract(node)
+        extract_tools = ctx.get("automation_extract_tools")
+        selected = merge_extract_tools(selected, extract_tools)
+        hint = extract_prompt_hint(parse_extract_vars(node))
+        if hint:
+            if system_prompt.strip():
+                system_prompt = f"{system_prompt.rstrip()}\n\n{hint}"
+            else:
+                user_prompt = self._with_extract_hint(user_prompt, node)
+        names = {str(item) for item in (ctx.get("automation_extract_names") or [])}
+        messages: list[dict[str, Any]] = []
+        if system_prompt.strip():
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": user_prompt})
+        max_iterations = int(
+            node.get("max_iterations") or self.blank_llm_max_iterations
+        )
+        max_iterations = max(1, min(max_iterations, self.blank_llm_max_iterations))
+        last_content = ""
+        transport_state: dict[str, Any] | None = None
+        for _iteration in range(max_iterations):
+            result = await self.submit_llm(
+                model_config=self.agent_config,
+                messages=messages,
+                tools=selected or None,
+                tool_choice="auto" if selected else None,
+                call_type="automation:blank",
+                max_tokens=getattr(self.agent_config, "max_tokens", None),
+                transport_state=transport_state,
+            )
+            tool_name_map = (
+                result.get("_tool_name_map") if isinstance(result, dict) else None
+            )
+            api_to_internal: dict[str, str] = {}
+            if isinstance(tool_name_map, dict):
+                raw = tool_name_map.get("api_to_internal")
+                if isinstance(raw, dict):
+                    api_to_internal = {
+                        str(key): str(value) for key, value in raw.items()
+                    }
+            next_transport = (
+                result.get("_transport_state") if isinstance(result, dict) else None
+            )
+            transport_state = (
+                next_transport if isinstance(next_transport, dict) else None
+            )
+            choice = (result.get("choices") or [{}])[0]
+            message = choice.get("message") if isinstance(choice, dict) else {}
+            if not isinstance(message, dict):
+                message = {}
+            content = str(message.get("content") or "")
+            tool_calls = message.get("tool_calls") or []
+            if content.strip():
+                last_content = content
+            if not tool_calls:
+                assign_extracted_vars(variables, sink)
+                return last_content
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": content,
+                    "tool_calls": tool_calls,
+                }
+            )
+            for tool_call in tool_calls:
+                if not isinstance(tool_call, dict):
+                    continue
+                function_raw = tool_call.get("function")
+                function: dict[str, Any] = (
+                    function_raw if isinstance(function_raw, dict) else {}
+                )
+                raw_name = str(function.get("name") or "")
+                internal_name = api_to_internal.get(raw_name, raw_name).replace(
+                    "-_-", "."
+                )
+                raw_args = function.get("arguments") or "{}"
+                if isinstance(raw_args, dict):
+                    args = raw_args
+                else:
+                    try:
+                        parsed = json.loads(str(raw_args))
+                        args = parsed if isinstance(parsed, dict) else {}
+                    except json.JSONDecodeError:
+                        args = {}
+                handled = apply_extract_tool_call(
+                    internal_name,
+                    args,
+                    sink=sink,
+                    names=names,
+                )
+                if handled is not None:
+                    payload = handled
+                else:
+                    try:
+                        tool_result = await self.execute_tool(internal_name, args, ctx)
+                        payload = _stringify(tool_result)
+                    except Exception as exc:
+                        payload = f"工具执行失败: {exc}"
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": str(tool_call.get("id") or ""),
+                        "name": raw_name,
+                        "content": payload,
+                    }
+                )
+        assign_extracted_vars(variables, sink)
+        return last_content or "达到最大迭代次数"
+
+    def _eval_branch_if(self, node: dict[str, Any], variables: dict[str, Any]) -> str:
+        source = str(node.get("input") or "{{trigger.text_original}}")
+        text = render_template(source, variables)
+        sender_raw = variables.get("trigger", {})
+        sender_id: int | None = None
+        if isinstance(sender_raw, dict):
+            sender_value = sender_raw.get("sender_id")
+            if sender_value is not None:
+                try:
+                    sender_id = int(sender_value)
+                except (TypeError, ValueError):
+                    sender_id = None
+        cases = node.get("cases")
+        if isinstance(cases, list):
+            for case in cases:
+                if not isinstance(case, dict):
+                    continue
+                case_id = str(case.get("id") or "").strip()
+                if not case_id:
+                    continue
+                if match_condition_on_text(text, case, sender_id=sender_id) is not None:
+                    return case_id
+                clock = case.get("clock") if isinstance(case.get("clock"), dict) else {}
+                if (
+                    clock
+                    and not str(case.get("text") or "")
+                    and not case.get("mentions")
+                ):
+                    if clock_matches(
+                        datetime.now(),
+                        after=str(clock.get("after") or "") or None,
+                        before=str(clock.get("before") or "") or None,
+                        weekdays=[
+                            int(item)
+                            for item in clock.get("weekdays") or []
+                            if str(item).isdigit()
+                        ]
+                        or None,
+                    ):
+                        return case_id
+        return BRANCH_ELSE_CASE
+
+    async def _eval_branch_llm(
+        self, node: dict[str, Any], variables: dict[str, Any]
+    ) -> str:
+        options_raw = node.get("options")
+        if not isinstance(options_raw, list):
+            return BRANCH_ELSE_CASE
+        options: list[dict[str, Any]] = [
+            item for item in options_raw if isinstance(item, dict)
+        ]
+        tools = []
+        id_by_tool: dict[str, str] = {}
+        for option in options:
+            option_id = str(option.get("id") or "").strip()
+            if not option_id:
+                continue
+            base_tool_name = option_tool_name(option_id)
+            tool_name = base_tool_name
+            collision_index = 2
+            while tool_name in id_by_tool:
+                tool_name = f"{base_tool_name[:55]}_{collision_index}"
+                collision_index += 1
+            id_by_tool[tool_name] = option_id
+            tools.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": tool_name,
+                        "description": str(option.get("description") or option_id),
+                        "parameters": {"type": "object", "properties": {}},
+                    },
+                }
+            )
+        prompt = render_template(str(node.get("input") or ""), variables)
+        messages = [{"role": "user", "content": prompt}]
+        result = await self.submit_llm(
+            model_config=self.agent_config,
+            messages=messages,
+            tools=tools,
+            tool_choice="required",
+            call_type="automation:branch",
+            max_tokens=getattr(self.agent_config, "max_tokens", None),
+        )
+        choice = (result.get("choices") or [{}])[0]
+        message = choice.get("message") if isinstance(choice, dict) else {}
+        tool_calls = (
+            message.get("tool_calls") or [] if isinstance(message, dict) else []
+        )
+        if tool_calls and isinstance(tool_calls[0], dict):
+            function = tool_calls[0].get("function")
+            raw_name = ""
+            if isinstance(function, dict):
+                raw_name = str(function.get("name") or "")
+            mapped = id_by_tool.get(raw_name)
+            if mapped:
+                return mapped
+        return (
+            str(options[0].get("id") or BRANCH_ELSE_CASE)
+            if options
+            else BRANCH_ELSE_CASE
+        )
+
+    async def _run_loop_times(
+        self,
+        node: dict[str, Any],
+        *,
+        task: dict[str, Any],
+        variables: dict[str, Any],
+        emit_if_needed: Callable[[dict[str, Any], str], Awaitable[None]],
+    ) -> str:
+        count = int(node.get("count") or self.loop_max_iterations)
+        max_iterations = min(
+            int(node.get("max_iterations") or self.loop_max_iterations),
+            self.loop_max_iterations,
+        )
+        count = max(0, min(count, max_iterations))
+        body = {
+            str(item).strip() for item in (node.get("body") or []) if str(item).strip()
+        }
+        logger.info(
+            "[自动化] 循环 times: id=%s node=%s count=%s body=%s",
+            self._task_id(),
+            str(node.get("id") or ""),
+            count,
+            ",".join(sorted(body)) or "-",
+        )
+        until = node.get("until") if isinstance(node.get("until"), dict) else None
+        last = ""
+        loop_variables = dict(variables)
+        for index in range(count):
+            if until is not None:
+                source = str(until.get("input") or "{{trigger.text_original}}")
+                text = render_template(source, loop_variables)
+                sender_raw = loop_variables.get("trigger", {})
+                sender_id: int | None = None
+                if (
+                    isinstance(sender_raw, dict)
+                    and sender_raw.get("sender_id") is not None
+                ):
+                    try:
+                        sender_id = int(sender_raw["sender_id"])
+                    except (TypeError, ValueError):
+                        sender_id = None
+                if (
+                    match_condition_on_text(text, until, sender_id=sender_id)
+                    is not None
+                ):
+                    logger.info(
+                        "[自动化] 循环 until 命中，提前结束: id=%s node=%s index=%s",
+                        self._task_id(),
+                        str(node.get("id") or ""),
+                        index,
+                    )
+                    break
+            logger.debug(
+                "[自动化] 循环迭代: id=%s node=%s index=%s/%s",
+                self._task_id(),
+                str(node.get("id") or ""),
+                index,
+                count,
+            )
+            iteration_variables = dict(loop_variables)
+            iteration_variables["index"] = index
+            last = await self._run_graph(
+                task,
+                variables=iteration_variables,
+                emit_if_needed=emit_if_needed,
+                include_bodies=True,
+                only_ids=body,
+            )
+            _merge_scoped_variables(loop_variables, iteration_variables)
+            _merge_scoped_variables(variables, iteration_variables)
+        return last
+
+    async def _run_loop_each(
+        self,
+        node: dict[str, Any],
+        *,
+        task: dict[str, Any],
+        variables: dict[str, Any],
+        emit_if_needed: Callable[[dict[str, Any], str], Awaitable[None]],
+    ) -> str:
+        source = render_template(str(node.get("source") or ""), variables)
+        items = _parse_each_source(source)
+        max_iterations = min(
+            int(node.get("max_iterations") or self.loop_max_iterations),
+            self.loop_max_iterations,
+        )
+        items = items[:max_iterations]
+        body = {
+            str(item).strip() for item in (node.get("body") or []) if str(item).strip()
+        }
+        logger.info(
+            "[自动化] 循环 each: id=%s node=%s items=%s body=%s",
+            self._task_id(),
+            str(node.get("id") or ""),
+            len(items),
+            ",".join(sorted(body)) or "-",
+        )
+        last = ""
+        loop_variables = dict(variables)
+        for index, item in enumerate(items):
+            iteration_variables = dict(loop_variables)
+            iteration_variables["index"] = index
+            iteration_variables["item"] = item
+            last = await self._run_graph(
+                task,
+                variables=iteration_variables,
+                emit_if_needed=emit_if_needed,
+                include_bodies=True,
+                only_ids=body,
+            )
+            _merge_scoped_variables(loop_variables, iteration_variables)
+            _merge_scoped_variables(variables, iteration_variables)
+        return last

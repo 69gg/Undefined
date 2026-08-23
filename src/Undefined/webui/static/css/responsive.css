@@ -17,6 +17,15 @@
     height: 100dvh;
     padding-bottom: max(14px, env(safe-area-inset-bottom));
   }
+  .main-content.workflow-layout {
+    height: 100dvh;
+    padding-top: 0;
+    padding-bottom: max(14px, env(safe-area-inset-bottom));
+  }
+  .main-content.workflow-layout #tab-schedules.active > .header.sticky {
+    margin: 0 -30px 16px;
+    padding: 14px 30px;
+  }
 }
 
 @media (max-width: 768px) {
@@ -68,6 +77,18 @@
     height: 100dvh;
     min-height: 0;
     padding: 14px 16px max(12px, env(safe-area-inset-bottom));
+  }
+  .main-content.workflow-layout {
+    height: 100dvh;
+    min-height: 0;
+    padding: 14px 16px max(12px, env(safe-area-inset-bottom));
+  }
+  .main-content.workflow-layout #tab-schedules.active > .header.sticky {
+    margin: 0 0 12px;
+    padding: 0;
+    position: relative;
+    border-bottom: 0;
+    box-shadow: none;
   }
   .main-content.chat-layout #tab-chat > .header {
     margin-bottom: 8px;

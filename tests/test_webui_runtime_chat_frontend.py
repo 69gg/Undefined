@@ -1432,9 +1432,13 @@ def test_webchat_layout_keeps_input_at_bottom_and_log_scrollable() -> None:
     assert ".main-content.chat-layout" in responsive_css
     assert "height: 100dvh;" in responsive_css
     assert "function syncMainContentLayout()" in main_js
-    assert (
-        'appContent.style.display = state.tab === "chat" ? "grid" : "block";' in main_js
-    )
+    layout_block = main_js.split("function syncMainContentLayout()", 1)[1].split(
+        "\n}\n", 1
+    )[0]
+    assert 'state.tab === "chat" || state.tab === "schedules"' in layout_block
+    assert 'appContent.style.display = "grid";' in layout_block
+    assert 'appContent.style.display = "block";' in layout_block
+    assert 'appContent.style.display = "none";' in layout_block
     assert 'role="log"' in template
     assert 'aria-live="polite"' in template
     assert 'data-i18n-aria-label="runtime.chat_log_label"' in template

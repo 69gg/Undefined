@@ -7,6 +7,7 @@ from .manager import ConfigManager
 from .models import (
     APIConfig,
     AgentModelConfig,
+    AutomationsConfig,
     ChatModelConfig,
     EmbeddingModelConfig,
     GrokModelConfig,
@@ -31,6 +32,7 @@ __all__ = [
     "SecurityModelConfig",
     "APIConfig",
     "AgentModelConfig",
+    "AutomationsConfig",
     "EmbeddingModelConfig",
     "GrokModelConfig",
     "RerankModelConfig",

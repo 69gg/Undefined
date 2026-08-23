@@ -181,6 +181,14 @@ def apply_config_updates(
         ):
             handler.message_batcher.update_config(updated.message_batcher)
 
+    if _needs_automations_update(changed_keys):
+        asyncio.create_task(
+            _apply_message_handler_automations_hot_reload(
+                updated,
+                context.message_handler,
+            )
+        )
+
     if _needs_core_ai_model_update(changed_keys):
         context.ai_client.apply_model_configs(
             chat_config=updated.chat_model,
@@ -247,6 +255,12 @@ def _needs_message_batcher_update(changed_keys: set[str]) -> bool:
     )
 
 
+def _needs_automations_update(changed_keys: set[str]) -> bool:
+    return any(
+        key == "automations" or key.startswith("automations.") for key in changed_keys
+    )
+
+
 def _matches_prefixes(changed_keys: set[str], prefixes: tuple[str, ...]) -> bool:
     return any(
         key == prefix or key.startswith(f"{prefix}.")
@@ -298,6 +312,17 @@ async def _apply_message_handler_skills_hot_reload(
         enabled=updated.skills_hot_reload,
         interval=updated.skills_hot_reload_interval,
         debounce=updated.skills_hot_reload_debounce,
+    )
+
+
+async def _apply_message_handler_automations_hot_reload(
+    updated: Config,
+    message_handler: MessageHandler | None,
+) -> None:
+    if message_handler is None:
+        return
+    await message_handler.apply_automations_hot_reload_config(
+        max_concurrent=updated.automations.max_concurrent
     )
 
 

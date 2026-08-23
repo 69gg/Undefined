@@ -33,6 +33,12 @@ function updateI18N() {
     ) {
         window.WeixinController.onLanguageChanged();
     }
+    if (
+        window.SchedulesController &&
+        typeof window.SchedulesController.onLanguageChanged === "function"
+    ) {
+        window.SchedulesController.onLanguageChanged();
+    }
 }
 
 function updateToggleLabels() {

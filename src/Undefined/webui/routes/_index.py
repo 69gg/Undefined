@@ -39,6 +39,7 @@ async def index_handler(request: web.Request) -> Response:
     query_theme = str(request.query.get("theme") or "").strip().lower()
     query_view = str(request.query.get("view") or "").strip().lower()
     query_tab = str(request.query.get("tab") or "").strip().lower()
+    query_task = str(request.query.get("task") or "").strip()
     query_client = str(request.query.get("client") or "").strip().lower()
     query_return_to = str(request.query.get("return_to") or "").strip()
 
@@ -66,6 +67,7 @@ async def index_handler(request: web.Request) -> Response:
         "lang": lang,
         "theme": theme,
         "initial_tab": initial_tab,
+        "initial_task": query_task if query_tab == "schedules" else "",
         "launcher_mode": launcher_mode,
         "return_to": query_return_to if launcher_mode else "",
     }

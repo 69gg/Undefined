@@ -1,0 +1,15 @@
+{
+    "type": "function",
+    "function": {
+        "name": "set_enabled",
+        "description": "启用或停用一条自动化，不删除图。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "task_id": { "type": "string" },
+                "enabled": { "type": "boolean" }
+            },
+            "required": ["task_id", "enabled"]
+        }
+    }
+}

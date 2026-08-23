@@ -1,0 +1,17 @@
+{
+    "type": "function",
+    "function": {
+        "name": "get",
+        "description": "读取一条自动化的完整图（nodes/edges）以及上次运行信息。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "task_id": {
+                    "type": "string",
+                    "description": "自动化 ID"
+                }
+            },
+            "required": ["task_id"]
+        }
+    }
+}

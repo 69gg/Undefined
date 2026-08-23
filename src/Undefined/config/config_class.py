@@ -12,6 +12,7 @@ from .domain_parsers import _update_dataclass
 from .models import (
     AgentModelConfig,
     APIConfig,
+    AutomationsConfig,
     ChatModelConfig,
     CognitiveConfig,
     EmbeddingModelConfig,
@@ -243,6 +244,8 @@ class Config:
     image_gen: ImageGenConfig
     models_image_gen: ImageGenModelConfig
     models_image_edit: ImageGenModelConfig
+    # 条件驱动自动化（带默认值，避免手工构造 Config 的测试缺字段）
+    automations: AutomationsConfig = dataclass_field(default_factory=AutomationsConfig)
     _allowed_group_ids_set: set[int] = dataclass_field(
         default_factory=set,
         init=False,

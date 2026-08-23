@@ -948,6 +948,26 @@ class OneBotClient:
                     task = asyncio.create_task(self._safe_handle_message(poke_event))
                     self._tasks.add(task)
                     task.add_done_callback(self._tasks.discard)
+            elif notice_type in {"group_increase", "group_decrease"}:
+                sender_id = data.get("user_id", 0)
+                group_id = data.get("group_id", 0)
+                logger.info(
+                    "[bold magenta][收到群成员变动][/bold magenta] type=%s sender=%s group=%s",
+                    notice_type,
+                    sender_id,
+                    group_id,
+                )
+                if self._message_handler:
+                    member_event = {
+                        "post_type": "notice",
+                        "notice_type": notice_type,
+                        "group_id": group_id,
+                        "user_id": sender_id,
+                        "sub_type": sub_type,
+                    }
+                    task = asyncio.create_task(self._safe_handle_message(member_event))
+                    self._tasks.add(task)
+                    task.add_done_callback(self._tasks.discard)
             else:
                 logger.debug(
                     f"收到通知事件: notice_type={notice_type}, sub_type={sub_type}"

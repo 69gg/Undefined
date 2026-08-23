@@ -37,7 +37,7 @@ if TYPE_CHECKING:
     from Undefined.services.message_batcher import BufferedMessage
     from Undefined.services.security import SecurityService
     from Undefined.utils.history import MessageHistoryManager
-    from Undefined.utils.scheduler import TaskScheduler
+    from Undefined.automations.service import AutomationService
     from Undefined.utils.sender import MessageSender
 
 logger = logging.getLogger(__name__)
@@ -68,7 +68,7 @@ class PrivateReplyMixin:
         config: Config
         history_manager: MessageHistoryManager
         onebot: Any
-        scheduler: TaskScheduler
+        scheduler: AutomationService
         security: SecurityService
         sender: MessageSender
 

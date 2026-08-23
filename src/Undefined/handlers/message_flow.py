@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 import inspect
 import logging
 import os
@@ -34,12 +35,21 @@ from Undefined.onebot import (
     get_message_sender_id,
 )
 from Undefined.rate_limit import RateLimiter
-from Undefined.scheduled_task_storage import ScheduledTaskStorage
-from Undefined.services.coordinator import AICoordinator
+from Undefined.automations.logutil import preview_text
+from Undefined.automations.match import AutomationEvent
+from Undefined.automations.service import AutomationService
 from Undefined.services.command import CommandDispatcher
+from Undefined.services.coordinator import AICoordinator
 from Undefined.services.message_batcher import MessageBatcher, make_scope
 from Undefined.services.model_pool import ModelPoolService
-from Undefined.services.queue_manager import QueueManager
+from Undefined.services.queue_manager import (
+    QUEUE_LANE_GROUP_MENTION,
+    QUEUE_LANE_GROUP_NORMAL,
+    QUEUE_LANE_GROUP_SUPERADMIN,
+    QUEUE_LANE_PRIVATE,
+    QUEUE_LANE_SUPERADMIN,
+    QueueManager,
+)
 from Undefined.services.security import SecurityService
 from Undefined.skills.pipelines import PipelineRegistry
 from Undefined.skills.pipelines.context import build_pipeline_context
@@ -49,7 +59,6 @@ from Undefined.utils.history import MessageHistoryManager
 from Undefined.utils.logging import log_debug_json, redact_string
 from Undefined.utils.queue_intervals import build_model_queue_intervals
 from Undefined.utils.resources import resolve_resource_path
-from Undefined.utils.scheduler import TaskScheduler
 from Undefined.utils.message_reply import GENERIC_REPLY_PLACEHOLDER, ReplyContext
 from Undefined.utils.message_targets import DeliveryAddress
 from Undefined.utils.sender import AddressBoundSender, MessageSender
@@ -89,6 +98,50 @@ def _extract_forward_id_from_segment(segment: dict[str, Any]) -> str:
     return str(forward_id).strip() if forward_id is not None else ""
 
 
+def _automation_message_queue_lane(
+    *,
+    sender_id: int,
+    superadmin_qq: int | None,
+    is_private: bool,
+    is_at_bot: bool = False,
+) -> str:
+    if sender_id == superadmin_qq:
+        return QUEUE_LANE_SUPERADMIN if is_private else QUEUE_LANE_GROUP_SUPERADMIN
+    if is_private:
+        return QUEUE_LANE_PRIVATE
+    return QUEUE_LANE_GROUP_MENTION if is_at_bot else QUEUE_LANE_GROUP_NORMAL
+
+
+def _build_automation_message_resources(
+    *,
+    message_id: int | str | None,
+    attachments: list[dict[str, str]],
+    message_content: list[dict[str, Any]],
+    reply_context: ReplyContext | None,
+    queue_lane: str,
+    batch_scope: str,
+) -> dict[str, Any]:
+    """Build the single-message snapshot exposed to an automation run."""
+    if message_id is None or not str(message_id).strip():
+        normalized_message_id: int | str = ""
+        has_message_id = False
+    else:
+        normalized_message_id = message_id
+        has_message_id = True
+    return {
+        "message_id": normalized_message_id,
+        "trigger_message_id": normalized_message_id,
+        "message_ids": [normalized_message_id] if has_message_id else [],
+        "attachments": deepcopy(attachments),
+        "message_content": deepcopy(message_content),
+        "reply_context": reply_context.to_dict() if reply_context is not None else {},
+        "queue_lane": queue_lane,
+        "batch_scope": batch_scope,
+        "batched_count": 1,
+        "current_input_is_batched": False,
+    }
+
+
 class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
     """消息处理器。
 
@@ -102,7 +155,6 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
         onebot: OneBotClient,
         ai: AIClient,
         faq_storage: FAQStorage,
-        task_storage: ScheduledTaskStorage,
     ) -> None:
         self.config = config
         self.onebot = onebot
@@ -145,7 +197,7 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
             self.history_manager,
             self.sender,
             onebot,
-            TaskScheduler(ai, self.sender, onebot, self.history_manager, task_storage),
+            AutomationService(ai, self.sender, onebot, self.history_manager),
             self.security,
             command_dispatcher=self.command_dispatcher,
         )
@@ -589,6 +641,15 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
             await self._handle_poke_notice(event)
             return
 
+        if post_type == "notice" and event.get("notice_type") in {
+            "group_increase",
+            "group_decrease",
+            "member_join",
+            "member_leave",
+        }:
+            await self._handle_member_notice(event)
+            return
+
         if event.get("message_type") == "private":
             await self._handle_private_message(event)
             return
@@ -703,6 +764,19 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
             ),
         )
 
+        private_live_resources = _build_automation_message_resources(
+            message_id=trigger_message_id,
+            attachments=prompt_refs,
+            message_content=private_message_content,
+            reply_context=None,
+            queue_lane=_automation_message_queue_lane(
+                sender_id=private_sender_id,
+                superadmin_qq=getattr(self.config, "superadmin_qq", None),
+                is_private=True,
+            ),
+            batch_scope=make_scope(user_id=private_sender_id),
+        )
+
         if not self.config.should_process_private_message():
             logger.debug(
                 "[消息策略] 已关闭私聊处理: user=%s",
@@ -740,6 +814,20 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
             message_content=private_message_content,
         )
 
+        if await self._run_automations(
+            AutomationEvent(
+                kind="message",
+                channel="private",
+                text=str(parsed_content_raw or text),
+                sender_id=private_sender_id,
+                user_id=private_sender_id,
+                nickname=str(user_name or private_sender_nickname or ""),
+                address=f"qq:{private_sender_id}",
+            ),
+            live_resources=private_live_resources,
+        ):
+            return
+
         await self.ai_coordinator.handle_private_reply(
             private_sender_id,
             ai_content_base,
@@ -767,6 +855,7 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
             return
         address = DeliveryAddress("wechat", qq_id)
         route_sender = AddressBoundSender(self.sender, address)
+        batch_scope = f"private:{address.canonical}"
         received_at_ms = (
             created_at_ms
             if created_at_ms is not None and created_at_ms > 0
@@ -813,6 +902,18 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
             message_id=None,
             scope_key=build_attachment_scope(user_id=qq_id, request_type="private"),
         )
+        wechat_live_resources = _build_automation_message_resources(
+            message_id=message_id,
+            attachments=attachments,
+            message_content=message_content,
+            reply_context=reply_context,
+            queue_lane=_automation_message_queue_lane(
+                sender_id=qq_id,
+                superadmin_qq=getattr(self.config, "superadmin_qq", None),
+                is_private=True,
+            ),
+            batch_scope=batch_scope,
+        )
         if not self.config.should_process_private_message():
             return
 
@@ -827,7 +928,6 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
             return
 
         command = self.command_dispatcher.parse_command(text)
-        batch_scope = f"private:{address.canonical}"
         if command:
             await self._flush_command_buffer(scope=batch_scope, sender_id=qq_id)
 
@@ -853,6 +953,19 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
             message_content=message_content,
             address=address,
         )
+        if await self._run_automations(
+            AutomationEvent(
+                kind="message",
+                channel="wechat",
+                text=str(text),
+                sender_id=qq_id,
+                user_id=qq_id,
+                nickname=str(sender_name or ""),
+                address=address.canonical,
+            ),
+            live_resources=wechat_live_resources,
+        ):
+            return
         await self.ai_coordinator.handle_private_reply(
             qq_id,
             text,
@@ -1125,6 +1238,20 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
                         sender_id,
                     )
 
+        group_live_resources = _build_automation_message_resources(
+            message_id=trigger_message_id,
+            attachments=prompt_refs,
+            message_content=message_content,
+            reply_context=None,
+            queue_lane=_automation_message_queue_lane(
+                sender_id=sender_id,
+                superadmin_qq=getattr(self.config, "superadmin_qq", None),
+                is_private=False,
+                is_at_bot=is_at_bot,
+            ),
+            batch_scope=make_scope(group_id=group_id),
+        )
+
         if not self.config.should_process_group_message(is_at_bot=is_at_bot):
             logger.debug(
                 "[消息策略] 跳过群消息处理: group=%s sender=%s process_every_message=%s at_bot=%s",
@@ -1167,6 +1294,20 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
             text=text,
             message_content=message_content,
         )
+
+        if await self._run_automations(
+            AutomationEvent(
+                kind="message",
+                channel="group",
+                text=str(parsed_content_raw or text),
+                sender_id=sender_id,
+                nickname=str(sender_card or sender_nickname or ""),
+                group_id=group_id,
+                address=f"group:{group_id}",
+            ),
+            live_resources=group_live_resources,
+        ):
+            return
 
         display_name = sender_card or sender_nickname or str(sender_id)
         await self.ai_coordinator.handle_auto_reply(
@@ -1261,6 +1402,118 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
         detections = await self.pipeline_registry.run(context)
         return bool(detections)
 
+    async def _run_automations(
+        self,
+        event: AutomationEvent,
+        *,
+        live_resources: dict[str, Any] | None = None,
+    ) -> bool:
+        """Run matching automations. True means the AI loop should be skipped.
+
+        Non-blocking matches return immediately while their graphs keep running.
+        """
+        scheduler = getattr(self.ai_coordinator, "scheduler", None)
+        handle = getattr(scheduler, "handle_event", None)
+        if not callable(handle):
+            logger.debug("[自动化] 运行时未注入，跳过事件 kind=%s", event.kind)
+            return False
+        logger.debug(
+            "[自动化] 入站: kind=%s channel=%s address=%s sender=%s group=%s text_len=%s preview=%s",
+            event.kind,
+            event.channel,
+            event.address,
+            event.sender_id,
+            event.group_id,
+            len(event.text or ""),
+            preview_text(event.text),
+        )
+        try:
+            if live_resources is None:
+                consumed = bool(await handle(event))
+            else:
+                consumed = bool(await handle(event, live_resources=live_resources))
+        except Exception:
+            logger.exception(
+                "[自动化] 处理事件失败: kind=%s channel=%s address=%s",
+                event.kind,
+                event.channel,
+                event.address,
+            )
+            return False
+        if consumed:
+            logger.info(
+                "[自动化] 已拦截本轮 AI: kind=%s channel=%s address=%s sender=%s",
+                event.kind,
+                event.channel,
+                event.address,
+                event.sender_id,
+            )
+        return consumed
+
+    async def _resolve_member_nickname(self, group_id: int, user_id: int | None) -> str:
+        """Resolve group card or QQ nickname for a member notice."""
+        if user_id is None:
+            return ""
+        try:
+            member_info = await self.onebot.get_group_member_info(group_id, user_id)
+            if isinstance(member_info, dict):
+                card = str(member_info.get("card") or "").strip()
+                nickname = str(member_info.get("nickname") or "").strip()
+                if card or nickname:
+                    return card or nickname
+        except Exception as exc:
+            logger.warning(
+                "[自动化] 获取入退群成员名片失败: group=%s user=%s err=%s",
+                group_id,
+                user_id,
+                exc,
+            )
+        try:
+            user_info = await self.onebot.get_stranger_info(user_id)
+            if isinstance(user_info, dict):
+                return str(user_info.get("nickname") or "").strip()
+        except Exception as exc:
+            logger.warning(
+                "[自动化] 获取入退群用户昵称失败: user=%s err=%s",
+                user_id,
+                exc,
+            )
+        return ""
+
+    async def _handle_member_notice(self, event: dict[str, Any]) -> None:
+        """入群 / 退群自动化触发。"""
+        group_id = safe_int(event.get("group_id"))
+        user_id = safe_int(event.get("user_id"))
+        notice_type = str(event.get("notice_type") or "")
+        kind = (
+            "member_join"
+            if notice_type in {"group_increase", "member_join"}
+            else "member_leave"
+        )
+        if group_id is None:
+            return
+        if not self.config.is_group_allowed(group_id):
+            logger.debug(
+                "[访问控制] 忽略群成员通知: group=%s user=%s kind=%s",
+                group_id,
+                user_id,
+                kind,
+            )
+            return
+        nickname = await self._resolve_member_nickname(group_id, user_id)
+        await self._run_automations(
+            AutomationEvent(
+                kind=kind,
+                channel="group",
+                text="",
+                sender_id=user_id,
+                user_id=user_id,
+                nickname=nickname,
+                group_id=group_id,
+                address=f"group:{group_id}",
+            )
+        )
+
     async def apply_skills_hot_reload_config(
         self,
         *,
@@ -1279,6 +1532,17 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
             interval=interval,
             debounce=debounce,
         )
+
+    async def apply_automations_hot_reload_config(
+        self,
+        *,
+        max_concurrent: int,
+    ) -> None:
+        """Apply automation runtime settings that support hot reload."""
+        scheduler = getattr(self.ai_coordinator, "scheduler", None)
+        update = getattr(scheduler, "update_max_concurrent", None)
+        if callable(update):
+            await update(max_concurrent)
 
     def _spawn_background_task(
         self,
@@ -1317,6 +1581,10 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
                 return_exceptions=True,
             )
         await self.pipeline_registry.stop_hot_reload()
+        scheduler = getattr(self.ai_coordinator, "scheduler", None)
+        shutdown = getattr(scheduler, "shutdown", None)
+        if callable(shutdown):
+            shutdown()
         await self.message_batcher.flush_all()
         # 关闭前排空 AI 队列并落盘历史，避免丢回复/丢记录
         await self.ai_coordinator.queue_manager.drain()

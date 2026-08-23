@@ -1,0 +1,11 @@
+{
+    "type": "function",
+    "function": {
+        "name": "list",
+        "description": "列出全部自动化工作流，含 start 类型、场景、上次运行状态。旧定时任务也会出现在这里。",
+        "parameters": {
+            "type": "object",
+            "properties": {}
+        }
+    }
+}

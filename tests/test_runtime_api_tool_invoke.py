@@ -41,7 +41,7 @@ class _FakeToolRegistry:
             _make_tool_schema("get_current_time"),
             _make_tool_schema("end"),
             _make_tool_schema("messages.send_message"),
-            _make_tool_schema("scheduler.create_schedule_task"),
+            _make_tool_schema("automation.create"),
             _make_tool_schema("mcp.server.tool"),
         ]
 
@@ -191,7 +191,7 @@ async def test_tools_list_expose_toolsets_only() -> None:
     payload = _json(response)
     names = {t["function"]["name"] for t in payload["tools"]}
     assert "messages.send_message" in names
-    assert "scheduler.create_schedule_task" in names
+    assert "automation.create" in names
     assert "get_current_time" not in names
     assert "web_agent" not in names
     assert "mcp.server.tool" not in names

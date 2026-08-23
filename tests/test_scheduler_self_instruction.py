@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -7,24 +8,18 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from Undefined.skills.toolsets.scheduler.create_schedule_task.handler import (
-    execute as create_schedule_task_execute,
+from Undefined.automations.address import (
+    resolve_live_event_address,
+    resolve_task_address,
 )
-from Undefined.skills.toolsets.scheduler.list_schedule_tasks.handler import (
-    execute as list_schedule_tasks_execute,
-)
-from Undefined.skills.toolsets.scheduler.update_schedule_task.handler import (
-    execute as update_schedule_task_execute,
-)
+from Undefined.automations.constants import SELF_CALL_TOOL_NAME
+from Undefined.automations.match import AutomationEvent
+from Undefined.automations.service import AutomationService
+from Undefined.automations.validate import AutomationValidationError
 from Undefined.utils import io as async_io
-from Undefined.utils.scheduler import (
-    SELF_CALL_TOOL_NAME,
-    TaskScheduler,
-    _resolve_task_address,
-)
 
 
-class _DummyTaskStorage:
+class _DummyStorage:
     def load_tasks(self) -> dict[str, Any]:
         return {}
 
@@ -32,15 +27,44 @@ class _DummyTaskStorage:
         return None
 
 
+def _make_service(
+    *,
+    ai: Any | None = None,
+    sender: Any | None = None,
+    onebot: Any | None = None,
+) -> AutomationService:
+    return AutomationService(
+        ai
+        or SimpleNamespace(
+            ask=AsyncMock(),
+            memory_storage=SimpleNamespace(),
+            runtime_config=SimpleNamespace(),
+        ),
+        sender
+        or SimpleNamespace(
+            send_group_message=AsyncMock(),
+            send_private_message=AsyncMock(),
+        ),
+        onebot
+        or SimpleNamespace(
+            send_like=AsyncMock(),
+            get_image=AsyncMock(return_value=None),
+            get_forward_msg=AsyncMock(return_value=[]),
+        ),
+        SimpleNamespace(),
+        storage=cast(Any, _DummyStorage()),
+    )
+
+
 def test_resolve_task_address_rejects_conflicting_legacy_target() -> None:
     with pytest.raises(ValueError, match="address 与旧目标参数指向不同会话"):
-        _resolve_task_address("wechat:12345", 12345, "private")
+        resolve_task_address("wechat:12345", 12345, "private")
 
 
 def test_resolve_task_address_preserves_address_and_legacy_only_paths() -> None:
-    address_only = _resolve_task_address("wechat:12345", None, "private")
-    legacy_only = _resolve_task_address(None, 12345, "private")
-    matching_targets = _resolve_task_address("group:12345", 12345, "group")
+    address_only = resolve_task_address("wechat:12345", None, "private")
+    legacy_only = resolve_task_address(None, 12345, "private")
+    matching_targets = resolve_task_address("group:12345", 12345, "group")
 
     assert address_only is not None
     assert address_only.canonical == "wechat:12345"
@@ -50,122 +74,222 @@ def test_resolve_task_address_preserves_address_and_legacy_only_paths() -> None:
     assert matching_targets.canonical == "group:12345"
 
 
-@pytest.mark.asyncio
-async def test_create_schedule_task_supports_self_instruction() -> None:
-    scheduler = SimpleNamespace(add_task=AsyncMock(return_value=True))
-    context: dict[str, Any] = {
-        "scheduler": scheduler,
-        "group_id": 10001,
-    }
-
-    result = await create_schedule_task_execute(
-        {
-            "cron_expression": "0 9 * * *",
-            "self_instruction": "明天早上先总结待办，再提醒我前三项。",
-        },
-        context,
+def test_resolve_live_event_address_prefers_event_session() -> None:
+    group = resolve_live_event_address(
+        address="group:1017148870",
+        channel="group",
+        group_id=1017148870,
+        user_id=2608261902,
     )
-
-    assert "调用未来的自己" in result
-    scheduler.add_task.assert_awaited_once()
-    kwargs = scheduler.add_task.await_args.kwargs
-    assert kwargs["tool_name"] == SELF_CALL_TOOL_NAME
-    assert kwargs["tool_args"] == {"prompt": "明天早上先总结待办，再提醒我前三项。"}
-    assert kwargs["self_instruction"] == "明天早上先总结待办，再提醒我前三项。"
+    wechat = resolve_live_event_address(
+        address="wechat:12345",
+        channel="wechat",
+        user_id=12345,
+    )
+    private = resolve_live_event_address(
+        address="",
+        channel="private",
+        user_id=10001,
+    )
+    assert group is not None
+    assert group.canonical == "group:1017148870"
+    assert wechat is not None
+    assert wechat.canonical == "wechat:12345"
+    assert private is not None
+    assert private.canonical == "qq:10001"
 
 
 @pytest.mark.asyncio
-async def test_create_schedule_task_keeps_wechat_address_without_legacy_target() -> (
+async def test_execute_tool_injects_cognitive_service() -> None:
+    captured: list[Any] = []
+    cognitive = SimpleNamespace(enabled=True)
+
+    async def execute_tool(
+        name: str, args: dict[str, Any], context: dict[str, Any]
+    ) -> str:
+        _ = name, args
+        captured.append(context.get("cognitive_service"))
+        return "ok"
+
+    ai = SimpleNamespace(
+        tool_manager=SimpleNamespace(execute_tool=execute_tool),
+        _cognitive_service=cognitive,
+        memory_storage=SimpleNamespace(),
+        runtime_config=SimpleNamespace(),
+    )
+    service = _make_service(ai=ai)
+    try:
+        result = await service._execute_tool("cognitive.get_profile", {}, {})
+    finally:
+        service.shutdown()
+
+    assert result == "ok"
+    assert captured == [cognitive]
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_keeps_explicit_cognitive_service() -> None:
+    captured: list[Any] = []
+    injected = SimpleNamespace(enabled=True, source="context")
+    owned = SimpleNamespace(enabled=True, source="ai")
+
+    async def execute_tool(
+        name: str, args: dict[str, Any], context: dict[str, Any]
+    ) -> str:
+        _ = name, args
+        captured.append(context.get("cognitive_service"))
+        return "ok"
+
+    ai = SimpleNamespace(
+        tool_manager=SimpleNamespace(execute_tool=execute_tool),
+        _cognitive_service=owned,
+        memory_storage=SimpleNamespace(),
+        runtime_config=SimpleNamespace(),
+    )
+    service = _make_service(ai=ai)
+    try:
+        await service._execute_tool(
+            "cognitive.get_profile",
+            {},
+            {"cognitive_service": injected},
+        )
+    finally:
+        service.shutdown()
+
+    assert captured == [injected]
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_prefers_strict_tool_manager_path() -> None:
+    strict_execute = AsyncMock(side_effect=RuntimeError("tool failed"))
+    permissive_execute = AsyncMock(return_value="执行 tool 时出错: tool failed")
+    ai = SimpleNamespace(
+        tool_manager=SimpleNamespace(
+            execute_tool=permissive_execute,
+            execute_tool_strict=strict_execute,
+        ),
+        memory_storage=SimpleNamespace(),
+        runtime_config=SimpleNamespace(),
+    )
+    service = _make_service(ai=ai)
+    try:
+        with pytest.raises(RuntimeError, match="tool failed"):
+            await service._execute_tool("tool", {}, {})
+    finally:
+        service.shutdown()
+
+    strict_execute.assert_awaited_once()
+    permissive_execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_event_workflow_injects_live_session_into_tool_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: list[dict[str, Any]] = []
+
+    async def execute_tool(
+        name: str, args: dict[str, Any], context: dict[str, Any]
+    ) -> str:
+        _ = name, args
+        captured.append(
+            {
+                "group_id": context.get("group_id"),
+                "user_id": context.get("user_id"),
+                "sender_id": context.get("sender_id"),
+                "address": context.get("address"),
+                "request_type": context.get("request_type"),
+                "channel": context.get("channel"),
+            }
+        )
+        return "ok"
+
+    monkeypatch.setattr(
+        "Undefined.automations.service.collect_context_resources",
+        lambda values: {
+            key: values[key]
+            for key in (
+                "send_message_callback",
+                "sender",
+                "history_manager",
+                "onebot_client",
+            )
+            if key in values
+        },
+    )
+    ai = SimpleNamespace(
+        tool_manager=SimpleNamespace(
+            execute_tool=execute_tool,
+            get_openai_tools=lambda: [],
+        ),
+        memory_storage=SimpleNamespace(),
+        runtime_config=SimpleNamespace(),
+        ask=AsyncMock(return_value=""),
+        submit_queued_llm_call=AsyncMock(return_value={"choices": []}),
+        agent_config=SimpleNamespace(max_tokens=16),
+    )
+    sender = SimpleNamespace(
+        send_group_message=AsyncMock(),
+        send_private_message=AsyncMock(),
+        send_address_message=AsyncMock(),
+    )
+    service = _make_service(ai=ai, sender=sender)
+    service.tasks["testtoviolet"] = {
+        "task_id": "testtoviolet",
+        "task_name": "测试群祸害紫罗兰",
+        "enabled": True,
+        "consume_ai_loop": True,
+        "auto_send_final": False,
+        "address": "qq:999",
+        "nodes": [
+            {
+                "id": "start",
+                "type": "start",
+                "kind": "message",
+                "channels": ["group"],
+                "group_ids": [1017148870],
+                "text": "",
+            },
+            {
+                "id": "tool_1",
+                "type": "tool",
+                "tool_name": "cognitive.get_profile",
+                "args": {"entity_id": "2608261902"},
+            },
+        ],
+        "edges": [{"from": "start", "to": "tool_1"}],
+    }
+    try:
+        consumed = await service.handle_event(
+            AutomationEvent(
+                kind="message",
+                channel="group",
+                text="hi",
+                sender_id=2608261902,
+                group_id=1017148870,
+                address="group:1017148870",
+            )
+        )
+    finally:
+        service.shutdown()
+
+    assert consumed is True
+    assert captured == [
+        {
+            "group_id": 1017148870,
+            "user_id": 2608261902,
+            "sender_id": 2608261902,
+            "address": "group:1017148870",
+            "request_type": "group",
+            "channel": "group",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_automation_service_execute_self_call_invokes_ai_and_sends_result() -> (
     None
 ):
-    scheduler = SimpleNamespace(add_task=AsyncMock(return_value=True))
-    context: dict[str, Any] = {
-        "scheduler": scheduler,
-        "request_type": "private",
-        "user_id": 12345,
-        "address": "wechat:12345",
-    }
-
-    result = await create_schedule_task_execute(
-        {
-            "cron_expression": "0 9 * * *",
-            "self_instruction": "提醒我查看微信消息。",
-        },
-        context,
-    )
-
-    assert "调用未来的自己" in result
-    kwargs = scheduler.add_task.await_args.kwargs
-    assert kwargs["target_address"] == "wechat:12345"
-    assert kwargs["target_id"] is None
-    assert kwargs["target_type"] == "private"
-
-
-@pytest.mark.asyncio
-async def test_create_schedule_task_rejects_conflicting_modes() -> None:
-    scheduler = SimpleNamespace(add_task=AsyncMock(return_value=True))
-    context: dict[str, Any] = {
-        "scheduler": scheduler,
-        "group_id": 10001,
-    }
-
-    result = await create_schedule_task_execute(
-        {
-            "cron_expression": "*/5 * * * *",
-            "tool_name": "get_current_time",
-            "self_instruction": "冲突参数",
-        },
-        context,
-    )
-
-    assert "不能同时使用" in result
-    scheduler.add_task.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_update_schedule_task_supports_self_instruction() -> None:
-    scheduler = SimpleNamespace(update_task=AsyncMock(return_value=True))
-    context: dict[str, Any] = {"scheduler": scheduler}
-
-    result = await update_schedule_task_execute(
-        {
-            "task_id": "task_demo",
-            "self_instruction": "每晚 11 点帮我生成复盘提纲。",
-        },
-        context,
-    )
-
-    assert "已成功修改" in result
-    scheduler.update_task.assert_awaited_once()
-    kwargs = scheduler.update_task.await_args.kwargs
-    assert kwargs["tool_name"] == SELF_CALL_TOOL_NAME
-    assert kwargs["tool_args"] == {"prompt": "每晚 11 点帮我生成复盘提纲。"}
-    assert kwargs["self_instruction"] == "每晚 11 点帮我生成复盘提纲。"
-
-
-@pytest.mark.asyncio
-async def test_list_schedule_tasks_marks_self_instruction_task() -> None:
-    scheduler = SimpleNamespace(
-        list_tasks=lambda: {
-            "task_self_1": {
-                "task_name": "future_me",
-                "tool_name": SELF_CALL_TOOL_NAME,
-                "tool_args": {"prompt": "明天提醒我看板更新"},
-                "cron": "0 9 * * *",
-                "current_executions": 0,
-            }
-        }
-    )
-    context: dict[str, Any] = {"scheduler": scheduler}
-
-    result = await list_schedule_tasks_execute({}, context)
-
-    assert "调用未来的自己" in result
-    assert "明天提醒我看板更新" in result
-
-
-@pytest.mark.asyncio
-async def test_task_scheduler_execute_self_call_invokes_ai_and_sends_result() -> None:
     ai = SimpleNamespace(
         ask=AsyncMock(return_value="未来指令已执行"),
         memory_storage=SimpleNamespace(),
@@ -175,19 +299,7 @@ async def test_task_scheduler_execute_self_call_invokes_ai_and_sends_result() ->
         send_group_message=AsyncMock(),
         send_private_message=AsyncMock(),
     )
-    onebot = SimpleNamespace(
-        send_like=AsyncMock(),
-        get_image=AsyncMock(return_value=None),
-        get_forward_msg=AsyncMock(return_value=[]),
-    )
-    history_manager = SimpleNamespace()
-    scheduler = TaskScheduler(
-        ai,
-        sender,
-        onebot,
-        history_manager,
-        task_storage=cast(Any, _DummyTaskStorage()),
-    )
+    service = _make_service(ai=ai, sender=sender)
 
     sent_messages: list[str] = []
 
@@ -195,7 +307,7 @@ async def test_task_scheduler_execute_self_call_invokes_ai_and_sends_result() ->
         sent_messages.append(message)
 
     try:
-        result = await scheduler._execute_tool(
+        result = await service._execute_tool(
             SELF_CALL_TOOL_NAME,
             {"prompt": "请在触发时复盘并提醒我明天重点。"},
             {
@@ -205,13 +317,13 @@ async def test_task_scheduler_execute_self_call_invokes_ai_and_sends_result() ->
             },
         )
     finally:
-        scheduler.scheduler.shutdown(wait=False)
+        service.shutdown()
 
     assert result == "已执行向未来自己的指令"
     ai.ask.assert_awaited_once()
     ask_call = ai.ask.await_args
     assert ask_call.args[0] == "请在触发时复盘并提醒我明天重点。"
-    assert ask_call.kwargs["scheduler"] is scheduler
+    assert ask_call.kwargs["scheduler"] is service
     assert ask_call.kwargs["extra_context"]["scheduled_self_call"] is True
     assert ask_call.kwargs["extra_context"]["scheduled_task_id"] == "task_self_abc"
     assert ask_call.kwargs["extra_context"]["scheduled_task_name"] == "future-review"
@@ -219,68 +331,250 @@ async def test_task_scheduler_execute_self_call_invokes_ai_and_sends_result() ->
 
 
 @pytest.mark.asyncio
-async def test_task_scheduler_update_task_refreshes_job_args() -> None:
-    ai = SimpleNamespace(
-        ask=AsyncMock(),
-        memory_storage=SimpleNamespace(),
-        runtime_config=SimpleNamespace(),
-    )
-    sender = SimpleNamespace(
-        send_group_message=AsyncMock(),
-        send_private_message=AsyncMock(),
-    )
-    onebot = SimpleNamespace(
-        send_like=AsyncMock(),
-        get_image=AsyncMock(return_value=None),
-        get_forward_msg=AsyncMock(return_value=[]),
-    )
-    scheduler = TaskScheduler(
-        ai,
-        sender,
-        onebot,
-        SimpleNamespace(),
-        task_storage=cast(Any, _DummyTaskStorage()),
-    )
+async def test_upsert_automation_refreshes_job_args() -> None:
+    service = _make_service()
 
     try:
-        created = await scheduler.add_task(
-            task_id="task_edit_args",
-            tool_name="get_current_time",
-            tool_args={"format": "iso"},
-            cron_expression="0 9 * * *",
-            target_id=10001,
-            target_type="group",
+        created = await service.upsert_automation(
+            "task_edit_args",
+            {
+                "task_name": "edit",
+                "tool_name": "get_current_time",
+                "tool_args": {"format": "iso"},
+                "cron": "0 9 * * *",
+                "target_id": 10001,
+                "target_type": "group",
+            },
         )
-        updated = await scheduler.update_task(
-            task_id="task_edit_args",
-            tool_name="messages.send_message",
-            tool_args={"message": "updated"},
-            target_id=None,
-            target_id_provided=True,
-            target_type="private",
+        updated = await service.upsert_automation(
+            "task_edit_args",
+            {
+                "task_name": "edit",
+                "tool_name": "messages.send_message",
+                "tool_args": {"message": "updated"},
+                "cron": "0 9 * * *",
+                "address": "qq:10002",
+            },
         )
-        job = scheduler.scheduler.get_job("task_edit_args")
+        job = service._apscheduler.get_job("task_edit_args")
     finally:
-        scheduler.scheduler.shutdown(wait=False)
+        service.shutdown()
 
     assert created is True
     assert updated is True
     assert job is not None
-    assert list(job.args) == [
-        "task_edit_args",
-        "messages.send_message",
-        {"message": "updated"},
-        None,
-        "private",
-    ]
+    assert list(job.args) == ["task_edit_args"]
+    stored = service.list_tasks()["task_edit_args"]
+    assert stored["address"] == "qq:10002"
+    assert stored["target_type"] == "private"
 
 
 @pytest.mark.asyncio
-async def test_task_scheduler_routes_wechat_result_by_canonical_address(
+async def test_upsert_automation_ignores_external_context_id_on_update() -> None:
+    service = _make_service()
+    saved_context_id = uuid.uuid4().hex
+    service.tasks["safe_context"] = {
+        "context_id": saved_context_id,
+        "nodes": [
+            {
+                "id": "start",
+                "type": "start",
+                "kind": "message",
+                "channels": ["group"],
+            },
+            {"id": "done", "type": "template", "template": "ok"},
+        ],
+        "edges": [{"from": "start", "to": "done"}],
+    }
+    try:
+        await service.upsert_automation(
+            "safe_context",
+            {
+                "context_id": "../automations",
+                "nodes": [
+                    {
+                        "id": "start",
+                        "type": "start",
+                        "kind": "message",
+                        "channels": ["group"],
+                    },
+                    {"id": "done", "type": "template", "template": "updated"},
+                ],
+                "edges": [{"from": "start", "to": "done"}],
+            },
+        )
+    finally:
+        service.shutdown()
+
+    assert service.tasks["safe_context"]["context_id"] == saved_context_id
+
+
+@pytest.mark.asyncio
+async def test_upsert_automation_rejects_invalid_saved_context_id() -> None:
+    service = _make_service()
+    original = {
+        "context_id": "../automations",
+        "nodes": [
+            {
+                "id": "start",
+                "type": "start",
+                "kind": "message",
+                "channels": ["group"],
+            },
+            {"id": "done", "type": "template", "template": "ok"},
+        ],
+        "edges": [{"from": "start", "to": "done"}],
+    }
+    service.tasks["unsafe_context"] = original
+    try:
+        with pytest.raises(ValueError, match="context_id must be a valid UUID"):
+            await service.upsert_automation("unsafe_context", dict(original))
+    finally:
+        service.shutdown()
+
+    assert service.tasks["unsafe_context"] is original
+
+
+@pytest.mark.asyncio
+async def test_disabled_time_automation_removes_and_restores_job() -> None:
+    service = _make_service()
+    try:
+        await service.upsert_automation(
+            "task_toggle",
+            {
+                "task_name": "toggle",
+                "tool_name": "get_current_time",
+                "tool_args": {},
+                "cron": "0 9 * * *",
+                "target_id": 10001,
+                "target_type": "group",
+                "enabled": False,
+            },
+        )
+        assert service._apscheduler.get_job("task_toggle") is None
+        assert service.next_run_iso("task_toggle") is None
+
+        assert await service.set_enabled("task_toggle", True) is True
+        assert service._apscheduler.get_job("task_toggle") is not None
+
+        assert await service.set_enabled("task_toggle", False) is True
+        assert service._apscheduler.get_job("task_toggle") is None
+        assert service.next_run_iso("task_toggle") is None
+    finally:
+        service.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_invalid_cron_is_rejected_before_storage_or_scheduler_update() -> None:
+    service = _make_service()
+    try:
+        with pytest.raises(AutomationValidationError):
+            await service.upsert_automation(
+                "task_invalid_cron",
+                {
+                    "tool_name": "get_current_time",
+                    "tool_args": {},
+                    "cron": "invalid cron",
+                    "target_id": 10001,
+                    "target_type": "group",
+                },
+            )
+        assert "task_invalid_cron" not in service.tasks
+        assert service._apscheduler.get_job("task_invalid_cron") is None
+    finally:
+        service.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_invalid_legacy_automation_can_disable_but_not_enable() -> None:
+    service = _make_service()
+    service.tasks["legacy_invalid"] = {
+        "enabled": False,
+        "nodes": [
+            {
+                "id": "start",
+                "type": "start",
+                "kind": "cron",
+                "cron": "invalid cron",
+            },
+            {"id": "done", "type": "template", "template": "ok"},
+        ],
+        "edges": [{"from": "start", "to": "done"}],
+    }
+    try:
+        assert await service.set_enabled("legacy_invalid", False) is True
+        with pytest.raises(AutomationValidationError):
+            await service.set_enabled("legacy_invalid", True)
+        assert service.tasks["legacy_invalid"]["enabled"] is False
+        assert service._apscheduler.get_job("legacy_invalid") is None
+    finally:
+        service.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_recovery_skips_disabled_time_jobs() -> None:
+    class _LoadedStorage(_DummyStorage):
+        def load_tasks(self) -> dict[str, Any]:
+            return {
+                "enabled": {
+                    "enabled": True,
+                    "nodes": [
+                        {
+                            "id": "start",
+                            "type": "start",
+                            "kind": "cron",
+                            "cron": "0 9 * * *",
+                        },
+                        {"id": "done", "type": "template", "template": "ok"},
+                    ],
+                    "edges": [{"from": "start", "to": "done"}],
+                },
+                "disabled": {
+                    "enabled": False,
+                    "nodes": [
+                        {
+                            "id": "start",
+                            "type": "start",
+                            "kind": "cron",
+                            "cron": "0 10 * * *",
+                        },
+                        {"id": "done", "type": "template", "template": "ok"},
+                    ],
+                    "edges": [{"from": "start", "to": "done"}],
+                },
+            }
+
+    service = AutomationService(
+        SimpleNamespace(
+            ask=AsyncMock(),
+            memory_storage=SimpleNamespace(),
+            runtime_config=SimpleNamespace(),
+        ),
+        SimpleNamespace(
+            send_group_message=AsyncMock(),
+            send_private_message=AsyncMock(),
+        ),
+        SimpleNamespace(
+            send_like=AsyncMock(),
+            get_image=AsyncMock(return_value=None),
+            get_forward_msg=AsyncMock(return_value=[]),
+        ),
+        SimpleNamespace(),
+        storage=cast(Any, _LoadedStorage()),
+    )
+    try:
+        assert service._apscheduler.get_job("enabled") is not None
+        assert service._apscheduler.get_job("disabled") is None
+    finally:
+        service.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_time_fire_routes_wechat_result_by_canonical_address(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "Undefined.utils.scheduler.collect_context_resources",
+        "Undefined.automations.service.collect_context_resources",
         lambda values: {
             key: values[key]
             for key in (
@@ -293,6 +587,7 @@ async def test_task_scheduler_routes_wechat_result_by_canonical_address(
                 "history_manager",
                 "onebot_client",
             )
+            if key in values
         },
     )
     ai = SimpleNamespace(
@@ -305,19 +600,8 @@ async def test_task_scheduler_routes_wechat_result_by_canonical_address(
         send_private_message=AsyncMock(),
         send_address_message=AsyncMock(),
     )
-    onebot = SimpleNamespace(
-        send_like=AsyncMock(),
-        get_image=AsyncMock(return_value=None),
-        get_forward_msg=AsyncMock(return_value=[]),
-    )
-    scheduler = TaskScheduler(
-        ai,
-        sender,
-        onebot,
-        SimpleNamespace(),
-        task_storage=cast(Any, _DummyTaskStorage()),
-    )
-    scheduler.tasks["task_wechat"] = {
+    service = _make_service(ai=ai, sender=sender)
+    service.tasks["task_wechat"] = {
         "task_id": "task_wechat",
         "tool_name": SELF_CALL_TOOL_NAME,
         "tool_args": {"prompt": "提醒我"},
@@ -328,15 +612,9 @@ async def test_task_scheduler_routes_wechat_result_by_canonical_address(
     }
 
     try:
-        await scheduler._execute_tool_wrapper(
-            "task_wechat",
-            SELF_CALL_TOOL_NAME,
-            {"prompt": "提醒我"},
-            None,
-            "private",
-        )
+        await service._on_time_fire("task_wechat")
     finally:
-        scheduler.scheduler.shutdown(wait=False)
+        service.shutdown()
 
     sender.send_address_message.assert_awaited_once()
     address = sender.send_address_message.await_args.args[0]
@@ -350,7 +628,7 @@ async def test_task_scheduler_routes_wechat_result_by_canonical_address(
     [(".png", "image"), (".ogg", "record")],
 )
 @pytest.mark.asyncio
-async def test_task_scheduler_routes_wechat_media_as_address_file(
+async def test_time_fire_routes_wechat_media_as_address_file(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     suffix: str,
@@ -359,7 +637,7 @@ async def test_task_scheduler_routes_wechat_media_as_address_file(
     media_path = tmp_path / f"reminder{suffix}"
     await async_io.write_bytes(media_path, b"media")
     monkeypatch.setattr(
-        "Undefined.utils.scheduler.collect_context_resources",
+        "Undefined.automations.service.collect_context_resources",
         lambda values: {
             key: values[key]
             for key in (
@@ -368,6 +646,7 @@ async def test_task_scheduler_routes_wechat_media_as_address_file(
                 "history_manager",
                 "onebot_client",
             )
+            if key in values
         },
     )
 
@@ -394,19 +673,8 @@ async def test_task_scheduler_routes_wechat_media_as_address_file(
         send_address_message=AsyncMock(),
         send_address_file=AsyncMock(),
     )
-    onebot = SimpleNamespace(
-        send_like=AsyncMock(),
-        get_image=AsyncMock(return_value=None),
-        get_forward_msg=AsyncMock(return_value=[]),
-    )
-    scheduler = TaskScheduler(
-        ai,
-        sender,
-        onebot,
-        SimpleNamespace(),
-        task_storage=cast(Any, _DummyTaskStorage()),
-    )
-    scheduler.tasks["task_wechat_media"] = {
+    service = _make_service(ai=ai, sender=sender)
+    service.tasks["task_wechat_media"] = {
         "task_id": "task_wechat_media",
         "tool_name": "test.media",
         "tool_args": {},
@@ -417,18 +685,12 @@ async def test_task_scheduler_routes_wechat_media_as_address_file(
     }
 
     try:
-        await scheduler._execute_tool_wrapper(
-            "task_wechat_media",
-            "test.media",
-            {},
-            None,
-            "private",
-        )
+        await service._on_time_fire("task_wechat_media")
     finally:
-        scheduler.scheduler.shutdown(wait=False)
+        service.shutdown()
 
     sender.send_address_file.assert_awaited_once_with(
-        _resolve_task_address("wechat:12345", None, "private"),
+        resolve_task_address("wechat:12345", None, "private"),
         str(media_path),
         name=media_path.name,
         kind=expected_kind,

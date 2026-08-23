@@ -89,3 +89,9 @@ class AgentRegistry(BaseRegistry):
             Agent 执行结果文本
         """
         return await self.execute(agent_name, args, context)
+
+    async def execute_agent_strict(
+        self, agent_name: str, args: Dict[str, Any], context: Dict[str, Any]
+    ) -> str:
+        """Execute an Agent without converting registry failures into strings."""
+        return await self.execute_strict(agent_name, args, context)

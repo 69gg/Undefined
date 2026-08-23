@@ -305,6 +305,23 @@ class BaseRegistry:
     async def execute(
         self, name: str, args: Dict[str, Any], context: Dict[str, Any]
     ) -> str:
+        """Execute a skill and convert failures to user-facing result strings."""
+        return await self._execute(name, args, context, strict=False)
+
+    async def execute_strict(
+        self, name: str, args: Dict[str, Any], context: Dict[str, Any]
+    ) -> str:
+        """Execute a skill while preserving failures for workflow orchestration."""
+        return await self._execute(name, args, context, strict=True)
+
+    async def _execute(
+        self,
+        name: str,
+        args: Dict[str, Any],
+        context: Dict[str, Any],
+        *,
+        strict: bool,
+    ) -> str:
         """执行指定的技能，包含超时控制、异常处理及统计记录
 
         参数:
@@ -337,6 +354,8 @@ class BaseRegistry:
                     name,
                     format_log_payload(f"未找到项目: {name}"),
                 )
+            if strict:
+                raise LookupError(f"未找到项目: {name}")
             return f"未找到项目: {name}"
 
         if logger.isEnabledFor(logging.INFO) and self.kind in {
@@ -365,6 +384,8 @@ class BaseRegistry:
                 self._load_handler_for_item(item)
             handler = item.handler
             if not handler:
+                if strict:
+                    raise RuntimeError(f"未找到项目处理器: {name}")
                 result_payload = f"未找到项目: {name}"
                 return_value = str(result_payload)
             else:
@@ -387,6 +408,8 @@ class BaseRegistry:
                 "execute", name, status="timeout", duration_ms=int(duration * 1000)
             )
             result_payload = f"执行 {name} 超时 (>{int(self.timeout_seconds)}s)"
+            if strict:
+                raise
             return_value = str(result_payload)
 
         except asyncio.CancelledError:
@@ -396,6 +419,8 @@ class BaseRegistry:
                 "execute", name, status="cancelled", duration_ms=int(duration * 1000)
             )
             result_payload = f"执行 {name} 已取消"
+            if strict:
+                raise
             return_value = str(result_payload)
 
         except Exception as e:
@@ -406,6 +431,8 @@ class BaseRegistry:
                 "execute", name, status="error", duration_ms=int(duration * 1000)
             )
             result_payload = f"执行 {name} 时出错: {str(e)}"
+            if strict:
+                raise
             return_value = str(result_payload)
 
         if logger.isEnabledFor(logging.INFO) and self.kind in {

@@ -383,11 +383,13 @@ def test_create_app_registers_management_routes() -> None:
     assert ("GET", "/api/v1/management/probes/bootstrap") in routes
     assert ("GET", "/api/v1/management/changelog") in routes
     assert ("GET", "/api/v1/management/runtime/meta") in routes
-    assert ("GET", "/api/v1/management/runtime/schedules") in routes
-    assert ("POST", "/api/v1/management/runtime/schedules") in routes
-    assert ("GET", "/api/v1/management/runtime/schedules/{task_id}") in routes
-    assert ("PATCH", "/api/v1/management/runtime/schedules/{task_id}") in routes
-    assert ("DELETE", "/api/v1/management/runtime/schedules/{task_id}") in routes
+    assert ("GET", "/api/v1/management/runtime/automations") in routes
+    assert ("POST", "/api/v1/management/runtime/automations") in routes
+    assert ("GET", "/api/v1/management/runtime/automations/{task_id}") in routes
+    assert ("PATCH", "/api/v1/management/runtime/automations/{task_id}") in routes
+    assert ("DELETE", "/api/v1/management/runtime/automations/{task_id}") in routes
+    assert ("GET", "/api/v1/management/runtime/automations/catalog") in routes
+    assert ("POST", "/api/v1/management/runtime/automations/validate") in routes
     assert ("POST", "/api/v1/management/config/validate") in routes
     assert ("POST", "/api/v1/management/bot/start") in routes
     assert ("GET", "/api/v1/management/update-check") in routes
@@ -531,14 +533,23 @@ async def test_runtime_chat_file_upload_handler_requires_auth(monkeypatch: Any) 
 
 
 async def test_index_handler_renders_schedules_tab() -> None:
-    request = _request(query={"view": "app", "tab": "schedules"})
+    request = _request(query={"view": "app", "tab": "schedules", "task": "hotspot"})
 
     response = await _index.index_handler(cast(web.Request, cast(Any, request)))
     payload_text = cast(web.Response, response).text
 
     assert payload_text is not None
     assert 'id="tab-schedules"' in payload_text
+    assert 'id="schedulePages"' in payload_text
+    assert 'class="schedule-page schedule-list-view"' in payload_text
+    assert 'id="scheduleEditorView"' in payload_text
+    assert 'id="btnWfScrollEditor"' in payload_text
     assert 'data-tab="schedules"' in payload_text
+    assert '"initial_tab": "schedules"' in payload_text
+    assert '"initial_task": "hotspot"' in payload_text
+    assert '<script src="/static/js/workflow-graph.js"></script>' in payload_text
+    assert '<script src="/static/js/workflow-canvas.js"></script>' in payload_text
+    assert '<script src="/static/js/workflow-inspector.js"></script>' in payload_text
     assert '<script src="/static/js/schedules.js"></script>' in payload_text
 
 
@@ -698,7 +709,7 @@ async def test_management_meme_blob_handler_url_encodes_uid(
     assert captured["path"] == "/api/v1/memes/pic%20a%2Fb%3F/blob"
 
 
-async def test_management_schedule_create_requires_auth(
+async def test_management_automation_create_requires_auth(
     monkeypatch: Any,
 ) -> None:
     called = False
@@ -711,7 +722,7 @@ async def test_management_schedule_create_requires_auth(
     monkeypatch.setattr(_runtime, "check_auth", lambda _request: False)
     monkeypatch.setattr(_runtime, "_proxy_runtime", _fake_proxy_runtime)
 
-    response = await _runtime.runtime_schedules_create_handler(
+    response = await _runtime.runtime_automations_create_handler(
         cast(web.Request, cast(Any, _request(json_body={"task_id": "task_demo"})))
     )
     payload = _json_payload(response)
@@ -721,7 +732,7 @@ async def test_management_schedule_create_requires_auth(
     assert called is False
 
 
-async def test_management_schedule_update_returns_400_on_invalid_json(
+async def test_management_automation_update_returns_400_on_invalid_json(
     monkeypatch: Any,
 ) -> None:
     class _BadJsonRequest(SimpleNamespace):
@@ -743,14 +754,14 @@ async def test_management_schedule_update_returns_400_on_invalid_json(
         ),
     )
 
-    response = await _runtime.runtime_schedule_update_handler(request)
+    response = await _runtime.runtime_automation_update_handler(request)
     payload = _json_payload(response)
 
     assert cast(web.Response, response).status == 400
     assert payload["error"] == "Invalid JSON payload"
 
 
-async def test_management_schedule_detail_url_encodes_task_id(
+async def test_management_automation_detail_url_encodes_task_id(
     monkeypatch: Any,
 ) -> None:
     captured: dict[str, str] = {}
@@ -777,17 +788,17 @@ async def test_management_schedule_detail_url_encodes_task_id(
         ),
     )
 
-    response = await _runtime.runtime_schedule_detail_handler(request)
+    response = await _runtime.runtime_automation_detail_handler(request)
     payload = _json_payload(response)
 
     assert payload["ok"] is True
     assert captured == {
         "method": "GET",
-        "path": "/api/v1/schedules/task%20a%2Fb%3F",
+        "path": "/api/v1/automations/task%20a%2Fb%3F",
     }
 
 
-async def test_management_schedule_create_proxies_json_payload(
+async def test_management_automation_create_proxies_json_payload(
     monkeypatch: Any,
 ) -> None:
     captured: dict[str, Any] = {}
@@ -799,7 +810,7 @@ async def test_management_schedule_create_proxies_json_payload(
     monkeypatch.setattr(_runtime, "check_auth", lambda _request: True)
     monkeypatch.setattr(_runtime, "_proxy_runtime", _fake_proxy_runtime)
 
-    response = await _runtime.runtime_schedules_create_handler(
+    response = await _runtime.runtime_automations_create_handler(
         cast(
             web.Request,
             cast(
@@ -807,7 +818,8 @@ async def test_management_schedule_create_proxies_json_payload(
                 _request(
                     json_body={
                         "task_id": "task_demo",
-                        "cron_expression": "0 9 * * *",
+                        "kind": "cron",
+                        "cron": "0 9 * * *",
                     }
                 ),
             ),
@@ -818,10 +830,11 @@ async def test_management_schedule_create_proxies_json_payload(
     assert cast(web.Response, response).status == 201
     assert payload["ok"] is True
     assert captured["method"] == "POST"
-    assert captured["path"] == "/api/v1/schedules"
+    assert captured["path"] == "/api/v1/automations"
     assert captured["payload"] == {
         "task_id": "task_demo",
-        "cron_expression": "0 9 * * *",
+        "kind": "cron",
+        "cron": "0 9 * * *",
     }
 
 
