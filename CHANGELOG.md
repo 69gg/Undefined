@@ -1,3 +1,13 @@
+## v3.13.2 前端依赖安全更新
+
+本版本修复 Undefined Console 与 Undefined Chat 共同继承的 Nano ID 高危拒绝服务漏洞，并保持现有 Vite / PostCSS 依赖结构不变。
+
+- 将两套应用锁文件中的传递依赖 `nanoid` 从 3.3.16 更新至官方修复版本 3.3.18，修复自定义生成器在长度为零时可能无限循环的问题（[GHSA-2v37-7h3g-55p8](https://github.com/advisories/GHSA-2v37-7h3g-55p8)）。
+- 通过 PostCSS 现有语义版本范围正常解析修复版本，不新增顶层依赖或 npm override；Console 与 Chat 的 `npm audit` 均恢复为 0 项漏洞。
+- Python 包、Undefined Console、Undefined Chat、Tauri 清单及各锁文件版本统一更新至 3.13.2，并同步 Release 版本校验与完整质量检查。
+
+---
+
 ## v3.13.1 GitHub 仓库卡片头像修复
 
 本版本修复 GitHub 仓库卡片在离线浏览器中无法加载仓库所有者头像的问题，并统一 GitHub 元数据与头像请求的代理语义；卡片继续保持离线渲染，不重新开放浏览器网络访问。
