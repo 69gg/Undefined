@@ -1,16 +1,28 @@
 from __future__ import annotations
 
+import base64
 from typing import Any
+from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 
 import Undefined.github.client as client_module
 
 
 class _FakeResponse:
-    def __init__(self, payload: object, headers: dict[str, str] | None = None) -> None:
+    def __init__(
+        self,
+        payload: object,
+        headers: dict[str, str] | None = None,
+        *,
+        content: bytes = b"",
+        url: str = "https://api.github.com",
+    ) -> None:
         self._payload = payload
-        self.headers = headers or {}
+        self.headers = httpx.Headers(headers)
+        self.content = content
+        self.url = url
 
     def json(self) -> object:
         return self._payload
@@ -42,6 +54,101 @@ def _repo_payload() -> dict[str, Any]:
         "fork": False,
         "private": False,
     }
+
+
+@pytest.mark.asyncio
+async def test_get_github_avatar_data_url_uses_github_proxy_scope_and_encodes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    image_bytes = b"\x89PNG\r\n\x1a\navatar"
+    captured: dict[str, Any] = {}
+
+    async def fake_request_with_retry(
+        method: str,
+        url: str,
+        **kwargs: Any,
+    ) -> _FakeResponse:
+        captured.update({"method": method, "url": url, **kwargs})
+        return _FakeResponse(
+            {},
+            {
+                "Content-Type": "image/png",
+                "Content-Length": str(len(image_bytes)),
+            },
+            content=image_bytes,
+            url="https://avatars.githubusercontent.com/u/1?v=4",
+        )
+
+    monkeypatch.setattr(client_module, "request_with_retry", fake_request_with_retry)
+    context: dict[str, object] = {"request_id": "avatar-test"}
+
+    data_url = await client_module.get_github_avatar_data_url(
+        "https://avatars.githubusercontent.com/u/1?v=4",
+        request_timeout=8.0,
+        request_retries=3,
+        context=context,
+    )
+
+    encoded = base64.b64encode(image_bytes).decode("ascii")
+    assert data_url == f"data:image/png;base64,{encoded}"
+    assert captured["method"] == "GET"
+    assert captured["timeout"] == 8.0
+    assert captured["retries"] == 3
+    assert captured["context"] is context
+    assert captured["follow_redirects"] is True
+    assert captured["proxy_scope"] == "github"
+
+
+@pytest.mark.asyncio
+async def test_get_github_avatar_data_url_rejects_untrusted_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request_mock = AsyncMock()
+    monkeypatch.setattr(client_module, "request_with_retry", request_mock)
+
+    with pytest.raises(ValueError, match="不受信任"):
+        await client_module.get_github_avatar_data_url("https://example.com/avatar.png")
+
+    request_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("headers", "message"),
+    [
+        ({"Content-Type": "text/html"}, "媒体类型"),
+        (
+            {
+                "Content-Type": "image/png",
+                "Content-Length": str(client_module.MAX_GITHUB_AVATAR_SIZE_BYTES + 1),
+            },
+            "大小限制",
+        ),
+    ],
+)
+async def test_get_github_avatar_data_url_rejects_invalid_response(
+    monkeypatch: pytest.MonkeyPatch,
+    headers: dict[str, str],
+    message: str,
+) -> None:
+    async def fake_request_with_retry(
+        _method: str,
+        _url: str,
+        **_kwargs: Any,
+    ) -> _FakeResponse:
+        return _FakeResponse(
+            {},
+            headers,
+            content=b"image",
+            url="https://avatars.githubusercontent.com/u/1?v=4",
+        )
+
+    monkeypatch.setattr(client_module, "request_with_retry", fake_request_with_retry)
+
+    with pytest.raises(ValueError, match=message):
+        await client_module.get_github_avatar_data_url(
+            "https://avatars.githubusercontent.com/u/1?v=4"
+        )
 
 
 @pytest.mark.asyncio

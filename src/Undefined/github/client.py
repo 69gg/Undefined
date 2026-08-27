@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import base64
 import re
 from typing import Any
+from urllib.parse import urlsplit
 
 from Undefined.github.models import GitHubReleaseInfo, GitHubRepoInfo
 from Undefined.github.parser import normalize_github_repo_id
 from Undefined.skills.http_client import request_with_retry
+from Undefined.utils.http_download import parse_content_length
 
 _API_BASE_URL = "https://api.github.com"
 _HEADERS = {
@@ -17,6 +20,21 @@ _HEADERS = {
 }
 DEFAULT_REQUEST_TIMEOUT_SECONDS: float = 10.0
 DEFAULT_REQUEST_RETRIES: int = 2
+MAX_GITHUB_AVATAR_SIZE_BYTES: int = 2 * 1024 * 1024
+_GITHUB_AVATAR_HOSTS = frozenset({"avatars.githubusercontent.com"})
+_GITHUB_AVATAR_MEDIA_TYPES = frozenset(
+    {
+        "image/avif",
+        "image/gif",
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+    }
+)
+_GITHUB_AVATAR_HEADERS = {
+    "Accept": "image/avif,image/webp,image/png,image/jpeg,image/gif",
+    "User-Agent": _HEADERS["User-Agent"],
+}
 
 
 def _as_str(value: object) -> str:
@@ -65,6 +83,66 @@ def _license_name(value: object) -> str:
     if not isinstance(value, dict):
         return ""
     return _as_str(value.get("spdx_id")) or _as_str(value.get("name"))
+
+
+def _validate_github_avatar_url(value: str) -> str:
+    url = value.strip()
+    parsed = urlsplit(url)
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("GitHub 头像 URL 端口无效") from exc
+
+    if (
+        parsed.scheme.lower() != "https"
+        or (parsed.hostname or "").lower() not in _GITHUB_AVATAR_HOSTS
+        or port not in (None, 443)
+    ):
+        raise ValueError("GitHub 头像 URL 不受信任")
+    return url
+
+
+def _normalize_avatar_media_type(value: str) -> str:
+    return value.partition(";")[0].strip().lower()
+
+
+async def get_github_avatar_data_url(
+    avatar_url: str,
+    *,
+    request_timeout: float = DEFAULT_REQUEST_TIMEOUT_SECONDS,
+    request_retries: int = DEFAULT_REQUEST_RETRIES,
+    context: dict[str, object] | None = None,
+) -> str:
+    """下载 GitHub 头像并编码为供离线渲染使用的 data URL。"""
+    trusted_url = _validate_github_avatar_url(avatar_url)
+    response = await request_with_retry(
+        "GET",
+        trusted_url,
+        headers=_GITHUB_AVATAR_HEADERS,
+        timeout=request_timeout,
+        follow_redirects=True,
+        context=context,
+        retries=request_retries,
+        proxy_scope="github",
+    )
+    _validate_github_avatar_url(str(response.url))
+
+    media_type = _normalize_avatar_media_type(response.headers.get("content-type", ""))
+    if media_type not in _GITHUB_AVATAR_MEDIA_TYPES:
+        raise ValueError(f"GitHub 头像媒体类型不受支持: {media_type or '-'}")
+
+    declared_size = parse_content_length(response.headers.get("content-length"))
+    if declared_size is not None and declared_size > MAX_GITHUB_AVATAR_SIZE_BYTES:
+        raise ValueError("GitHub 头像超过大小限制")
+
+    content = response.content
+    if not content:
+        raise ValueError("GitHub 头像内容为空")
+    if len(content) > MAX_GITHUB_AVATAR_SIZE_BYTES:
+        raise ValueError("GitHub 头像超过大小限制")
+
+    encoded = base64.b64encode(content).decode("ascii")
+    return f"data:{media_type};base64,{encoded}"
 
 
 def _parse_contributor_count(link_header: str, payload: object) -> int | None:

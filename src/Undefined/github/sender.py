@@ -11,6 +11,7 @@ import uuid
 from Undefined.github.client import (
     DEFAULT_REQUEST_RETRIES,
     DEFAULT_REQUEST_TIMEOUT_SECONDS,
+    get_github_avatar_data_url,
     get_public_repo_info,
 )
 from Undefined.github.models import GitHubRepoInfo
@@ -75,12 +76,15 @@ def _topic_html(info: GitHubRepoInfo) -> str:
     return f'<div class="topics">{topic_items}</div>'
 
 
-def _build_repo_card_html(info: GitHubRepoInfo) -> str:
+def _build_repo_card_html(
+    info: GitHubRepoInfo,
+    *,
+    avatar_data_url: str | None = None,
+) -> str:
     description = info.description or "No description provided."
-    avatar = info.owner_avatar_url
     avatar_html = (
-        f'<img class="avatar" src="{_html_text(avatar)}" alt="">'
-        if avatar
+        f'<img class="avatar" src="{_html_text(avatar_data_url)}" alt="">'
+        if avatar_data_url
         else '<div class="avatar placeholder"></div>'
     )
     stats = "".join(
@@ -280,8 +284,13 @@ def _build_fallback_message(info: GitHubRepoInfo) -> str:
     return "\n".join(lines)
 
 
-async def _render_repo_card(info: GitHubRepoInfo, output_path: Path) -> None:
-    html_content = _build_repo_card_html(info)
+async def _render_repo_card(
+    info: GitHubRepoInfo,
+    output_path: Path,
+    *,
+    avatar_data_url: str | None,
+) -> None:
+    html_content = _build_repo_card_html(info, avatar_data_url=avatar_data_url)
     await render_html_to_image(
         html_content,
         str(output_path),
@@ -289,6 +298,32 @@ async def _render_repo_card(info: GitHubRepoInfo, output_path: Path) -> None:
         screenshot_selector=".card",
         proxy=get_request_proxy(info.html_url or "https://github.com", "github"),
     )
+
+
+async def _load_owner_avatar_data_url(
+    info: GitHubRepoInfo,
+    *,
+    request_timeout: float,
+    request_retries: int,
+    context: dict[str, object] | None,
+) -> str | None:
+    if not info.owner_avatar_url:
+        return None
+    try:
+        return await get_github_avatar_data_url(
+            info.owner_avatar_url,
+            request_timeout=request_timeout,
+            request_retries=request_retries,
+            context=context,
+        )
+    except Exception:
+        logger.warning(
+            "[GitHub] 头像下载失败，使用占位图: repo=%s owner=%s",
+            info.repo_id,
+            info.owner_login,
+            exc_info=True,
+        )
+        return None
 
 
 async def _send_message(
@@ -338,10 +373,20 @@ async def send_github_repo_card(
         output_dir
         / f"github_{info.repo_id.replace('/', '_')}_{uuid.uuid4().hex[:8]}.png"
     )
+    avatar_data_url = await _load_owner_avatar_data_url(
+        info,
+        request_timeout=request_timeout,
+        request_retries=request_retries,
+        context=context,
+    )
 
     try:
         try:
-            await _render_repo_card(info, output_path)
+            await _render_repo_card(
+                info,
+                output_path,
+                avatar_data_url=avatar_data_url,
+            )
             message = f"[CQ:image,file={output_path.resolve().as_uri()}]"
         except Exception:
             logger.exception(

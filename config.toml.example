@@ -1377,8 +1377,8 @@ summary_preview_chars = 1000
 # zh: GitHub 仓库自动提取配置（仅获取 public 仓库信息）。
 # en: GitHub repository auto-extraction settings (public repositories only).
 [github]
-# zh: 是否让 GitHub API 和仓库卡片渲染中的远程资源使用 [proxy] 代理地址。默认关闭。
-# en: Whether GitHub API and remote resources in repo-card rendering use proxy addresses from [proxy]. Disabled by default.
+# zh: 是否让 GitHub API 和仓库所有者头像下载使用 [proxy] 代理地址。默认关闭；卡片浏览器保持离线。
+# en: Whether GitHub API and repository-owner avatar downloads use proxy addresses from [proxy]. Disabled by default; card rendering stays offline.
 use_proxy = false
 # zh: 是否启用自动提取（检测到 GitHub 仓库链接或 owner/repo 仓库 ID 时自动发送图片卡片）。
 # en: Enable auto-extraction (auto-send an image card when GitHub repository links or owner/repo IDs are detected).

@@ -1023,7 +1023,7 @@ api_key = "replace-with-your-key"
 
 | 字段 | 默认值 | 说明 | 约束/回退 |
 |---|---:|---|---|
-| `use_proxy` | `false` | GitHub API 请求和仓库卡片渲染资源加载是否使用 `[proxy]` 中的代理地址 | |
+| `use_proxy` | `false` | GitHub API 请求和仓库所有者头像下载是否使用 `[proxy]` 中的代理地址 | |
 | `auto_extract_enabled` | `false` | 是否自动提取 GitHub 仓库链接或 `owner/repo` 仓库 ID | |
 | `request_timeout_seconds` | `10.0` | GitHub API 请求超时（秒），作为显式超时传入，不被 `[network].request_timeout_seconds` 覆盖 | `<=0` 回退 `10`，`>60` 截断到 `60` |
 | `request_retries` | `2` | GitHub API 请求重试次数，仅重试网络/超时异常和 `429`/`5xx` 状态码 | `<0` 回退 `0`，`>5` 截断到 `5` |
@@ -1035,7 +1035,7 @@ api_key = "replace-with-your-key"
 - 命中 `https://github.com/owner/repo`、`github.com/owner/repo` 或 `git@github.com:owner/repo.git` 时触发。
 - 裸 `owner/repo` 会作为 GitHub 仓库 ID 尝试一次 public API 请求；失败时只记录日志，不向会话发送错误消息。
 - 仅支持 public 仓库。卡片渲染为图片，包含仓库 ID、作者头像、简介、stars、forks、issues、contributors、watchers、语言、许可证、默认分支和更新时间等信息。
-- GitHub API 请求默认不使用代理；需要时设置 `[github].use_proxy = true`，代理地址来自 `[proxy]`。
+- GitHub API 与仓库所有者头像下载默认不使用代理；需要时设置 `[github].use_proxy = true`，两类请求都会使用 `[proxy]` 中的代理地址。头像下载后以内联资源交给离线卡片渲染器，浏览器不会额外联网。
 - 自动提取失败日志会记录异常类型、`repr(exc)` 和堆栈，便于定位代理连接失败等 `str(exc)` 为空的异常。
 
 自动提取调度说明：

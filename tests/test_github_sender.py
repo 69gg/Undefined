@@ -60,8 +60,15 @@ async def test_send_github_repo_card_renders_and_sends_image(
         Path(output_path).write_bytes(b"png")
 
     get_public_repo_info_mock = AsyncMock(return_value=_repo_info())
+    avatar_data_url = "data:image/png;base64,YXZhdGFy"
+    get_github_avatar_data_url_mock = AsyncMock(return_value=avatar_data_url)
     monkeypatch.setattr(
         sender_module, "get_public_repo_info", get_public_repo_info_mock
+    )
+    monkeypatch.setattr(
+        sender_module,
+        "get_github_avatar_data_url",
+        get_github_avatar_data_url_mock,
     )
     monkeypatch.setattr(
         sender_module, "render_html_to_image", fake_render_html_to_image
@@ -96,6 +103,14 @@ async def test_send_github_repo_card_renders_and_sends_image(
     assert "69gg/Undefined" in rendered_html[0]
     assert "QQ bot platform" in rendered_html[0]
     assert "1,234" in rendered_html[0]
+    assert avatar_data_url in rendered_html[0]
+    assert "https://avatars.githubusercontent.com" not in rendered_html[0]
+    get_github_avatar_data_url_mock.assert_awaited_once_with(
+        "https://avatars.githubusercontent.com/u/1?v=4",
+        request_timeout=18.0,
+        request_retries=4,
+        context={"request_id": "sender-test"},
+    )
     sender.send_group_message.assert_called_once()
     sent_message = sender.send_group_message.call_args.args[1]
     assert sent_message.startswith("[CQ:image,file=file://")
@@ -106,3 +121,29 @@ async def test_send_github_repo_card_renders_and_sends_image(
     history_message = sender.send_group_message.call_args.kwargs["history_message"]
     assert history_message.startswith("GitHub: 69gg/Undefined")
     assert "auto_history" not in sender.send_group_message.call_args.kwargs
+
+
+@pytest.mark.asyncio
+async def test_load_owner_avatar_data_url_falls_back_to_placeholder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        sender_module,
+        "get_github_avatar_data_url",
+        AsyncMock(side_effect=RuntimeError("download failed")),
+    )
+
+    avatar_data_url = await sender_module._load_owner_avatar_data_url(
+        _repo_info(),
+        request_timeout=10.0,
+        request_retries=2,
+        context=None,
+    )
+    html = sender_module._build_repo_card_html(
+        _repo_info(),
+        avatar_data_url=avatar_data_url,
+    )
+
+    assert avatar_data_url is None
+    assert '<div class="avatar placeholder"></div>' in html
+    assert "https://avatars.githubusercontent.com" not in html
