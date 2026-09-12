@@ -19,8 +19,8 @@
       </p>
     </td>
     <td width="30%" valign="top">
-      <a href="img/undefined-9527.png">
-        <img src="img/undefined-9527.png" width="100%" alt="Undefined 9527 自主智能体识别证" />
+      <a href="https://raw.githubusercontent.com/69gg/Undefined/main/img/undefined-9527.png">
+        <img src="https://raw.githubusercontent.com/69gg/Undefined/main/img/undefined-9527.png" width="100%" alt="Undefined 9527 自主智能体识别证" />
       </a>
     </td>
   </tr>
