@@ -11,21 +11,21 @@
  */
 
 export {
-	PlatformProvider,
-	usePlatform,
+	isAndroid,
+	setupAndroidLifecycle,
+} from "./AndroidLifecycle";
+export type { ConnectionSetupProps, RuntimeConfig } from "./ConnectionSetup";
+export { ConnectionSetup } from "./ConnectionSetup";
+export type { DesktopLayoutProps } from "./DesktopLayout";
+export { DesktopLayout } from "./DesktopLayout";
+export type { KeybindingHandler } from "./KeybindingManager";
+export { KeybindingManager } from "./KeybindingManager";
+export {
 	isAndroidPlatform,
 	isDesktopPlatform,
 	isMobilePlatform,
+	PlatformProvider,
+	usePlatform,
 } from "./PlatformContext";
-export { KeybindingManager } from "./KeybindingManager";
-export type { KeybindingHandler } from "./KeybindingManager";
-export { DesktopLayout } from "./DesktopLayout";
-export type { DesktopLayoutProps } from "./DesktopLayout";
-export { ConnectionSetup } from "./ConnectionSetup";
-export type { ConnectionSetupProps, RuntimeConfig } from "./ConnectionSetup";
-export {
-	setupAndroidLifecycle,
-	isAndroid,
-} from "./AndroidLifecycle";
 export type { PlatformInfo } from "./types";
 export { DEFAULT_PLATFORM_INFO } from "./types";

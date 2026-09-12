@@ -1,6 +1,6 @@
 <table border="0">
   <tr>
-    <td width="100%" valign="top">
+    <td width="70%" valign="top">
       <div align="center">
         <h1>Undefined</h1>
         <em>QQ and WeChat bot platform with cognitive memory architecture and multi-agent Skills.</em>
@@ -18,16 +18,17 @@
         <strong>Undefined</strong> 是一个基于 Python 异步架构的高性能机器人平台，以 OneBot V11 接入 QQ，并可通过微信 ClawBot/iLink 接入微信私聊。项目搭载<strong>认知记忆架构</strong>，采用自研 <strong>Skills</strong> 系统，内置多个智能 Agent，支持代码分析、网络搜索、娱乐互动等多模态能力，并提供 <strong>WebUI</strong> 在线管理，以及可连接同一管理服务的 <strong>跨平台 App</strong>。
       </p>
     </td>
+    <td width="30%" valign="top">
+      <a href="https://raw.githubusercontent.com/69gg/Undefined/main/img/undefined-9527.png">
+        <img src="https://raw.githubusercontent.com/69gg/Undefined/main/img/undefined-9527.png" width="100%" alt="Undefined 9527 自主智能体识别证" />
+      </a>
+    </td>
   </tr>
 </table>
 
 ### _与 [NagaAgent](https://github.com/Xxiii8322766509/NagaAgent) 进行联动！_
 
 ---
-
-## ⚡ 立即体验
-
-[点击添加官方实例QQ](https://qm.qq.com/q/cvjJoNysGA)
 
 ## Release 下载速查
 

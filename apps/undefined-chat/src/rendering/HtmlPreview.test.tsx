@@ -2,7 +2,7 @@ import { render as baseRender, screen } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { LOCALE_STORAGE_KEY, LanguageProvider } from "../i18n";
+import { LanguageProvider, LOCALE_STORAGE_KEY } from "../i18n";
 import type { MarkdownContentProps } from "./MarkdownContent";
 import { MarkdownContent } from "./MarkdownContent";
 

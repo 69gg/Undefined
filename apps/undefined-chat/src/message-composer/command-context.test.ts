@@ -2,12 +2,12 @@ import { describe, expect, test } from "vitest";
 import type { CommandInfo } from "../runtime-client/types";
 import { commandInfo as cmd, subcommandInfo as sub } from "../test-fixtures";
 import {
-	type CommandMatch,
-	MAX_COMMAND_MATCHES,
 	buildCommandContext,
 	buildReplacement,
+	type CommandMatch,
 	computeMatches,
 	findCommandByNameOrAlias,
+	MAX_COMMAND_MATCHES,
 	matchLabel,
 	matchMeta,
 	matchUsage,

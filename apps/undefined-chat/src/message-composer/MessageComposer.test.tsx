@@ -8,7 +8,7 @@ import {
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { LOCALE_STORAGE_KEY, LanguageProvider } from "../i18n";
+import { LanguageProvider, LOCALE_STORAGE_KEY } from "../i18n";
 import { commandInfo, subcommandInfo } from "../test-fixtures";
 import { MessageComposer } from "./MessageComposer";
 

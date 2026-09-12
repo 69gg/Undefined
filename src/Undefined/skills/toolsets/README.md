@@ -185,7 +185,7 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
 
 - `group_analysis.member_structure`: 统计成员结构事实
 - `group_analysis.message_mix`: 统计消息构成事实
-- `group_analysis.member_activity`: 分析群成员活跃度
+- `group_analysis.member_activity`: 区分最近发言、历史窗口消息数及混合指标排行；统计口径见 [group_analysis/README.md](group_analysis/README.md)
 - `group_analysis.rank_members`: 对群成员进行多维度排名
 - `group_analysis.filter_members`: 按条件过滤群成员
 - `group_analysis.inactive_risk`: 检测长期潜水或新成员沉默等活跃风险

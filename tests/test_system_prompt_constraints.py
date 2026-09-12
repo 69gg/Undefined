@@ -370,6 +370,39 @@ def test_system_prompts_speak_like_qq_user_about_own_tools(path: Path) -> None:
         assert snippet in text
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", PROMPT_PATHS)
+async def test_system_prompts_skip_shared_background_without_omitting_needed_answers(
+    path: Path,
+) -> None:
+    """主提示词减少背景复述，同时保留必要解释与自然回应。"""
+    text = await async_io.read_text(path)
+    assert text is not None
+
+    assert "<name>优先补充新信息</name>" in text
+    assert "对方刚说过、明确确认过，或当前追问已展示理解的内容" in text
+    assert "直接回应本轮新增的问题、变化或结论" in text
+    assert "不能仅凭身份、职业、熟悉术语或你自己知道就假定对方懂" in text
+    assert "用户明确要求解释、回顾、总结或完整步骤" in text
+    assert "省略会影响正确操作时，补齐必要说明" in text
+    assert "不为避免重复而漏答" in text
+    assert "不要求每句都有新事实，也不改变原有回复触发规则" in text
+
+
+@pytest.mark.asyncio
+async def test_each_rules_preserve_context_aware_reply_brevity() -> None:
+    """每轮提醒保留基于上下文判断的简洁回复约束。"""
+    text = await async_io.read_text("res/IMPORTANT/each.md")
+    assert text is not None
+
+    assert "优先补充新信息" in text
+    assert "直接回答新增问题，不重讲定义、背景和已给出的步骤" in text
+    assert "不能仅凭身份或术语假定" in text
+    assert "用户要求解释、回顾、总结或完整步骤" in text
+    assert "仍补齐必要说明" in text
+    assert "不要求每句都有新事实，也不改变回复触发规则" in text
+
+
 def test_naga_prompt_keeps_relationship_contextual_and_non_claiming() -> None:
     text = Path("res/prompts/undefined_nagaagent.xml").read_text(encoding="utf-8")
 

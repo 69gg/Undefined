@@ -61,6 +61,7 @@ export function AttachmentImage({
 				className={className}
 				style={style}
 				aria-busy="true"
+				role="status"
 				aria-label={alt || t("image.loading")}
 			/>
 		);
@@ -72,6 +73,7 @@ export function AttachmentImage({
 				className={className}
 				style={style}
 				title={alt || t("image.loadFailed")}
+				role="status"
 				aria-label={alt || t("image.loadFailed")}
 			>
 				{getFileIcon(mediaType ?? "image/")}

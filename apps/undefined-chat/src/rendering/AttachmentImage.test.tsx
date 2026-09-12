@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { LOCALE_STORAGE_KEY, LanguageProvider } from "../i18n";
+import { LanguageProvider, LOCALE_STORAGE_KEY } from "../i18n";
 import type { AttachmentPreviewResult } from "../runtime-client/types";
 import { AttachmentImage } from "./AttachmentImage";
 import { AttachmentImageProvider } from "./AttachmentImageContext";
@@ -42,8 +42,13 @@ describe("AttachmentImage", () => {
 	it("加载成功显示 img（blob src）", async () => {
 		renderWithProvider(<AttachmentImage uid="pic_1" alt="chart.png" />);
 
+		expect(screen.getByRole("status", { name: "chart.png" })).toHaveAttribute(
+			"aria-busy",
+			"true",
+		);
 		const img = await screen.findByRole("img", { name: "chart.png" });
 		expect(img.getAttribute("src")).toMatch(/^blob:/);
+		expect(screen.queryByRole("status")).toBeNull();
 	});
 
 	it("加载失败显示文件图标降级，不渲染 img", async () => {
@@ -59,6 +64,9 @@ describe("AttachmentImage", () => {
 		);
 
 		expect(await screen.findByText("IMG")).toBeInTheDocument();
+		expect(
+			screen.getByRole("status", { name: "chart.png" }),
+		).toBeInTheDocument();
 		expect(screen.queryByRole("img")).toBeNull();
 	});
 

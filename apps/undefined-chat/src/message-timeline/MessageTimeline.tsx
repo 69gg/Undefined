@@ -18,8 +18,8 @@ import { AttachmentCard } from "./AttachmentCard";
 import { ChatStageLabel } from "./ChatStageLabel";
 import { MessageQuoteButton } from "./MessageQuoteButton";
 import {
-	MessageTimelineContent,
 	hasRenderableTimeline,
+	MessageTimelineContent,
 } from "./MessageTimelineContent";
 
 export type MessageTimelineProps = {
@@ -475,7 +475,7 @@ export function MessageTimeline({
 		jobId: null,
 		toolCount: 0,
 	});
-	// biome-ignore lint/correctness/useExhaustiveDependencies: streamSignature + activeJob 作为流式信号
+	// streamSignature + activeJob 作为流式信号。
 	useEffect(() => {
 		if (!activeJob) return;
 		const jobId = activeJob.jobId;
@@ -520,7 +520,7 @@ export function MessageTimeline({
 	}, [scrollToBottomSignal, scheduleScrollToBottom]);
 
 	// 初次加载历史/切换会话完成：滚到底部（监听 historyLoading 从 true → false）
-	// biome-ignore lint/correctness/useExhaustiveDependencies: historyLoading 作为加载完成信号
+	// historyLoading 作为加载完成信号。
 	useEffect(() => {
 		const prev = prevHistoryLoadingRef.current;
 		const current = Boolean(historyLoading);
@@ -537,7 +537,7 @@ export function MessageTimeline({
 	}, [historyLoading]);
 
 	// 切换会话：滚到底部（覆盖"点击进入有缓存的对话"场景，此时 historyLoading 无 true→false 转换）
-	// biome-ignore lint/correctness/useExhaustiveDependencies: key 作为切换信号（MessageTimeline 用 key={conversationId}）
+	// key 作为切换信号（MessageTimeline 用 key={conversationId}）。
 	useEffect(() => {
 		if (visibleItems.length > 0 && autoScrollEnabled) {
 			stickToBottomRef.current = true;

@@ -37,6 +37,7 @@ export function ConversationList({
 	const navLabel = t("conversation.nav");
 
 	return (
+		// biome-ignore lint/a11y/useAriaPropsSupportedByRole: aria-modal 仅在同一条件将 role 切换为 dialog 时启用。
 		<nav
 			id={id}
 			aria-label={navLabel}

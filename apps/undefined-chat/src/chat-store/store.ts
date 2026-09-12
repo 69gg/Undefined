@@ -1476,7 +1476,7 @@ export function createChatStore({
 
 	async function loadMoreHistory(conversationId: string): Promise<void> {
 		const historyState = state.historyByConversation[conversationId];
-		if (!historyState || !historyState.hasMore || historyState.loading) {
+		if (!historyState?.hasMore || historyState.loading) {
 			return;
 		}
 

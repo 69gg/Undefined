@@ -179,7 +179,9 @@
 
     function optionSelect(name, value, names, allowCustom) {
         const options = [{ value: "", label: "—" }];
-        names.forEach((item) => options.push({ value: item, label: item }));
+        names.forEach((item) => {
+            options.push({ value: item, label: item });
+        });
         if (allowCustom && value && !names.includes(value)) {
             options.push({ value, label: value });
         }
@@ -411,7 +413,7 @@
             .filter((item) => Number.isInteger(item));
     }
 
-    function readStartPatch(root, node, task) {
+    function readStartPatch(root, _node, _task) {
         const fieldValue = (name) =>
             root.querySelector(`[data-field="${name}"]`);
         const kind = fieldValue("kind")?.value || "message";

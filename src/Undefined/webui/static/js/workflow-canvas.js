@@ -427,7 +427,7 @@
                 );
             }
         });
-        window.addEventListener("pointerup", (event) => {
+        window.addEventListener("pointerup", () => {
             if (panDrag) {
                 panDrag = null;
                 root.classList.remove("is-panning");

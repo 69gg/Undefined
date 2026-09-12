@@ -2,7 +2,7 @@ import { render as baseRender, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom";
-import { LOCALE_STORAGE_KEY, LanguageProvider } from "../i18n";
+import { LanguageProvider, LOCALE_STORAGE_KEY } from "../i18n";
 import type { Attachment } from "../runtime-client/types";
 import { AttachmentImageProvider } from "./AttachmentImageContext";
 import { MarkdownContent } from "./MarkdownContent";

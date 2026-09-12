@@ -273,6 +273,7 @@ function setCookie(name, value, days = 30) {
     const d = new Date();
     d.setTime(d.getTime() + days * 24 * 60 * 60 * 1000);
     const expires = `expires=${d.toUTCString()}`;
+    // biome-ignore lint/suspicious/noDocumentCookie: 同步 cookie 辅助函数需兼容既有 WebView 和 HTTP 管理入口。
     document.cookie = `${name}=${value};${expires};path=/;SameSite=Lax`;
 }
 

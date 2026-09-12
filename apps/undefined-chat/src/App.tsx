@@ -470,6 +470,7 @@ export function App() {
 						if (e.key === "Escape") closeMobileSidebar();
 					}}
 					role="presentation"
+					aria-hidden="true"
 				/>
 
 				{/* 侧边栏 */}

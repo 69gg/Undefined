@@ -78,6 +78,8 @@ API Key 不应暴露给 React 状态树或日志。Tauri 负责保存、读取�
 
 下载和预览同样通过 Tauri 受控命令处理。图片附件通过 `AttachmentImage` 或附件预览按钮调用 `previewAttachment`，Rust 端带 auth 拉取附件字节，再转为 `Blob` URL 渲染；全屏预览走应用内 `ImageViewerModal`，关闭时释放临时 URL。
 
+历史时间线未接入全局图片查看回调时使用本地 `ImagePreview`。可从图片通过 Enter / Space 打开，焦点进入关闭按钮，Tab / Shift+Tab 保持在预览内；Escape、点击遮罩或关闭按钮均可关闭，焦点恢复到触发图片。
+
 ## HTML 渲染与预览
 
 HTML 采用与 WebUI 基线对齐的双层策略：

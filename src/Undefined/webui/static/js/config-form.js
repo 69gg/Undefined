@@ -50,9 +50,9 @@ function initConfigFormLayout() {
         configLayoutResizeObserver = new ResizeObserver(() =>
             updateConfigSectionStickyOffset(),
         );
-        chromeElements.forEach((element) =>
-            configLayoutResizeObserver.observe(element),
-        );
+        chromeElements.forEach((element) => {
+            configLayoutResizeObserver.observe(element);
+        });
     }
     window.addEventListener("resize", updateConfigSectionStickyOffset);
     window.requestAnimationFrame(updateConfigSectionStickyOffset);
@@ -1141,7 +1141,7 @@ function buildAotTemplate(path, arr) {
             for (const [key, value] of Object.entries(
                 MODEL_POOL_ENTRY_DEFAULTS,
             )) {
-                if (!Object.prototype.hasOwnProperty.call(template, key)) {
+                if (!Object.hasOwn(template, key)) {
                     template[key] = isPlainObject(value) ? {} : value;
                 }
             }
@@ -1174,9 +1174,9 @@ function createAotWidget(path, arr) {
     const entriesDiv = document.createElement("div");
     entriesDiv.dataset.aotPath = path;
     container.appendChild(entriesDiv);
-    (arr || []).forEach((entry) =>
-        entriesDiv.appendChild(createAotEntry(path, entry)),
-    );
+    (arr || []).forEach((entry) => {
+        entriesDiv.appendChild(createAotEntry(path, entry));
+    });
     const addBtn = document.createElement("button");
     addBtn.type = "button";
     addBtn.className = "btn ghost btn-sm";

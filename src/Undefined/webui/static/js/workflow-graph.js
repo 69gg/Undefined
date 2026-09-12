@@ -429,7 +429,9 @@
         }
 
         function emit() {
-            listeners.forEach((fn) => fn(getState()));
+            listeners.forEach((fn) => {
+                fn(getState());
+            });
         }
 
         function pushHistory() {
