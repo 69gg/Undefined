@@ -2,7 +2,7 @@
     "type": "function",
     "function": {
         "name": "member_activity",
-        "description": "区分群成员最近发言与历史窗口活跃度（数据来自 OneBot）。member_list 仅按最后发言时间排序，不能据此判断谁发言最多或当前在线；查询窗口内谁发言最多用 history，综合消息数、活跃天数与最近发言用 hybrid（默认）。历史统计仅覆盖本次读取到的消息，未检索到不等于从未发言。",
+        "description": "区分群成员最近发言与历史窗口活跃度（数据来自 OneBot）。member_list 仅按最后发言时间排序，不能据此判断谁发言最多或当前在线；查询窗口内谁发言最多用 history，综合消息数、活跃天数与最近发言用 hybrid（默认）。历史统计仅覆盖本次读取到且时间有效的消息，跳过时间缺失、无效或越界的记录；未检索到不等于从未发言。",
         "parameters": {
             "type": "object",
             "properties": {

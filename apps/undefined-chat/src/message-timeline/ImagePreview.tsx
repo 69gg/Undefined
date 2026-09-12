@@ -29,6 +29,9 @@ export function ImagePreview({ src, alt, open, onClose }: ImagePreviewProps) {
 	return (
 		<div
 			className="runtime-image-viewer"
+			role="dialog"
+			aria-modal="true"
+			aria-label={alt || t("imageViewer.label")}
 			onClick={onClose}
 			onKeyDown={(e) => {
 				if (e.key === "Enter" || e.key === " ") {

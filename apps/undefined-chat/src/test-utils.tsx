@@ -4,7 +4,7 @@ import {
 	render,
 } from "@testing-library/react";
 import type { ReactElement, ReactNode } from "react";
-import { LOCALE_STORAGE_KEY, LanguageProvider, type Locale } from "./i18n";
+import { LanguageProvider, LOCALE_STORAGE_KEY, type Locale } from "./i18n";
 
 /**
  * 测试包裹器：提供 LanguageProvider，使组件内 useTranslation 可用。

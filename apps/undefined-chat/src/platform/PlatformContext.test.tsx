@@ -1,10 +1,10 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import {
-	PlatformProvider,
 	isAndroidPlatform,
 	isDesktopPlatform,
 	isMobilePlatform,
+	PlatformProvider,
 	usePlatform,
 } from "./PlatformContext";
 import type { PlatformInfo } from "./types";

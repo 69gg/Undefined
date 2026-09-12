@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
+from Undefined.utils import io as async_io
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 TOOLSETS_DIR = ROOT_DIR / "src" / "Undefined" / "skills" / "toolsets"
@@ -32,9 +34,9 @@ MOVED_ANALYSIS_TOOL_DIRS = {
 }
 
 
-def _load_config(tool_dir: Path) -> dict[str, Any]:
-    with (tool_dir / "config.json").open("r", encoding="utf-8") as file:
-        data = json.load(file)
+async def _load_config(tool_dir: Path) -> dict[str, Any]:
+    """通过仓库 I/O 工具读取并校验工具配置。"""
+    data = await async_io.read_json(tool_dir / "config.json")
     assert isinstance(data, dict)
     return data
 
@@ -47,7 +49,9 @@ def _function_name(config: dict[str, Any]) -> str:
     return name
 
 
-def test_group_analysis_tools_are_colocated_and_named() -> None:
+@pytest.mark.asyncio
+async def test_group_analysis_tools_are_colocated_and_named() -> None:
+    """群分析工具集中存放，配置名称与各自目录一致。"""
     group_analysis_dir = TOOLSETS_DIR / "group_analysis"
     actual_tool_dirs = {
         path.name
@@ -57,7 +61,8 @@ def test_group_analysis_tools_are_colocated_and_named() -> None:
 
     assert GROUP_ANALYSIS_TOOLS <= actual_tool_dirs
     for tool_name in GROUP_ANALYSIS_TOOLS:
-        assert _function_name(_load_config(group_analysis_dir / tool_name)) == tool_name
+        config = await _load_config(group_analysis_dir / tool_name)
+        assert _function_name(config) == tool_name
 
 
 def test_group_toolset_keeps_analysis_tools_out() -> None:
@@ -67,8 +72,10 @@ def test_group_toolset_keeps_analysis_tools_out() -> None:
     assert group_tool_dirs.isdisjoint(MOVED_ANALYSIS_TOOL_DIRS)
 
 
-def test_member_activity_schema_distinguishes_recency_and_frequency() -> None:
-    config = _load_config(TOOLSETS_DIR / "group_analysis" / "member_activity")
+@pytest.mark.asyncio
+async def test_member_activity_schema_distinguishes_recency_and_frequency() -> None:
+    """工具参数说明区分最近发言、窗口消息数及默认混合排行。"""
+    config = await _load_config(TOOLSETS_DIR / "group_analysis" / "member_activity")
     function = config["function"]
     properties = function["parameters"]["properties"]
 

@@ -3,14 +3,14 @@ import type { AttachmentDraft } from "../chat-store/store";
 import { useTranslation } from "../i18n";
 import type { CommandInfo, MessageReference } from "../runtime-client/types";
 import { CommandPalette } from "./CommandPalette";
-import { ReferenceChips } from "./ReferenceChips";
 import {
-	type CommandMatch,
 	buildCommandContext,
 	buildReplacement,
+	type CommandMatch,
 	computeMatches,
 	findCommandByNameOrAlias,
 } from "./command-context";
+import { ReferenceChips } from "./ReferenceChips";
 
 export type MessageComposerProps = {
 	attachmentQueue: AttachmentDraft[];
@@ -95,7 +95,7 @@ export function MessageComposer({
 	}, [focusRequest]);
 
 	// 输入框高度自适应
-	// biome-ignore lint/correctness/useExhaustiveDependencies: update height on value change
+	// 随输入内容更新高度。
 	useEffect(() => {
 		const textarea = textareaRef.current;
 		if (textarea) {
@@ -125,7 +125,7 @@ export function MessageComposer({
 
 	// 子命令模式下命令存在但无子命令 → 展示帮助卡片
 	const helpCommand = useMemo<CommandInfo | null>(() => {
-		if (!commandContext || commandContext.mode !== "subcommand") return null;
+		if (commandContext?.mode !== "subcommand") return null;
 		if (commandMatches.length > 0) return null;
 		const command = findCommandByNameOrAlias(
 			commandSuggestions,

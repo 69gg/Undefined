@@ -1,7 +1,7 @@
 import type { Options as ReactMarkdownOptions } from "react-markdown";
 import rehypeRaw from "rehype-raw";
-import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import type { Options as SanitizeSchema } from "rehype-sanitize";
+import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 
 /** react-markdown `rehypePlugins` 的列表类型（来源于 unified 的 PluggableList）。 */
 type RehypePlugins = NonNullable<ReactMarkdownOptions["rehypePlugins"]>;

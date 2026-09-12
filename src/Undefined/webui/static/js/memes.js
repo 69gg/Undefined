@@ -625,7 +625,9 @@
                 "memesSortSelect",
                 "memesTopK",
                 "memesPageSize",
-            ].forEach((id) => bindListReload(id));
+            ].forEach((id) => {
+                bindListReload(id);
+            });
         },
         onTabActivated(tab) {
             if (tab !== "memes") return;

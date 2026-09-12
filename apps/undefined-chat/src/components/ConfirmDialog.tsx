@@ -58,6 +58,7 @@ export function ConfirmDialog({
 		>
 			<div
 				className="confirm-dialog"
+				role="document"
 				onClick={(event) => event.stopPropagation()}
 				onKeyDown={(event) => event.stopPropagation()}
 			>

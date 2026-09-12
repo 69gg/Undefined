@@ -141,7 +141,7 @@ export function CodeBlock({
 				<pre>
 					<code
 						className={`hljs ${showLineNumbers ? "line-numbers" : ""}`}
-						// biome-ignore lint/security/noDangerouslySetInnerHtml: highlight.js output is sanitized
+						// highlight.js output is sanitized.
 						dangerouslySetInnerHTML={{ __html: highlightedCode }}
 					/>
 				</pre>

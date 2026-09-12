@@ -3,8 +3,8 @@ import type { ReactElement } from "react";
 import { describe, expect, test, vi } from "vitest";
 import { renderWithProviders } from "../test-utils";
 import {
-	MessageTimelineContent,
 	hasRenderableTimeline,
+	MessageTimelineContent,
 } from "./MessageTimelineContent";
 
 /** MessageTimelineContent 内部经 ToolBlock 使用 useTranslation，需 LanguageProvider。 */

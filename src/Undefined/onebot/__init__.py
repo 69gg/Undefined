@@ -6,11 +6,13 @@ from Undefined.onebot.message import (
     get_message_content,
     get_message_sender_id,
     parse_message_time,
+    try_parse_message_time,
 )
 
 __all__ = [
     "OneBotClient",
     "parse_message_time",
+    "try_parse_message_time",
     "get_message_sender_id",
     "get_message_content",
 ]

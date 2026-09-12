@@ -79,6 +79,7 @@ export function ImageViewerModal({
 		>
 			<div
 				className="runtime-image-viewer-stage"
+				role="document"
 				onClick={(e) => e.stopPropagation()}
 				onKeyDown={(e) => e.stopPropagation()}
 			>
@@ -97,6 +98,7 @@ export function ImageViewerModal({
 			</div>
 			<div
 				className="runtime-image-viewer-toolbar"
+				role="group"
 				onClick={(e) => e.stopPropagation()}
 				onKeyDown={(e) => e.stopPropagation()}
 			>

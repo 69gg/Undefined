@@ -103,7 +103,7 @@ function renderStructuredToolValue(value: unknown): React.ReactElement {
 		return (
 			<div className="runtime-tool-structured-list">
 				{value.map((item, index) => (
-					// biome-ignore lint/suspicious/noArrayIndexKey: 只读结果，顺序稳定
+					// 只读结果，顺序稳定。
 					<div className="runtime-tool-structured-row" key={index}>
 						<span className="runtime-tool-key">{index}</span>
 						<div className="runtime-tool-value">

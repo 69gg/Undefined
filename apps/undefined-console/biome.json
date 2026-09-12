@@ -1,13 +1,14 @@
 {
-    "$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
+    "root": false,
+    "$schema": "https://biomejs.dev/schemas/2.5.10/schema.json",
     "files": {
-        "include": [
-            "src/**/*.ts",
-            "package.json",
-            "tsconfig.json",
-            "vite.config.ts",
-            "src-tauri/tauri.conf.json",
-            "src-tauri/capabilities/**/*.json"
+        "includes": [
+            "**/src/**/*.ts",
+            "**/package.json",
+            "**/tsconfig.json",
+            "**/vite.config.ts",
+            "**/src-tauri/tauri.conf.json",
+            "**/src-tauri/capabilities/**/*.json"
         ]
     },
     "linter": {

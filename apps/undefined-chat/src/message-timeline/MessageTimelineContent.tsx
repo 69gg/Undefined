@@ -183,7 +183,7 @@ export function MessageTimelineContent({
 				if (entry.type === "message" && entry.content?.trim()) {
 					return (
 						<MarkdownContent
-							// biome-ignore lint/suspicious/noArrayIndexKey: 历史记录只读不变
+							// 历史记录只读不变。
 							key={idx}
 							content={entry.content}
 							onPreviewHtml={onPreviewHtml}

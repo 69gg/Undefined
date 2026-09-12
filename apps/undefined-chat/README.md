@@ -47,6 +47,8 @@ npm run tauri:dev
 
 `npm run check` 当前包含 Biome、TypeScript、unit/jsdom integration tests、cargo fmt、cargo check 和 cargo test。
 
+Biome 固定为 **2.5.10**，与 Console 和根目录 WebUI 配置保持一致；使用 `npm ci` 安装锁定版本。App 的 `biome.json` 使用独立嵌套配置（`root: false`），不继承 WebUI 格式规则；升级约定见 [构建文档](../../docs/build.md#6-git-hook-集成)。
+
 Runtime 默认连接 `http://127.0.0.1:8788`，受保护请求由 Tauri Rust command 注入 `X-Undefined-API-Key`。React 侧不直接持有 API Key。
 
 ## Android smoke checklist

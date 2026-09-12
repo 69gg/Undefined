@@ -11,6 +11,8 @@ A `Tauri v2` management client for Undefined that targets the remote Management 
 
 ## Scripts
 
+Biome is pinned to **2.5.10**, matching Chat and the root WebUI configuration. Use `npm ci` for reproducible installs and `npm run check` for the complete validation suite. The app's `biome.json` is an independent nested configuration (`root: false`); see [build documentation](../../docs/build.md#6-git-hook-集成).
+
 ```bash
 npm install
 npm run dev           # Vite web shell

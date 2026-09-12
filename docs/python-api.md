@@ -93,6 +93,8 @@ from Undefined.api.app import RuntimeAPIServer
 - `Undefined.config.coercers`, `Undefined.config.parsers`（`Undefined.config.model_parsers` 仅保留兼容 re-export）
 - `Undefined.utils.io`, `Undefined.utils.paths`
 
+OneBot 内部时间解析提供两种约定：`parse_message_time(message)` 在无效时间上保留当前时间回退，适用于既有展示调用；`try_parse_message_time(message)` 返回 `datetime | None`，用于历史统计等必须区分未知时间的场景。二者均支持秒级、毫秒级及数值字符串时间戳；统计调用必须先排除 `None`，不能将其补为当前时间后计数或排序。
+
 ---
 
 ## 配置 API

@@ -43,7 +43,7 @@
 		"remark-gfm": "^4.0.1"
 	},
 	"devDependencies": {
-		"@biomejs/biome": "^1.9.4",
+		"@biomejs/biome": "2.5.10",
 		"@tauri-apps/cli": "^2.3.1",
 		"@testing-library/jest-dom": "^6.9.1",
 		"@testing-library/react": "^16.2.0",

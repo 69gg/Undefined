@@ -15,30 +15,38 @@ def parse_message_time(message: dict[str, Any]) -> datetime:
     兼容秒级/毫秒级时间戳与字符串输入，异常时回退到当前时间。
     """
 
+    return try_parse_message_time(message) or datetime.now()
+
+
+def try_parse_message_time(message: dict[str, Any]) -> datetime | None:
+    """解析秒级、毫秒级或数值字符串时间戳，无效时返回 None。
+
+    用于必须保留时间有效性的历史统计，不以当前时间补全缺失记录。
+    """
+
     raw_timestamp = message.get("time")
 
-    if raw_timestamp is None:
-        return datetime.now()
+    if raw_timestamp is None or isinstance(raw_timestamp, bool):
+        return None
 
     try:
         timestamp = float(raw_timestamp)
-    except (TypeError, ValueError):
-        logger.debug("[OneBot] 无法解析消息时间戳，使用当前时间: %s", raw_timestamp)
-        return datetime.now()
+    except (TypeError, ValueError, OverflowError):
+        logger.debug("[OneBot] 无法解析消息时间戳: %s", raw_timestamp)
+        return None
 
     # 13 位毫秒时间戳自动降为秒。
     if timestamp > 1_000_000_000_000:
         timestamp /= 1000.0
 
     if timestamp <= 0:
-        return datetime.now()
+        return None
 
     try:
         return datetime.fromtimestamp(timestamp)
     except (OSError, OverflowError, ValueError):
-        # 越界或非法 epoch 回退当前时间，避免整条消息解析失败。
-        logger.debug("[OneBot] 时间戳越界，使用当前时间: %s", raw_timestamp)
-        return datetime.now()
+        logger.debug("[OneBot] 时间戳越界或非法: %s", raw_timestamp)
+        return None
 
 
 def get_message_sender_id(message: dict[str, Any]) -> int:

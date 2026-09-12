@@ -3,7 +3,7 @@
  * 包含聊天阶段状态的中英文字映射
  */
 
-import { type Locale, defaultLocale } from "./index";
+import { defaultLocale, type Locale } from "./index";
 
 export type ChatStage =
 	| "received"

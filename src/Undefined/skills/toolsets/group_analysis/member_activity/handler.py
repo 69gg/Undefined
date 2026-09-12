@@ -6,7 +6,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Any
 
-from Undefined.onebot import parse_message_time
+from Undefined.onebot import try_parse_message_time
 from Undefined.utils.group_metrics import (
     clamp_int,
     datetime_to_ts,
@@ -156,7 +156,9 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
                 if uid not in member_map:
                     continue
 
-                msg_dt = parse_message_time(msg)
+                msg_dt = try_parse_message_time(msg)
+                if msg_dt is None:
+                    continue
                 msg_ts = datetime_to_ts(msg_dt)
                 if msg_ts is None:
                     continue
@@ -215,6 +217,7 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
                 "统计范围：仅覆盖本次读取到的历史消息，可能未覆盖整个时间窗口；"
                 "未检索到不等于从未发言，也不能断言整个窗口没有发言。"
             )
+            result_parts.append("时间缺失、无效或越界的历史消息不参与统计。")
             if source == "history":
                 result_parts.append(
                     "排序依据：窗口消息数，其次为活跃天数、窗口内最后发言时间。"

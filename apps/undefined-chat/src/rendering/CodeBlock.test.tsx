@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { LOCALE_STORAGE_KEY, LanguageProvider } from "../i18n";
+import { LanguageProvider, LOCALE_STORAGE_KEY } from "../i18n";
 import { CodeBlock } from "./CodeBlock";
 
 // CodeBlock 内部使用 useTranslation，需置于 LanguageProvider 下

@@ -10,7 +10,7 @@ import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { App } from "./App";
-import { LOCALE_STORAGE_KEY, LanguageProvider } from "./i18n";
+import { LanguageProvider, LOCALE_STORAGE_KEY } from "./i18n";
 import { createTauriRuntimeClient } from "./runtime-client/tauri";
 import { conversation, historyItem, runtimeClientStub } from "./test-fixtures";
 

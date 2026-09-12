@@ -1,4 +1,4 @@
-export { ImageViewerModal } from "./ImageViewerModal";
 export type { ImageViewerModalProps } from "./ImageViewerModal";
-export { useImageViewer } from "./useImageViewer";
+export { ImageViewerModal } from "./ImageViewerModal";
 export type { UseImageViewerReturn } from "./useImageViewer";
+export { useImageViewer } from "./useImageViewer";
