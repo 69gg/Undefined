@@ -25,10 +25,6 @@
 
 ---
 
-## ⚡ 立即体验
-
-[点击添加官方实例QQ](https://qm.qq.com/q/cvjJoNysGA)
-
 ## Release 下载速查
 
 如果只是部署和运行 QQ Bot，通常**不需要**在 GitHub Release 的 Assets 里下载任何文件。推荐按下方[快速开始](#-快速开始-源码模式)使用源码部署；只想快速体验命令行入口时，可使用 `pip install -U Undefined-bot` 或 `uv tool install Undefined-bot`。
