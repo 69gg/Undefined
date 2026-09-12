@@ -19,6 +19,9 @@
             },
             "correctness": {
                 "noUnusedVariables": "warn"
+            },
+            "suspicious": {
+                "noArrayIndexKey": "error"
             }
         }
     }

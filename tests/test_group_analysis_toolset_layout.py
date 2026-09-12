@@ -83,5 +83,10 @@ async def test_member_activity_schema_distinguishes_recency_and_frequency() -> N
     assert "查询窗口内谁发言最多用 history" in function["description"]
     assert "最近发言榜不等于发言数量榜" in properties["source"]["description"]
     assert "相对当前时间" in properties["threshold_days"]["description"]
+    assert "source 为 history 或 hybrid" in properties["threshold_days"]["description"]
+    assert (
+        "未设置 history_days 且未提供 start_time"
+        in properties["threshold_days"]["description"]
+    )
     assert "0 不代表整个窗口没有发言" in properties["include_zero"]["description"]
     assert properties["source"]["default"] == "hybrid"

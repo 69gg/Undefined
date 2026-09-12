@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import type { ToolBlock as ToolBlockType } from "../chat-store/types";
 import {
 	type HtmlPreviewRequest,
@@ -161,9 +161,11 @@ export function MessageTimelineContent({
 	} | null>(null);
 
 	// 统一的图片点击处理：优先外部回调，否则走本地预览
-	const handleImageClick =
-		onImageClick ??
-		((src: string, alt: string) => setPreviewImage({ src, alt }));
+	// 保持本地回调稳定，避免 Markdown 图片重建后无法恢复触发元素的焦点。
+	const openLocalPreview = useCallback((src: string, alt: string): void => {
+		setPreviewImage({ src, alt });
+	}, []);
+	const handleImageClick = onImageClick ?? openLocalPreview;
 
 	return (
 		<div className="message-timeline-content">
@@ -183,7 +185,7 @@ export function MessageTimelineContent({
 				if (entry.type === "message" && entry.content?.trim()) {
 					return (
 						<MarkdownContent
-							// 历史记录只读不变。
+							// biome-ignore lint/suspicious/noArrayIndexKey: 历史记录只读不变。
 							key={idx}
 							content={entry.content}
 							onPreviewHtml={onPreviewHtml}

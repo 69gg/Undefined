@@ -89,6 +89,7 @@ function TextBlock({ value, onPreviewHtml, onImageClick }: TextBlockProps) {
 					}}
 					onKeyDown={(e) => {
 						if (onImageClick && src && (e.key === "Enter" || e.key === " ")) {
+							e.preventDefault();
 							onImageClick(src, alt || "");
 						}
 					}}
@@ -175,7 +176,7 @@ function renderTextWithAttachments(
 			if (attachment || uid?.startsWith("pic_")) {
 				nodes.push(
 					<AttachmentImage
-						// 静态只读消息片段，不增删重排。
+						// biome-ignore lint/suspicious/noArrayIndexKey: 静态只读消息片段，不增删重排。
 						key={`${keyPrefix}-img-${idx}`}
 						uid={attachment?.id ?? uid}
 						alt={attachment?.name ?? fallbackImageAlt}
@@ -190,7 +191,7 @@ function renderTextWithAttachments(
 		if (!part.trim()) return;
 		nodes.push(
 			<TextBlock
-				// 静态只读消息片段，不增删重排。
+				// biome-ignore lint/suspicious/noArrayIndexKey: 静态只读消息片段，不增删重排。
 				key={`${keyPrefix}-text-${idx}`}
 				value={part}
 				onPreviewHtml={onPreviewHtml}
@@ -222,6 +223,7 @@ export function MarkdownContent({
 				if (segment.type === "code") {
 					return (
 						<CodeBlock
+							// biome-ignore lint/suspicious/noArrayIndexKey: 消息片段按原文顺序排列，可包含相同内容。
 							key={`${index}-code-${segment.value.slice(0, 16)}`}
 							code={segment.value}
 							language={segment.language}
@@ -232,6 +234,7 @@ export function MarkdownContent({
 					);
 				}
 				return (
+					// biome-ignore lint/suspicious/noArrayIndexKey: 消息片段按原文顺序排列，可包含相同内容。
 					<Fragment key={`${index}-text-${segment.value.slice(0, 16)}`}>
 						{renderTextWithAttachments(
 							segment.value,

@@ -27,6 +27,7 @@
 
 - `last_sent_time` 只表示最后一次发言的时间，不能据此判断发言频率或当前在线状态。“刚说过一句”不意味着“发言最多”。字段定义见 [OneBot 11 成员信息接口](https://github.com/botuniverse/onebot-11/blob/master/api/public.md)。
 - `threshold_days` 的成员列表统计以当前时间为基准，与 `start_time` / `end_time` 限定的历史窗口分开展示；`history` 模式不附带这份当前概况。
+- 在 `history` / `hybrid` 模式下，未设置 `history_days` 且未提供 `start_time` 时，`threshold_days` 也决定历史检索窗口的天数。因此它既是近期发言阈值，也是缺省历史窗口；指定 `history_days` 或 `start_time` 可独立设置历史范围。
 - 最后发言时间缺失或为 0 的成员单独列为“未知”，不算作最后发言较早的成员，也不能断言其从未发言。
 - 历史统计仅覆盖本次成功读取到的消息，受 `max_history_count` 和接口可用范围限制，可能未覆盖整个窗口。`include_zero=true` 展示的 0 条表示“窗口内未检索到发言”，不是整个窗口内确定没有发言。
 - `history` 和 `hybrid` 会跳过时间缺失、无效或越界的历史消息，不计入消息数、活跃天数或最后发言时间；支持秒级、毫秒级及数值字符串时间戳，不用当前时间补全未知记录。

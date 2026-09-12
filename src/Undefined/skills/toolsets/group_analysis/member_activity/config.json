@@ -12,7 +12,7 @@
                 },
                 "threshold_days": {
                     "type": "integer",
-                    "description": "成员列表的近期发言阈值（相对当前时间的天数），默认 30 天；仅判断最后发言是否落在近期，不表示发言频率。",
+                    "description": "成员列表的近期发言阈值（相对当前时间的天数），默认 30 天；用于判断最后发言是否落在近期，不表示发言频率。当 source 为 history 或 hybrid、未设置 history_days 且未提供 start_time 时，也作为历史记录检索窗口的天数。",
                     "default": 30
                 },
                 "source": {
