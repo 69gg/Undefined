@@ -87,16 +87,19 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
         now_ts = int(time.time())
         threshold_ts = now_ts - (threshold_days * 86400)
 
-        active_members: list[dict[str, Any]] = []
-        inactive_members: list[dict[str, Any]] = []
+        recent_members: list[dict[str, Any]] = []
+        stale_members: list[dict[str, Any]] = []
+        unknown_members: list[dict[str, Any]] = []
         member_map: dict[int, dict[str, Any]] = {}
 
         for member in member_list:
             last_sent = parse_unix_timestamp(member.get("last_sent_time"))
-            if last_sent == 0 or last_sent < threshold_ts:
-                inactive_members.append(member)
+            if last_sent == 0:
+                unknown_members.append(member)
+            elif last_sent < threshold_ts:
+                stale_members.append(member)
             else:
-                active_members.append(member)
+                recent_members.append(member)
 
             raw_uid = member.get("user_id")
             if raw_uid is None:
@@ -107,16 +110,17 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
                 continue
             member_map[uid] = member
 
-        active_members.sort(
+        recent_members.sort(
             key=lambda item: parse_unix_timestamp(item.get("last_sent_time")),
             reverse=True,
         )
-        inactive_members.sort(
+        stale_members.sort(
             key=lambda item: parse_unix_timestamp(item.get("last_sent_time")),
         )
 
         history_counts: dict[int, int] = defaultdict(int)
         history_active_days: dict[int, set[str]] = defaultdict(set)
+        history_last_sent: dict[int, int] = {}
         history_message_total = 0
         history_start_dt: datetime | None = None
         history_end_dt: datetime | None = None
@@ -161,23 +165,32 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
 
                 history_counts[uid] += 1
                 history_active_days[uid].add(msg_dt.strftime("%Y-%m-%d"))
+                history_last_sent[uid] = max(history_last_sent.get(uid, 0), msg_ts)
                 history_message_total += 1
 
         result_parts: list[str] = [f"【群活跃度统计】群号: {group_id}"]
         result_parts.append(f"分析模式: {source}")
         result_parts.append(f"总成员数: {len(member_list)}")
-        result_parts.append(
-            f"活跃成员（最近{threshold_days}天内发言）: {len(active_members)}"
-        )
-        result_parts.append(f"非活跃成员: {len(inactive_members)}")
-
-        if member_list:
-            active_rate = len(active_members) / len(member_list) * 100
-            result_parts.append(f"活跃率: {active_rate:.1f}%")
+        if source in {"member_list", "hybrid"}:
+            result_parts.append("成员列表最近发言概况（相对当前时间）:")
+            result_parts.append(
+                f"最近{threshold_days}天内有发言记录: {len(recent_members)}"
+            )
+            result_parts.append(
+                f"最后发言早于{threshold_days}天前: {len(stale_members)}"
+            )
+            result_parts.append(f"最后发言时间未知: {len(unknown_members)}")
+            recent_rate = len(recent_members) / len(member_list) * 100
+            result_parts.append(f"近期发言成员占比（占总成员）: {recent_rate:.1f}%")
+            result_parts.append(
+                "口径说明：最后发言时间仅表示最近一次发言，不能据此判断发言频率或当前在线状态；"
+                "时间未知不代表从未发言。"
+            )
 
         ranking_items: list[dict[str, Any]] = []
         if source == "member_list":
-            for member in active_members:
+            ranking_title = "最近发言成员"
+            for member in recent_members:
                 ranking_items.append(
                     {
                         "member": member,
@@ -190,6 +203,7 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
                     }
                 )
         else:
+            ranking_title = "窗口消息数排行" if source == "history" else "混合指标排行"
             if history_start_dt and history_end_dt:
                 result_parts.append(
                     f"历史窗口: {format_datetime(history_start_dt)} ~ {format_datetime(history_end_dt)}"
@@ -197,11 +211,24 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
                 result_parts.append(
                     f"历史消息计数: {history_message_total} 条（最多读取 {max_history_count} 条）"
                 )
+            result_parts.append(
+                "统计范围：仅覆盖本次读取到的历史消息，可能未覆盖整个时间窗口；"
+                "未检索到不等于从未发言，也不能断言整个窗口没有发言。"
+            )
+            if source == "history":
+                result_parts.append(
+                    "排序依据：窗口消息数，其次为活跃天数、窗口内最后发言时间。"
+                )
+            else:
+                result_parts.append(
+                    "排序依据：窗口消息数、活跃天数和成员列表最后发言时间加权的综合分，"
+                    "不是单纯的消息数量排名。"
+                )
 
             window_active_users = sum(
                 1 for value in history_counts.values() if value > 0
             )
-            result_parts.append(f"窗口内有发言成员: {window_active_users}")
+            result_parts.append(f"窗口内检索到发言的成员: {window_active_users}")
             if member_list:
                 avg_messages = history_message_total / len(member_list)
                 result_parts.append(f"窗口内人均消息: {avg_messages:.2f}")
@@ -212,8 +239,16 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
                     continue
 
                 active_days = len(history_active_days.get(uid, set()))
-                last_sent_ts = parse_unix_timestamp(member.get("last_sent_time"))
-                score = _score_hybrid(message_count, active_days, last_sent_ts, now_ts)
+                last_sent_ts = (
+                    history_last_sent.get(uid, 0)
+                    if source == "history"
+                    else parse_unix_timestamp(member.get("last_sent_time"))
+                )
+                score = (
+                    _score_hybrid(message_count, active_days, last_sent_ts, now_ts)
+                    if source == "hybrid"
+                    else None
+                )
 
                 ranking_items.append(
                     {
@@ -247,43 +282,54 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
 
         if ranking_items:
             result_parts.append(
-                f"最活跃成员 Top {min(display_count, len(ranking_items))}:"
+                f"{ranking_title} Top {min(display_count, len(ranking_items))}:"
             )
             for index, item in enumerate(ranking_items[:display_count], start=1):
                 member = item["member"]
                 name = member_display_name(member)
                 member_uid = member.get("user_id")
-                last_desc = format_timestamp(int(item.get("last_sent_ts") or 0))
+                last_sent_ts = int(item.get("last_sent_ts") or 0)
+                last_desc = (
+                    format_timestamp(last_sent_ts) if last_sent_ts > 0 else "未知"
+                )
                 if source == "member_list":
                     result_parts.append(
                         f"{index}. {name} ({member_uid}) | 最后发言: {last_desc}"
                     )
                 elif source == "history":
+                    if last_sent_ts <= 0:
+                        last_desc = "窗口内未检索到发言"
                     result_parts.append(
                         f"{index}. {name} ({member_uid}) | 窗口消息: {item['message_count']} | "
-                        f"活跃天数: {item['active_days']} | 最后发言: {last_desc}"
+                        f"活跃天数: {item['active_days']} | 窗口内最后发言: {last_desc}"
                     )
                 else:
                     result_parts.append(
                         f"{index}. {name} ({member_uid}) | 综合分: {item['score']} | "
                         f"窗口消息: {item['message_count']} | 活跃天数: {item['active_days']} | "
-                        f"最后发言: {last_desc}"
+                        f"成员列表最后发言: {last_desc}"
                     )
 
-        if inactive_members:
+        if source in {"member_list", "hybrid"} and stale_members:
             result_parts.append(
-                f"潜水成员 Top {min(display_count, len(inactive_members))}:"
+                f"最后发言较早成员 Top {min(display_count, len(stale_members))}:"
             )
-            for index, member in enumerate(inactive_members[:display_count], start=1):
+            for index, member in enumerate(stale_members[:display_count], start=1):
                 name = member_display_name(member)
                 member_uid = member.get("user_id")
                 last_sent = parse_unix_timestamp(member.get("last_sent_time"))
-                last_desc = (
-                    "从未发言" if last_sent <= 0 else format_timestamp(last_sent)
-                )
+                last_desc = format_timestamp(last_sent)
                 result_parts.append(
                     f"{index}. {name} ({member_uid}) | 最后发言: {last_desc}"
                 )
+
+        if source in {"member_list", "hybrid"} and unknown_members:
+            result_parts.append(
+                f"最后发言时间未知成员 Top {min(display_count, len(unknown_members))}:"
+            )
+            for index, member in enumerate(unknown_members[:display_count], start=1):
+                name = member_display_name(member)
+                result_parts.append(f"{index}. {name} ({member.get('user_id')})")
 
         return "\n".join(result_parts)
 

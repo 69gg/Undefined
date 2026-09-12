@@ -44,6 +44,10 @@ Consecutive messages from the same sender within `[message_batcher].window_secon
 ### User identification in prompts
 The system prompt now includes a rule: **recognize and address users by their QQ ID (`sender_id`)** because nicknames can change. When needing to address a user, use the latest nickname obtained via `group.get_member_info(brief=true)`. `end.observations` must be substantive facts worth future retrieval (prefer empty over noise); user-centered observations should always include the QQ ID, e.g., “QQ号12345678（昵称张三）做了某事”.
 
+### Reply relevance and member activity semantics
+Both main prompt variants and `res/IMPORTANT/each.md` guide replies to add useful information without repeating shared background. Keep exceptions for requested explanations, recaps, complete steps, corrections, and natural social replies; never infer a user's knowledge solely from their identity or terminology.
+`group_analysis.member_activity` distinguishes recency (`member_list`), retrieved window message counts (`history`), and weighted indicators (`hybrid`, default). History-mode timestamps must come from messages inside the selected window. Missing/zero `last_sent_time` means unknown, not proof of inactivity or never speaking; last-message time does not indicate current online status. See [the toolset documentation](src/Undefined/skills/toolsets/group_analysis/README.md) for reporting limits.
+
 ## Testing Guidelines
 Write tests as `tests/test_<feature>.py`. Async tests use `pytest-asyncio`. Add or update coverage for behavior changes in APIs, config loading/hot reload, cognitive memory, meme or knowledge flows, and WebUI/runtime routes. If you touch `apps/undefined-console/` or `src/Undefined/webui/static/js/`, run `npm run check` in `apps/undefined-console/` in addition to the Python checks; if you touch `apps/undefined-chat/`, run `npm run check` in `apps/undefined-chat/` (it bundles Vitest unit/e2e suites, so cover changed behavior there). No fixed coverage threshold is configured, so cover touched paths well.
 

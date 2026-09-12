@@ -34,6 +34,8 @@
 
 > **同 sender 短时合并**：默认开启。同一发送者在 5 秒（可配置）内连续发送的多条消息会合并到同一轮 AI 调用，AI 一次性看到全部消息块自行识别"独立请求/修正/补充/打断"，避免重复触发与回复打架。例如先发"帮我画一只猫"再快速补一句"改成狗"，Bot 只会按最终意图回应；多个独立请求也会被 AI 各自回复。配置项详见 [docs/configuration.md §4.10.2](configuration.md#4102-message_batcher-同-sender-短时消息合并) 与 [docs/message-batching.md](message-batching.md)。
 
+> **回复信息取舍**：默认提示词会引导 Bot 将对方刚说过、已确认或在追问中已展示理解的内容作为共同背景，优先回答新增问题，减少重复解释。不会仅凭身份或术语假定对方已懂；用户要求解释、回顾、总结、完整步骤，或需要纠错、保证正确操作时，仍补齐必要内容。闲聊中的情绪回应和接梗不受影响，原有回复触发规则保持不变。
+
 ---
 
 ## 2. 认知记忆系统
@@ -236,7 +238,7 @@ HTML 和 Markdown 工具都支持显式长图版式：
 |---|---|
 | `group_analysis.member_structure` | 统计角色分布、等级概览、入群时间覆盖和最后发言分层等成员结构事实 |
 | `group_analysis.message_mix` | 统计消息类型分布、活跃时段、活跃星期、时间覆盖和最近消息样本 |
-| `group_analysis.member_activity` | 分析群成员活跃度（支持 member_list / history / hybrid 三种数据源模式） |
+| `group_analysis.member_activity` | 区分最近发言、历史窗口消息数及混合指标排行（member_list / history / hybrid） |
 | `group_analysis.rank_members` | 对群成员进行多维度排名 |
 | `group_analysis.filter_members` | 按角色、等级、入群时间、活跃时间等条件过滤群成员 |
 | `group_analysis.inactive_risk` | 检测长期潜水或新成员沉默等活跃风险 |
@@ -245,6 +247,8 @@ HTML 和 Markdown 工具都支持显式长图版式：
 | `group_analysis.member_messages` | 深度分析指定成员的消息数量、类型分布和活跃时段 |
 | `group_analysis.join_statistics` | 统计群成员加入趋势与留存情况 |
 | `group_analysis.new_member_activity` | 分析新成员加入后的活跃度变化 |
+
+`member_activity` 中的“最近发言”不等于“发言最多”：`source=member_list` 仅按成员列表最后发言时间排序；查窗口内谁发言最多应使用 `source=history`，按本次读取到的窗口消息数排序，时间也取自窗口内消息；默认 `source=hybrid` 综合窗口消息数、活跃天数及成员列表最后发言时间计算分数。最后发言时间不能说明当前在线状态；缺失或为 0 时标为“未知”，不归为“从未发言”或潜水成员。历史消息可能因读取上限或接口可用范围而不完整，未检索到不代表整个窗口没有发言。详细口径见 [group_analysis 工具集说明](../src/Undefined/skills/toolsets/group_analysis/README.md)。
 
 **示例：**
 > *"帮我分析一下这个群最近整体活跃度怎么样。"*

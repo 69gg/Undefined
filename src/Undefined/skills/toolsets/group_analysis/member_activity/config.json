@@ -2,7 +2,7 @@
     "type": "function",
     "function": {
         "name": "member_activity",
-        "description": "分析群成员活跃度（数据统一来自 OneBot 接口）。支持 member_list/history/hybrid 三种模式：可结合最近发言与历史消息窗口，输出活跃统计、活跃榜和潜水成员。",
+        "description": "区分群成员最近发言与历史窗口活跃度（数据来自 OneBot）。member_list 仅按最后发言时间排序，不能据此判断谁发言最多或当前在线；查询窗口内谁发言最多用 history，综合消息数、活跃天数与最近发言用 hybrid（默认）。历史统计仅覆盖本次读取到的消息，未检索到不等于从未发言。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -12,12 +12,12 @@
                 },
                 "threshold_days": {
                     "type": "integer",
-                    "description": "非活跃阈值（天数），默认 30 天",
+                    "description": "成员列表的近期发言阈值（相对当前时间的天数），默认 30 天；仅判断最后发言是否落在近期，不表示发言频率。",
                     "default": 30
                 },
                 "source": {
                     "type": "string",
-                    "description": "数据源模式：member_list(仅最近发言), history(仅历史窗口消息), hybrid(融合，默认)。",
+                    "description": "member_list：按成员列表最后发言时间倒序；history：按窗口内已读取消息数排序，同数时依次比较活跃天数、窗口内最后发言；hybrid：综合窗口消息数、活跃天数和成员列表最后发言时间加权排序，默认。最近发言榜不等于发言数量榜。",
                     "enum": [
                         "member_list",
                         "history",
@@ -44,12 +44,12 @@
                 },
                 "include_zero": {
                     "type": "boolean",
-                    "description": "source=history 时是否包含窗口内消息为 0 的成员，默认 false。",
+                    "description": "source=history 时是否包含本次读取的窗口消息数为 0 的成员，默认 false；0 不代表整个窗口没有发言。",
                     "default": false
                 },
                 "count": {
                     "type": "integer",
-                    "description": "返回最活跃/最不活跃成员的数量，默认 10",
+                    "description": "各榜单展示的成员数量，默认 10；榜单含义由 source 决定。",
                     "default": 10
                 }
             }

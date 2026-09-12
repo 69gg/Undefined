@@ -5,6 +5,9 @@ from typing import Any
 
 import pytest
 
+from Undefined.skills.toolsets.group_analysis.member_activity.handler import (
+    execute as member_activity_execute,
+)
 from Undefined.skills.toolsets.group_analysis.member_structure.handler import (
     execute as member_structure_execute,
 )
@@ -167,3 +170,168 @@ async def test_fact_tools_require_onebot_client() -> None:
         {"group_id": 123456}, {}
     )
     assert "OneBot 客户端未设置" in await message_mix_execute({"group_id": 123456}, {})
+
+
+@pytest.fixture
+def activity_onebot() -> _FakeOneBot:
+    now = datetime.now()
+    return _FakeOneBot(
+        members=[
+            {
+                "user_id": 1001,
+                "nickname": "Alice",
+                "last_sent_time": int((now - timedelta(hours=1)).timestamp()),
+            },
+            {
+                "user_id": 1002,
+                "nickname": "Bob",
+                "last_sent_time": int((now - timedelta(days=2)).timestamp()),
+            },
+            {
+                "user_id": 1003,
+                "nickname": "Carol",
+                "last_sent_time": int((now - timedelta(days=40)).timestamp()),
+            },
+            {"user_id": 1004, "nickname": "Dave", "last_sent_time": 0},
+            {"user_id": 1005, "nickname": "Eve"},
+        ],
+        messages=[
+            _message(user_id=1001, nickname="Alice", time_text="2025-01-21 09:00:00"),
+            _message(user_id=1001, nickname="Alice", time_text="2025-01-20 12:00:00"),
+            _message(user_id=1002, nickname="Bob", time_text="2025-01-20 11:00:00"),
+            _message(user_id=1002, nickname="Bob", time_text="2025-01-20 10:00:00"),
+            _message(user_id=1002, nickname="Bob", time_text="2024-12-31 23:00:00"),
+        ],
+    )
+
+
+@pytest.mark.asyncio
+async def test_member_activity_member_list_reports_recency_not_frequency(
+    activity_onebot: _FakeOneBot,
+) -> None:
+    result = await member_activity_execute(
+        {"group_id": 123456, "source": "member_list"},
+        {"onebot_client": activity_onebot},
+    )
+
+    assert "最近30天内有发言记录: 2" in result
+    assert "最后发言早于30天前: 1" in result
+    assert "最后发言时间未知: 2" in result
+    assert "近期发言成员占比（占总成员）: 40.0%" in result
+    assert "最近发言成员 Top 2:" in result
+    assert result.index("1. Alice") < result.index("2. Bob")
+    assert "最后发言较早成员 Top 1:\n1. Carol" in result
+    assert "最后发言时间未知成员 Top 2:\n1. Dave (1004)\n2. Eve (1005)" in result
+    assert "不能据此判断发言频率或当前在线状态" in result
+    assert "时间未知不代表从未发言" in result
+    assert "最活跃成员" not in result
+    assert "潜水成员" not in result
+    assert "活跃率" not in result
+    assert "历史窗口" not in result
+    assert activity_onebot.history_calls == []
+
+
+@pytest.mark.asyncio
+async def test_member_activity_history_ranks_window_messages_and_times(
+    activity_onebot: _FakeOneBot,
+) -> None:
+    result = await member_activity_execute(
+        {
+            "group_id": 123456,
+            "source": "history",
+            "start_time": "2025-01-01 00:00:00",
+            "end_time": "2025-01-20 23:59:59",
+        },
+        {"onebot_client": activity_onebot},
+    )
+
+    assert "历史消息计数: 3 条" in result
+    assert "窗口内检索到发言的成员: 2" in result
+    assert "窗口消息数排行 Top 2:" in result
+    assert "1. Bob (1002) | 窗口消息: 2 | 活跃天数: 1" in result
+    assert "2. Alice (1001) | 窗口消息: 1 | 活跃天数: 1" in result
+    assert "窗口内最后发言: 2025-01-20 11:00:00" in result
+    assert "窗口内最后发言: 2025-01-20 12:00:00" in result
+    assert "仅覆盖本次读取到的历史消息" in result
+    assert "成员列表最近发言概况" not in result
+    assert "最后发言较早成员" not in result
+    assert "最后发言时间未知成员" not in result
+    assert "综合分" not in result
+    assert "Carol" not in result
+    assert activity_onebot.history_calls
+
+
+@pytest.mark.asyncio
+async def test_member_activity_history_ties_use_window_last_message(
+    activity_onebot: _FakeOneBot,
+) -> None:
+    activity_onebot.messages = [
+        _message(user_id=1002, nickname="Bob", time_text="2025-01-20 11:00:00"),
+        _message(user_id=1001, nickname="Alice", time_text="2025-01-20 10:00:00"),
+    ]
+
+    result = await member_activity_execute(
+        {
+            "group_id": 123456,
+            "source": "history",
+            "start_time": "2025-01-01 00:00:00",
+            "end_time": "2025-01-20 23:59:59",
+        },
+        {"onebot_client": activity_onebot},
+    )
+
+    assert "1. Bob (1002) | 窗口消息: 1" in result
+    assert "2. Alice (1001) | 窗口消息: 1" in result
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("include_zero", [False, True])
+async def test_member_activity_empty_history_does_not_claim_no_one_ever_spoke(
+    activity_onebot: _FakeOneBot, include_zero: bool
+) -> None:
+    activity_onebot.messages = []
+    result = await member_activity_execute(
+        {
+            "group_id": 123456,
+            "source": "history",
+            "include_zero": include_zero,
+            "start_time": "2025-01-01 00:00:00",
+            "end_time": "2025-01-20 23:59:59",
+        },
+        {"onebot_client": activity_onebot},
+    )
+
+    assert "历史消息计数: 0 条" in result
+    assert "未检索到不等于从未发言，也不能断言整个窗口没有发言" in result
+    assert "最近发言成员" not in result
+    assert "最后发言较早成员" not in result
+    if include_zero:
+        assert "窗口消息数排行 Top 5:" in result
+        assert result.count("窗口内最后发言: 窗口内未检索到发言") == 5
+    else:
+        assert "窗口消息数排行 Top" not in result
+
+
+@pytest.mark.asyncio
+async def test_member_activity_default_hybrid_labels_both_sources(
+    activity_onebot: _FakeOneBot,
+) -> None:
+    result = await member_activity_execute(
+        {
+            "group_id": 123456,
+            "start_time": "2025-01-01 00:00:00",
+            "end_time": "2025-01-20 23:59:59",
+        },
+        {"onebot_client": activity_onebot},
+    )
+
+    assert "分析模式: hybrid" in result
+    assert "成员列表最近发言概况（相对当前时间）" in result
+    assert "最后发言时间未知: 2" in result
+    assert "混合指标排行 Top 5:" in result
+    assert "不是单纯的消息数量排名" in result
+    assert "综合分:" in result
+    assert "成员列表最后发言: 未知" in result
+    assert "最活跃成员" not in result
+    assert "潜水成员" not in result
+    assert activity_onebot.history_calls
