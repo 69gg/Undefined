@@ -1,8 +1,13 @@
 from pathlib import Path
+import tomllib
 import pytest
 
 from Undefined.config.loader import Config
-from Undefined.config.onebot import parse_file_send_host, parse_file_send_mode
+from Undefined.config.onebot import (
+    FileSendSettings,
+    parse_file_send_host,
+    parse_file_send_mode,
+)
 from Undefined.config.load_sections.core import load_core
 from Undefined.config.env_registry import ENV_REGISTRY
 
@@ -10,9 +15,9 @@ from Undefined.config.env_registry import ENV_REGISTRY
 @pytest.mark.parametrize(
     "raw,expected",
     [
-        (None, "stream"),
-        ("", "stream"),
-        ("   ", "stream"),
+        (None, "local"),
+        ("", "local"),
+        ("   ", "local"),
         (" Stream ", "stream"),
         ("url", "url"),
         ("LOCAL", "local"),
@@ -20,6 +25,27 @@ from Undefined.config.env_registry import ENV_REGISTRY
 )
 def test_mode_normalization(raw: str | None, expected: str) -> None:
     assert parse_file_send_mode(raw) == expected
+
+
+@pytest.mark.parametrize("mode", [None, "", "   "])
+def test_legacy_config_defaults_to_local(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str | None
+) -> None:
+    monkeypatch.delenv("ONEBOT_FILE_SEND_MODE", raising=False)
+    source = '[onebot]\nws_url = "ws://localhost:3001"\n'
+    if mode is not None:
+        source += f'file_send_mode = "{mode}"\n'
+    path = tmp_path / "config.toml"
+    path.write_text(source, encoding="utf-8")
+    cfg = Config.load(path, strict=False)
+    assert cfg.onebot_file_send_mode == "local"
+    assert FileSendSettings.from_config(cfg).mode == "local"
+    assert FileSendSettings().mode == "local"
+
+
+def test_template_defaults_to_local() -> None:
+    source = Path("config.toml.example").read_text(encoding="utf-8")
+    assert tomllib.loads(source)["onebot"]["file_send_mode"] == "local"
 
 
 @pytest.mark.parametrize("raw", ["auto", "base64", "stream api"])
@@ -76,7 +102,7 @@ def test_env_precedence_and_loaded_config(
     # TOML 空值也遵循 TOML 优先，使用默认值而非环境变量。
     assert (
         load_core({"onebot": {"file_send_mode": ""}})["onebot_file_send_mode"]
-        == "stream"
+        == "local"
     )
     path = tmp_path / "config.toml"
     path.write_text(

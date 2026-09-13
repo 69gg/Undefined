@@ -6,7 +6,7 @@ import re
 from typing import Any, Literal, cast
 
 FileSendMode = Literal["local", "url", "stream"]
-DEFAULT_FILE_SEND_MODE: FileSendMode = "stream"
+DEFAULT_FILE_SEND_MODE: FileSendMode = "local"
 DEFAULT_FILE_SEND_HOST = "127.0.0.1"
 
 

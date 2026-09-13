@@ -29,13 +29,46 @@ class _RespondingWebSocket:
         self.client = client
         self.response = response
         self.send_count = 0
+        self.requests: list[dict[str, Any]] = []
 
     async def send(self, payload: str) -> None:
         self.send_count += 1
         request = json.loads(payload)
+        self.requests.append(request)
         echo = str(request["echo"])
         response = {**self.response, "echo": echo}
         self.client._pending_responses[echo].set_result(response)
+
+
+@pytest.mark.parametrize("target_type", ["group", "private"])
+@pytest.mark.parametrize("upload_file", [False, True])
+async def test_default_client_preserves_local_file_delivery(
+    tmp_path: Path, target_type: str, upload_file: bool
+) -> None:
+    client = OneBotClient("ws://example.invalid")
+    websocket = _RespondingWebSocket(client, {"status": "ok"})
+    client.ws = cast(Any, websocket)
+    # 本地模式允许把 Bot 上不存在的路径交给协议端，不会读取或上传该文件。
+    path = tmp_path / "legacy.png"
+    media = [{"type": "image", "data": {"file": str(path)}}]
+    if upload_file:
+        if target_type == "group":
+            await client.upload_group_file(1, str(path))
+        else:
+            await client.upload_private_file(1, str(path))
+    elif target_type == "group":
+        await client.send_group_message(1, media)
+    else:
+        await client.send_private_message(1, media)
+    assert websocket.send_count == 1
+    request = websocket.requests[0]
+    if upload_file:
+        assert request["action"] == f"upload_{target_type}_file"
+        assert request["params"]["file"] == path.as_uri()
+        assert request["params"]["name"] == path.name
+    else:
+        assert request["action"] == f"send_{target_type}_msg"
+        assert request["params"]["message"] == media
 
 
 @pytest.mark.asyncio

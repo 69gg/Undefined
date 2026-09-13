@@ -28,6 +28,10 @@ from Undefined.attachments import AttachmentRegistry
 from Undefined.utils.sender import MessageSender
 
 
+def _stream_settings() -> FileSendSettings:
+    return FileSendSettings("stream")
+
+
 class NapCat:
     """模拟实际 WebSocket 协议，严格检查逐块请求、完成请求及文件字节。"""
 
@@ -140,7 +144,9 @@ async def connected(napcat: NapCat, token: str = "") -> AsyncIterator[OneBotClie
     server_logger.setLevel(logging.INFO)
     async with serve(napcat.websocket, "127.0.0.1", 0, logger=server_logger) as server:
         port = server.sockets[0].getsockname()[1]
-        client = OneBotClient(f"ws://127.0.0.1:{port}", token)
+        client = OneBotClient(
+            f"ws://127.0.0.1:{port}", token, config_getter=_stream_settings
+        )
         await client.connect()
         task = asyncio.create_task(client.run())
         try:
@@ -197,7 +203,9 @@ async def test_all_media_nested_cq_and_originals(tmp_path: Path, action: str) ->
     path = tmp_path / "中 文,[x]&.png"
     path.write_bytes(b"file bytes")
     napcat = NapCat()
-    transport = OneBotFileTransport(napcat.respond, chunk_size=3)
+    transport = OneBotFileTransport(
+        napcat.respond, config_getter=_stream_settings, chunk_size=3
+    )
     escaped = (
         str(path)
         .replace("&", "&amp;")
@@ -258,17 +266,20 @@ async def test_all_media_nested_cq_and_originals(tmp_path: Path, action: str) ->
 )
 async def test_remote_sources_passthrough(source: str) -> None:
     call = AsyncMock()
-    transport = OneBotFileTransport(call)
+    transport = OneBotFileTransport(call, config_getter=_stream_settings)
     params = {"message": f"[CQ:image,file={source}]"}
     async with transport.prepare("send_group_msg", params) as prepared:
         assert prepared.apply("send_group_msg", params) == params
     call.assert_not_called()
 
 
-async def test_local_does_no_io_or_transfer(tmp_path: Path) -> None:
+@pytest.mark.parametrize("explicit", [False, True])
+async def test_local_and_default_do_no_io_or_transfer(
+    tmp_path: Path, explicit: bool
+) -> None:
     call = AsyncMock()
     transport = OneBotFileTransport(
-        call, config_getter=lambda: FileSendSettings("local")
+        call, config_getter=(lambda: FileSendSettings("local")) if explicit else None
     )
     params = {"file": (tmp_path / "does-not-exist.zip").as_uri()}
     async with transport.prepare("upload_group_file", params) as prepared:
@@ -294,7 +305,10 @@ async def test_prepare_errors_never_send_or_fallback(
     napcat = NapCat()
     napcat.failure = failure
     client = OneBotClient(
-        "ws://unused", file_transport=OneBotFileTransport(napcat.respond)
+        "ws://unused",
+        file_transport=OneBotFileTransport(
+            napcat.respond, config_getter=_stream_settings
+        ),
     )
     client._call_api_raw = AsyncMock()  # type: ignore[method-assign]
     async with RequestContext(request_type="group", group_id=1, sender_id=2) as ctx:
@@ -310,7 +324,7 @@ async def test_empty_file_fails_before_upload(tmp_path: Path) -> None:
     path = tmp_path / "empty"
     path.touch()
     call = AsyncMock()
-    transport = OneBotFileTransport(call)
+    transport = OneBotFileTransport(call, config_getter=_stream_settings)
     with pytest.raises(FileTransferError, match="零字节"):
         async with transport.prepare("upload_private_file", {"file": str(path)}):
             pytest.fail("must not prepare")
@@ -328,7 +342,9 @@ async def test_source_change_prevents_completion(tmp_path: Path) -> None:
             path.write_bytes(b"changed")
         return result
 
-    transport = OneBotFileTransport(mutate, chunk_size=3)
+    transport = OneBotFileTransport(
+        mutate, config_getter=_stream_settings, chunk_size=3
+    )
     with pytest.raises(FileTransferError, match="源文件发生变化"):
         async with transport.prepare("upload_private_file", {"file": str(path)}):
             pytest.fail("must not prepare")
@@ -342,7 +358,10 @@ async def test_fallback_reuses_upload_and_original_idempotence(tmp_path: Path) -
     napcat = NapCat()
     napcat.failure = "fallback"
     client = OneBotClient(
-        "ws://unused", file_transport=OneBotFileTransport(napcat.respond)
+        "ws://unused",
+        file_transport=OneBotFileTransport(
+            napcat.respond, config_getter=_stream_settings
+        ),
     )
     client._call_api_raw = napcat.respond  # type: ignore[method-assign]
     await client.upload_private_file(1, str(path), "展示.zip")
@@ -362,7 +381,10 @@ async def test_uncertain_forward_blocks_reupload(tmp_path: Path) -> None:
     napcat = NapCat()
     napcat.failure = "delivery_timeout"
     client = OneBotClient(
-        "ws://unused", file_transport=OneBotFileTransport(napcat.respond)
+        "ws://unused",
+        file_transport=OneBotFileTransport(
+            napcat.respond, config_getter=_stream_settings
+        ),
     )
     client._call_api_raw = napcat.respond  # type: ignore[method-assign]
     nodes = [
@@ -387,7 +409,9 @@ async def test_cancel_and_budget_reset_only_current_stream(tmp_path: Path) -> No
         napcat = NapCat()
         napcat.failure = "blocked"
         transport = OneBotFileTransport(
-            napcat.respond, timeout=0.03 if not cancel else 10
+            napcat.respond,
+            config_getter=_stream_settings,
+            timeout=0.03 if not cancel else 10,
         )
 
         async def prepare() -> None:
@@ -568,7 +592,9 @@ async def test_cancelled_queue_and_queue_wait_outside_budget(tmp_path: Path) -> 
     path = tmp_path / "data"
     path.write_bytes(b"abc")
     napcat = NapCat()
-    transport = OneBotFileTransport(napcat.respond, timeout=0.1)
+    transport = OneBotFileTransport(
+        napcat.respond, config_getter=_stream_settings, timeout=0.1
+    )
     await transport._stream_lock.acquire()
 
     async def prepare() -> None:
@@ -595,7 +621,7 @@ async def test_remote_completion_path_is_not_read_on_bot(
     source.write_bytes(b"data")
     napcat = NapCat()
     napcat.remote_path = remote_path
-    transport = OneBotFileTransport(napcat.respond)
+    transport = OneBotFileTransport(napcat.respond, config_getter=_stream_settings)
     async with transport.prepare("upload_group_file", {"file": str(source)}) as files:
         assert (
             files.apply("upload_group_file", {"file": str(source)})["file"]
@@ -628,7 +654,7 @@ async def test_malformed_completion_never_sends(
             response["data"][field] = value
         return response
 
-    transport = OneBotFileTransport(corrupt)
+    transport = OneBotFileTransport(corrupt, config_getter=_stream_settings)
     with pytest.raises(FileTransferError):
         async with transport.prepare("upload_group_file", {"file": str(source)}):
             pytest.fail("must not send")
@@ -645,7 +671,7 @@ async def test_only_incomplete_second_file_is_reset(tmp_path: Path) -> None:
             napcat.failure = "ack"
         return await napcat.respond(action, params)
 
-    transport = OneBotFileTransport(fail_second)
+    transport = OneBotFileTransport(fail_second, config_getter=_stream_settings)
     params = {
         "message": [
             {"type": "image", "data": {"file": str(p)}} for p in (first, second)
@@ -671,7 +697,10 @@ async def test_sender_history_registers_original_local_source(
     source.write_bytes(b"media")
     napcat = NapCat()
     client = OneBotClient(
-        "ws://unused", file_transport=OneBotFileTransport(napcat.respond)
+        "ws://unused",
+        file_transport=OneBotFileTransport(
+            napcat.respond, config_getter=_stream_settings
+        ),
     )
     client._call_api_raw = napcat.respond  # type: ignore[method-assign]
     registry = AttachmentRegistry(

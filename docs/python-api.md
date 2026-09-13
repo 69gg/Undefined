@@ -150,7 +150,7 @@ print(cfg.chat_model.model_name)  # gpt-4o-mini
 
 ### `OneBotClient` 文件传输依赖
 
-`OneBotClient(ws_url, token="", *, config_getter=None, file_transport=None)` 保留原有位置参数和发送返回值。未注入配置时本地文件默认走 NapCat Stream API；库嵌入需要共享路径发送时可注入 `FileSendSettings("local")`，运行中需要热更新则注入返回当前 `Config` 的函数：
+`OneBotClient(ws_url, token="", *, config_getter=None, file_transport=None)` 保留原有位置参数和发送返回值。未注入配置时本地文件默认使用 `local`，保持旧的本地路径发送行为；库嵌入需要 Stream 上传时可通过 `config_getter` 显式返回 `FileSendSettings("stream")`，运行中需要热更新则注入返回当前 `Config` 的函数：
 
 ```python
 from Undefined.onebot import OneBotClient

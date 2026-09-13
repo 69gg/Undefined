@@ -223,16 +223,16 @@ model_name = "gpt-4o-mini"
 |---|---:|---|---|
 | `ws_url` | `""` | OneBot WebSocket 地址 | 模板示例通常写 `ws://127.0.0.1:3001`；严格模式必填 |
 | `token` | `""` | OneBot token | 同时用于 URL 参数与 `Authorization` 头 |
-| `file_send_mode` | `"stream"` | Bot 本地文件发送方式：`local` / `url` / `stream` | 缺省或空值用默认值；去除首尾空白并转小写；非法非空值报配置错误 |
+| `file_send_mode` | `"local"` | Bot 本地文件发送方式：`local` / `url` / `stream` | 缺省或空值用默认值，兼容旧部署；去除首尾空白并转小写；非法非空值报配置错误 |
 | `file_send_host` | `"127.0.0.1"` | URL 模式传给 OneBot 的 Runtime 下载主机 | IPv4、IPv6 或域名，不包含协议、端口或路径；缺省或空值用默认值 |
 
 `onebot.ws_url` / `onebot.token` 变更需要重启进程。`file_send_mode` / `file_send_host` 支持热更新：每次逻辑投递开始时取得独立快照，排队及进行中的投递保持旧值，后续投递使用新值。环境变量为 `ONEBOT_FILE_SEND_MODE` / `ONEBOT_FILE_SEND_HOST`，沿用 TOML 优先、环境变量补缺的规则。
 
-- `local`：保留原有路径或 `file://` 格式，协议端必须能读取该路径。
+- `local`（默认）：保留原有路径或 `file://` 格式，协议端必须能读取该路径。
 - `url`：复用 Runtime HTTP 监听，将本地文件复制为临时下载资源。URL 使用 `file_send_host` 与 **实际生效的监听端口**，不会使用尚未重启生效的新 `api.port`。需要 `[api].enabled = true` 且协议端能访问该监听；默认 `127.0.0.1` 指协议端自身的回环地址，跨容器时应填写其可达的 Bot 主机或域名，并配置可达的 `[api].host`。
-- `stream`（默认）：通过 NapCat `upload_file_stream` 扩展按 64 KiB 分块上传，校验完成后使用协议端路径发送。协议端不支持时明确报错，需手动选择其他模式。零字节文件不支持此模式。
+- `stream`：通过 NapCat `upload_file_stream` 扩展按 64 KiB 分块上传，校验完成后使用协议端路径发送。协议端不支持时明确报错，需手动选择其他模式。零字节文件不支持此模式。
 
-这些选项只影响 Bot 本地文件；已有 HTTP/HTTPS URL、Base64 和协议端资源标识保持原样，展示文件名、附件 UID 和历史来源不变。旧配置未包含新字段时也采用默认 `stream`，不能假定所有 OneBot 实现或 Lagrange.Core 都支持 NapCat 扩展。
+这些选项只影响 Bot 本地文件；已有 HTTP/HTTPS URL、Base64 和协议端资源标识保持原样，展示文件名、附件 UID 和历史来源不变。旧配置未包含新字段且未通过环境变量指定模式时继续采用 `local`，保持原有发送行为；`url` 和 `stream` 需要显式启用。不能假定所有 OneBot 实现或 Lagrange.Core 都支持 NapCat 扩展。
 
 Stream 本地文件投递在同一 Bot 内串行，纯文本不等待上传锁。Stream／URL 文件准备、发送与明确失败后的文件消息段回退共用 8 分钟预算，排队不计时；临时资源保留 16 分钟。URL 副本在源文件删除或切换模式后仍可下载，到期拒绝新请求，已有下载允许完成。文件准备失败不会触发文件消息段回退或标记已发送；投递发出后无法确认结果时禁止自动重发。不会自动切换模式、自动重试上传或启动 Runtime。
 
