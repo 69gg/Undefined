@@ -6,6 +6,7 @@ from typing import Any
 
 from Undefined.skills.toolsets.messages.context_utils import (
     handle_delivery_uncertain,
+    file_transfer_error_message,
     is_delivery_uncertain_error,
     mark_message_sent,
 )
@@ -85,6 +86,8 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
     except ValueError as exc:
         return f"发送失败：{exc}"
     except Exception as exc:
+        if transfer_message := file_transfer_error_message(exc):
+            return transfer_message
         if is_delivery_uncertain_error(exc):
             logger.warning(
                 "[语音发送] 投递结果未确认，阻止自动重试: uid=%s address=%s",

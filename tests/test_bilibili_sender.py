@@ -10,6 +10,8 @@ import pytest
 import Undefined.bilibili.sender as bilibili_sender
 from Undefined.attachments import AttachmentRegistry
 from Undefined.bilibili.models import DanmakuItem, VideoStats
+from Undefined.onebot.file_errors import FileTransferError
+from Undefined.onebot.client import OneBotDeliveryUncertainError
 
 
 def _video_info() -> Any:
@@ -26,6 +28,40 @@ def _video_info() -> Any:
         cid=456,
         stats=VideoStats(view=1000, like=88, coin=9, favorite=10, danmaku=101),
     )
+
+
+@pytest.mark.parametrize("uncertain", [False, True])
+async def test_bilibili_does_not_fallback_after_transport_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, uncertain: bool
+) -> None:
+    path = tmp_path / "video.mp4"
+    path.write_bytes(b"video")
+    error = (
+        OneBotDeliveryUncertainError("send_forward_msg", "timeout")
+        if uncertain
+        else FileTransferError("stream", "unsupported")
+    )
+    sender: Any = SimpleNamespace(
+        send_group_forward_message=AsyncMock(side_effect=error)
+    )
+    monkeypatch.setattr(
+        bilibili_sender, "normalize_to_bvid", AsyncMock(return_value="BV1xx411c7mD")
+    )
+    monkeypatch.setattr(
+        bilibili_sender,
+        "download_video",
+        AsyncMock(return_value=(path, _video_info(), 80)),
+    )
+    with pytest.raises(type(error)):
+        await bilibili_sender.send_bilibili_video(
+            "BV1xx411c7mD",
+            sender,
+            cast(Any, SimpleNamespace()),
+            "group",
+            1,
+            danmaku_enabled=False,
+        )
+    sender.send_group_forward_message.assert_awaited_once()
 
 
 @pytest.mark.asyncio

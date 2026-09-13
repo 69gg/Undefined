@@ -59,7 +59,7 @@ tool_invoke_callback_timeout = 10
 
 ## 2. 鉴权规则
 
-- 除 `/api/v1/naga/*` 外，所有 `/api/*` 路由都要求请求头：
+- 除 `/api/v1/naga/*` 及下述使用单文件令牌的 GET／HEAD 下载路由外，所有 `/api/*` 路由都要求请求头：
 
 ```http
 X-Undefined-API-Key: <your_key>
@@ -79,6 +79,19 @@ curl http://127.0.0.1:8788/openapi.json
 ```
 
 ## 4. 主要接口
+
+### OneBot 临时文件下载
+
+```text
+GET  /api/v1/onebot/files/{file_id}?token=...
+HEAD /api/v1/onebot/files/{file_id}?token=...
+```
+
+仅 `[onebot].file_send_mode = "url"` 在进程内部登记本地文件时产生下载链接，无公共上传或任意本地路径参数。每个 ID 对应独立随机令牌，权限仅限该文件；`X-Undefined-API-Key` 不能替代此令牌，该令牌也不能调用其他 Runtime API。此路由不借用或扩大 WebChat 附件作用域。
+
+支持 GET、HEAD、Range（`206`）和有效期内重复读取。缺少或错误令牌为 `401`，文件不存在或过期为 `404`，无效 Range 为 `416`。链接与独立副本保留 16 分钟，过期拒绝新读取，已有下载结束后删除副本。业务清理源文件及切换发送模式不会提前撤销链接。正常停止清理本实例缓存；启动只回收 `data/cache/onebot_files` 中本模块命名且已过期的遗留缓存。
+
+服务复用 Runtime 实际监听端口。`onebot.file_send_host` 仅用于生成协议端可达的 URL，不能改变绑定地址；绑定仍由 `[api].host` 控制。文件 URL 令牌和 Stream 分块内容不会写入 Bot 请求日志及 Runtime 访问日志，反向代理也应隐藏查询串。
 
 ### 健康检查
 

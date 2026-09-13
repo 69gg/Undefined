@@ -22,13 +22,14 @@ _SENSITIVE_KEYWORDS: tuple[str, ...] = (
     "secret",
     "password",
     "onebot_token",
+    "chunk_data",
 )
 
 # 敏感信息正则表达式
 _BEARER_RE = re.compile(r"(Bearer\s+)[A-Za-z0-9._~+/=-]+", re.IGNORECASE)
 _KV_TOKEN_RE = re.compile(
-    r"(?i)(api_key|apikey|access_token|refresh_token|id_token|token|secret|password)"
-    r"(\s*[:=]\s*)(['\"]?)([^'\"\s]+)"
+    r"(?i)(api_key|apikey|access_token|refresh_token|id_token|token|secret|password|chunk_data)"
+    r"(['\"]?\s*[:=]\s*)(['\"]?)([^'\"\s]+)"
 )
 _SK_RE = re.compile(r"\bsk-[A-Za-z0-9]{8,}\b")
 
@@ -65,8 +66,8 @@ def redact_string(text: str) -> str:
     """
     if not text:
         return text
-    masked = _BEARER_RE.sub(r"\\1***", text)
-    masked = _KV_TOKEN_RE.sub(r"\\1\\2\\3***", masked)
+    masked = _BEARER_RE.sub(r"\1***", text)
+    masked = _KV_TOKEN_RE.sub(r"\1\2\3***", masked)
     masked = _SK_RE.sub("sk-***", masked)
     return masked
 

@@ -16,6 +16,8 @@ from ..coercers import (
     _get_value,
 )
 
+from ..onebot import parse_file_send_host, parse_file_send_mode
+
 logger = logging.getLogger(__name__)
 
 
@@ -180,4 +182,10 @@ def load_core(
         "nagaagent_mode_enabled": nagaagent_mode_enabled,
         "onebot_ws_url": onebot_ws_url,
         "onebot_token": onebot_token,
+        "onebot_file_send_mode": parse_file_send_mode(
+            _get_value(data, ("onebot", "file_send_mode"), "ONEBOT_FILE_SEND_MODE")
+        ),
+        "onebot_file_send_host": parse_file_send_host(
+            _get_value(data, ("onebot", "file_send_host"), "ONEBOT_FILE_SEND_HOST")
+        ),
     }

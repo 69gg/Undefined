@@ -9,6 +9,8 @@ from unittest.mock import AsyncMock
 import pytest
 
 from Undefined.context import RequestContext
+from Undefined.config.onebot import FileSendSettings
+from Undefined.onebot.file_errors import OneBotAPIError
 from Undefined.onebot.client import (
     OneBotClient,
     OneBotDeliveryUncertainError,
@@ -41,7 +43,9 @@ async def test_upload_group_file_does_not_fallback_or_repeat_after_timeout(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    client = OneBotClient("ws://example.invalid")
+    client = OneBotClient(
+        "ws://example.invalid", config_getter=lambda: FileSendSettings("local")
+    )
     websocket = _RespondingWebSocket(
         client,
         {
@@ -80,17 +84,26 @@ async def test_upload_group_file_keeps_fallback_for_definitive_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    client = OneBotClient("ws://example.invalid")
-    upload = AsyncMock(side_effect=RuntimeError("消息体无法解析"))
-    fallback = AsyncMock(return_value={"status": "ok"})
-    monkeypatch.setattr(client, "_call_api", upload)
-    monkeypatch.setattr(client, "send_group_message", fallback)
+    client = OneBotClient(
+        "ws://example.invalid", config_getter=lambda: FileSendSettings("local")
+    )
+    upload = AsyncMock(
+        side_effect=[OneBotAPIError("消息体无法解析", 1200), {"status": "ok"}]
+    )
+    monkeypatch.setattr(client, "_call_api_raw", upload)
     file_path = tmp_path / "song.mp3"
 
     result = await client.upload_group_file(10001, str(file_path), "song.mp3")
 
     assert result == {"status": "ok"}
-    fallback.assert_awaited_once()
+    assert [call.args[0] for call in upload.await_args_list] == [
+        "upload_group_file",
+        "send_group_msg",
+    ]
+    assert (
+        upload.await_args_list[0].args[1]["file"]
+        == upload.await_args_list[1].args[1]["message"][0]["data"]["file"]
+    )
 
 
 @pytest.mark.asyncio

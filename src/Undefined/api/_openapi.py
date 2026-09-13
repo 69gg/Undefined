@@ -18,6 +18,38 @@ def _build_openapi_spec(ctx: RuntimeAPIContext, request: web.Request) -> dict[st
     cfg = ctx.config_getter()
     naga_routes_enabled = _naga_routes_enabled(cfg, ctx.naga_store)
     paths: dict[str, Any] = {
+        "/api/v1/onebot/files/{file_id}": {
+            method: {
+                "summary": "Download a temporary OneBot file"
+                if method == "get"
+                else "Inspect a temporary OneBot file",
+                "description": "Process-internal registration only. A token authorizes one file for 16 minutes. Supports Range and repeated reads; does not authorize other Runtime APIs.",
+                "security": [{"OneBotFileToken": []}],
+                "parameters": [
+                    {
+                        "name": "file_id",
+                        "in": "path",
+                        "required": True,
+                        "schema": {"type": "string"},
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "File",
+                        "content": {
+                            "application/octet-stream": {
+                                "schema": {"type": "string", "format": "binary"}
+                            }
+                        },
+                    },
+                    "206": {"description": "Partial file"},
+                    "401": {"description": "Missing or invalid file token"},
+                    "404": {"description": "File missing or expired"},
+                    "416": {"description": "Invalid byte range"},
+                },
+            }
+            for method in ("get", "head")
+        },
         "/health": {
             "get": {
                 "summary": "Health check",
@@ -323,6 +355,7 @@ def _build_openapi_spec(ctx: RuntimeAPIContext, request: web.Request) -> dict[st
         ],
         "components": {
             "securitySchemes": {
+                "OneBotFileToken": {"type": "apiKey", "in": "query", "name": "token"},
                 "ApiKeyAuth": {
                     "type": "apiKey",
                     "in": "header",

@@ -398,6 +398,10 @@ async def send_bilibili_video(
 
     except Exception as exc:
         logger.exception("[Bilibili] 处理视频失败: %s", bvid)
+        if getattr(exc, "delivery_uncertain", False) or getattr(
+            exc, "file_transfer_error", False
+        ):
+            raise
         try:
             if video_info is None:
                 video_info = await get_video_info(bvid, cookie=cookie)

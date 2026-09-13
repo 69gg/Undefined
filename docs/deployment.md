@@ -241,34 +241,35 @@ python -c "from Undefined.utils.resources import read_text_resource; print(len(r
 
 ## NapCat / Lagrange.Core 部署要求
 
-**NapCat（或 Lagrange.Core）必须与 Bot 进程共享同一文件系统，不能将 NapCat 单独放在无法访问 Bot 数据目录的 Docker 容器内。**
+Bot 本地文件支持三种发送方式，默认 `stream`。**是否需要共享文件系统取决于模式**：
 
-### 原因
+| 模式 | 共享文件系统 | 协议端要求 | Runtime 文件监听 |
+|---|---|---|---|
+| `local` | 必须按发送路径可见 | 能读取 Bot 给出的路径／`file://` URI | 不需要 |
+| `url` | 不需要 | 对相应消息／文件接口支持 HTTP URL，且能访问 Runtime | 需要 |
+| `stream`（默认） | 不需要 | 支持 NapCat `upload_file_stream` 扩展 | 不需要 |
 
-Bot 发送本地文件（图片、音频、压缩包等）时，统一使用 `file:///path/to/file` URI，例如：
-
-```
-[CQ:image,file=file:///home/pyl/Undefined/data/cache/render/stats_line_chart.png]
-```
-
-NapCat 收到后会在**自身所在的文件系统**上按路径读取文件。若 NapCat 在独立容器中，宿主机路径不可见，会报：
-
-```
-ENOENT: no such file or directory, copyfile '/home/pyl/...' -> '/app/.config/QQ/NapCat/temp/...'
+```toml
+[onebot]
+file_send_mode = "stream"
+file_send_host = "127.0.0.1" # 仅 URL 模式使用，不包含协议、端口或路径
 ```
 
-### 支持的部署方式
+`local` 适用于同一宿主机、同一容器，或共享 volume 且内部路径一致的不同容器。协议端会在**自己的文件系统**中读取 URI；路径未挂载仍会报 `ENOENT`。
 
-| 场景 | 是否支持 |
-|---|---|
-| Bot 和 NapCat 都在宿主机 | ✅ |
-| Bot 在宿主机，NapCat 在 Docker（路径未挂载） | ❌ |
-| Bot 和 NapCat 在同一个 Docker 容器 | ✅ |
-| Bot 和 NapCat 在不同容器，共享同一 volume 且路径一致 | ✅ |
+`url` 模式复用 `[api]` Runtime HTTP 服务，无需额外端口。`file_send_host` 填写协议端实际可达的 IPv4、IPv6 或域名；IPv6 会正确生成带方括号的 URL。端口取实际监听值，修改 `api.port` 而尚未重启时仍使用旧端口。默认 `127.0.0.1` 仅适用于协议端与 Bot 共用网络空间的情况，独立容器中的回环地址指向容器自身；需要同时保证 `[api].host` 的绑定允许协议端访问。Runtime 关闭或未就绪时准备阶段报错，不会自动启动服务。
+
+URL 使用单文件独立令牌，有效期 16 分钟，支持 HEAD、Range 和重复读取。下载读取的是 Bot 保存的独立副本，业务删除源文件或切换模式不会影响有效链接。到期拒绝新请求，正在读取的请求可以完成，然后清理副本。不要在反向代理访问日志中记录文件 URL 查询串。
+
+`stream` 通过已有 OneBot WebSocket 按 64 KiB 分块上传，每块单独等待确认，最后独立请求完成并校验路径、大小和 SHA-256，再发 QQ 消息。一个 Bot 的 Stream 文件投递串行，多文件顺序准备，文本消息不受上传锁影响。文件准备、发送和明确失败后的回退共用 8 分钟预算，排队等待不计时；协议端文件显式保留 16 分钟。未完成 Stream 失败时仅尝试重置该 Stream，已完成文件依靠保留期回收，不调用清空临时目录的接口。不支持零字节文件，不自动重试上传或跨重启续传。
+
+**旧配置缺少新增字段时同样默认为 `stream`。** 协议端明确不支持扩展时会提示切换 `onebot.file_send_mode`，不会静默回退。NapCat 扩展不能视为所有 OneBot 实现的共同能力；使用 Lagrange.Core 等实现时应按其实际能力选 `local`，或核对所用消息与普通文件上传接口的 URL 支持后选择 `url`。
+
+实现参考固定版本的 [NapCat 上传示例](https://github.com/NapNeko/NapCatQQ/blob/109d0c1dff755875f3b79795e99cee6115289fbb/packages/napcat-onebot/action/stream/test_upload_stream.py) 与 [UploadFileStream](https://github.com/NapNeko/NapCatQQ/blob/109d0c1dff755875f3b79795e99cee6115289fbb/packages/napcat-onebot/action/stream/UploadFileStream.ts)。Bot 新传输层使用分块 IO，但该上游在合并磁盘分块时仍构造完整内存缓冲区，现有附件登记也可能读取完整文件；**不承诺整个链路固定内存占用**。
 
 ### 受影响的功能
 
-以下功能均依赖本地文件路径：
+以下功能的本地来源统一经过该传输层，保留原始附件 UID、展示文件名与历史语义：
 
 - `/stats` 统计图表
 - `render.render_markdown` / `render.render_latex` 渲染图片
@@ -276,3 +277,5 @@ ENOENT: no such file or directory, copyfile '/home/pyl/...' -> '/app/.config/QQ/
 - `code_delivery_agent` 代码交付压缩包
 - `messages.send_text_file` / `messages.send_url_file`
 - Bilibili 视频下载发送
+
+同时覆盖语音、视频缩略图和嵌套合并转发中的媒体，支持 CQ 字符串及消息段数组。已有 HTTP/HTTPS URL、Base64 或协议端资源标识原样通过。两项配置支持按投递快照热更新，见 [配置说明](configuration.md#43-onebot-协议端连接)。

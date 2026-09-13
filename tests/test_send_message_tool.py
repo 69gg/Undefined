@@ -12,6 +12,7 @@ from jsonschema import Draft202012Validator
 from Undefined.attachments import AttachmentRecord, AttachmentRegistry
 from Undefined.context import RequestContext
 from Undefined.onebot.client import OneBotDeliveryUncertainError
+from Undefined.onebot.file_errors import FileTransferError
 from Undefined.skills.toolsets.messages.context_utils import DELIVERY_UNCERTAIN_RESULT
 from Undefined.skills.toolsets.messages.send_message.handler import execute
 from Undefined.utils import io as async_io
@@ -28,6 +29,32 @@ def _build_runtime_config() -> Any:
 
 def _tool_context(**values: Any) -> dict[str, Any]:
     return {"mark_message_sent_this_turn": mark_message_sent_this_turn, **values}
+
+
+async def test_file_only_message_surfaces_preparation_error(tmp_path: Path) -> None:
+    registry = AttachmentRegistry(
+        registry_path=tmp_path / "registry.json", cache_dir=tmp_path / "attachments"
+    )
+    record = await registry.register_bytes(
+        "group:10001", b"file", kind="file", display_name="data.txt", source_kind="test"
+    )
+    error = FileTransferError("stream", "请切换 onebot.file_send_mode")
+    sender = SimpleNamespace(
+        send_address_message=AsyncMock(), send_address_file=AsyncMock(side_effect=error)
+    )
+    context = _tool_context(
+        request_type="group",
+        group_id=10001,
+        sender_id=20002,
+        runtime_config=_build_runtime_config(),
+        sender=sender,
+        attachment_registry=registry,
+    )
+    result = await execute({"message": f'<attachment uid="{record.uid}"/>'}, context)
+    assert result == error.user_message
+    assert not context.get("message_sent_this_turn")
+    sender.send_address_file.assert_awaited_once()
+    sender.send_address_message.assert_not_awaited()
 
 
 @pytest.mark.asyncio

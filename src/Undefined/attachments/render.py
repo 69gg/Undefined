@@ -301,6 +301,8 @@ async def dispatch_pending_file_sends(
                 continue
             dispatched_count += 1
         except Exception as exc:
+            if bool(getattr(exc, "file_transfer_error", False)):
+                raise
             if bool(getattr(exc, "delivery_uncertain", False)):
                 logger.warning(
                     "[文件发送] 投递结果未确认，停止继续派发以避免重复发送 "

@@ -183,7 +183,11 @@ async def main() -> None:
     _reranker: Any = None
     try:
         init_start = time.perf_counter()
-        onebot = OneBotClient(config.onebot_ws_url, config.onebot_token)
+        onebot = OneBotClient(
+            config.onebot_ws_url,
+            config.onebot_token,
+            config_getter=lambda: get_config(strict=False),
+        )
         memory_storage = MemoryStorage(max_memories=100)
         end_summary_storage = EndSummaryStorage()
         ai = AIClient(

@@ -1,6 +1,7 @@
 """OneBot v11 WebSocket 客户端实现。"""
 
 import asyncio
+from copy import deepcopy
 import hashlib
 import json
 import logging
@@ -11,6 +12,12 @@ import websockets
 from websockets.asyncio.client import ClientConnection
 
 from Undefined.context import RequestContext
+from Undefined.onebot.file_errors import OneBotAPIError
+from Undefined.onebot.file_transport import OneBotFileTransport
+from Undefined.onebot.file_store import DELIVERY_TIMEOUT
+from Undefined.onebot.file_references import local_file_path
+from Undefined.utils import io
+from Undefined.attachments.segments import display_name_from_source
 from Undefined.utils.logging import log_debug_json, redact_string, sanitize_data
 
 logger = logging.getLogger(__name__)
@@ -21,6 +28,8 @@ _DELIVERY_ACTIONS = frozenset(
         "send_private_msg",
         "upload_group_file",
         "upload_private_file",
+        "send_forward_msg",
+        "send_private_forward_msg",
     }
 )
 _DELIVERY_TIMEOUT_MARKERS = ("timeout", "timed out", "超时")
@@ -100,7 +109,14 @@ def _mark_message_sent_this_turn() -> None:
 class OneBotClient:
     """OneBot v11 WebSocket 客户端"""
 
-    def __init__(self, ws_url: str, token: str = ""):
+    def __init__(
+        self,
+        ws_url: str,
+        token: str = "",
+        *,
+        config_getter: Callable[[], Any] | None = None,
+        file_transport: OneBotFileTransport | None = None,
+    ) -> None:
         self.ws_url = ws_url
         self.token = token
         self.ws: ClientConnection | None = None
@@ -110,6 +126,11 @@ class OneBotClient:
             Callable[[dict[str, Any]], Coroutine[Any, Any, None]] | None
         ) = None
         self._running = False
+        self.file_transport = (
+            file_transport
+            if file_transport is not None
+            else OneBotFileTransport(self._call_api_raw, config_getter=config_getter)
+        )
 
     def set_message_handler(
         self, handler: Callable[[dict[str, Any]], Coroutine[Any, Any, None]]
@@ -150,17 +171,21 @@ class OneBotClient:
         if self.token:
             extra_headers["Authorization"] = f"Bearer {self.token}"
 
+        # websockets 的 DEBUG 会记录未脱敏的握手和原始帧；请求细节由本模块脱敏后记录。
+        wire_logger = logging.getLogger(f"{__name__}.wire")
+        wire_logger.setLevel(logging.INFO)
         try:
             self.ws = await websockets.connect(
                 url,
                 ping_interval=20,
-                ping_timeout=480,
+                ping_timeout=DELIVERY_TIMEOUT,
                 max_size=100 * 1024 * 1024,  # 100MB，支持大量历史消息
                 additional_headers=extra_headers if extra_headers else None,
+                logger=wire_logger,
             )
             logger.info("[bold green][WebSocket][/bold green] 连接成功")
         except Exception as e:
-            logger.error(f"[WebSocket] 连接失败: {e}")
+            logger.error("[WebSocket] 连接失败: %s", redact_string(str(e)))
             raise
 
     async def disconnect(self) -> None:
@@ -179,26 +204,60 @@ class OneBotClient:
         *,
         suppress_error_retcodes: set[int] | None = None,
         mark_sent: bool = True,
+        fallback: tuple[str, dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        original = deepcopy(params) if params is not None else {}
+        if fallback is not None:
+            fallback = (fallback[0], deepcopy(fallback[1]))
+        if action not in _DELIVERY_ACTIONS:
+            return await self._call_api_raw(
+                action, original, suppress_error_retcodes=suppress_error_retcodes
+            )
+        if _was_delivery_uncertain(action, original):
+            if mark_sent:
+                _mark_message_sent_this_turn()
+            raise OneBotDeliveryUncertainError(
+                action, "同一请求内相同投递此前结果未确认，已阻止重复发送"
+            )
+        try:
+            async with self.file_transport.prepare(action, original) as files:
+                try:
+                    result = await self._call_api_raw(
+                        action,
+                        files.apply(action, original),
+                        suppress_error_retcodes=suppress_error_retcodes,
+                    )
+                except OneBotAPIError:
+                    if fallback is None:
+                        raise
+                    fallback_action, fallback_params = fallback
+                    logger.warning("[文件上传] %s 明确失败，尝试文件消息段回退", action)
+                    result = await self._call_api_raw(
+                        fallback_action, files.apply(fallback_action, fallback_params)
+                    )
+                if mark_sent:
+                    _mark_message_sent_this_turn()
+                return result
+        except OneBotDeliveryUncertainError:
+            _remember_uncertain_delivery(action, original)
+            if fallback is not None:
+                _remember_uncertain_delivery(*fallback)
+            if mark_sent:
+                _mark_message_sent_this_turn()
+            raise
+
+    async def _call_api_raw(
+        self,
+        action: str,
+        params: dict[str, Any] | None = None,
+        *,
+        suppress_error_retcodes: set[int] | None = None,
     ) -> dict[str, Any]:
         """调用 OneBot API"""
         if not self.ws:
             raise RuntimeError("WebSocket 未连接")
 
         request_params = params or {}
-        if action in _DELIVERY_ACTIONS and _was_delivery_uncertain(
-            action, request_params
-        ):
-            logger.warning(
-                "[投递防重] 同一请求内相同投递此前结果未确认，拒绝自动重试: action=%s",
-                action,
-            )
-            if mark_sent:
-                _mark_message_sent_this_turn()
-            raise OneBotDeliveryUncertainError(
-                action,
-                "同一请求内相同投递此前结果未确认，已阻止重复发送",
-            )
-
         self._message_id += 1
         echo = str(self._message_id)  # 使用字符串类型
 
@@ -223,13 +282,13 @@ class OneBotClient:
         try:
             await self.ws.send(json.dumps(request))
             # 等待响应，超时 8 分钟
-            response = await asyncio.wait_for(future, timeout=480.0)
+            response = await asyncio.wait_for(future, timeout=DELIVERY_TIMEOUT)
             duration = time.perf_counter() - start_time
 
             status = response.get("status")
             if status == "failed":
                 retcode = response.get("retcode", -1)
-                msg = response.get("message", "未知错误")
+                msg = redact_string(str(response.get("message", "未知错误")))
                 if suppress_error_retcodes and retcode in suppress_error_retcodes:
                     logger.warning(
                         f"[bold yellow][API预期失败][/bold yellow] [green]{action}[/green] (ID=[magenta]{echo}[/magenta]) | 耗时=[magenta]{duration:.2f}s[/magenta] | retcode=[yellow]{retcode}[/yellow] | message={msg}"
@@ -239,15 +298,12 @@ class OneBotClient:
                         f"[bold red][API失败][/bold red] [green]{action}[/green] (ID=[magenta]{echo}[/magenta]) | 耗时=[magenta]{duration:.2f}s[/magenta] | retcode=[red]{retcode}[/red] | message={msg}"
                     )
                 if _is_delivery_timeout(action, msg):
-                    _remember_uncertain_delivery(action, request_params)
-                    if mark_sent:
-                        _mark_message_sent_this_turn()
                     raise OneBotDeliveryUncertainError(
                         action,
                         str(msg),
                         retcode=retcode,
                     )
-                raise RuntimeError(f"API 调用失败: {msg} (retcode={retcode})")
+                raise OneBotAPIError(msg, retcode)
 
             logger.info(
                 f"[bold green][API成功][/bold green] [green]{action}[/green] (ID=[magenta]{echo}[/magenta]) | 耗时=[magenta]{duration:.2f}s[/magenta]"
@@ -255,17 +311,22 @@ class OneBotClient:
             if logger.isEnabledFor(logging.DEBUG):
                 log_debug_json(logger, "[OneBot响应体]", response)
             return response
-        except asyncio.TimeoutError as exc:
+        except (
+            TimeoutError,
+            asyncio.CancelledError,
+            websockets.exceptions.ConnectionClosed,
+            ConnectionError,
+            OSError,
+        ) as exc:
             duration = time.perf_counter() - start_time
             logger.error(f"[API超时] {action} (ID={echo}) | 耗时={duration:.2f}s")
             if action in _DELIVERY_ACTIONS:
-                _remember_uncertain_delivery(action, request_params)
-                if mark_sent:
-                    _mark_message_sent_this_turn()
                 raise OneBotDeliveryUncertainError(
                     action,
-                    "等待 OneBot 投递响应超时",
+                    "投递请求发出后等待响应超时、被取消或连接中断",
                 ) from exc
+            if isinstance(exc, websockets.exceptions.ConnectionClosed):
+                raise ConnectionError("OneBot WebSocket 连接中断") from exc
             raise
         finally:
             self._pending_responses.pop(echo, None)
@@ -286,8 +347,6 @@ class OneBotClient:
             },
             mark_sent=mark_sent,
         )
-        if mark_sent:
-            _mark_message_sent_this_turn()
         return result
 
     async def send_private_message(
@@ -318,8 +377,6 @@ class OneBotClient:
             params,
             mark_sent=mark_sent,
         )
-        if mark_sent:
-            _mark_message_sent_this_turn()
         return result
 
     async def get_group_msg_history(
@@ -730,41 +787,20 @@ class OneBotClient:
             file_path: 本地文件绝对路径
             name: 文件名（可选，默认使用原文件名）
         """
-        from pathlib import Path as _Path
-
-        file_name = name or _Path(file_path).name
-        file_uri = _Path(file_path).resolve().as_uri()
-        try:
-            return await self._call_api(
-                "upload_group_file",
+        file_uri, file_name = await self._file_upload_source(file_path, name)
+        return await self._call_api(
+            "upload_group_file",
+            {"group_id": group_id, "file": file_uri, "name": file_name},
+            fallback=(
+                "send_group_msg",
                 {
                     "group_id": group_id,
-                    "file": file_uri,
-                    "name": file_name,
+                    "message": [
+                        {"type": "file", "data": {"file": file_uri, "name": file_name}}
+                    ],
                 },
-            )
-        except OneBotDeliveryUncertainError:
-            logger.warning(
-                "[文件上传] upload_group_file 投递结果未确认，"
-                "不执行文件消息段回退: group=%s",
-                group_id,
-            )
-            raise
-        except RuntimeError:
-            # 回退：尝试用文件消息段发送
-            logger.warning(
-                "[文件上传] upload_group_file 失败，尝试文件消息段回退: group=%s",
-                group_id,
-            )
-            return await self.send_group_message(
-                group_id,
-                [
-                    {
-                        "type": "file",
-                        "data": {"file": file_uri, "name": file_name},
-                    }
-                ],
-            )
+            ),
+        )
 
     async def upload_private_file(
         self,
@@ -779,40 +815,20 @@ class OneBotClient:
             file_path: 本地文件绝对路径
             name: 文件名（可选，默认使用原文件名）
         """
-        from pathlib import Path as _Path
-
-        file_name = name or _Path(file_path).name
-        file_uri = _Path(file_path).resolve().as_uri()
-        try:
-            return await self._call_api(
-                "upload_private_file",
+        file_uri, file_name = await self._file_upload_source(file_path, name)
+        return await self._call_api(
+            "upload_private_file",
+            {"user_id": user_id, "file": file_uri, "name": file_name},
+            fallback=(
+                "send_private_msg",
                 {
                     "user_id": user_id,
-                    "file": file_uri,
-                    "name": file_name,
+                    "message": [
+                        {"type": "file", "data": {"file": file_uri, "name": file_name}}
+                    ],
                 },
-            )
-        except OneBotDeliveryUncertainError:
-            logger.warning(
-                "[文件上传] upload_private_file 投递结果未确认，"
-                "不执行文件消息段回退: user=%s",
-                user_id,
-            )
-            raise
-        except RuntimeError:
-            logger.warning(
-                "[文件上传] upload_private_file 失败，尝试文件消息段回退: user=%s",
-                user_id,
-            )
-            return await self.send_private_message(
-                user_id,
-                [
-                    {
-                        "type": "file",
-                        "data": {"file": file_uri, "name": file_name},
-                    }
-                ],
-            )
+            ),
+        )
 
     async def send_group_sign(self, group_id: int) -> dict[str, Any]:
         """执行群打卡
@@ -824,6 +840,20 @@ class OneBotClient:
             API 响应
         """
         return await self._call_api("send_group_sign", {"group_id": group_id})
+
+    @staticmethod
+    async def _file_upload_source(source: str, name: str | None) -> tuple[str, str]:
+        from pathlib import Path
+
+        path = local_file_path(source)
+        if path is None and "://" not in source and await io.is_file(Path(source)):
+            path = Path(source)
+        filename = name or display_name_from_source(source, "file")
+        if path is not None:
+            filename = name or path.name
+            if not source.startswith("file://"):
+                source = (await io.resolve_path(path)).as_uri()
+        return source, filename
 
     async def _get_group_notices(self, group_id: int) -> list[dict[str, Any]]:
         """获取群公告列表（非标准 API，依赖具体实现）
@@ -875,7 +905,9 @@ class OneBotClient:
                     await self._dispatch_message(data)
                 except json.JSONDecodeError as e:
                     logger.error(
-                        f"[WebSocket] 无法解析 JSON 消息: {raw_message!r}, 错误: {e}"
+                        "[WebSocket] 无法解析 JSON 消息: size=%d, 错误: %s",
+                        len(raw_message),
+                        e,
                     )
                 except websockets.ConnectionClosed:
                     logger.warning("[WebSocket] 连接已关闭，接收循环结束")
@@ -884,6 +916,11 @@ class OneBotClient:
                     logger.exception(f"[WebSocket] 接收消息时发生异常: {e}")
         finally:
             self._running = False
+            for future in self._pending_responses.values():
+                if not future.done():
+                    future.set_exception(
+                        ConnectionError("OneBot WebSocket 接收循环已停止")
+                    )
             # 等待所有后台任务完成
             if self._tasks:
                 logger.debug(
@@ -902,7 +939,9 @@ class OneBotClient:
             echo_str = str(echo)
             if echo_str in self._pending_responses:
                 logger.debug(f"收到 API 响应: echo={echo_str}")
-                self._pending_responses[echo_str].set_result(data)
+                future = self._pending_responses[echo_str]
+                if not future.done():
+                    future.set_result(data)
                 return
             else:
                 logger.debug(

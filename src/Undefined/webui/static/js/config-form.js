@@ -417,6 +417,10 @@ const FIELD_SELECT_EMPTY_OPTION = {
 
 const FIELD_SELECT_OPTION_RULES = [
     {
+        match: (path) => path === "onebot.file_send_mode",
+        options: ["local", "url", "stream"],
+    },
+    {
         match: (path) => path.endsWith(".pool.strategy"),
         options: ["default", "round_robin", "random"],
     },
