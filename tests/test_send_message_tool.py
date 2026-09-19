@@ -132,6 +132,28 @@ async def test_send_message_reports_body_sent_when_file_transfer_fails(
 
 
 @pytest.mark.asyncio
+async def test_send_message_does_not_claim_body_sent_when_body_transfer_fails() -> None:
+    error = FileTransferError("url", "Runtime 文件服务未就绪", stage="prepare")
+    sender = SimpleNamespace(
+        send_address_message=AsyncMock(side_effect=error),
+        send_address_file=AsyncMock(),
+    )
+    context = _tool_context(
+        request_type="group",
+        group_id=10001,
+        sender_id=20002,
+        runtime_config=_build_runtime_config(),
+        sender=sender,
+    )
+
+    result = await execute({"message": "带内联图片的正文"}, context)
+
+    assert result == error.user_message
+    assert not context.get("message_sent_this_turn")
+    sender.send_address_file.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_send_message_schema_rejects_mixed_address_parameters() -> None:
     config_text = await async_io.read_text(
         Path("src/Undefined/skills/toolsets/messages/send_message/config.json")

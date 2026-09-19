@@ -276,6 +276,31 @@ async def test_send_private_message_reports_partial_delivery_before_transfer_err
 
 
 @pytest.mark.asyncio
+async def test_send_private_message_does_not_claim_body_sent_when_body_transfer_fails() -> (
+    None
+):
+    error = FileTransferError("url", "Runtime 文件服务未就绪", stage="prepare")
+    sender = SimpleNamespace(
+        send_address_message=AsyncMock(side_effect=error),
+        send_address_file=AsyncMock(),
+    )
+    context: dict[str, Any] = _tool_context(
+        request_type="private",
+        user_id=12345,
+        sender_id=12345,
+        request_id="req-private-body-failure",
+        runtime_config=_build_runtime_config(),
+        sender=sender,
+    )
+
+    result = await execute({"message": "带内联图片的正文"}, context)
+
+    assert result == error.user_message
+    assert not context.get("message_sent_this_turn")
+    sender.send_address_file.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_send_private_message_marks_uncertain_file_delivery_as_attempted(
     tmp_path: Path,
 ) -> None:
