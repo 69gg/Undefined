@@ -117,8 +117,10 @@ def _parse_embedding_feature_overrides(
     unknown = sorted(str(name) for name in raw if name not in EMBEDDING_FEATURES)
     if unknown:
         logger.warning(
-            "[配置] models.embedding.features 中存在未知功能名，已忽略: %s",
+            "[配置] models.embedding.features 中存在未知功能名（疑似拼写错误），"
+            "已忽略、对应功能继续使用默认配置: %s（可用功能名: %s）",
             ", ".join(unknown),
+            ", ".join(EMBEDDING_FEATURES),
         )
 
     overrides: dict[str, EmbeddingFeatureOverride] = {}

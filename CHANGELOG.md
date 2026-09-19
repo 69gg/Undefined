@@ -9,10 +9,10 @@
 - 史官 worker 新增并发上限 `[cognitive.historian].max_concurrency`（默认 4），以信号量与在途计数双重约束，不再无上限并发。
 - 修复随包 Agent 的 handler 无法加载：handler 模块改按真实包路径导入，`code_delivery_agent` 等使用相对导入的 Agent 恢复可用；注册阶段即预导入全部 handler，失败项记录 `load_error` 并从 schema 中排除，主 AI 不再看到不可用的技能。
 - 配置热更新失败不再静默：更新改为步骤表逐项执行，单步异常不中断其余步骤，失败项与「未完全生效」汇总以 error 级日志输出；异步热更新任务与配置回调的异常均会被记录。嵌入 / 重排模型配置变更加入需重启提示，避免热重载静默无效。
-- 新增 SIGTERM 优雅停机：容器 / systemd / supervisor 停止时不再被直接终止并跳过落盘清理，SIGTERM 与 SIGINT 收敛到同一停机事件，取消连接任务并等待收敛。
+- 新增 SIGTERM 优雅停机：容器 / systemd / supervisor 停止时不再被直接终止并跳过落盘清理，SIGTERM 与 SIGINT 收敛到同一停机事件，取消连接任务并等待收敛；停机完成后恢复系统原有信号处理器。
 - 修复消息队列重试上限口径分叉：coordinator 与 QueueManager 各用一套重试上限，热更新后两者可分叉，导致等待方在仍会重试时被误判为失败、或重试已耗尽后干等到 480 秒超时；现统一由 `resolve_effective_retry_count` 计算并与等待超时预算同口径。
-- `scripts/reembed_cognitive.py` 支持维度变化迁移：检测到新旧向量维度不同时先读取全量记录、删除并重建同名 collection（沿用原索引元数据）后按新维度写回，记录不丢；`--dry-run` 不做任何写入。
-- 依赖与配置清理：crawl4ai 与 langchain-community 改为必需依赖，删除「未安装则降级」的静默回退（缺失时直接报错暴露环境问题）；移除零引用的死配置 `cognitive.historian.rewrite_max_retry` 与死依赖 imgkit、croniter。
+- `scripts/reembed_cognitive.py` 支持维度变化迁移：检测到新旧向量维度不同时把新向量全部写入临时 collection，校验记录数后删除原库并原子换名，原库在迁移完成前保持不动，中途被杀可自动清理或从临时库恢复，记录不丢；`--dry-run` 不做任何写入。
+- 依赖与配置清理：crawl4ai 与 langchain-community 改为必需依赖，删除「未安装则降级」的静默回退（crawl4ai 环境异常时启动降级为网页获取不可用并以 error 日志提示修复，不再让 Bot 启动崩溃）；移除零引用的死配置 `cognitive.historian.rewrite_max_retry`、无调用方的 `SecurityService.check_rate_limit` / `record_rate_limit`（限流由 rate_limiter 承担）与死依赖 imgkit、croniter。
 - CI 补齐治理：工作流收敛只读权限、并发取消与任务超时，前端行为测试真实执行而非静默跳过，新增 Python 3.11 / 3.13 兼容矩阵，测试开启 65% 覆盖率门禁。
 
 ---
