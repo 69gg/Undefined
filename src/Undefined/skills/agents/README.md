@@ -182,7 +182,7 @@ Agent 的执行逻辑，负责：
 
 ## 运行特性
 
-- **延迟加载 (Lazy Load)**：Agent `handler.py` 首次调用时导入，减少启动耗时。
+- **加载即校验**：Agent `handler.py` 在注册阶段导入；导入失败（如相对导入错误、缺少依赖）会记录 `load_error` 并从 Agent schema 中排除，主 AI 不会被告知一个不可用的 Agent。
 - **超时与取消**：Agent 调用默认 120s 超时，超时返回提示并记录统计。
 - **结构化日志**：统一输出 `event=execute`、`status=success/timeout/error` 等字段。
 - **热重载**：检测到 `skills/agents/` 变更后自动重载 Agent 注册表。
