@@ -27,21 +27,26 @@ class ProfileStorage:
 
     def _get_lock(self, entity_type: str, entity_id: str) -> asyncio.Lock:
         key = f"{entity_type}:{entity_id}"
-        if key not in self._locks:
-            self._locks[key] = asyncio.Lock()
-        return self._locks[key]
+        lock = self._locks.get(key)
+        if lock is None:
+            # dict.setdefault 原子插入：并发首次进入同一实体时双方拿到同一把锁，
+            # 不会出现各自建锁、后建覆盖先建导致互斥失效
+            lock = self._locks.setdefault(key, asyncio.Lock())
+        return lock
 
     def merge_guard(self, entity_type: str, entity_id: str) -> asyncio.Lock:
         """跨「读 → LLM → 写」整段侧写合并的互斥锁。
 
         只串行化同一实体的合并周期，避免两个 job 各自基于旧快照改写后互相覆盖
         （后写覆盖先写，先前的观察永久丢失）。与文件写入锁分开，避免与
-        `write_profile` 的锁重入死锁。
+        `write_profile` 的锁重入死锁。锁的创建经 `dict.setdefault` 原子完成，
+        见 `_get_lock`。
         """
         key = f"{entity_type}:{entity_id}"
-        if key not in self._merge_locks:
-            self._merge_locks[key] = asyncio.Lock()
-        return self._merge_locks[key]
+        lock = self._merge_locks.get(key)
+        if lock is None:
+            lock = self._merge_locks.setdefault(key, asyncio.Lock())
+        return lock
 
     def _profile_path(self, entity_type: str, entity_id: str) -> Path:
         return self._base / f"{entity_type}s" / f"{entity_id}.md"

@@ -89,6 +89,30 @@ async def test_merge_guard_serializes_read_llm_write_cycles(tmp_path: Path) -> N
 
 
 @pytest.mark.asyncio
+async def test_merge_guard_concurrent_first_access_shares_one_lock(
+    tmp_path: Path,
+) -> None:
+    """并发首次进入同一新实体时必须拿到同一把锁，不能各自建锁互相覆盖。"""
+    storage = ProfileStorage(tmp_path)
+
+    async def grab(entity_id: str) -> asyncio.Lock:
+        return storage.merge_guard("user", entity_id)
+
+    results = await asyncio.gather(*[grab(f"new-{i % 2}") for i in range(20)])
+    # gather 保序：偶数位都是 new-0，奇数位都是 new-1
+    assert all(lock is results[0] for lock in results[::2])
+    assert all(lock is results[1] for lock in results[1::2])
+    assert results[0] is not results[1]
+    assert len(storage._merge_locks) == 2
+    assert len(storage._locks) == 0
+
+    write_locks = await asyncio.gather(
+        *[asyncio.to_thread(storage._get_lock, "user", "fresh") for _ in range(10)]
+    )
+    assert all(lock is write_locks[0] for lock in write_locks)
+
+
+@pytest.mark.asyncio
 async def test_merge_profiles_holds_entity_merge_guard() -> None:
     events: list[str] = []
 
