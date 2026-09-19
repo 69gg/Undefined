@@ -182,15 +182,18 @@ class ProfileStorage:
         """把指定历史版本恢复为当前侧写。
 
         恢复前会把当前内容按常规流程存成新快照，因此恢复操作本身也可回退。
+        版本读取在 `merge_guard` 内进行，与史官合并的「读 → 写」整段互斥；
+        在恢复取锁之前已落盘的并发合并会被本次恢复覆盖，但那份内容已由
+        `write_profile` 存入历史快照，可再次恢复找回。
         返回被恢复的版本名。
         """
         name = self._normalize_revision_name(revision)
-        content = await self.read_revision(entity_type, entity_id, name)
-        if content is None:
-            raise FileNotFoundError(
-                f"侧写历史版本不存在: {entity_type}:{entity_id}/{name}"
-            )
         async with self.merge_guard(entity_type, entity_id):
+            content = await self.read_revision(entity_type, entity_id, name)
+            if content is None:
+                raise FileNotFoundError(
+                    f"侧写历史版本不存在: {entity_type}:{entity_id}/{name}"
+                )
             await self.write_profile(entity_type, entity_id, content)
         logger.info(
             "[认知侧写] 已恢复历史版本: entity_type=%s entity_id=%s revision=%s",

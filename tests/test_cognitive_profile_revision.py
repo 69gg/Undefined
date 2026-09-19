@@ -64,6 +64,39 @@ async def test_restore_revision_missing_raises(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_restore_revision_holds_merge_guard_across_read_and_write(
+    tmp_path: Path,
+) -> None:
+    """恢复的读与写都在 merge_guard 内，期间并发合并无法插入。"""
+    storage = ProfileStorage(tmp_path)
+    hist_dir = tmp_path / "history" / "user" / "10001"
+    hist_dir.mkdir(parents=True)
+    (hist_dir / "20260101000000000000.md").write_text("restored", encoding="utf-8")
+    await storage.write_profile("user", "10001", "current")
+
+    events: list[str] = []
+
+    async def concurrent_merge() -> None:
+        async with storage.merge_guard("user", "10001"):
+            events.append("merge:enter")
+            await asyncio.sleep(0.05)  # 模拟 LLM 改写耗时
+            await storage.write_profile("user", "10001", "merged")
+            events.append("merge:exit")
+
+    merge_task = asyncio.create_task(concurrent_merge())
+    await asyncio.sleep(0)  # 让合并先持锁
+    restore_task = asyncio.create_task(
+        storage.restore_revision("user", "10001", "20260101000000000000.md")
+    )
+    await asyncio.wait_for(restore_task, timeout=2)
+    await merge_task
+
+    # 恢复与合并整段串行，最终内容是恢复出的版本（合并的旧内容已在快照里）
+    assert events == ["merge:enter", "merge:exit"]
+    assert await storage.read_profile("user", "10001") == "restored"
+
+
+@pytest.mark.asyncio
 async def test_merge_guard_serializes_read_llm_write_cycles(tmp_path: Path) -> None:
     storage = ProfileStorage(tmp_path)
     order: list[str] = []
