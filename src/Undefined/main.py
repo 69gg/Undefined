@@ -507,10 +507,12 @@ async def main() -> None:
                 "/naga 命令和 /api/v1/naga/* 端点都不会可用"
             )
 
-    shutdown_event = install_shutdown_signal_handlers(logger)
+    shutdown_guard = install_shutdown_signal_handlers(logger)
     try:
-        await _run_until_shutdown(onebot, shutdown_event, logger)
+        await _run_until_shutdown(onebot, shutdown_guard.event, logger)
     except KeyboardInterrupt:
+        # 仅在信号处理器注册全部失败（如非主线程运行）时才会走到这里；
+        # 正常安装后 SIGINT 会转为停机事件，不再抛 KeyboardInterrupt
         logger.info("[退出] 收到退出信号 (Ctrl+C)")
     except Exception as exc:
         logger.exception("[异常] 运行期间发生未捕获的错误: %s", exc)
@@ -541,24 +543,64 @@ async def main() -> None:
         await config_manager.stop_hot_reload()
         await close_render_browser()
         await close_render_cache()
+        shutdown_guard.restore()
         logger.info("[退出] 机器人已停止运行")
 
 
-def install_shutdown_signal_handlers(logger: logging.Logger) -> asyncio.Event:
+class ShutdownSignalGuard:
+    """优雅停机信号注册的句柄：携带停机事件并支持恢复安装前的信号状态。"""
+
+    def __init__(
+        self,
+        event: asyncio.Event,
+        previous: dict[int, Any],
+        loop_based: set[int],
+        loop: asyncio.AbstractEventLoop,
+        logger: logging.Logger,
+    ) -> None:
+        self.event = event
+        self._previous = previous
+        self._loop_based = loop_based
+        self._loop = loop
+        self._logger = logger
+
+    def restore(self) -> None:
+        """恢复安装前的信号处理器；须从安装时的同一线程调用。"""
+        for signum, handler in self._previous.items():
+            try:
+                if signum in self._loop_based:
+                    self._loop.remove_signal_handler(signum)
+                signal.signal(signum, handler)
+            except (OSError, RuntimeError, ValueError):
+                self._logger.warning("[退出] 恢复信号 %s 的原处理器失败", signum)
+        self._previous.clear()
+
+
+def install_shutdown_signal_handlers(logger: logging.Logger) -> ShutdownSignalGuard:
     """注册 SIGTERM / SIGINT 的优雅停机事件。
 
     容器与服务管理器默认发送 SIGTERM（而非 Ctrl+C 的 SIGINT），此前未处理会直接
     终止进程并跳过后面的落盘清理。这里把两个信号都收敛到同一个事件，由主循环在
     被唤醒后走正常关闭流程。
+
+    安装前会保存原有处理器，停机完成后调用 `ShutdownSignalGuard.restore()`
+    归还信号控制权，避免作为库被导入时永久劫持调用方的信号处理。
     """
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()
+    previous: dict[int, Any] = {}
+    loop_based: set[int] = set()
     for signame in ("SIGTERM", "SIGINT"):
         signum = getattr(signal, signame, None)
         if signum is None:
             continue
         try:
+            previous[signum] = signal.getsignal(signum)
+        except (OSError, ValueError):
+            continue
+        try:
             loop.add_signal_handler(signum, stop_event.set)
+            loop_based.add(signum)
         except (NotImplementedError, RuntimeError, ValueError):
             # Windows 的事件循环不支持 add_signal_handler，退回到 signal.signal
             try:
@@ -570,7 +612,9 @@ def install_shutdown_signal_handlers(logger: logging.Logger) -> asyncio.Event:
                 )
             except (ValueError, OSError):
                 logger.warning("[退出] 无法注册 %s 处理器", signame)
-    return stop_event
+                # 未安装成功就没有需要恢复的状态
+                previous.pop(signum, None)
+    return ShutdownSignalGuard(stop_event, previous, loop_based, loop, logger)
 
 
 async def _run_until_shutdown(

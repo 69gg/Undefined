@@ -59,19 +59,40 @@ async def test_install_shutdown_signal_handlers_reacts_to_sigterm() -> None:
         pytest.skip("SIGTERM unavailable")
 
     original = signal.getsignal(signal.SIGTERM)
-    event = install_shutdown_signal_handlers(logger)
+    guard = install_shutdown_signal_handlers(logger)
     if signal.getsignal(signal.SIGTERM) is signal.SIG_DFL:
         pytest.skip("当前事件循环不支持信号处理器")
     try:
         os.kill(os.getpid(), signal.SIGTERM)
-        await asyncio.wait_for(event.wait(), timeout=2)
-        assert event.is_set()
+        await asyncio.wait_for(guard.event.wait(), timeout=2)
+        assert guard.event.is_set()
+    finally:
+        guard.restore()
+    assert signal.getsignal(signal.SIGTERM) is original
+
+
+@pytest.mark.asyncio
+async def test_install_shutdown_signal_handlers_restore_returns_previous_handler() -> (
+    None
+):
+    if not hasattr(signal, "SIGTERM"):  # pragma: no cover - 非 POSIX 平台
+        pytest.skip("SIGTERM unavailable")
+
+    def _previous_handler(signum: object, frame: object) -> None:  # pragma: no cover
+        return None
+
+    original = signal.signal(signal.SIGTERM, _previous_handler)
+    try:
+        guard = install_shutdown_signal_handlers(logger)
+        guard.restore()
+        assert signal.getsignal(signal.SIGTERM) is _previous_handler
     finally:
         signal.signal(signal.SIGTERM, original)
 
 
 @pytest.mark.asyncio
 async def test_install_shutdown_signal_handlers_returns_fresh_event() -> None:
-    event = install_shutdown_signal_handlers(logger)
-    assert isinstance(event, asyncio.Event)
-    assert event.is_set() is False
+    guard = install_shutdown_signal_handlers(logger)
+    assert isinstance(guard.event, asyncio.Event)
+    assert guard.event.is_set() is False
+    guard.restore()
