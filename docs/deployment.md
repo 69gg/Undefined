@@ -116,6 +116,10 @@ uv run Undefined-webui
 >
 > WebUI 功能详见 [WebUI 使用指南](webui-guide.md)。
 
+#### 优雅停机
+
+`SIGINT`（Ctrl+C）与 `SIGTERM` 都会触发同一套优雅停机流程：停止 OneBot 连接、关闭 Runtime API 与微信服务、停止史官 / memes worker、断开连接、关闭 AI 客户端与检索运行时、停止配置热重载并释放渲染资源。容器、systemd、supervisor 等默认以 `SIGTERM` 停止进程，无需额外配置；请避免使用 `SIGKILL`（`docker kill -s KILL`），否则会跳过全部落盘清理。
+
 #### 自动启动选项
 
 若希望 WebUI 启动后自动拉起机器人进程，可在 `config.toml` 中设置：

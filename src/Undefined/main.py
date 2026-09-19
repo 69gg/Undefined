@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import signal
 import time
 import sys
 from typing import Any
@@ -506,8 +507,9 @@ async def main() -> None:
                 "/naga 命令和 /api/v1/naga/* 端点都不会可用"
             )
 
+    shutdown_event = install_shutdown_signal_handlers(logger)
     try:
-        await onebot.run_with_reconnect()
+        await _run_until_shutdown(onebot, shutdown_event, logger)
     except KeyboardInterrupt:
         logger.info("[退出] 收到退出信号 (Ctrl+C)")
     except Exception as exc:
@@ -540,6 +542,68 @@ async def main() -> None:
         await close_render_browser()
         await close_render_cache()
         logger.info("[退出] 机器人已停止运行")
+
+
+def install_shutdown_signal_handlers(logger: logging.Logger) -> asyncio.Event:
+    """注册 SIGTERM / SIGINT 的优雅停机事件。
+
+    容器与服务管理器默认发送 SIGTERM（而非 Ctrl+C 的 SIGINT），此前未处理会直接
+    终止进程并跳过后面的落盘清理。这里把两个信号都收敛到同一个事件，由主循环在
+    被唤醒后走正常关闭流程。
+    """
+    stop_event = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for signame in ("SIGTERM", "SIGINT"):
+        signum = getattr(signal, signame, None)
+        if signum is None:
+            continue
+        try:
+            loop.add_signal_handler(signum, stop_event.set)
+        except (NotImplementedError, RuntimeError, ValueError):
+            # Windows 的事件循环不支持 add_signal_handler，退回到 signal.signal
+            try:
+                signal.signal(
+                    signum,
+                    lambda *_args, _loop=loop, _event=stop_event: (
+                        _loop.call_soon_threadsafe(_event.set)
+                    ),
+                )
+            except (ValueError, OSError):
+                logger.warning("[退出] 无法注册 %s 处理器", signame)
+    return stop_event
+
+
+async def _run_until_shutdown(
+    onebot: OneBotClient,
+    shutdown_event: asyncio.Event,
+    logger: logging.Logger,
+) -> None:
+    """运行 OneBot 连接，收到停止信号或连接任务结束时返回。"""
+    run_task = asyncio.create_task(onebot.run_with_reconnect(), name="onebot-run")
+    stop_task = asyncio.create_task(shutdown_event.wait(), name="shutdown-wait")
+    try:
+        done, _pending = await asyncio.wait(
+            {run_task, stop_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if run_task in done:
+            # 连接任务自行结束：把异常抛给上层处理
+            run_task.result()
+            return
+        logger.info("[退出] 收到停止信号 (SIGTERM/SIGINT)，正在优雅停机...")
+        run_task.cancel()
+        try:
+            await run_task
+        except asyncio.CancelledError:
+            pass
+        except Exception as exc:
+            logger.warning("[退出] 停止 OneBot 连接时发生异常: %s", exc)
+    finally:
+        stop_task.cancel()
+        try:
+            await stop_task
+        except asyncio.CancelledError:
+            pass
 
 
 def run() -> None:
