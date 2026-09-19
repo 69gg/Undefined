@@ -202,8 +202,9 @@ def _finish_dimension_migration(
     staging_collection: Any,
     *,
     expected_count: int,
+    expected_dimension: int,
 ) -> None:
-    """校验临时库记录数后删原库、换名；失败时保留原库，可安全重跑。"""
+    """校验临时库记录数与向量维度后删原库、换名；失败时保留原库，可安全重跑。"""
     staged = staging_collection.count()
     if staged != expected_count:
         raise RuntimeError(
@@ -211,7 +212,23 @@ def _finish_dimension_migration(
             f"{staged} != {expected_count}；已保留原库 {collection_name}，"
             "请排查后重跑脚本"
         )
-    logger.info("临时 collection 校验通过（%d 条），换名为 %s", staged, collection_name)
+    staged_dimension = _collection_dimension(staging_collection)
+    if (
+        expected_dimension
+        and staged_dimension
+        and staged_dimension != expected_dimension
+    ):
+        raise RuntimeError(
+            f"临时 collection {staging_collection.name} 存在异常维度: "
+            f"{staged_dimension} != {expected_dimension}；已保留原库 "
+            f"{collection_name}，请排查嵌入模型输出后重跑脚本"
+        )
+    logger.info(
+        "临时 collection 校验通过（%d 条，维度 %s），换名为 %s",
+        staged,
+        staged_dimension or expected_dimension,
+        collection_name,
+    )
     client.delete_collection(collection_name)
     staging_collection.modify(name=collection_name)
 
@@ -248,6 +265,7 @@ async def _reembed_collection(
     dimension_checked = False
     write_target = collection
     staging_collection: Any = None
+    migration_dimension = 0
     start_time = time.perf_counter()
 
     for i in range(0, total, batch_size):
@@ -283,6 +301,16 @@ async def _reembed_collection(
                         client, collection_name, collection.metadata
                     )
                     staging_collection = write_target
+                    migration_dimension = new_dimension
+        elif staging_collection is not None and migration_dimension:
+            # 迁移期间批次维度必须与首批一致，异常立即中止且原库未动
+            batch_dimension = len(new_embeddings[0]) if new_embeddings else 0
+            if batch_dimension and batch_dimension != migration_dimension:
+                raise RuntimeError(
+                    f"{collection_name} 迁移期间批次维度漂移: "
+                    f"{batch_dimension} != {migration_dimension}（第 {i} 条起）；"
+                    "已保留原库，请排查嵌入模型输出后重跑脚本"
+                )
 
         if not dry_run:
             # upsert 覆写：ID 不变，document 和 metadata 不变，仅更新 embedding；
@@ -309,7 +337,11 @@ async def _reembed_collection(
 
     if staging_collection is not None:
         _finish_dimension_migration(
-            client, collection_name, staging_collection, expected_count=total
+            client,
+            collection_name,
+            staging_collection,
+            expected_count=total,
+            expected_dimension=migration_dimension,
         )
 
     elapsed_total = time.perf_counter() - start_time

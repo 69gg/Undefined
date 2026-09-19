@@ -35,6 +35,19 @@ class _FixedDimEmbedder:
         return [[0.1] * self._dimension for _ in texts]
 
 
+class _DriftingDimEmbedder:
+    """首批返回 dim_a、之后返回 dim_b 的假嵌入器，模拟模型输出漂移。"""
+
+    def __init__(self, dim_a: int, dim_b: int) -> None:
+        self._dims = [dim_a, dim_b]
+        self._calls = 0
+
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        dim = self._dims[0] if self._calls == 0 else self._dims[1]
+        self._calls += 1
+        return [[0.1] * dim for _ in texts]
+
+
 def _seed_collection(client: Any, name: str, dimension: int, count: int = 3) -> Any:
     collection = client.get_or_create_collection(
         name, metadata={"hnsw:space": "cosine"}
@@ -147,6 +160,30 @@ async def test_reembed_migration_leaves_no_staging_collection(
     assert migrated.count() == 3
     sample = cast(Any, migrated.get(limit=1, include=["embeddings"]))
     assert len(sample["embeddings"][0]) == 5
+
+
+@pytest.mark.asyncio
+async def test_reembed_aborts_on_batch_dimension_drift(tmp_path: Path) -> None:
+    """迁移期间某批次维度异常时立即中止，原库保持完好。"""
+    module = _load_script_module()
+    client = chromadb.PersistentClient(path=str(tmp_path))
+    collection = _seed_collection(client, "cognitive_events", dimension=3)
+
+    with pytest.raises(RuntimeError, match="维度漂移"):
+        await module._reembed_collection(
+            collection,
+            "cognitive_events",
+            _DriftingDimEmbedder(5, 6),
+            batch_size=2,
+            dry_run=False,
+            client=client,
+        )
+
+    # 原库未被替换，仍是旧维度与全量记录
+    original = client.get_collection("cognitive_events")
+    assert original.count() == 3
+    sample = cast(Any, original.get(limit=1, include=["embeddings"]))
+    assert len(sample["embeddings"][0]) == 3
 
 
 def test_recover_stale_staging_deletes_residue_when_original_intact(
