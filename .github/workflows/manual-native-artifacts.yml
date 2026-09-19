@@ -418,7 +418,7 @@ jobs:
 
       - name: Setup Android SDK
         if: steps.select.outputs.selected == 'true'
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
       - name: Ensure Android platform packages
         if: steps.select.outputs.selected == 'true'
