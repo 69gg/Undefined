@@ -299,7 +299,7 @@ def _validate_target_and_allowlist(
     if target_type == "group" and not runtime_config.is_group_allowed(target_id):
         return _group_access_error(runtime_config, target_id)
     if target_type == "private" and not runtime_config.is_private_allowed(target_id):
-        return private_access_error(runtime_config, target_id)
+        return private_access_error(runtime_config, target_id, prefix="")
     return None
 
 

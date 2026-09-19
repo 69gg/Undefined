@@ -15,23 +15,27 @@ def private_access_error(
     target_id: int,
     *,
     prefix: str = "发送失败：",
+    access_note: str = "，已被访问控制拦截",
 ) -> str:
     """按访问控制拒绝原因生成统一的用户可见说明。
 
     读取 `runtime_config.private_access_denied_reason(target_id)`：
     - `blacklist` 表示命中 `access.blocked_private_ids`；
     - 其余情况（含 `allowlist` / 未配置）统一提示不在允许列表内。
+
+    `prefix` / `access_note` 用于保留各工具调用点的原有文案差异
+    （如表情反应没有"发送失败"语义、文件类工具不带拦截说明）。
     """
     reason_getter = getattr(runtime_config, "private_access_denied_reason", None)
     reason = reason_getter(target_id) if callable(reason_getter) else None
     if reason == "blacklist":
         return (
-            f"{prefix}目标用户 {target_id} 在黑名单内（access.blocked_private_ids），"
-            "已被访问控制拦截"
+            f"{prefix}目标用户 {target_id} 在黑名单内"
+            f"（access.blocked_private_ids）{access_note}"
         )
     return (
-        f"{prefix}目标用户 {target_id} 不在允许列表内（access.allowed_private_ids），"
-        "已被访问控制拦截"
+        f"{prefix}目标用户 {target_id} 不在允许列表内"
+        f"（access.allowed_private_ids）{access_note}"
     )
 
 

@@ -398,7 +398,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         if target_type == "private" and not runtime_config.is_private_allowed(
             target_id
         ):
-            return private_access_error(runtime_config, target_id)
+            return private_access_error(runtime_config, target_id, access_note="")
 
     send_file_callable, history_recorded_by_sender, sender_error = (
         _resolve_file_send_callable(context, target_type)
