@@ -218,9 +218,18 @@ def apply_config_updates(
 
     def _apply_message_batcher() -> None:
         if handler is None:
+            logger.warning(
+                "[配置] message_batcher 配置变更，但热更新上下文缺少 message_handler，"
+                "本次变更未应用"
+            )
             return
-        if getattr(handler, "message_batcher", None) is not None:
-            handler.message_batcher.update_config(updated.message_batcher)
+        if getattr(handler, "message_batcher", None) is None:
+            logger.warning(
+                "[配置] message_batcher 配置变更，但当前 message_handler 未装配 "
+                "message_batcher，本次变更未应用"
+            )
+            return
+        handler.message_batcher.update_config(updated.message_batcher)
 
     def _apply_automations() -> None:
         _spawn_hot_reload_task(

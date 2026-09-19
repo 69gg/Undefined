@@ -19,6 +19,8 @@ class ProfileStorage:
         self._revision_keep = revision_keep
         self._locks: dict[str, asyncio.Lock] = {}
         self._merge_locks: dict[str, asyncio.Lock] = {}
+        # 两张表按 (entity_type, entity_id) 增长，实体总量即 user/group 数量级，
+        # 有限且不随消息量增长，故不做淘汰；若未来出现高频实体类型再引入 LRU
         logger.info(
             "[认知侧写] 初始化完成: base=%s revision_keep=%s",
             str(self._base),
