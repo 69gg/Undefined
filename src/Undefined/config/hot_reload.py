@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -142,83 +143,161 @@ class HotReloadContext:
     message_handler: MessageHandler | None = None
 
 
+# 热更新创建的后台任务：持有强引用避免被 GC 回收，并统一回收异常
+_BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
+
+
+def _spawn_hot_reload_task(
+    coro: Coroutine[Any, Any, None],
+    description: str,
+) -> None:
+    """创建热更新后台任务并回收异常，避免静默失败。"""
+    task = asyncio.create_task(coro, name=f"config-hot-reload:{description}")
+    _BACKGROUND_TASKS.add(task)
+
+    def _on_done(finished: asyncio.Task[None]) -> None:
+        _BACKGROUND_TASKS.discard(finished)
+        if finished.cancelled():
+            return
+        exc = finished.exception()
+        if exc is not None:
+            logger.error(
+                "[配置] 热更新后台任务失败: %s（该部分配置未生效）",
+                description,
+                exc_info=exc,
+            )
+
+    task.add_done_callback(_on_done)
+
+
 def apply_config_updates(
     updated: Config,
     changes: dict[str, tuple[object, object]],
     context: HotReloadContext,
 ) -> None:
+    """把热更新应用到运行时。
+
+    每一步独立执行并捕获异常：单步失败不会中断其余步骤；失败项会以 error 级日志
+    列出，避免出现“配置已改、行为未改”却无人知晓的隐蔽不一致。
+    """
     if not changes:
         return
 
     changed_keys = set(changes.keys())
     logger.debug("[配置] 热更新变更项: %s", ", ".join(sorted(changed_keys)))
     _log_restart_required(changed_keys)
-    context.security_service.apply_config(updated)
-    if "ai_request_max_retries" in changed_keys:
+
+    handler = context.message_handler
+
+    def _apply_security() -> None:
+        context.security_service.apply_config(updated)
+
+    def _apply_retries() -> None:
         context.queue_manager.update_max_retries(updated.ai_request_max_retries)
 
-    if _needs_queue_interval_update(changed_keys):
+    def _apply_queue_intervals() -> None:
         context.queue_manager.update_model_intervals(
             build_model_queue_intervals(updated)
         )
 
-    if _needs_intro_update(changed_keys):
-        intro_config = AgentIntroGenConfig(
-            enabled=updated.agent_intro_autogen_enabled,
-            queue_interval_seconds=updated.agent_intro_autogen_queue_interval,
-            max_tokens=updated.agent_intro_autogen_max_tokens,
-            cache_path=Path(updated.agent_intro_hash_path),
-        )
-        context.ai_client.apply_intro_config(intro_config)
-
-    if _needs_search_update(changed_keys):
-        context.ai_client.apply_search_config(updated.searxng_url)
-
-    if _needs_attachment_update(changed_keys):
-        context.ai_client.apply_attachment_config(updated)
-
-    if _needs_message_batcher_update(changed_keys):
-        handler = context.message_handler
-        if (
-            handler is not None
-            and getattr(handler, "message_batcher", None) is not None
-        ):
-            handler.message_batcher.update_config(updated.message_batcher)
-
-    if _needs_automations_update(changed_keys):
-        asyncio.create_task(
-            _apply_message_handler_automations_hot_reload(
-                updated,
-                context.message_handler,
+    def _apply_intro() -> None:
+        context.ai_client.apply_intro_config(
+            AgentIntroGenConfig(
+                enabled=updated.agent_intro_autogen_enabled,
+                queue_interval_seconds=updated.agent_intro_autogen_queue_interval,
+                max_tokens=updated.agent_intro_autogen_max_tokens,
+                cache_path=Path(updated.agent_intro_hash_path),
             )
         )
 
-    if _needs_core_ai_model_update(changed_keys):
+    def _apply_search() -> None:
+        context.ai_client.apply_search_config(updated.searxng_url)
+
+    def _apply_attachments() -> None:
+        context.ai_client.apply_attachment_config(updated)
+
+    def _apply_message_batcher() -> None:
+        if handler is None:
+            return
+        if getattr(handler, "message_batcher", None) is not None:
+            handler.message_batcher.update_config(updated.message_batcher)
+
+    def _apply_automations() -> None:
+        _spawn_hot_reload_task(
+            _apply_message_handler_automations_hot_reload(updated, handler),
+            "automations",
+        )
+
+    def _apply_model_configs() -> None:
         context.ai_client.apply_model_configs(
             chat_config=updated.chat_model,
             vision_config=updated.vision_model,
             agent_config=updated.agent_model,
             runtime_config=updated,
         )
-    elif _needs_runtime_ai_model_update(changed_keys):
+
+    def _apply_runtime_config() -> None:
         context.ai_client.apply_runtime_config(updated)
 
-    if _needs_skills_hot_reload_update(changed_keys):
-        asyncio.create_task(_apply_skills_hot_reload(updated, context.ai_client))
-        asyncio.create_task(
-            _apply_message_handler_skills_hot_reload(
-                updated,
-                context.message_handler,
-            )
+    def _apply_skills_reload() -> None:
+        _spawn_hot_reload_task(
+            _apply_skills_hot_reload(updated, context.ai_client),
+            "skills",
+        )
+        _spawn_hot_reload_task(
+            _apply_message_handler_skills_hot_reload(updated, handler),
+            "message-handler-skills",
         )
 
-    if _needs_config_hot_reload_update(changed_keys):
-        asyncio.create_task(
+    def _apply_config_watcher() -> None:
+        _spawn_hot_reload_task(
             _restart_config_hot_reload(
                 context.config_manager,
                 updated.skills_hot_reload_interval,
                 updated.skills_hot_reload_debounce,
-            )
+            ),
+            "config-watcher",
+        )
+
+    steps: list[tuple[str, Callable[[], None]]] = [
+        ("security", _apply_security),
+    ]
+    if "ai_request_max_retries" in changed_keys:
+        steps.append(("ai_request_max_retries", _apply_retries))
+    if _needs_queue_interval_update(changed_keys):
+        steps.append(("queue_intervals", _apply_queue_intervals))
+    if _needs_intro_update(changed_keys):
+        steps.append(("agent_intro", _apply_intro))
+    if _needs_search_update(changed_keys):
+        steps.append(("search", _apply_search))
+    if _needs_attachment_update(changed_keys):
+        steps.append(("attachments", _apply_attachments))
+    if _needs_message_batcher_update(changed_keys):
+        steps.append(("message_batcher", _apply_message_batcher))
+    if _needs_automations_update(changed_keys):
+        steps.append(("automations", _apply_automations))
+    if _needs_core_ai_model_update(changed_keys):
+        steps.append(("core_ai_models", _apply_model_configs))
+    elif _needs_runtime_ai_model_update(changed_keys):
+        steps.append(("runtime_ai_config", _apply_runtime_config))
+    if _needs_skills_hot_reload_update(changed_keys):
+        steps.append(("skills_hot_reload", _apply_skills_reload))
+    if _needs_config_hot_reload_update(changed_keys):
+        steps.append(("config_hot_reload", _apply_config_watcher))
+
+    failed: list[str] = []
+    for name, step in steps:
+        try:
+            step()
+        except Exception:
+            failed.append(name)
+            logger.error("[配置] 热更新步骤失败: %s", name, exc_info=True)
+
+    if failed:
+        logger.error(
+            "[配置] 热更新未完全生效（运行时状态与 config.toml 不一致）: %s；"
+            "请修复配置或代码后重新保存配置，必要时重启进程",
+            ", ".join(failed),
         )
 
 
@@ -287,18 +366,41 @@ async def _apply_skills_hot_reload(updated: Config, ai_client: AIClient) -> None
     if anthropic_skill_registry is not None:
         registries.append(anthropic_skill_registry)
 
+    def _registry_name(registry: Any) -> str:
+        return type(registry).__name__
+
+    failed: list[str] = []
     if not updated.skills_hot_reload:
         for registry in registries:
-            await registry.stop_hot_reload()
+            try:
+                await registry.stop_hot_reload()
+            except Exception:
+                failed.append(_registry_name(registry))
+                logger.error(
+                    "[配置] 停止技能热重载失败: %s",
+                    _registry_name(registry),
+                    exc_info=True,
+                )
         logger.info("[配置] 技能热重载已禁用")
+        if failed:
+            logger.error("[配置] 部分注册表热重载未停止: %s", ", ".join(failed))
         return
 
     for registry in registries:
-        await registry.stop_hot_reload()
-        registry.start_hot_reload(
-            interval=updated.skills_hot_reload_interval,
-            debounce=updated.skills_hot_reload_debounce,
-        )
+        try:
+            await registry.stop_hot_reload()
+            registry.start_hot_reload(
+                interval=updated.skills_hot_reload_interval,
+                debounce=updated.skills_hot_reload_debounce,
+            )
+        except Exception:
+            failed.append(_registry_name(registry))
+            logger.error(
+                "[配置] 重启技能热重载失败: %s", _registry_name(registry), exc_info=True
+            )
+    if failed:
+        logger.error("[配置] 以下注册表热重载未生效: %s", ", ".join(failed))
+        return
     logger.info(
         "[配置] 技能热重载已更新: interval=%.2fs debounce=%.2fs",
         updated.skills_hot_reload_interval,

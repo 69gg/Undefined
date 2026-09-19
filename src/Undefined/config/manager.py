@@ -113,13 +113,26 @@ class ConfigManager:
         return snapshot
 
     def _notify(self, changes: dict[str, tuple[Any, Any]]) -> None:
+        """把热更新变更分发给订阅者。
+
+        单个回调失败不再静默丢弃：记录 error 级日志与失败回调名单，其余回调继续
+        执行。调用方据此可以在日志中看到“配置已改、行为未改”的不一致。
+        """
         if not self._callbacks:
             return
         config = self._config
         if config is None:
             return
+        failed: list[str] = []
         for callback in list(self._callbacks):
             try:
                 callback(config, changes)
             except Exception:
-                logger.debug("配置回调执行失败", exc_info=True)
+                name = getattr(callback, "__qualname__", repr(callback))
+                failed.append(name)
+                logger.error("[配置] 热更新回调执行失败: %s", name, exc_info=True)
+        if failed:
+            logger.error(
+                "[配置] 以下回调未完成，相关运行时配置可能未生效，请修复后重新保存配置或重启: %s",
+                ", ".join(failed),
+            )

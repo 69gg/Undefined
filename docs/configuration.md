@@ -1378,6 +1378,7 @@ api_key = "replace-with-your-key"
 - `memes.vector_store_path`
 - `memes.queue_path`
 - `naga.*`（`enabled/api_url/api_key/use_proxy/moderation_enabled/mode/allowed_group_ids/blocked_group_ids/allowed_private_ids/blocked_private_ids`）
+- `models.embedding` / `models.embedding.features.*` / `models.rerank`（嵌入与重排运行时在启动时构造，热更新只提示需重启）
 
 ### 5.3 明确“会执行热应用”的字段
 - `onebot.file_send_mode` / `onebot.file_send_host`（新投递读取快照；进行中投递及旧 URL 生命周期不变）
@@ -1408,6 +1409,14 @@ api_key = "replace-with-your-key"
 
 ### 5.4 其他字段
 - `Config` 对象本身会更新。
+
+### 5.5 热更新失败的可见性
+
+热更新在共享的 `Config` 实例上逐字段就地生效，整个过程没有 `await`，同一事件循环内的读方不会在一次读取里看到“改了一半”的对象；跨 `await` 的多次读取仍可能分别落在变更前后，需要严格一致的快照时请在单次读取中取全所需字段。
+
+应用阶段按步骤隔离：单步抛错不会中断后续步骤，失败步骤会以 `error` 级日志逐条打印（`热更新步骤失败`），并在末尾汇总一条“热更新未完全生效（运行时状态与 config.toml 不一致）”。异步步骤（技能热重载、自动化并发、配置监听器重启）使用被强引用跟踪的后台任务，任务异常同样以 `error` 级日志输出（`热更新后台任务失败`）。配置订阅者回调抛错时记录失败回调名单，其余回调继续执行。
+
+因此若看到上述日志，说明 `config.toml` 已改但对应运行时未生效，需要修复报错原因后重新保存配置；必要时重启进程。
 - 具体功能是否“立刻体现”，取决于模块是“每次读取配置”还是“启动时缓存”。
 - 对于行为不确定项，建议改完观察日志；必要时重启进程确认。
 

@@ -588,29 +588,41 @@ class Config:
 
     # 热更新运行时参数
     def update_from(self, new_config: "Config") -> dict[str, tuple[Any, Any]]:
-        # 逐字段 diff；嵌套模型配置用 _update_dataclass 展开为 chat_model.api_url 等键
+        """就地应用热更新，返回 `{字段路径: (旧值, 新值)}`。
+
+        逐字段 diff；嵌套模型配置用 `_update_dataclass` 原地展开为
+        `chat_model.api_url` 等键，保留对象身份，因此已经持有该对象的组件
+        （队列间隔、HistorianWorker 等）能同步看到新值。
+
+        可见性：整个应用过程没有 `await`，同一事件循环内的读方不会在一次读取中
+        看到“改了一半”的对象；跨 `await` 的多次读取仍可能分别落在变更前与变更后，
+        需要严格一致的快照时请在单次读取中取全所需字段。派生集合在 finally 中刷新，
+        即使某个字段解析异常也不会留下过期索引。
+        """
         changes: dict[str, tuple[Any, Any]] = {}
-        for field in fields(self):
-            name = field.name
-            old_value = getattr(self, name)
-            new_value = getattr(new_config, name)
-            if isinstance(
-                old_value,
-                (
-                    ChatModelConfig,
-                    VisionModelConfig,
-                    SecurityModelConfig,
-                    AgentModelConfig,
-                    GrokModelConfig,
-                ),
-            ):
-                changes.update(_update_dataclass(old_value, new_value, prefix=name))
-                continue
-            if old_value != new_value:
-                setattr(self, name, new_value)
-                changes[name] = (old_value, new_value)
-        if changes:
-            self._refresh_runtime_sets()
+        try:
+            for field in fields(self):
+                name = field.name
+                old_value = getattr(self, name)
+                new_value = getattr(new_config, name)
+                if isinstance(
+                    old_value,
+                    (
+                        ChatModelConfig,
+                        VisionModelConfig,
+                        SecurityModelConfig,
+                        AgentModelConfig,
+                        GrokModelConfig,
+                    ),
+                ):
+                    changes.update(_update_dataclass(old_value, new_value, prefix=name))
+                    continue
+                if old_value != new_value:
+                    setattr(self, name, new_value)
+                    changes[name] = (old_value, new_value)
+        finally:
+            if changes:
+                self._refresh_runtime_sets()
         return changes
 
     def reload(self, strict: bool = False) -> dict[str, tuple[Any, Any]]:
