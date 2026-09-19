@@ -727,14 +727,12 @@ document_instruction = ""
 #     [models.embedding] defaults or overrides individual fields; features with
 #     the same effective config share one dispatch queue.
 
-# zh: 按功能覆写示例：知识库（knowledge）。
-# en: Per-feature override example: knowledge base (knowledge).
+# zh: 按功能覆写示例：知识库（knowledge）。仅 use_default = false 时下方字段生效，取哨兵值仍表示继承默认配置。
+# en: Per-feature override example: knowledge base (knowledge). Fields below apply only when use_default = false; sentinel values inherit the defaults.
 [models.embedding.features.knowledge]
 # zh: 是否完全使用 [models.embedding] 默认配置；true 时本表其余字段全部忽略。
 # en: Whether to fully inherit the [models.embedding] defaults; when true, all other fields here are ignored.
 use_default = true
-# zh: 以下字段仅在 use_default = false 时生效；只有出现在本表中的字段才会覆写默认配置。
-# en: The fields below apply only when use_default = false; only fields present here override the defaults.
 # zh: 覆写 API 地址；空字符串表示继承默认配置。
 # en: Override API URL; an empty string inherits the default.
 api_url = ""
@@ -766,14 +764,12 @@ document_instruction = ""
 # zh: 覆写额外请求体参数，按 key 合并到默认 request_params 之上（同名以本表为准）。
 # en: Override extra request-body params, merged over the default request_params (this table wins).
 [models.embedding.features.knowledge.request_params]
-# zh: 按功能覆写示例：认知记忆（cognitive）。
-# en: Per-feature override example: cognitive memory (cognitive).
+# zh: 按功能覆写示例：认知记忆（cognitive）。仅 use_default = false 时下方字段生效，取哨兵值仍表示继承默认配置。
+# en: Per-feature override example: cognitive memory (cognitive). Fields below apply only when use_default = false; sentinel values inherit the defaults.
 [models.embedding.features.cognitive]
 # zh: 是否完全使用 [models.embedding] 默认配置；true 时本表其余字段全部忽略。
 # en: Whether to fully inherit the [models.embedding] defaults; when true, all other fields here are ignored.
 use_default = true
-# zh: 以下字段仅在 use_default = false 时生效；只有出现在本表中的字段才会覆写默认配置。
-# en: The fields below apply only when use_default = false; only fields present here override the defaults.
 # zh: 覆写 API 地址；空字符串表示继承默认配置。
 # en: Override API URL; an empty string inherits the default.
 api_url = ""
@@ -805,14 +801,12 @@ document_instruction = ""
 # zh: 覆写额外请求体参数，按 key 合并到默认 request_params 之上（同名以本表为准）。
 # en: Override extra request-body params, merged over the default request_params (this table wins).
 [models.embedding.features.cognitive.request_params]
-# zh: 按功能覆写示例：梗库（memes）。
-# en: Per-feature override example: meme library (memes).
+# zh: 按功能覆写示例：梗库（memes）。仅 use_default = false 时下方字段生效，取哨兵值仍表示继承默认配置。
+# en: Per-feature override example: meme library (memes). Fields below apply only when use_default = false; sentinel values inherit the defaults.
 [models.embedding.features.memes]
 # zh: 是否完全使用 [models.embedding] 默认配置；true 时本表其余字段全部忽略。
 # en: Whether to fully inherit the [models.embedding] defaults; when true, all other fields here are ignored.
 use_default = true
-# zh: 以下字段仅在 use_default = false 时生效；只有出现在本表中的字段才会覆写默认配置。
-# en: The fields below apply only when use_default = false; only fields present here override the defaults.
 # zh: 覆写 API 地址；空字符串表示继承默认配置。
 # en: Override API URL; an empty string inherits the default.
 api_url = ""
@@ -1786,6 +1780,9 @@ poll_interval_seconds = 1.0
 # zh: 任务超时时间（秒），超时后重新入队。
 # en: Stale job timeout (seconds), re-queued after timeout.
 stale_job_timeout_seconds = 300.0
+# zh: 史官同时在途处理的任务上限（>=1）；超出后暂停取新任务，避免并发无上限。
+# en: Max in-flight historian jobs (>=1); new jobs wait until in-flight drops below it.
+max_concurrency = 4
 
 [cognitive.profile]
 # zh: 用户画像存储路径。

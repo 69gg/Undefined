@@ -428,6 +428,12 @@ const FIELD_SELECT_OPTION_RULES = [
         match: (path) => path === "message_batcher.strategy",
         options: ["extend", "fixed"],
     },
+    {
+        // 按功能覆写的 embedding 代理开关是三态的：inherit 表示继承默认配置
+        match: (path) =>
+            /^models\.embedding\.features\.[^.]+\.use_proxy$/.test(path),
+        options: ["inherit", "true", "false"],
+    },
 ];
 
 /** @type {Record<string, Array<string | { value: string, label: string }>>} */
