@@ -23,7 +23,7 @@ async def execute(args: list[str], context: CommandContext) -> None:
                 callable(send_forward),
             )
         )
-        await context.dispatcher._handle_stats_private(
+        await context.dispatcher.handle_stats_private(
             user_id,
             context.sender_id,
             args,
@@ -39,4 +39,4 @@ async def execute(args: list[str], context: CommandContext) -> None:
         )
         return
 
-    await context.dispatcher._handle_stats(context.group_id, context.sender_id, args)
+    await context.dispatcher.handle_stats(context.group_id, context.sender_id, args)

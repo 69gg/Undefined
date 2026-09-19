@@ -14,12 +14,12 @@ class _DummyDispatcher:
         self.group_calls: list[tuple[int, int, list[str]]] = []
         self.private_calls: list[tuple[int, int, list[str], bool, bool, bool]] = []
 
-    async def _handle_stats(
+    async def handle_stats(
         self, group_id: int, sender_id: int, args: list[str]
     ) -> None:
         self.group_calls.append((group_id, sender_id, list(args)))
 
-    async def _handle_stats_private(
+    async def handle_stats_private(
         self,
         user_id: int,
         sender_id: int,

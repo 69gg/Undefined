@@ -12,7 +12,7 @@ from weixin_ilink_client import (
     UnsupportedCapabilityError,
 )
 
-import Undefined.services.command as command_module
+import Undefined.services.stats_command as stats_command_module
 from Undefined.services.command import CommandDispatcher
 from Undefined.utils import io as async_io
 
@@ -74,12 +74,12 @@ async def test_private_stats_uses_one_forward_delivery(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(command_module, "_MATPLOTLIB_AVAILABLE", True)
+    monkeypatch.setattr(stats_command_module, "_MATPLOTLIB_AVAILABLE", True)
     dispatcher, render_dir = await _dispatcher(tmp_path)
     send_message = AsyncMock()
     send_forward = AsyncMock()
 
-    await dispatcher._handle_stats_private(
+    await dispatcher.handle_stats_private(
         12345,
         12345,
         ["7d"],
@@ -101,7 +101,7 @@ async def test_group_stats_waits_for_analysis_before_chart_rendering(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(command_module, "_MATPLOTLIB_AVAILABLE", True)
+    monkeypatch.setattr(stats_command_module, "_MATPLOTLIB_AVAILABLE", True)
     dispatcher, render_dir = await _dispatcher(tmp_path)
     events: list[str] = []
 
@@ -126,7 +126,7 @@ async def test_group_stats_waits_for_analysis_before_chart_rendering(
     dynamic_dispatcher._build_stats_forward_nodes = AsyncMock(return_value=[])
     dynamic_dispatcher._send_group_forward_message = AsyncMock()
 
-    await dispatcher._handle_stats(10000, 12345, ["7d", "--ai"])
+    await dispatcher.handle_stats(10000, 12345, ["7d", "--ai"])
 
     assert events == ["analysis", "render"]
     assert not await async_io.exists(render_dir)
@@ -136,11 +136,11 @@ async def test_private_stats_callback_only_channel_sends_chart_sequence(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(command_module, "_MATPLOTLIB_AVAILABLE", True)
+    monkeypatch.setattr(stats_command_module, "_MATPLOTLIB_AVAILABLE", True)
     dispatcher, render_dir = await _dispatcher(tmp_path)
     send_message = AsyncMock()
 
-    await dispatcher._handle_stats_private(
+    await dispatcher.handle_stats_private(
         12345,
         12345,
         ["7d"],
@@ -160,12 +160,12 @@ async def test_private_stats_definitive_rejection_keeps_text_summary(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(command_module, "_MATPLOTLIB_AVAILABLE", True)
+    monkeypatch.setattr(stats_command_module, "_MATPLOTLIB_AVAILABLE", True)
     dispatcher, render_dir = await _dispatcher(tmp_path)
     send_message = AsyncMock()
     send_forward = AsyncMock(side_effect=UnsupportedCapabilityError("item_list"))
 
-    await dispatcher._handle_stats_private(
+    await dispatcher.handle_stats_private(
         12345,
         12345,
         ["7d"],
@@ -194,12 +194,12 @@ async def test_private_stats_ambiguous_failure_does_not_send_fallback(
     monkeypatch: pytest.MonkeyPatch,
     error: Exception,
 ) -> None:
-    monkeypatch.setattr(command_module, "_MATPLOTLIB_AVAILABLE", True)
+    monkeypatch.setattr(stats_command_module, "_MATPLOTLIB_AVAILABLE", True)
     dispatcher, render_dir = await _dispatcher(tmp_path)
     send_message = AsyncMock()
     send_forward = AsyncMock(side_effect=error)
 
-    await dispatcher._handle_stats_private(
+    await dispatcher.handle_stats_private(
         12345,
         12345,
         ["7d"],
