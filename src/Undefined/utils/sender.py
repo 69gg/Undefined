@@ -389,22 +389,7 @@ class MessageSender:
                 history_attachment=history_attachment,
             )
             return
-        if not self.config.is_private_allowed(address.target_id):
-            enabled = self.config.access_control_enabled()
-            reason = (
-                self.config.private_access_denied_reason(address.target_id) or "unknown"
-            )
-            logger.warning(
-                "[访问控制] 已拦截微信文件发送: user=%s reason=%s (access enabled=%s)",
-                address.target_id,
-                reason,
-                enabled,
-            )
-            raise PermissionError(
-                "blocked by access control: "
-                f"type=private reason={reason} user_id={address.target_id} "
-                f"enabled={enabled}"
-            )
+        self._ensure_private_allowed(address.target_id, "微信文件发送")
         service = self._require_weixin_service()
         sent_message_id = await service.send_file(
             address.target_id,
@@ -486,22 +471,7 @@ class MessageSender:
                 auto_history=auto_history,
                 attachments=history_attachments or None,
             )
-        if not self.config.is_private_allowed(address.target_id):
-            enabled = self.config.access_control_enabled()
-            reason = (
-                self.config.private_access_denied_reason(address.target_id) or "unknown"
-            )
-            logger.warning(
-                "[访问控制] 已拦截微信语音发送: user=%s reason=%s (access enabled=%s)",
-                address.target_id,
-                reason,
-                enabled,
-            )
-            raise PermissionError(
-                "blocked by access control: "
-                f"type=private reason={reason} user_id={address.target_id} "
-                f"enabled={enabled}"
-            )
+        self._ensure_private_allowed(address.target_id, "微信语音发送")
 
         service = self._require_weixin_service()
         prepared = await service.prepare_voice(path)
@@ -600,19 +570,7 @@ class MessageSender:
         history_message: str | None,
         attachments: list[dict[str, str]] | None,
     ) -> str | None:
-        if not self.config.is_private_allowed(user_id):
-            enabled = self.config.access_control_enabled()
-            reason = self.config.private_access_denied_reason(user_id) or "unknown"
-            logger.warning(
-                "[访问控制] 已拦截微信消息发送: user=%s reason=%s (access enabled=%s)",
-                user_id,
-                reason,
-                enabled,
-            )
-            raise PermissionError(
-                "blocked by access control: "
-                f"type=private reason={reason} user_id={user_id} enabled={enabled}"
-            )
+        self._ensure_private_allowed(user_id, "微信消息发送")
         service = self._require_weixin_service()
         reply_context: ReplyContext | None = None
         reference: RefMessage | None = None
@@ -937,6 +895,24 @@ class MessageSender:
             )
         return attachments
 
+    def _ensure_private_allowed(self, user_id: int, action: str) -> None:
+        """私聊访问控制统一门禁：未放行时记录日志并抛出 PermissionError。"""
+        if self.config.is_private_allowed(user_id):
+            return
+        enabled = self.config.access_control_enabled()
+        reason = self.config.private_access_denied_reason(user_id) or "unknown"
+        logger.warning(
+            "[访问控制] 已拦截%s: user=%s reason=%s (access enabled=%s)",
+            action,
+            user_id,
+            reason,
+            enabled,
+        )
+        raise PermissionError(
+            "blocked by access control: "
+            f"type=private reason={reason} user_id={int(user_id)} enabled={enabled}"
+        )
+
     async def send_group_message(
         self,
         group_id: int,
@@ -1091,19 +1067,7 @@ class MessageSender:
         attachments: list[dict[str, str]] | None = None,
     ) -> int | None:
         """发送私聊消息"""
-        if not self.config.is_private_allowed(user_id):
-            enabled = self.config.access_control_enabled()
-            reason = self.config.private_access_denied_reason(user_id) or "unknown"
-            logger.warning(
-                "[访问控制] 已拦截私聊消息发送: user=%s reason=%s (access enabled=%s)",
-                user_id,
-                reason,
-                enabled,
-            )
-            raise PermissionError(
-                "blocked by access control: "
-                f"type=private reason={reason} user_id={int(user_id)} enabled={enabled}"
-            )
+        self._ensure_private_allowed(user_id, "私聊消息发送")
 
         safe_message = redact_string(message)
         logger.info(f"[发送消息] 目标用户:{user_id} | 内容摘要:{safe_message[:100]}...")
@@ -1224,19 +1188,7 @@ class MessageSender:
         auto_history: bool = True,
     ) -> None:
         """发送私聊合并转发，并将可读摘要写入历史。"""
-        if not self.config.is_private_allowed(user_id):
-            enabled = self.config.access_control_enabled()
-            reason = self.config.private_access_denied_reason(user_id) or "unknown"
-            logger.warning(
-                "[访问控制] 已拦截私聊合并转发: user=%s reason=%s (access enabled=%s)",
-                user_id,
-                reason,
-                enabled,
-            )
-            raise PermissionError(
-                "blocked by access control: "
-                f"type=private reason={reason} user_id={int(user_id)} enabled={enabled}"
-            )
+        self._ensure_private_allowed(user_id, "私聊合并转发")
 
         send_private_forward = getattr(self.onebot, "send_private_forward_msg", None)
         if not callable(send_private_forward):
@@ -1516,19 +1468,7 @@ class MessageSender:
         mark_sent: bool = True,
     ) -> None:
         """在私聊中拍一拍指定用户。"""
-        if not self.config.is_private_allowed(user_id):
-            enabled = self.config.access_control_enabled()
-            reason = self.config.private_access_denied_reason(user_id) or "unknown"
-            logger.warning(
-                "[访问控制] 已拦截私聊拍一拍: user=%s reason=%s (access enabled=%s)",
-                user_id,
-                reason,
-                enabled,
-            )
-            raise PermissionError(
-                "blocked by access control: "
-                f"type=private reason={reason} user_id={int(user_id)} enabled={enabled}"
-            )
+        self._ensure_private_allowed(user_id, "私聊拍一拍")
 
         logger.info("[拍一拍] 私聊用户=%s", user_id)
         await self.onebot.send_private_poke(user_id, mark_sent=mark_sent)
@@ -1602,19 +1542,7 @@ class MessageSender:
         history_attachment: AttachmentRecord | None = None,
     ) -> None:
         """通过统一发送层上传私聊文件。"""
-        if not self.config.is_private_allowed(user_id):
-            enabled = self.config.access_control_enabled()
-            reason = self.config.private_access_denied_reason(user_id) or "unknown"
-            logger.warning(
-                "[访问控制] 已拦截私聊文件发送: user=%s reason=%s (access enabled=%s)",
-                user_id,
-                reason,
-                enabled,
-            )
-            raise PermissionError(
-                "blocked by access control: "
-                f"type=private reason={reason} user_id={int(user_id)} enabled={enabled}"
-            )
+        self._ensure_private_allowed(user_id, "私聊文件发送")
 
         file_name = name or Path(file_path).name
         logger.info("[发送文件] 目标用户:%s | 文件:%s", user_id, file_name)
