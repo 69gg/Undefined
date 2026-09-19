@@ -21,6 +21,8 @@ agent_name/
     └── __init__.py
 ```
 
+当前内置 Agent：`web_agent`、`file_analysis_agent`、`naga_code_analysis_agent`、`undefined_self_code_agent`、`info_agent`、`entertainment_agent`、`summary_agent`、`code_delivery_agent`。
+
 ## 模型配置
 
 智能体默认使用 `config.toml` 中的 `[models.agent]` 配置；同名环境变量仍可作为兼容覆盖（用于临时调试或无文件配置场景）。
@@ -183,7 +185,7 @@ Agent 的执行逻辑，负责：
 ## 运行特性
 
 - **加载即校验**：Agent `handler.py` 在注册阶段导入；导入失败（如相对导入错误、缺少依赖）会记录 `load_error` 并从 Agent schema 中排除，主 AI 不会被告知一个不可用的 Agent。
-- **超时与取消**：Agent 调用默认 120s 超时，超时返回提示并记录统计。
+- **超时与取消**：Agent 调用**未启用超时**（`AgentRegistry` 显式传入 `timeout_seconds=0`），命令式超时保护由调用方负责；超时/取消语义仍会记录统计。
 - **结构化日志**：统一输出 `event=execute`、`status=success/timeout/error` 等字段。
 - **热重载**：检测到 `skills/agents/` 变更后自动重载 Agent 注册表。
 
@@ -276,7 +278,7 @@ mv skills/tools/my_tool skills/agents/my_agent/tools/
 - **功能**：分析用户提供的附件、内部 UID、URL、legacy file_id、arXiv 论文标识或 Bilibili 视频标识，提取文件内容。
 - **适用场景**：PDF/Word/Excel/PPT/文本/代码/压缩包解析，图片、音频、视频等多模态内容识别，arXiv 论文 PDF 分析，Bilibili 视频内容分析。
 - **不适用**：没有文件来源的开放式搜索、需要联网查资料的问题、执行文件或安全鉴定。
-- **子工具**：`download_file`, `detect_file_type`, `read_text_file`, `extract_pdf`, `describe_pdf_page`, `extract_docx`, `extract_xlsx`, `extract_pptx`, `extract_archive`, `analyze_code`, `analyze_multimodal`, `cleanup_temp`；还可调用共享主工具 `arxiv_paper(output_mode=uid)` 与 `bilibili_video(output_mode=uid)` 获取待分析附件 UID。
+- **子工具**：`download_file`, `detect_file_type`, `read_text_file`, `extract_pdf`, `describe_pdf_page`, `extract_docx`, `extract_xlsx`, `extract_pptx`, `extract_archive`, `analyze_code`, `analyze_multimodal`, `cleanup_temp`；还可调用共享主工具 `arxiv_paper(output_mode=uid)`、`bilibili_video(output_mode=uid)` 与 `douyin_video(output_mode=uid)` 获取待分析附件 UID。
 
 ### naga_code_analysis_agent（NagaAgent 代码分析助手）
 - **功能**：只读分析 NagaAgent 项目的结构、源码、配置、构建、部署和实现细节。

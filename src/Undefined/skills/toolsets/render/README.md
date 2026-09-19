@@ -10,5 +10,11 @@
 
 `layout=default` 保持原有布局。`layout=long` 时，`width` 是最终图片像素宽度，高度按内容自动延伸；`padding=0` 可用于 HTML 全幅设计。
 
+交付参数（`render_html` / `render_markdown` 均支持，`render_latex` 不支持）：
+- `delivery`（默认 `embed`）：`embed` 返回可插入回复的图片 UID；`send` 立即发送到目标
+- `target_id` / `message_type`：仅 `delivery=send` 时需要，缺省时从当前会话推断
+
+`render_latex` 额外支持 `output_format`（`png` / `pdf`）。
+
 目录结构：
 - 每个子目录对应一个工具（`config.json` + `handler.py`）

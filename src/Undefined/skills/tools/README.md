@@ -77,7 +77,7 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
 | `send_private_message_callback` | `Callable` | 发送私聊消息的回调（建议使用 sender） |
 | `send_image_callback` | `Callable` | 发送图片的回调 |
 | `get_recent_messages_callback` | `Callable` | 获取历史消息的回调（建议使用 history_manager） |
-| `fetch_session_messages_callback` | `Callable` | 拉取当前会话消息用于总结（`/summary` 与 `summary_agent.fetch_messages`） |
+| `fetch_session_messages_callback` | `Callable` | 拉取当前会话消息用于总结（`/summary` 与 `summary_agent` 的 `fetch_messages` 子工具） |
 | `memory_storage` | `MemoryStorage` | 记忆存储实例 |
 | `ai_client` | `AIClient` | AI 客户端实例（用于调用图片描述等） |
 | `base_path` | `Path` | 默认基础路径（通常锁定在 `code/NagaAgent`） |
@@ -111,7 +111,7 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
 ## 运行特性
 
 - **延迟加载 (Lazy Load)**：`handler.py` 仅在首次调用时导入，减少启动耗时。
-- **超时与取消**：单次执行默认 120s 超时；超时会返回提示并记录统计。
+- **超时与取消**：单次执行默认 480s 超时（`ToolRegistry` 未覆写 `timeout_seconds`）；超时会返回提示并记录统计。
 - **结构化日志**：统一输出 `event=execute`、`status=success/timeout/error` 等字段，便于检索与统计。
 - **热重载**：检测到工具变更会自动重新加载（默认开启）。
 

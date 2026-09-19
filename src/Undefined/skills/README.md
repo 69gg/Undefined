@@ -11,22 +11,24 @@ skills/
 ├── pipelines/        # 自动处理管线，斜杠命令之后、AI 之前并行检测/处理
 │   ├── __init__.py
 │   ├── registry.py
-│   └── pipelines/
-│       ├── bilibili/
-│       ├── arxiv/
-│       └── github/
+│   ├── models.py
+│   ├── context.py
+│   ├── bilibili/
+│   ├── douyin/
+│   ├── arxiv/
+│   └── github/
 │
 ├── tools/          # 基础小工具，直接暴露给 AI 调用
 │   ├── __init__.py
-│   ├── send_message/
-│   ├── get_recent_messages/
-│   ├── save_memory/
+│   ├── end/
+│   ├── get_current_time/
+│   ├── get_picture/
+│   ├── python_interpreter/
 │   └── ...
 │
 ├── agents/         # 智能代理，封装复杂任务的 AI Agent
 │   ├── __init__.py
 │   ├── web_agent/
-│   │   ├── anthropic_skills/  # Agent 私有 Anthropic Skills（可选）
 │   │   ├── tools/
 │   │   ├── config.json
 │   │   ├── handler.py
@@ -75,16 +77,16 @@ skills/
 - **目录结构**: `pipelines/{pipeline_name}/config.json + handler.py`。
 - **执行方式**: 同一条非命令消息会并行检测全部管线，并行处理全部命中结果；处理产出的消息通过统一发送层写入历史并自动登记本地媒体/文件附件后，再进入 AI 自动回复。
 - **热重载**: 跟随 `[skills]` 的 `hot_reload`、`hot_reload_interval`、`hot_reload_debounce` 配置。
-- **示例**: `bilibili`, `arxiv`, `github`
+- **示例**: `bilibili`, `douyin`, `arxiv`, `github`
 
 ### 基础工具
 
 - **定位**: 单一功能的原子操作
 - **调用方式**: 注册到主 AI 完整工具池；启用 Tool Search 时，除始终加载项外由主 AI 按需检索 schema
 - **Agent 可见性**: 默认仅主 AI 可见；可通过 `skills/tools/{tool_name}/callable.json` 按白名单暴露给 Agent
-- **命名规则**: 简单名称（如 `send_message`, `save_memory`）
+- **命名规则**: 简单名称（如 `end`, `get_current_time`）；发消息等带业务前缀的能力在工具集里（如 `messages.send_message`）
 - **适用场景**: 通用、高频使用的简单操作
-- **示例**: `send_message`, `get_recent_messages`, `save_memory`, `end`
+- **示例**: `end`, `get_current_time`, `get_picture`, `python_interpreter`
 
 ### 工具集
 
@@ -110,7 +112,7 @@ skills/
 
 - **定位**: 领域知识/指令注入，遵循 [agentskills.io](https://agentskills.io) 开放标准
 - **调用方式**: 注册为 `skills-_-<name>` function tool，AI 调用后返回完整指令内容
-- **命名规则**: 内部 `skills.<name>`，注册为 `skills-_-<name>`（使用 `config.tools_dot_delimiter`）
+- **命名规则**: 内部 `skills.<name>`，注册为 `skills-_-<name>`（分隔符取 TOML 中 `[tools].dot_delimiter`，`Config` 属性名为 `tools_dot_delimiter`）
 - **目录结构**: `anthropic_skills/<skill-name>/SKILL.md` 或 `agents/<agent>/anthropic_skills/<skill-name>/`
 - **适用场景**: 提供领域专业知识、工作流程指导、最佳实践
 - **特性**: 渐进式披露（元数据始终注入，完整内容按需获取）、热重载；启用 Tool Search 时，对应 function schema 也可能需要先检索
@@ -122,7 +124,7 @@ skills/
 - **handler 模块名即真实包路径**: 随包技能的 handler 按 `Undefined.skills.<...>.handler` 导入，因此 `handler.py` 内可以使用同目录相对导入（`from .helper import ...`）；常规 `import` 与注册表加载得到同一个模块对象。
 - **模型 schema 按需投影**: 可通过 `skills.tool_search_enabled`（即 `[skills]` 下的 `tool_search_enabled`）让主 AI 首轮只看到配置为始终加载的工具和 `tool_search` schema，其余工具以名称目录提示，检索后从下一模型轮开始可调用。它只降低模型上下文占用，不会卸载注册表或提前导入 handler；子 Agent 不使用该投影。
 - **结构化日志 + 统计**: 统一输出 `event=execute`、`status=success/timeout/error` 等结构化字段，并记录执行耗时与成功/失败计数。
-- **超时与取消**: 所有技能执行默认 120 秒超时，超时会返回提示并记录统计。
+- **超时与取消**: 工具 / 工具集执行默认 480 秒超时（Agent 调用未启用超时），超时会返回提示并记录统计。
 - **热重载**: 自动扫描 `skills/` 目录，检测到 `config.json` 或 `handler.py` 变更后自动重载。
 
 Tool Search 的配置、查询语法、请求级生命周期和权限边界详见 [Tool Search 按需工具加载](../../../docs/tool-search.md)。

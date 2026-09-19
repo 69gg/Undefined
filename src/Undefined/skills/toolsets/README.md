@@ -8,28 +8,28 @@
 
 ```
 toolsets/
-├── music/                   # lxmusic2api 高层音乐能力
-│   ├── search_songs/        # 歌曲搜索
-│   ├── browse_playlists/    # 歌单标签、列表与详情
-│   ├── browse_rankings/     # 排行榜列表与详情
-│   └── get_audio/           # 直链或会话音频附件
-├── memes/                   # 表情包工具集
-│   ├── search_memes/        # 表情包检索
-│   └── send_meme_by_uid/    # 按 uid 发送表情包
+├── attachments/             # 附件 UID 与 URL 互查
+├── automation/              # 条件驱动自动化
+│   ├── list/ get/ create/ update/ delete/ set_enabled/
+├── cognitive/               # 认知记忆检索（get_profile / search_events / search_profiles）
 ├── commands/                # 斜杠命令查询（文本匹配，不接 RAG）
 │   ├── search/              # 按名称/别名/说明/文档检索全部命令
 │   └── get/                 # 取单条命令的权限、限流、用法和 README
-├── render/                  # 渲染工具集
-│   ├── render_html/         # HTML 渲染
-│   ├── render_latex/        # LaTeX 渲染
-│   └── render_markdown/     # Markdown 渲染
-└── automation/              # 条件驱动自动化
-    ├── list/
-    ├── get/
-    ├── create/
-    ├── update/
-    ├── delete/
-    └── set_enabled/
+├── contacts/                # 好友与群列表查询（query_friends / query_groups）
+├── group/                   # 群信息与成员能力（get_member_info / get_avatar 等）
+├── group_analysis/          # 群聊深度分析
+├── mcp/                     # MCP 工具集接入
+├── memes/                   # 表情包工具集
+│   ├── search_memes/        # 表情包检索
+│   └── send_meme_by_uid/    # 按 uid 发送表情包
+├── memory/                  # 长期记忆
+├── messages/                # 消息发送
+├── music/                   # lxmusic2api 高层音乐能力（10 个工具，见下文清单）
+├── notices/                 # 通知发送
+└── render/                  # 渲染工具集
+    ├── render_html/         # HTML 渲染
+    ├── render_latex/        # LaTeX 渲染
+    └── render_markdown/     # Markdown 渲染
 ```
 
 ## 命名规范
@@ -75,7 +75,7 @@ toolsets/{category}/callable.json
 ## 运行特性
 
 - **延迟加载**：仅在首次调用时导入 `handler.py`。
-- **超时与取消**：单次执行默认 120 秒超时，超时会返回提示并记录统计。
+- **超时与取消**：单次执行默认 480 秒超时（`ToolSetRegistry` 未覆写 `timeout_seconds`），超时会返回提示并记录统计。
 - **结构化日志**：统一输出 `event=execute`、`status=success/timeout/error` 等字段。
 - **热重载**：检测到 `toolsets/` 中的变更会自动重新加载。
 
