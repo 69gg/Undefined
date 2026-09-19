@@ -62,6 +62,8 @@ python scripts/sync_config_template.py --stdout
 
 **原理**：ChromaDB 存储了完整的原文本（`documents`），脚本读取所有记录，用新模型重新计算向量后 upsert 覆写，metadata 保持不变。
 
+**维度变化**：collection 在首次写入时定维，异维 upsert 会直接报 `InvalidArgumentError`。脚本会先比较新旧向量维度，检测到变化时先读全量记录、再删除并重建 collection，最后按新维度写回；`--dry-run` 只提示会重建，不做任何写入。
+
 **前置条件**：先在 `config.toml` 中将 `[models.embedding]` 更新为新模型配置。
 
 ```bash

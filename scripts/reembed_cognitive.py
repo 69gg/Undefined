@@ -7,6 +7,10 @@ cognitive_events 和 cognitive_profiles 两个 collection 进行全量重嵌入�
 原理：ChromaDB 存储了完整的原文本（documents），本脚本读取所有记录，
 用新模型重新计算向量，然后通过 upsert 覆写回去。metadata 保持不变。
 
+维度变化：ChromaDB 的 collection 在首次写入时定维，异维向量 upsert 会直接失败
+（InvalidArgumentError）。脚本会先比较新旧向量维度，检测到变化时删除并重建
+collection（先读全量记录再重建，不会丢数据），然后按新维度全量写回。
+
 用法：
     # 先在 config.toml 中更新 [models.embedding] 为新模型配置
     uv run python scripts/reembed_cognitive.py
@@ -128,12 +132,47 @@ def _get_all_records(
     return all_ids, all_docs, all_metas
 
 
+def _collection_dimension(collection: Any) -> int:
+    """读取 collection 当前向量维度；空库或读取失败返回 0。"""
+    try:
+        sample = collection.get(limit=1, include=["embeddings"])
+    except Exception as exc:  # pragma: no cover - 依赖 ChromaDB 内部行为
+        logger.warning("读取现有向量维度失败，将按新维度直接写入: %s", exc)
+        return 0
+    embeddings = sample.get("embeddings")
+    if embeddings is None or len(embeddings) == 0:
+        return 0
+    try:
+        return len(embeddings[0])
+    except TypeError:
+        return 0
+
+
+def _recreate_collection(
+    client: Any,
+    collection_name: str,
+    metadata: dict[str, Any] | None,
+) -> Any:
+    """删除并重建 collection，用于向量维度变化后的全量写回。"""
+    logger.warning(
+        "重建 collection %s（原维度与新模型不一致，ChromaDB 不支持原地改维）",
+        collection_name,
+    )
+    client.delete_collection(collection_name)
+    return client.get_or_create_collection(
+        collection_name,
+        metadata=metadata or {"hnsw:space": "cosine"},
+    )
+
+
 async def _reembed_collection(
     collection: Any,
     collection_name: str,
     embedder: Embedder,
     batch_size: int,
     dry_run: bool,
+    *,
+    client: Any = None,
 ) -> int:
     """对单个 collection 执行全量重嵌入，返回处理的记录数。"""
     logger.info("正在读取 %s ...", collection_name)
@@ -151,7 +190,12 @@ async def _reembed_collection(
         batch_size,
     )
 
+    current_dimension = _collection_dimension(collection)
+    if current_dimension:
+        logger.info("%s 现有向量维度: %s", collection_name, current_dimension)
+
     processed = 0
+    dimension_checked = False
     start_time = time.perf_counter()
 
     for i in range(0, total, batch_size):
@@ -161,6 +205,34 @@ async def _reembed_collection(
 
         # 计算新向量
         new_embeddings = await embedder.embed(batch_docs)
+
+        if not dimension_checked:
+            dimension_checked = True
+            new_dimension = len(new_embeddings[0]) if new_embeddings else 0
+            if (
+                current_dimension
+                and new_dimension
+                and current_dimension != new_dimension
+            ):
+                logger.warning(
+                    "%s 向量维度变化: %s -> %s",
+                    collection_name,
+                    current_dimension,
+                    new_dimension,
+                )
+                if dry_run:
+                    logger.info(
+                        "[dry-run] 实际执行时会重建 collection %s 后写入新维度向量",
+                        collection_name,
+                    )
+                else:
+                    if client is None:
+                        raise RuntimeError(
+                            "检测到向量维度变化，但缺少 ChromaDB client，无法重建 collection"
+                        )
+                    collection = _recreate_collection(
+                        client, collection_name, collection.metadata
+                    )
 
         if not dry_run:
             # upsert 覆写：ID 不变，document 和 metadata 不变，仅更新 embedding
@@ -239,7 +311,12 @@ async def _main(args: argparse.Namespace) -> None:
                 "cognitive_events", metadata={"hnsw:space": "cosine"}
             )
             total_processed += await _reembed_collection(
-                events_col, "cognitive_events", embedder, args.batch_size, args.dry_run
+                events_col,
+                "cognitive_events",
+                embedder,
+                args.batch_size,
+                args.dry_run,
+                client=client,
             )
 
         if not args.events_only:
@@ -252,6 +329,7 @@ async def _main(args: argparse.Namespace) -> None:
                 embedder,
                 args.batch_size,
                 args.dry_run,
+                client=client,
             )
     finally:
         await embedder.stop()

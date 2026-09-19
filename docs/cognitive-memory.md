@@ -438,6 +438,8 @@ data/cognitive/
 
 更换嵌入模型（维度变化或模型升级）后，需要对向量库进行全量重嵌入。详见 [`scripts/reembed_cognitive.py`](../scripts/reembed_cognitive.py)。
 
+向量维度发生变化时脚本会先读全量记录、再删除并重建 collection 后写回（ChromaDB 定维后无法原地改维，直接 upsert 异维向量会失败）；建议先 `--dry-run` 确认维度变化与记录数。
+
 ```bash
 # 1. 先在 config.toml 中更新 [models.embedding] 为新模型配置
 # 2. 停止机器人
