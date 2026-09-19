@@ -296,3 +296,19 @@ def test_runtime_registry_unknown_feature() -> None:
     )
     with pytest.raises(KeyError):
         registry.for_feature("unknown")
+
+
+def test_config_example_features_stay_in_sync_with_embedded_features() -> None:
+    """config.toml.example 的 features 子表必须与 EMBEDDING_FEATURES 一一对应，
+    防止新增 / 删除功能后示例漂移（未知功能名只会收到静默警告）。"""
+    import tomllib
+
+    example = (
+        Path(__file__).resolve().parent.parent / "config.toml.example"
+    ).read_text(encoding="utf-8")
+    data = tomllib.loads(example)
+    raw_features = data.get("models", {}).get("embedding", {}).get("features", {})
+    documented = {
+        name for name, value in raw_features.items() if isinstance(value, dict)
+    }
+    assert documented == set(EMBEDDING_FEATURES)

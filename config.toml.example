@@ -726,9 +726,14 @@ document_instruction = ""
 
 # zh: 按功能覆写的 embedding 配置。每个功能可完全继承 [models.embedding] 默认配置，
 #     也可单独设置并按字段覆写；生效配置完全相同的功能共用一个发车队列。
+#     通用哨兵规则：所有字符串字段（api_url / api_key / model_name / 指令前缀）
+#     空字符串均表示继承默认配置、无法表达显式清空；数值与 use_proxy 的哨兵见各字段注释。
 # en: Per-feature embedding overrides. Each feature either inherits the
 #     [models.embedding] defaults or overrides individual fields; features with
 #     the same effective config share one dispatch queue.
+#     Sentinel rule: empty strings in api_url / api_key / model_name / instruction
+#     prefixes all mean "inherit the default" and cannot express an explicit clear;
+#     numeric and use_proxy sentinels are documented on each field.
 
 # zh: 按功能覆写示例：知识库（knowledge）。仅 use_default = false 时下方字段生效，取哨兵值仍表示继承默认配置。
 # en: Per-feature override example: knowledge base (knowledge). Fields below apply only when use_default = false; sentinel values inherit the defaults.
