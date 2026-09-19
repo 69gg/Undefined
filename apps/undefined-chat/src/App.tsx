@@ -776,9 +776,5 @@ function WorkspaceLayout({
 	isDesktop: boolean;
 	children: ReactNode;
 }) {
-	return isDesktop ? (
-		<DesktopLayout>{children}</DesktopLayout>
-	) : (
-		<>{children}</>
-	);
+	return isDesktop ? <DesktopLayout>{children}</DesktopLayout> : children;
 }
