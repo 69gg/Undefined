@@ -121,9 +121,6 @@ def _parse_cognitive_config(data: dict[str, Any]) -> CognitiveConfig:
         rerank_candidate_multiplier=_coerce_int(
             q.get("rerank_candidate_multiplier") if isinstance(q, dict) else None, 3
         ),
-        rewrite_max_retry=_coerce_int(
-            hist.get("rewrite_max_retry") if isinstance(hist, dict) else None, 2
-        ),
         historian_recent_messages_inject_k=_coerce_int(
             hist.get("recent_messages_inject_k") if isinstance(hist, dict) else None,
             12,

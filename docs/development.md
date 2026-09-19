@@ -94,8 +94,10 @@ npm run check
 
 ```text
 .githooks/pre-commit
-.githooks/pre-tag
 ```
+
+> Git 没有 `pre-tag` 钩子事件，打 tag 前的版本校验由 Release workflow 调用
+> `uv run python scripts/release_notes.py validate --tag <tag>` 完成。
 
 启用方式：
 

@@ -272,8 +272,9 @@ Biome v2 通过 `files.includes` 表达检查范围和排除规则。两个 App 
 
 ```text
 .githooks/pre-commit
-.githooks/pre-tag
 ```
+
+> 打 tag 前的版本一致性校验不在本地钩子中执行（git 没有 `pre-tag` 事件），由 Release workflow 调用 `scripts/release_notes.py validate` 完成。
 
 安装方式：
 

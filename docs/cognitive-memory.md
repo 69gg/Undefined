@@ -331,7 +331,6 @@ data/cognitive/
 
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `rewrite_max_retry` | int | `2` | 绝对化改写最大重试次数（支持热更新） |
 | `recent_messages_inject_k` | int | `12` | 提供给史官的最近消息参考条数（0=禁用，支持热更新） |
 | `recent_message_line_max_len` | int | `240` | 最近消息参考中每条文本最大长度（支持热更新） |
 | `source_message_max_len` | int | `800` | 当前消息原文最大长度（支持热更新） |
@@ -374,7 +373,7 @@ data/cognitive/
 
 ### 热更新说明
 
-- **支持热更新**：`cognitive.query.*`、`cognitive.historian.poll_interval_seconds`、`cognitive.historian.rewrite_max_retry`、`cognitive.historian.recent_messages_inject_k`、`cognitive.historian.recent_message_line_max_len`、`cognitive.historian.source_message_max_len`
+- **支持热更新**：`cognitive.query.*`、`cognitive.historian.poll_interval_seconds`、`cognitive.historian.recent_messages_inject_k`、`cognitive.historian.recent_message_line_max_len`、`cognitive.historian.source_message_max_len`
 - **需重启**：`cognitive.enabled`、`cognitive.vector_store.*`、`models.embedding.*`、`models.rerank.*`
 
 说明：

@@ -538,7 +538,6 @@ class CognitiveConfig:
     time_decay_min_similarity: float = 0.35
     tool_default_top_k: int = 12
     profile_top_k: int = 8
-    rewrite_max_retry: int = 2
     poll_interval_seconds: float = 1.0
     stale_job_timeout_seconds: float = 300.0
     profile_revision_keep: int = 5

@@ -133,7 +133,7 @@ Android 端仍然走同一套连接模型，但 UI 目标是：
 - Console：`Undefined-Console-*` 桌面端和 Android 产物
 - Chat：`Undefined-Chat-*` 桌面端和 Android 产物
 
-两个 App 的版本都必须与 `pyproject.toml` 主版本一致。使用 `uv run python scripts/bump_version.py <version>` 统一更新版本；pre-tag 和 Release workflow 会校验 Console / Chat 的 `package.json`、`package-lock.json`、`Cargo.toml`、`tauri.conf.json` 和 `Cargo.lock`。
+两个 App 的版本都必须与 `pyproject.toml` 主版本一致。使用 `uv run python scripts/bump_version.py <version>` 统一更新版本；Release workflow 会校验 Console / Chat 的 `package.json`、`package-lock.json`、`Cargo.toml`、`tauri.conf.json` 和 `Cargo.lock`。
 
 ## 9. 本地开发
 

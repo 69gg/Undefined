@@ -1230,7 +1230,6 @@ api_key = "replace-with-your-key"
 
 | 字段 | 默认值 | 说明 |
 |---|---:|---|
-| `rewrite_max_retry` | `2` | 绝对化改写最大重试 |
 | `recent_messages_inject_k` | `12` | 注入给史官的近期消息条数 |
 | `recent_message_line_max_len` | `240` | 每条近期消息最大字符数 |
 | `source_message_max_len` | `800` | 当前触发消息最大字符数 |
