@@ -90,6 +90,7 @@ async def test_get_head_range_tokens_source_cleanup_mode_and_actual_port(
                     assert (
                         "filename*=UTF-8''" in response.headers["Content-Disposition"]
                     )
+                    assert response.headers["X-Content-Type-Options"] == "nosniff"
             async with http.head(url) as response:
                 assert response.status == 200
                 assert response.content_length == 10

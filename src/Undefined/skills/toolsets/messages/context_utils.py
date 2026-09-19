@@ -33,6 +33,12 @@ def file_transfer_error_message(error: BaseException) -> str | None:
     return str(getattr(error, "user_message", str(error)))
 
 
+def file_transfer_error_dispatched_count(error: BaseException) -> int:
+    """读取传输错误携带的已成功派发附件数量，未携带时为 0。"""
+    count = getattr(error, "dispatched_file_count", 0)
+    return count if isinstance(count, int) and count > 0 else 0
+
+
 def handle_delivery_uncertain(context: dict[str, Any]) -> str:
     """Mark an ambiguous attempt as sent and return non-retry tool feedback."""
 

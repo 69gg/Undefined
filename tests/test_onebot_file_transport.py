@@ -581,9 +581,16 @@ async def test_real_send_cancellation_and_total_budget_are_uncertain(
             await asyncio.wait_for(napcat.received.wait(), timeout=2)
             if cancel:
                 task.cancel()
-            with pytest.raises(OneBotDeliveryUncertainError):
+            # 外部取消原样传播；总预算耗尽才转换为未确认投递。
+            expected = (
+                asyncio.CancelledError if cancel else OneBotDeliveryUncertainError
+            )
+            with pytest.raises(expected):
                 await asyncio.wait_for(task, timeout=2)
             assert was_message_sent(ctx)
+            # 两种情况都按未确认投递登记，同一请求内相同投递禁止重发。
+            with pytest.raises(OneBotDeliveryUncertainError):
+                await client.upload_group_file(1, str(source))
     assert len(napcat.completed) == 1
     assert not any(r["params"].get("reset") for r in napcat.requests)
 

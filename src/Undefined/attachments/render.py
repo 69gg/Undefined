@@ -302,6 +302,8 @@ async def dispatch_pending_file_sends(
             dispatched_count += 1
         except Exception as exc:
             if bool(getattr(exc, "file_transfer_error", False)):
+                # 携带失败前已成功派发数量，供调用方按部分成功处理，避免整批重发。
+                setattr(exc, "dispatched_file_count", dispatched_count)
                 raise
             if bool(getattr(exc, "delivery_uncertain", False)):
                 logger.warning(

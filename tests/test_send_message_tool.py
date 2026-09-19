@@ -58,6 +58,80 @@ async def test_file_only_message_surfaces_preparation_error(tmp_path: Path) -> N
 
 
 @pytest.mark.asyncio
+async def test_send_message_reports_partial_delivery_before_transfer_error(
+    tmp_path: Path,
+) -> None:
+    registry = AttachmentRegistry(
+        registry_path=tmp_path / "registry.json", cache_dir=tmp_path / "attachments"
+    )
+    first = await registry.register_bytes(
+        "group:10001", b"one", kind="file", display_name="one.txt", source_kind="test"
+    )
+    second = await registry.register_bytes(
+        "group:10001", b"two", kind="file", display_name="two.txt", source_kind="test"
+    )
+    error = FileTransferError("stream", "请切换 onebot.file_send_mode")
+    sender = SimpleNamespace(
+        send_address_message=AsyncMock(),
+        send_address_file=AsyncMock(side_effect=[{"status": "ok"}, error]),
+    )
+    context = _tool_context(
+        request_type="group",
+        group_id=10001,
+        sender_id=20002,
+        runtime_config=_build_runtime_config(),
+        sender=sender,
+        attachment_registry=registry,
+    )
+
+    result = await execute(
+        {
+            "message": (
+                f'<attachment uid="{first.uid}"/><attachment uid="{second.uid}"/>'
+            )
+        },
+        context,
+    )
+
+    assert result == f"仅成功发送 1/2 个附件：{error.user_message}"
+    assert context["message_sent_this_turn"] is True
+    assert sender.send_address_file.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_send_message_reports_body_sent_when_file_transfer_fails(
+    tmp_path: Path,
+) -> None:
+    registry = AttachmentRegistry(
+        registry_path=tmp_path / "registry.json", cache_dir=tmp_path / "attachments"
+    )
+    record = await registry.register_bytes(
+        "group:10001", b"file", kind="file", display_name="data.txt", source_kind="test"
+    )
+    error = FileTransferError("stream", "请切换 onebot.file_send_mode")
+    sender = SimpleNamespace(
+        send_address_message=AsyncMock(), send_address_file=AsyncMock(side_effect=error)
+    )
+    context = _tool_context(
+        request_type="group",
+        group_id=10001,
+        sender_id=20002,
+        runtime_config=_build_runtime_config(),
+        sender=sender,
+        attachment_registry=registry,
+    )
+
+    result = await execute(
+        {"message": f'附件如下\n<attachment uid="{record.uid}"/>'}, context
+    )
+
+    assert result == f"消息正文已发送，但仅成功发送 0/1 个附件：{error.user_message}"
+    assert context["message_sent_this_turn"] is True
+    sender.send_address_message.assert_awaited_once()
+    sender.send_address_file.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_send_message_schema_rejects_mixed_address_parameters() -> None:
     config_text = await async_io.read_text(
         Path("src/Undefined/skills/toolsets/messages/send_message/config.json")

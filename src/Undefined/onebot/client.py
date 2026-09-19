@@ -12,7 +12,7 @@ import websockets
 from websockets.asyncio.client import ClientConnection
 
 from Undefined.context import RequestContext
-from Undefined.onebot.file_errors import OneBotAPIError
+from Undefined.onebot.file_errors import FileTransferError, OneBotAPIError
 from Undefined.onebot.file_transport import OneBotFileTransport
 from Undefined.onebot.file_store import DELIVERY_TIMEOUT
 from Undefined.onebot.file_references import local_file_path
@@ -238,12 +238,33 @@ class OneBotClient:
                 if mark_sent:
                     _mark_message_sent_this_turn()
                 return result
+        except FileTransferError as exc:
+            if exc.stage != "send":
+                raise
+            # 总预算在发送阶段耗尽：请求可能已发出，按结果未确认处理。
+            _remember_uncertain_delivery(action, original)
+            if fallback is not None:
+                _remember_uncertain_delivery(*fallback)
+            if mark_sent:
+                _mark_message_sent_this_turn()
+            raise OneBotDeliveryUncertainError(
+                action, "文件传输超过本次投递总时间预算，投递结果未确认"
+            ) from exc
         except OneBotDeliveryUncertainError:
             _remember_uncertain_delivery(action, original)
             if fallback is not None:
                 _remember_uncertain_delivery(*fallback)
             if mark_sent:
                 _mark_message_sent_this_turn()
+            raise
+        except asyncio.CancelledError as exc:
+            # 取消可能发生在请求发出之后：登记未确认投递，但不改写取消语义。
+            if getattr(exc, "onebot_delivery_uncertain", False):
+                _remember_uncertain_delivery(action, original)
+                if fallback is not None:
+                    _remember_uncertain_delivery(*fallback)
+                if mark_sent:
+                    _mark_message_sent_this_turn()
             raise
 
     async def _call_api_raw(
@@ -311,9 +332,15 @@ class OneBotClient:
             if logger.isEnabledFor(logging.DEBUG):
                 log_debug_json(logger, "[OneBot响应体]", response)
             return response
+        except asyncio.CancelledError as exc:
+            duration = time.perf_counter() - start_time
+            logger.error(f"[API超时] {action} (ID={echo}) | 耗时={duration:.2f}s")
+            if action in _DELIVERY_ACTIONS:
+                # 请求可能已发出：标记后由 _call_api 登记未确认投递，取消原样传播。
+                setattr(exc, "onebot_delivery_uncertain", True)
+            raise
         except (
             TimeoutError,
-            asyncio.CancelledError,
             websockets.exceptions.ConnectionClosed,
             ConnectionError,
             OSError,
@@ -323,7 +350,7 @@ class OneBotClient:
             if action in _DELIVERY_ACTIONS:
                 raise OneBotDeliveryUncertainError(
                     action,
-                    "投递请求发出后等待响应超时、被取消或连接中断",
+                    "投递请求发出后等待响应超时或连接中断",
                 ) from exc
             if isinstance(exc, websockets.exceptions.ConnectionClosed):
                 raise ConnectionError("OneBot WebSocket 连接中断") from exc

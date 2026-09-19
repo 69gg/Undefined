@@ -40,6 +40,44 @@ class _RespondingWebSocket:
         self.client._pending_responses[echo].set_result(response)
 
 
+class _SilentWebSocket:
+    close_code: int | None = None
+
+    def __init__(self) -> None:
+        self.sent = asyncio.Event()
+
+    async def send(self, payload: str) -> None:
+        self.sent.set()
+
+
+@pytest.mark.asyncio
+async def test_delivery_cancellation_propagates_and_blocks_repeat() -> None:
+    client = OneBotClient(
+        "ws://example.invalid", config_getter=lambda: FileSendSettings("local")
+    )
+    websocket = _SilentWebSocket()
+    client.ws = cast(Any, websocket)
+
+    async with RequestContext(
+        request_type="group",
+        group_id=10001,
+        sender_id=20002,
+    ) as request_context:
+        task = asyncio.create_task(client.send_group_message(10001, "hello"))
+        await websocket.sent.wait()
+        task.cancel()
+        # 取消必须原样传播，不能被改写成普通投递错误。
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        # 请求可能已发出：同一请求内相同投递仍禁止重发。
+        with pytest.raises(OneBotDeliveryUncertainError):
+            await client.send_group_message(10001, "hello")
+        assert was_message_sent(request_context) is True
+
+    assert not client._pending_responses
+
+
 @pytest.mark.parametrize("target_type", ["group", "private"])
 @pytest.mark.parametrize("upload_file", [False, True])
 async def test_default_client_preserves_local_file_delivery(

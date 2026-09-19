@@ -121,7 +121,7 @@ class OneBotFileTransport:
                     outcome = "success"
             except TimeoutError as exc:
                 raise FileTransferError(
-                    settings.mode, "文件准备超过本次投递总时间预算", stage=stage
+                    settings.mode, "文件准备或发送超过本次投递总时间预算", stage=stage
                 ) from exc
             except OSError as exc:
                 if stage != "prepare":

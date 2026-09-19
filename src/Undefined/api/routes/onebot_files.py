@@ -53,6 +53,7 @@ async def download(
                     "Content-Disposition": f"attachment; filename*=UTF-8''{quote(entry.name, safe='')}",
                     "Cache-Control": "private, no-store",
                     "Referrer-Policy": "no-referrer",
+                    "X-Content-Type-Options": "nosniff",
                 },
             )
             # FileResponse 在 prepare 中发送文件，不能在仅构造响应后释放读者租约。

@@ -14,6 +14,7 @@ from Undefined.utils.message_targets import (
 )
 from Undefined.skills.toolsets.messages.context_utils import (
     handle_delivery_uncertain,
+    file_transfer_error_dispatched_count,
     file_transfer_error_message,
     is_delivery_uncertain_error,
     mark_message_sent,
@@ -208,7 +209,17 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             return f"发送失败：{exc}"
         except Exception as e:
             if transfer_message := file_transfer_error_message(e):
-                return transfer_message
+                delivered = file_transfer_error_dispatched_count(e)
+                if delivered > 0:
+                    mark_message_sent(context)
+                if not has_delivery_message and delivered <= 0:
+                    return transfer_message
+                prefix = (
+                    "消息正文已发送，但仅成功发送 "
+                    if has_delivery_message
+                    else "仅成功发送 "
+                )
+                return f"{prefix}{delivered}/{pending_file_count} 个附件：{transfer_message}"
             if is_delivery_uncertain_error(e):
                 logger.warning(
                     "[发送消息] 投递结果未确认，阻止自动重试: "
