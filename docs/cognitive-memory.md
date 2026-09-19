@@ -42,6 +42,9 @@ queue_interval_seconds = 0.0
 ```
 
 > `models.embedding` 是必要前提。未配置时，即使 `cognitive.enabled = true`，启动时也会自动降级并打印警告。
+> 认知记忆默认复用 `[models.embedding]`；如需独立模型或参数，在
+> `[models.embedding.features.cognitive]` 中设置 `use_default = false` 后按字段覆写，
+> 详见 [配置文档](configuration.md#44101-modelsembeddingfeaturesname-按功能覆写)。
 
 启动后验证：
 
@@ -354,7 +357,8 @@ data/cognitive/
 
 ### [models.embedding]（必须配置）
 
-复用知识库的 embedding 配置，无需重复配置：
+默认复用知识库、梗库的 embedding 配置，无需重复配置；需要独立模型时用
+`[models.embedding.features.cognitive]` 覆写：
 
 | 字段 | 说明 |
 |------|------|
@@ -363,6 +367,9 @@ data/cognitive/
 | `model_name` | 模型名称（推荐 `text-embedding-3-small`） |
 | `queue_interval_seconds` | 发车间隔（默认 `0.0`；`<=0` 请求到达立即发车） |
 | `dimensions` | 向量维度（可选，模型默认值） |
+
+向量库维度由首次写入确定；更换 `dimensions` 或嵌入模型会改变向量维度，
+需要先按 [更换嵌入模型](#更换嵌入模型) 的说明重建向量库。
 
 ### 热更新说明
 

@@ -86,6 +86,18 @@ def _coerce_str(value: Any, default: str) -> str:
     return normalized if normalized is not None else default
 
 
+def _coerce_instruction(value: Any, default: str) -> str:
+    """解析指令前缀，保留原始空白。
+
+    指令会与文本直接拼接（如 ``f"{instruction}{text}"``），因此
+    ``"passage: "`` 的尾部空格与多行指令的换行都有意义，不能 strip；
+    仅空白字符串视为未设置。
+    """
+    if not isinstance(value, str):
+        return default
+    return value if value.strip() else default
+
+
 def _normalize_base_url(value: str, default: str) -> str:
     normalized = value.strip().rstrip("/")
     if normalized:

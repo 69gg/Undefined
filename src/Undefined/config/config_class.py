@@ -15,6 +15,7 @@ from .models import (
     AutomationsConfig,
     ChatModelConfig,
     CognitiveConfig,
+    EmbeddingFeatureOverride,
     EmbeddingModelConfig,
     GrokModelConfig,
     ImageGenConfig,
@@ -177,6 +178,8 @@ class Config:
     lxmusic2api_api_key: str
     # 嵌入模型
     embedding_model: EmbeddingModelConfig
+    # 按功能覆写的嵌入配置（key 见 EMBEDDING_FEATURES）
+    embedding_features: dict[str, EmbeddingFeatureOverride]
     rerank_model: RerankModelConfig
     # 知识库
     knowledge_enabled: bool
@@ -571,6 +574,17 @@ class Config:
         # 热更新运行时参数
 
         return bool(self.security_model_enabled)
+
+    def resolve_embedding_model(self, feature: str) -> EmbeddingModelConfig:
+        """返回指定功能实际生效的 embedding 配置。
+
+        `feature` 取 `EMBEDDING_FEATURES` 之一；未单独设置（或缺省）的功能
+        使用 `[models.embedding]` 默认配置。
+        """
+        override = self.embedding_features.get(feature)
+        if override is None:
+            return self.embedding_model
+        return override.resolve(self.embedding_model)
 
     # 热更新运行时参数
     def update_from(self, new_config: "Config") -> dict[str, tuple[Any, Any]]:

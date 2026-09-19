@@ -40,6 +40,10 @@ _RESTART_REQUIRED_KEYS: set[str] = {
     "api.auth_key",
     "api.openapi_enabled",
     "naga",
+    # 嵌入/重排运行时在启动时构造，热更新仅提示需要重启
+    "embedding_model",
+    "embedding_features",
+    "rerank_model",
 }
 
 _QUEUE_INTERVAL_KEYS: set[str] = {

@@ -196,11 +196,12 @@ async def _reembed_collection(
 
 
 def _build_embedder(config: Config) -> Embedder:
-    """根据 config.toml 构建 Embedder 实例。"""
-    embedding_config: EmbeddingModelConfig = config.embedding_model
+    """根据 config.toml 构建 Embedder 实例（使用 cognitive 功能实际生效的配置）。"""
+    embedding_config: EmbeddingModelConfig = config.resolve_embedding_model("cognitive")
     if not embedding_config.api_url or not embedding_config.model_name:
         logger.error(
-            "config.toml 中 [models.embedding] 未配置 api_url 或 model_name，无法继续。"
+            "config.toml 中 [models.embedding]（或 "
+            "[models.embedding.features.cognitive]）未配置 api_url 或 model_name，无法继续。"
         )
         sys.exit(1)
 
@@ -216,10 +217,11 @@ async def _main(args: argparse.Namespace) -> None:
 
     db_path = args.db_path or config.cognitive.vector_store_path
     logger.info("ChromaDB 路径: %s", db_path)
+    cognitive_embedding = config.resolve_embedding_model("cognitive")
     logger.info(
         "嵌入模型: %s (dimensions=%s)",
-        config.embedding_model.model_name,
-        config.embedding_model.dimensions or "auto",
+        cognitive_embedding.model_name,
+        cognitive_embedding.dimensions or "auto",
     )
 
     if not Path(db_path).exists():

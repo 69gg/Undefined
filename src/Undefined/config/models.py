@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from ipaddress import ip_address
 from typing import Any
 
@@ -10,6 +10,9 @@ from .api_modes import API_MODE_OPENAI_CHAT_COMPLETIONS, normalize_api_mode
 
 HISTORIAN_MIN_POLL_INTERVAL_SECONDS: float = 0.1
 PROMPT_FILE_INCLUDE_SLOTS: tuple[str, ...] = ("p0", "p1", "p2", "p3", "summary")
+
+# 支持独立 embedding 配置的功能；顺序即文档与校验顺序
+EMBEDDING_FEATURES: tuple[str, ...] = ("knowledge", "cognitive", "memes")
 
 
 def format_netloc(host: str, port: int) -> str:
@@ -198,6 +201,68 @@ class EmbeddingModelConfig:
     query_instruction: str = ""  # 查询端指令前缀（如 Qwen3-Embedding 需要）
     document_instruction: str = ""  # 文档端指令前缀（如 E5 系列需要 "passage: "）
     request_params: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class EmbeddingFeatureOverride:
+    """`[models.embedding.features.<name>]` 的按功能覆写配置。
+
+    字段的哨兵值表示“继承 ``[models.embedding]`` 默认值”：
+
+    - ``api_url`` / ``api_key`` / ``model_name`` / ``query_instruction`` /
+      ``document_instruction``：空字符串表示继承；
+    - ``use_proxy``：``None`` 表示继承；
+    - ``context_window_tokens``：``<=0`` 表示继承；
+    - ``queue_interval_seconds``：``<0`` 表示继承（``0`` 为请求到达立即发车）；
+    - ``dimensions``：``<0`` 表示继承（``0`` 为模型默认维度）；
+    - ``request_params``：按 key 合并到默认配置之上，同名以本表为准。
+
+    ``use_default=True`` 时整段忽略，直接使用默认配置。
+    """
+
+    use_default: bool = True
+    api_url: str = ""
+    api_key: str = ""
+    model_name: str = ""
+    use_proxy: bool | None = None
+    context_window_tokens: int = 0
+    queue_interval_seconds: float = -1.0
+    dimensions: int = -1
+    query_instruction: str = ""
+    document_instruction: str = ""
+    request_params: dict[str, Any] = field(default_factory=dict)
+
+    def resolve(self, default: EmbeddingModelConfig) -> EmbeddingModelConfig:
+        """把覆写合并到默认配置上，返回该功能实际生效的 embedding 配置。"""
+        if self.use_default:
+            return default
+        request_params = dict(default.request_params)
+        request_params.update(self.request_params)
+        return replace(
+            default,
+            api_url=self.api_url or default.api_url,
+            api_key=self.api_key or default.api_key,
+            model_name=self.model_name or default.model_name,
+            use_proxy=default.use_proxy if self.use_proxy is None else self.use_proxy,
+            context_window_tokens=(
+                default.context_window_tokens
+                if self.context_window_tokens <= 0
+                else self.context_window_tokens
+            ),
+            queue_interval_seconds=(
+                default.queue_interval_seconds
+                if self.queue_interval_seconds < 0
+                else self.queue_interval_seconds
+            ),
+            dimensions=(
+                default.dimensions if self.dimensions < 0 else (self.dimensions or None)
+            ),
+            query_instruction=self.query_instruction or default.query_instruction,
+            document_instruction=(
+                self.document_instruction or default.document_instruction
+            ),
+            request_params=request_params,
+        )
 
 
 @dataclass

@@ -3,7 +3,11 @@
 # 模型配置解析：原始 dict → ChatModelConfig 等 dataclass
 from .agent import _parse_agent_model_config
 from .chat import _parse_chat_model_config
-from .embedding import _parse_embedding_model_config, _parse_rerank_model_config
+from .embedding import (
+    _parse_embedding_feature_overrides,
+    _parse_embedding_model_config,
+    _parse_rerank_model_config,
+)
 from .grok import _parse_grok_model_config
 from .helpers import _log_debug_info, _merge_admins, _verify_required_fields
 from .historian import _parse_historian_model_config
@@ -23,6 +27,7 @@ __all__ = [
     "_merge_admins",
     "_parse_agent_model_config",
     "_parse_chat_model_config",
+    "_parse_embedding_feature_overrides",
     "_parse_embedding_model_config",
     "_parse_grok_model_config",
     "_parse_historian_model_config",

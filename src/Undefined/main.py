@@ -177,7 +177,7 @@ async def main() -> None:
     meme_service = None
     meme_worker = None
     meme_job_queue = None
-    retrieval_runtime = None
+    retrieval_registry = None
     runtime_api_server: RuntimeAPIServer | None = None
     weixin_service: WeixinService | None = None
     _reranker: Any = None
@@ -201,19 +201,27 @@ async def main() -> None:
         )
         await ai.attachment_registry.load()
         faq_storage = FAQStorage()
-        from Undefined.knowledge import RetrievalRuntime
+        from Undefined.config.models import EMBEDDING_FEATURES
+        from Undefined.knowledge import RetrievalRuntimeRegistry
 
-        retrieval_runtime = RetrievalRuntime(
+        retrieval_registry = RetrievalRuntimeRegistry(
             ai._requester,
-            config.embedding_model,
-            config.rerank_model,
+            embedding_models={
+                feature: config.resolve_embedding_model(feature)
+                for feature in EMBEDDING_FEATURES
+            },
+            rerank_model=config.rerank_model,
             embed_batch_size=config.knowledge_embed_batch_size,
         )
+        retrieval_runtime = retrieval_registry.for_feature("knowledge")
+        cognitive_retrieval_runtime = retrieval_registry.for_feature("cognitive")
+        meme_retrieval_runtime = retrieval_registry.for_feature("memes")
 
         # === Cognitive Memory ===
+        cognitive_embedding = config.resolve_embedding_model("cognitive")
         cognitive_actually_enabled = config.cognitive.enabled
         if cognitive_actually_enabled and (
-            not config.embedding_model.api_url or not config.embedding_model.model_name
+            not cognitive_embedding.api_url or not cognitive_embedding.model_name
         ):
             logger.warning(
                 "[认知记忆] cognitive.enabled=true 但 models.embedding 未配置，自动降级禁用"
@@ -231,7 +239,7 @@ async def main() -> None:
             need_reranker_for_knowledge or need_reranker_for_cognitive
         )
         if need_shared_reranker:
-            _reranker = retrieval_runtime.ensure_reranker()
+            _reranker = retrieval_registry.ensure_reranker()
             if _reranker is None:
                 if need_reranker_for_knowledge:
                     logger.warning(
@@ -245,12 +253,11 @@ async def main() -> None:
         if config.knowledge_enabled:
             from Undefined.knowledge import KnowledgeManager
 
-            if (
-                not config.embedding_model.api_url
-                or not config.embedding_model.model_name
-            ):
+            knowledge_embedding = config.resolve_embedding_model("knowledge")
+            if not knowledge_embedding.api_url or not knowledge_embedding.model_name:
                 raise ValueError(
-                    "知识库已启用，但 models.embedding.api_url / model_name 未配置完整"
+                    "知识库已启用，但 models.embedding.api_url / model_name "
+                    "（或 models.embedding.features.knowledge 覆写）未配置完整"
                 )
 
             knowledge_manager = KnowledgeManager(
@@ -295,7 +302,7 @@ async def main() -> None:
 
             vector_store = CognitiveVectorStore(
                 str(_cog_chroma),
-                retrieval_runtime,
+                cognitive_retrieval_runtime,
                 scheduler_foreground_burst=config.cognitive.vector_store_scheduler_foreground_burst,
             )
             job_queue = JobQueue(str(_cog_queues))
@@ -308,7 +315,7 @@ async def main() -> None:
                 vector_store=vector_store,
                 job_queue=job_queue,
                 profile_storage=profile_storage,
-                retrieval_runtime=retrieval_runtime,
+                retrieval_runtime=cognitive_retrieval_runtime,
             )
             historian_worker = HistorianWorker(
                 job_queue=job_queue,
@@ -339,7 +346,7 @@ async def main() -> None:
             meme_store = MemeStore(config.memes.db_path)
             meme_vector_store = MemeVectorStore(
                 config.memes.vector_store_path,
-                retrieval_runtime,
+                meme_retrieval_runtime,
             )
             meme_job_queue = JobQueue(config.memes.queue_path)
             meme_service = MemeService(
@@ -349,7 +356,7 @@ async def main() -> None:
                 job_queue=meme_job_queue,
                 ai_client=ai,
                 attachment_registry=ai.attachment_registry,
-                retrieval_runtime=retrieval_runtime,
+                retrieval_runtime=meme_retrieval_runtime,
             )
             meme_worker = MemeWorker(
                 job_queue=meme_job_queue,
@@ -526,8 +533,8 @@ async def main() -> None:
             await historian_worker.stop()
         await onebot.disconnect()
         await ai.close()
-        if retrieval_runtime is not None:
-            await retrieval_runtime.stop()
+        if retrieval_registry is not None:
+            await retrieval_registry.stop()
         await config_manager.stop_hot_reload()
         await close_render_browser()
         await close_render_cache()

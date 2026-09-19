@@ -685,8 +685,8 @@ stream_enabled = false
 # en: Extra request-body params (optional), e.g. temperature or vendor-specific fields.
 [models.grok.request_params]
 
-# zh: 嵌入模型配置（知识库语义检索使用）。
-# en: Embedding model config (used by knowledge semantic retrieval).
+# zh: 嵌入模型默认配置（知识库 / 认知记忆 / 梗库默认共用；各功能可在下方 features 中单独覆写）。
+# en: Default embedding model config (shared by knowledge, cognitive memory and memes by default; override per feature below).
 [models.embedding]
 # zh: 是否让该模型请求使用 [proxy] 代理地址。默认关闭。
 # en: Whether this model uses proxy addresses from [proxy]. Disabled by default.
@@ -720,6 +720,130 @@ document_instruction = ""
 # zh: 额外请求体参数（可选），用于 embedding 供应商的扩展字段。
 # en: Extra request-body params (optional) for embedding-provider-specific fields.
 [models.embedding.request_params]
+
+# zh: 按功能覆写的 embedding 配置。每个功能可完全继承 [models.embedding] 默认配置，
+#     也可单独设置并按字段覆写；生效配置完全相同的功能共用一个发车队列。
+# en: Per-feature embedding overrides. Each feature either inherits the
+#     [models.embedding] defaults or overrides individual fields; features with
+#     the same effective config share one dispatch queue.
+
+# zh: 按功能覆写示例：知识库（knowledge）。
+# en: Per-feature override example: knowledge base (knowledge).
+[models.embedding.features.knowledge]
+# zh: 是否完全使用 [models.embedding] 默认配置；true 时本表其余字段全部忽略。
+# en: Whether to fully inherit the [models.embedding] defaults; when true, all other fields here are ignored.
+use_default = true
+# zh: 以下字段仅在 use_default = false 时生效；只有出现在本表中的字段才会覆写默认配置。
+# en: The fields below apply only when use_default = false; only fields present here override the defaults.
+# zh: 覆写 API 地址；空字符串表示继承默认配置。
+# en: Override API URL; an empty string inherits the default.
+api_url = ""
+# zh: 覆写 API Key；空字符串表示继承默认配置。
+# en: Override API key; an empty string inherits the default.
+api_key = ""
+# zh: 覆写模型名称；空字符串表示继承默认配置。
+# en: Override model name; an empty string inherits the default.
+model_name = ""
+# zh: 覆写代理开关；"inherit"（或 "default"）表示继承默认配置，也可写 true / false。
+# en: Override the proxy switch; "inherit" (or "default") inherits the default, true / false override it.
+use_proxy = "inherit"
+# zh: 覆写上下文窗口上限（token）；<=0 表示继承默认配置。
+# en: Override the context window cap (tokens); <=0 inherits the default.
+context_window_tokens = 0
+# zh: 覆写队列发车间隔（秒）；<0 表示继承默认配置，0 表示请求到达立即发车。
+# en: Override the queue interval (seconds); <0 inherits the default, 0 dispatches on arrival.
+queue_interval_seconds = -1.0
+# zh: 覆写向量维度；<0 表示继承默认配置，0 表示使用模型默认维度。
+# en: Override embedding dimensions; <0 inherits the default, 0 uses the model default.
+dimensions = -1
+# zh: 覆写查询端指令前缀；空字符串表示继承默认配置。
+# en: Override the query instruction prefix; an empty string inherits the default.
+query_instruction = ""
+# zh: 覆写文档端指令前缀；空字符串表示继承默认配置。
+# en: Override the document instruction prefix; an empty string inherits the default.
+document_instruction = ""
+
+# zh: 覆写额外请求体参数，按 key 合并到默认 request_params 之上（同名以本表为准）。
+# en: Override extra request-body params, merged over the default request_params (this table wins).
+[models.embedding.features.knowledge.request_params]
+# zh: 按功能覆写示例：认知记忆（cognitive）。
+# en: Per-feature override example: cognitive memory (cognitive).
+[models.embedding.features.cognitive]
+# zh: 是否完全使用 [models.embedding] 默认配置；true 时本表其余字段全部忽略。
+# en: Whether to fully inherit the [models.embedding] defaults; when true, all other fields here are ignored.
+use_default = true
+# zh: 以下字段仅在 use_default = false 时生效；只有出现在本表中的字段才会覆写默认配置。
+# en: The fields below apply only when use_default = false; only fields present here override the defaults.
+# zh: 覆写 API 地址；空字符串表示继承默认配置。
+# en: Override API URL; an empty string inherits the default.
+api_url = ""
+# zh: 覆写 API Key；空字符串表示继承默认配置。
+# en: Override API key; an empty string inherits the default.
+api_key = ""
+# zh: 覆写模型名称；空字符串表示继承默认配置。
+# en: Override model name; an empty string inherits the default.
+model_name = ""
+# zh: 覆写代理开关；"inherit"（或 "default"）表示继承默认配置，也可写 true / false。
+# en: Override the proxy switch; "inherit" (or "default") inherits the default, true / false override it.
+use_proxy = "inherit"
+# zh: 覆写上下文窗口上限（token）；<=0 表示继承默认配置。
+# en: Override the context window cap (tokens); <=0 inherits the default.
+context_window_tokens = 0
+# zh: 覆写队列发车间隔（秒）；<0 表示继承默认配置，0 表示请求到达立即发车。
+# en: Override the queue interval (seconds); <0 inherits the default, 0 dispatches on arrival.
+queue_interval_seconds = -1.0
+# zh: 覆写向量维度；<0 表示继承默认配置，0 表示使用模型默认维度。
+# en: Override embedding dimensions; <0 inherits the default, 0 uses the model default.
+dimensions = -1
+# zh: 覆写查询端指令前缀；空字符串表示继承默认配置。
+# en: Override the query instruction prefix; an empty string inherits the default.
+query_instruction = ""
+# zh: 覆写文档端指令前缀；空字符串表示继承默认配置。
+# en: Override the document instruction prefix; an empty string inherits the default.
+document_instruction = ""
+
+# zh: 覆写额外请求体参数，按 key 合并到默认 request_params 之上（同名以本表为准）。
+# en: Override extra request-body params, merged over the default request_params (this table wins).
+[models.embedding.features.cognitive.request_params]
+# zh: 按功能覆写示例：梗库（memes）。
+# en: Per-feature override example: meme library (memes).
+[models.embedding.features.memes]
+# zh: 是否完全使用 [models.embedding] 默认配置；true 时本表其余字段全部忽略。
+# en: Whether to fully inherit the [models.embedding] defaults; when true, all other fields here are ignored.
+use_default = true
+# zh: 以下字段仅在 use_default = false 时生效；只有出现在本表中的字段才会覆写默认配置。
+# en: The fields below apply only when use_default = false; only fields present here override the defaults.
+# zh: 覆写 API 地址；空字符串表示继承默认配置。
+# en: Override API URL; an empty string inherits the default.
+api_url = ""
+# zh: 覆写 API Key；空字符串表示继承默认配置。
+# en: Override API key; an empty string inherits the default.
+api_key = ""
+# zh: 覆写模型名称；空字符串表示继承默认配置。
+# en: Override model name; an empty string inherits the default.
+model_name = ""
+# zh: 覆写代理开关；"inherit"（或 "default"）表示继承默认配置，也可写 true / false。
+# en: Override the proxy switch; "inherit" (or "default") inherits the default, true / false override it.
+use_proxy = "inherit"
+# zh: 覆写上下文窗口上限（token）；<=0 表示继承默认配置。
+# en: Override the context window cap (tokens); <=0 inherits the default.
+context_window_tokens = 0
+# zh: 覆写队列发车间隔（秒）；<0 表示继承默认配置，0 表示请求到达立即发车。
+# en: Override the queue interval (seconds); <0 inherits the default, 0 dispatches on arrival.
+queue_interval_seconds = -1.0
+# zh: 覆写向量维度；<0 表示继承默认配置，0 表示使用模型默认维度。
+# en: Override embedding dimensions; <0 inherits the default, 0 uses the model default.
+dimensions = -1
+# zh: 覆写查询端指令前缀；空字符串表示继承默认配置。
+# en: Override the query instruction prefix; an empty string inherits the default.
+query_instruction = ""
+# zh: 覆写文档端指令前缀；空字符串表示继承默认配置。
+# en: Override the document instruction prefix; an empty string inherits the default.
+document_instruction = ""
+
+# zh: 覆写额外请求体参数，按 key 合并到默认 request_params 之上（同名以本表为准）。
+# en: Override extra request-body params, merged over the default request_params (this table wins).
+[models.embedding.features.memes.request_params]
 
 # zh: 重排模型配置（知识库二阶段检索使用）。
 # en: Rerank model config (used in second-stage knowledge retrieval).

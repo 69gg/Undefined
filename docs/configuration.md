@@ -494,6 +494,8 @@ Prompt caching 补充：
 
 ### 4.4.10 `[models.embedding]` 嵌入模型
 
+`[models.embedding]` 是所有功能共用的**默认**嵌入配置，也是唯一需要配置的嵌入表。
+
 | 字段 | 默认值 | 说明 |
 |---|---:|---|
 | `api_url` | `""` | 嵌入 API 地址 |
@@ -502,9 +504,42 @@ Prompt caching 补充：
 | `use_proxy` | `false` | 是否使用 `[proxy]` 中的代理地址 |
 | `queue_interval_seconds` | `0.0` | 发车间隔；`<=0` 表示请求到达立即发车，`>0` 表示两次发车间隔 |
 | `dimensions` | `0` | 向量维度；`0`/空视为 `None`（模型默认） |
-| `query_instruction` | `""` | 查询前缀 |
-| `document_instruction` | `""` | 文档前缀 |
+| `query_instruction` | `""` | 查询前缀；原样保留首尾空白，与查询文本直接拼接 |
+| `document_instruction` | `""` | 文档前缀；原样保留首尾空白，与文档文本直接拼接 |
 | `request_params` | `{}` | 额外请求体参数；保留字段如 `model`/`input`/`dimensions` 会忽略 |
+
+#### 4.4.10.1 `[models.embedding.features.<name>]` 按功能覆写
+
+支持单独设置的功能名：`knowledge`（知识库）、`cognitive`（认知记忆）、`memes`（梗库）。
+每个功能都可以选择完全继承默认配置，或按字段覆写：
+
+```toml
+[models.embedding.features.cognitive]
+use_default = false          # 单独设置
+model_name = "qwen3-embedding-4b"
+dimensions = 2560
+queue_interval_seconds = 1.0
+query_instruction = "Instruct: 检索相关记忆\nQuery: "
+document_instruction = "passage: "
+```
+
+| 字段 | 哨兵值（= 继承默认） | 说明 |
+|---|---:|---|
+| `use_default` | `true` | `true` 时本表其余字段全部忽略 |
+| `api_url` / `api_key` / `model_name` | `""` | 覆写连接与模型名 |
+| `use_proxy` | `"inherit"` | 也可写 `"default"`；`true`/`false` 覆盖默认值 |
+| `context_window_tokens` | `<=0` | 覆写上下文窗口上限 |
+| `queue_interval_seconds` | `<0` | `0` 表示请求到达立即发车 |
+| `dimensions` | `<0` | `0` 表示使用模型默认维度 |
+| `query_instruction` / `document_instruction` | `""` | 覆写指令前缀；空字符串表示继承。如需“默认带前缀、个别功能不带”，请把默认前缀留空、只在需要的功能上单独设置 |
+| `[.request_params]` | 空表 | 按 key 合并到默认 `request_params` 之上，同名以本表为准 |
+
+语义说明：
+
+- 未出现在本表中的字段，以及取哨兵值的字段，都表示继续继承 `[models.embedding]`；
+- 生效配置完全相同（含指令前缀）的功能共用同一个 Embedder 与发车队列；任一字段不同则该功能拥有独立的 Embedder 与队列，重排器在所有功能间共享；
+- 功能名拼写错误或写成未知功能名时会被忽略并记录警告，该功能回落到默认配置；
+- 嵌入配置（含 `features` 子表）与 `[models.rerank]` 都在启动时构造运行时，热更新只提示“需要重启生效”，不会改变已运行实例。
 
 ### 4.4.11 `[models.rerank]` 重排模型
 
