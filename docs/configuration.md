@@ -1236,6 +1236,7 @@ api_key = "replace-with-your-key"
 | `source_message_max_len` | `800` | 当前触发消息最大字符数 |
 | `poll_interval_seconds` | `1.0` | 队列轮询间隔；小于 `0.1` 时按 `0.1` 秒处理，避免空队列忙循环 |
 | `stale_job_timeout_seconds` | `300.0` | processing 超时回收阈值 |
+| `max_concurrency` | `4` | 史官同时在途任务上限（最小 `1`）；超出后暂停取新任务，需重启生效 |
 
 ### 4.26.5 `[cognitive.profile]`
 

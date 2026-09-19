@@ -324,6 +324,7 @@ async def main() -> None:
                 ai_client=ai,
                 config_getter=lambda: get_config(strict=False).cognitive,
                 model_config=config.historian_model,
+                max_concurrency=config.cognitive.historian_max_concurrency,
             )
             ai.set_cognitive_service(cognitive_service)
             logger.info(

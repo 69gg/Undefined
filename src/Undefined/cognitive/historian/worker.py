@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 from datetime import datetime, timezone, tzinfo
@@ -49,6 +50,7 @@ class HistorianWorker:
         ai_client: Any,
         config_getter: Callable[[], Any],
         model_config: Any = None,
+        max_concurrency: int = 4,
     ) -> None:
         self._job_queue = job_queue
         self._vector_store = vector_store
@@ -56,9 +58,11 @@ class HistorianWorker:
         self._ai_client = ai_client
         self._config_getter = config_getter
         self._model_config = model_config
+        self._max_concurrency = max(1, int(max_concurrency))
         self._stop_event = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
         self._inflight_tasks: set[asyncio.Task[None]] = set()
+        self._semaphore = asyncio.Semaphore(self._max_concurrency)
 
     async def _prepare_query_embedding(self, query_text: str) -> list[float] | None:
         embed_query = getattr(self._vector_store, "embed_query", None)
@@ -97,8 +101,16 @@ class HistorianWorker:
         dispatch_count = 0
         logger.info("[史官] 轮询循环已开始")
         while not self._stop_event.is_set():
-            result = await self._job_queue.dequeue()
             config = self._config_getter()
+            poll_interval = max(
+                HISTORIAN_MIN_POLL_INTERVAL_SECONDS,
+                float(config.poll_interval_seconds),
+            )
+            if len(self._inflight_tasks) >= self._max_concurrency:
+                # 在途任务达到上限时先不取新任务，避免无界并发与内存堆积
+                await asyncio.sleep(poll_interval)
+                continue
+            result = await self._job_queue.dequeue()
             if result:
                 job_id, job = result
                 task = asyncio.create_task(self._process_job_with_retry(job_id, job))
@@ -128,12 +140,7 @@ class HistorianWorker:
                         config.failed_max_files,
                     )
 
-            await asyncio.sleep(
-                max(
-                    HISTORIAN_MIN_POLL_INTERVAL_SECONDS,
-                    float(config.poll_interval_seconds),
-                )
-            )
+            await asyncio.sleep(poll_interval)
 
         if self._inflight_tasks:
             logger.info(
@@ -143,6 +150,13 @@ class HistorianWorker:
         logger.info("[史官] 轮询循环已结束")
 
     async def _process_job_with_retry(self, job_id: str, job: dict[str, Any]) -> None:
+        # 并发上限由 _poll_loop 的在途计数与这里的信号量双重约束
+        async with self._semaphore:
+            await self._process_job_with_retry_inner(job_id, job)
+
+    async def _process_job_with_retry_inner(
+        self, job_id: str, job: dict[str, Any]
+    ) -> None:
         try:
             await self._process_job(job_id, job)
         except Exception as e:
@@ -449,14 +463,16 @@ class HistorianWorker:
         success_count = 0
         for index, target in enumerate(targets, start=1):
             try:
-                merged = await self._merge_profile_target(
-                    job=job,
-                    canonical=canonical,
-                    event_id=event_id,
-                    target=target,
-                    target_index=index,
-                    target_count=len(targets),
-                )
+                # 同一实体的「读 → LLM → 写」整段互斥，避免并发合并互相覆盖
+                async with self._profile_merge_guard(target):
+                    merged = await self._merge_profile_target(
+                        job=job,
+                        canonical=canonical,
+                        event_id=event_id,
+                        target=target,
+                        target_index=index,
+                        target_count=len(targets),
+                    )
                 if merged:
                     success_count += 1
             except Exception as exc:
@@ -474,6 +490,17 @@ class HistorianWorker:
             success_count,
             len(targets),
         )
+
+    def _profile_merge_guard(self, target: dict[str, str]) -> Any:
+        """返回目标实体的合并互斥锁；存储层未提供时退化为无锁上下文。"""
+        guard = getattr(self._profile_storage, "merge_guard", None)
+        if not callable(guard):
+            return contextlib.nullcontext()
+        entity_type = str(target.get("entity_type", ""))
+        entity_id = str(target.get("entity_id", ""))
+        if not entity_type or not entity_id:
+            return contextlib.nullcontext()
+        return guard(entity_type, entity_id)
 
     async def _write_profile(
         self,

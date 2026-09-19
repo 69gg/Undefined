@@ -136,6 +136,13 @@ def _parse_cognitive_config(data: dict[str, Any]) -> CognitiveConfig:
             hist.get("source_message_max_len") if isinstance(hist, dict) else None,
             800,
         ),
+        historian_max_concurrency=max(
+            1,
+            _coerce_int(
+                hist.get("max_concurrency") if isinstance(hist, dict) else None,
+                4,
+            ),
+        ),
         poll_interval_seconds=max(
             HISTORIAN_MIN_POLL_INTERVAL_SECONDS,
             _coerce_float(

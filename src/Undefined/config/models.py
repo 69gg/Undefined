@@ -554,6 +554,8 @@ class CognitiveConfig:
     historian_recent_message_line_max_len: int = 240
     # Max characters for the current source message attached to historian jobs.
     historian_source_message_max_len: int = 800
+    # Historian worker 同时在途处理的任务上限。
+    historian_max_concurrency: int = 4
 
 
 @dataclass

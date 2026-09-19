@@ -18,6 +18,7 @@ class ProfileStorage:
         self._base = Path(base_path)
         self._revision_keep = revision_keep
         self._locks: dict[str, asyncio.Lock] = {}
+        self._merge_locks: dict[str, asyncio.Lock] = {}
         logger.info(
             "[认知侧写] 初始化完成: base=%s revision_keep=%s",
             str(self._base),
@@ -29,6 +30,18 @@ class ProfileStorage:
         if key not in self._locks:
             self._locks[key] = asyncio.Lock()
         return self._locks[key]
+
+    def merge_guard(self, entity_type: str, entity_id: str) -> asyncio.Lock:
+        """跨「读 → LLM → 写」整段侧写合并的互斥锁。
+
+        只串行化同一实体的合并周期，避免两个 job 各自基于旧快照改写后互相覆盖
+        （后写覆盖先写，先前的观察永久丢失）。与文件写入锁分开，避免与
+        `write_profile` 的锁重入死锁。
+        """
+        key = f"{entity_type}:{entity_id}"
+        if key not in self._merge_locks:
+            self._merge_locks[key] = asyncio.Lock()
+        return self._merge_locks[key]
 
     def _profile_path(self, entity_type: str, entity_id: str) -> Path:
         return self._base / f"{entity_type}s" / f"{entity_id}.md"
@@ -132,6 +145,60 @@ class ProfileStorage:
             len(result),
         )
         return result
+
+    @staticmethod
+    def _normalize_revision_name(revision: str) -> str:
+        name = str(revision).strip()
+        # 只接受历史目录下的单层文件名，阻断路径穿越
+        if not name or name != Path(name).name or not name.endswith(".md"):
+            raise ValueError(f"非法的侧写历史版本名: {revision!r}")
+        return name
+
+    async def read_revision(
+        self, entity_type: str, entity_id: str, revision: str
+    ) -> str | None:
+        """读取指定历史版本内容；版本名取 `list_revisions` 的返回值。"""
+        name = self._normalize_revision_name(revision)
+        path = self._history_dir(entity_type, entity_id) / name
+
+        def _read() -> str | None:
+            if not path.exists():
+                return None
+            return path.read_text(encoding="utf-8")
+
+        content = await asyncio.to_thread(_read)
+        logger.info(
+            "[认知侧写] 读取历史版本: entity_type=%s entity_id=%s revision=%s found=%s",
+            entity_type,
+            entity_id,
+            name,
+            content is not None,
+        )
+        return content
+
+    async def restore_revision(
+        self, entity_type: str, entity_id: str, revision: str
+    ) -> str:
+        """把指定历史版本恢复为当前侧写。
+
+        恢复前会把当前内容按常规流程存成新快照，因此恢复操作本身也可回退。
+        返回被恢复的版本名。
+        """
+        name = self._normalize_revision_name(revision)
+        content = await self.read_revision(entity_type, entity_id, name)
+        if content is None:
+            raise FileNotFoundError(
+                f"侧写历史版本不存在: {entity_type}:{entity_id}/{name}"
+            )
+        async with self.merge_guard(entity_type, entity_id):
+            await self.write_profile(entity_type, entity_id, content)
+        logger.info(
+            "[认知侧写] 已恢复历史版本: entity_type=%s entity_id=%s revision=%s",
+            entity_type,
+            entity_id,
+            name,
+        )
+        return name
 
     @staticmethod
     def _sanitize_profile(content: str, entity_type: str, entity_id: str) -> str:

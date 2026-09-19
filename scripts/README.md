@@ -89,6 +89,26 @@ uv run python scripts/reembed_cognitive.py -v
 - 大量记录时注意 API 限速，可通过 `--batch-size` 降低并发
 - 建议先用 `--dry-run` 确认记录数量和配置正确性
 
+### [`restore_profile.py`](restore_profile.py) — 认知记忆侧写历史版本恢复
+
+侧写每次写入前会把旧内容存成历史快照（`cognitive.profile.revision_keep`，默认 5 份）。本脚本提供历史版本的列出、查看与恢复入口。
+
+```bash
+# 列出某用户/群聊的历史版本
+uv run python scripts/restore_profile.py list --entity-type user --entity-id 123456
+
+# 查看某个历史版本内容
+uv run python scripts/restore_profile.py show --entity-type user --entity-id 123456 --revision 20260101000000000000.md
+
+# 恢复某个历史版本（恢复前会把当前内容另存为新快照，可再次回退）
+uv run python scripts/restore_profile.py restore --entity-type user --entity-id 123456 --revision 20260101000000000000.md
+
+# 仅预览，不写盘
+uv run python scripts/restore_profile.py restore --entity-type user --entity-id 123456 --revision 20260101000000000000.md --dry-run
+```
+
+**注意**：恢复只改侧写 Markdown 与历史快照，不会更新 ChromaDB 中的侧写向量；需要同步检索结果时按 `docs/cognitive-memory.md` 的说明重嵌入。
+
 ### release_notes.py — 发布版本校验与 Release notes 生成
 
 Release workflow 使用这个脚本在构建前校验版本一致性，并在发布阶段从 `CHANGELOG.md` 最新版本条目生成 GitHub Release 说明。Release notes 会先写入 changelog 自动提取内容，再用 `---` 分隔并追加 `Detailed Changes`，按上一个 tag 到当前 tag 的 commit 主题分类列出 features、bug fixes 和 maintenance/others。
