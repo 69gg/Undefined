@@ -321,6 +321,16 @@ npm install
 5. `publish-release`：汇总所有产物并上传 GitHub Release；Release notes 从 `CHANGELOG.md` 最新版本条目生成，不读取 tag 注释。
 6. `publish-pypi`：发布 Python 包到 PyPI。
 
+### CI 工作流（ci.yml）
+
+拉取请求与 `main` / `develop` 推送会触发 `.github/workflows/ci.yml`，工作流级声明 `permissions: contents: read` 与并发取消（同一 ref 的新推送会取消旧运行），每个 job 都带 `timeout-minutes`：
+
+1. `quality-check`（Python 3.12）：`ruff` + `ruff format --check` + `mypy` + `pytest tests/ --cov`（覆盖率低于 `pyproject.toml` 的 `fail_under` 即失败）+ `uv build --wheel` 并校验 wheel 内含资源。该 job 会 `setup-node`，以便 WebUI 前端的 4 个 node 行为测试真正执行而不是静默 skip。
+2. `python-compat`（3.11 / 3.13）：`pyproject.toml` 声明 `>=3.11,<3.14`，因此两端边界各跑一次 `mypy` 与 `pytest`。
+3. `native-app-quality-check`（Console / Chat 矩阵）：`npm run check`。
+
+依赖统一通过 `uv sync --group dev` 安装：`dev` 是唯一一份工具清单（含 `pytest-cov` 与 `types-*` 类型桩），不再维护与它重复的 `ci` 组或 `[project.optional-dependencies]`。
+
 ## 8. 手动 Artifact 工作流
 
 如果只想让 GitHub Actions 编译一次原生 App 并从 workflow run 页面手动下载产物，不创建 GitHub Release，也不发布 PyPI，可以使用：
@@ -395,7 +405,7 @@ uv sync --group dev -p 3.12
 uv run ruff check .
 uv run ruff format --check .
 uv run mypy .
-uv run pytest tests/
+uv run pytest tests/ --cov
 uv build
 ```
 

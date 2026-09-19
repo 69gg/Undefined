@@ -7,12 +7,21 @@ on:
   pull_request:
     branches: [ "main", "develop" ]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   NODE_VERSION: "22"
+  PYTHON_VERSION: "3.12"
 
 jobs:
   quality-check:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -23,8 +32,13 @@ jobs:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
       - name: Install dependencies
-        run: uv sync --group ci -p 3.12
+        run: uv sync --group dev -p ${{ env.PYTHON_VERSION }}
 
       - name: Cache Ruff
         uses: actions/cache@v4
@@ -51,8 +65,8 @@ jobs:
       - name: Run Mypy
         run: uv run mypy .
 
-      - name: Run Tests
-        run: uv run pytest tests/
+      - name: Run Tests (with coverage gate)
+        run: uv run pytest tests/ --cov --cov-report=term
 
       - name: Build wheel
         run: uv build --wheel
@@ -61,9 +75,38 @@ jobs:
         run: |
           uv run python -c "import glob, zipfile; whl=glob.glob('dist/*.whl')[0]; z=zipfile.ZipFile(whl); names=set(z.namelist()); required={'config.toml.example','res/prompts/undefined.xml','img/xlwy.jpg'}; missing=sorted([p for p in required if p not in names]); assert not missing, f'missing in wheel: {missing}'"
 
+  python-compat:
+    name: Python compat (${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # pyproject 声明 >=3.11,<3.14；主岗位跑 3.12，这里覆盖两端边界
+        python-version: ["3.11", "3.13"]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Install dependencies
+        run: uv sync --group dev -p ${{ matrix.python-version }}
+
+      - name: Run Mypy
+        run: uv run mypy .
+
+      - name: Run Tests
+        run: uv run pytest tests/
+
   native-app-quality-check:
     name: Native app quality (${{ matrix.app_dir }})
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:

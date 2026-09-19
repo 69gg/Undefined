@@ -35,14 +35,11 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     if not url:
         return "URL 不能为空"
 
-    capabilities = get_crawl4ai_capabilities()
-    if (
-        not capabilities.available
-        or capabilities.async_web_crawler is None
-        or capabilities.browser_config is None
-        or capabilities.crawler_run_config is None
-    ):
-        return "网页获取功能未启用（crawl4ai 未安装）"
+    try:
+        capabilities = get_crawl4ai_capabilities()
+    except Exception as exc:
+        logger.error("[crawl_webpage] crawl4ai 初始化失败: %s", exc)
+        return f"网页获取功能不可用（crawl4ai 环境异常: {exc}）"
 
     AsyncWebCrawler = capabilities.async_web_crawler
     BrowserConfig = capabilities.browser_config

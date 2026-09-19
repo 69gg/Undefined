@@ -60,7 +60,6 @@ def _successful_capabilities(
     crawler_factory: Any,
 ) -> Crawl4AICapabilities:
     return Crawl4AICapabilities(
-        available=True,
         proxy_config_available=False,
         async_web_crawler=crawler_factory,
         browser_config=_FakeBrowserConfig,
@@ -100,7 +99,7 @@ async def test_crawl_webpage_ignores_missing_context_flag(
 
 
 @pytest.mark.asyncio
-async def test_crawl_webpage_ignores_stale_false_context_flag(
+async def test_crawl_webpage_runs_regardless_of_legacy_context_flags(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     result_payload = SimpleNamespace(
@@ -124,7 +123,6 @@ async def test_crawl_webpage_ignores_stale_false_context_flag(
         {"url": "https://example.com", "max_chars": 8},
         {
             "runtime_config": _runtime_config(),
-            "crawl4ai_available": False,
         },
     )
 
@@ -133,22 +131,20 @@ async def test_crawl_webpage_ignores_stale_false_context_flag(
 
 
 @pytest.mark.asyncio
-async def test_crawl_webpage_returns_unavailable_when_core_import_is_missing(
+async def test_crawl_webpage_reports_broken_crawl4ai_environment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        crawl_handler,
-        "get_crawl4ai_capabilities",
-        lambda: Crawl4AICapabilities(
-            available=False,
-            proxy_config_available=False,
-            error="ImportError: No module named crawl4ai",
-        ),
-    )
+    """crawl4ai 为必需依赖：探测失败时给出环境异常说明，而不是“未安装”。"""
+
+    def _raise() -> Any:
+        raise RuntimeError("已安装的 crawl4ai 缺少必需接口: BrowserConfig")
+
+    monkeypatch.setattr(crawl_handler, "get_crawl4ai_capabilities", _raise)
 
     result = await crawl_handler.execute({"url": "https://example.com"}, {})
 
-    assert result == "网页获取功能未启用（crawl4ai 未安装）"
+    assert "网页获取功能不可用" in result
+    assert "缺少必需接口" in result
 
 
 @pytest.mark.asyncio

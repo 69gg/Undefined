@@ -18,7 +18,6 @@ dependencies = [
     "matplotlib",
     "pillow",
     "markdown>=3.10",
-    "types-markdown>=3.10.0.20251106",
     "aiofiles>=25.1.0",
     "markdown-it-py[plugins]>=4.0.0",
     "mdit-py-plugins>=0.5.0",
@@ -28,7 +27,6 @@ dependencies = [
     "pymdown-extensions>=10.20",
     "playwright>=1.57.0",
     "aiohttp>=3.13.2",
-    "types-aiofiles>=25.1.0.20251011",
     "APScheduler>=3.10.0",
     "pymupdf>=1.27.2,!=1.27.2.2",
     "python-docx>=1.2.0",
@@ -60,19 +58,6 @@ Issues = "https://github.com/69gg/Undefined/issues"
 [project.scripts]
 Undefined = "Undefined.main:run"
 Undefined-webui = "Undefined.webui:run"
-
-[project.optional-dependencies]
-dev = [
-    "mypy>=1.8.0",
-    "ruff>=0.15.8",
-    "pytest>=8.0.0",
-    "pytest-asyncio>=0.23.0",
-    "pytest-cov>=7.1.0",
-]
-ci = [
-    "ruff>=0.15.8",
-    "mypy>=1.8.0",
-]
 
 [[tool.uv.index]]
 url = "https://pypi.org/simple"
@@ -127,7 +112,17 @@ exclude = ["code"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 
+[tool.coverage.run]
+source = ["Undefined"]
+branch = false
+
+[tool.coverage.report]
+# 覆盖率棘轮：整体不低于 65%（当前约 69%），防止明显回退
+fail_under = 65
+skip_covered = true
+
 [dependency-groups]
+# 开发与 CI 共用同一组工具（CI 通过 --group dev 安装，避免两份清单漂移）
 dev = [
     "mypy>=1.8.0",
     "ruff>=0.15.8",
@@ -135,8 +130,6 @@ dev = [
     "pytest-asyncio>=0.23.0",
     "pytest-cov>=7.1.0",
     "types-pyyaml>=6.0.12.20250915",
-]
-ci = [
-    "ruff>=0.15.8",
-    "mypy>=1.8.0",
+    "types-markdown>=3.10.0.20251106",
+    "types-aiofiles>=25.1.0.20251011",
 ]

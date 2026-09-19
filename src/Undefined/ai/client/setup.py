@@ -7,9 +7,10 @@ import logging
 import re
 from collections.abc import Collection
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Optional, Protocol, TYPE_CHECKING
+from typing import Any, Awaitable, Callable, Optional, Protocol
 
 import httpx
+from langchain_community.utilities import SearxSearchWrapper
 
 from Undefined.attachments import AttachmentRegistry
 from Undefined.ai.llm import ModelRequester
@@ -96,27 +97,6 @@ class SendPrivateMessageCallback(Protocol):
     def __call__(
         self, user_id: int, message: str, reply_to: int | None = None
     ) -> Awaitable[None]: ...
-
-
-# 尝试导入 langchain SearxSearchWrapper
-if TYPE_CHECKING:
-    from langchain_community.utilities import (
-        SearxSearchWrapper as SearxSearchWrapperType,
-    )
-else:
-    SearxSearchWrapperType = object
-
-_SearxSearchWrapper: type[SearxSearchWrapperType] | None
-try:
-    from langchain_community.utilities import SearxSearchWrapper as _SearxSearchWrapper
-
-    _SEARX_AVAILABLE = True
-except Exception:
-    _SearxSearchWrapper = None
-    _SEARX_AVAILABLE = False
-    logger.warning(
-        "[初始化] langchain_community 未安装或 SearxSearchWrapper 不可用，搜索功能将禁用"
-    )
 
 
 def _attachment_remote_download_max_bytes(runtime_config: Config) -> int:
@@ -295,35 +275,25 @@ class ClientSetupMixin:
         else:
             logger.info("[初始化] 技能热重载已禁用")
 
-        # 初始化搜索 wrapper
+        # 初始化搜索 wrapper（langchain_community 为必需依赖）
         self._search_wrapper: Optional[Any] = None
-        if _SEARX_AVAILABLE and _SearxSearchWrapper is not None:
-            searxng_url = runtime_config.searxng_url
-            if searxng_url:
-                try:
-                    self._search_wrapper = _SearxSearchWrapper(
-                        searx_host=searxng_url, k=10
-                    )
-                    logger.info(
-                        "[初始化] SearxSearchWrapper 初始化成功: url=%s k=10",
-                        redact_string(searxng_url),
-                    )
-                except Exception as exc:
-                    logger.warning("[初始化] SearxSearchWrapper 初始化失败: %s", exc)
-            else:
-                logger.info("[初始化] SEARXNG_URL 未配置，搜索功能禁用")
-
-        if self._crawl4ai_capabilities.available:
-            logger.info("[初始化] crawl4ai 可用，网页获取功能已启用")
-        else:
-            detail = self._crawl4ai_capabilities.error
-            if detail:
-                logger.warning(
-                    "[初始化] crawl4ai 不可用，网页获取功能将禁用: %s",
-                    detail,
+        searxng_url = runtime_config.searxng_url
+        if searxng_url:
+            try:
+                self._search_wrapper = SearxSearchWrapper(searx_host=searxng_url, k=10)
+                logger.info(
+                    "[初始化] SearxSearchWrapper 初始化成功: url=%s k=10",
+                    redact_string(searxng_url),
                 )
-            else:
-                logger.warning("[初始化] crawl4ai 不可用，网页获取功能将禁用")
+            except Exception as exc:
+                logger.warning("[初始化] SearxSearchWrapper 初始化失败: %s", exc)
+        else:
+            logger.info("[初始化] SEARXNG_URL 未配置，搜索功能禁用")
+
+        logger.info(
+            "[初始化] crawl4ai 已就绪，网页获取功能已启用: proxy_config=%s",
+            self._crawl4ai_capabilities.proxy_config_available,
+        )
 
         self._prompt_builder = PromptBuilder(
             bot_qq=self.bot_qq,
@@ -561,24 +531,13 @@ class ClientSetupMixin:
 
     def apply_search_config(self, searxng_url: str) -> None:
         """应用搜索服务配置（支持热更新）。"""
-        if not _SEARX_AVAILABLE or _SearxSearchWrapper is None:
-            if searxng_url:
-                logger.warning(
-                    "[配置] 搜索组件不可用，已忽略 SEARXNG_URL=%s",
-                    redact_string(searxng_url),
-                )
-            else:
-                logger.info("[配置] 搜索组件不可用，搜索已禁用")
-            self._search_wrapper = None
-            return
-
         if not searxng_url:
             self._search_wrapper = None
             logger.info("[配置] SEARXNG_URL 未配置，搜索功能已禁用")
             return
 
         try:
-            self._search_wrapper = _SearxSearchWrapper(searx_host=searxng_url, k=10)
+            self._search_wrapper = SearxSearchWrapper(searx_host=searxng_url, k=10)
             logger.info(
                 "[配置] 搜索服务已更新: url=%s k=10",
                 redact_string(searxng_url),

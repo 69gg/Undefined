@@ -323,9 +323,6 @@ class ClientAskLoopMixin(ClientQueueMixin):
             tool_context[MUSIC_TRACK_STORE_CONTEXT_KEY] = MusicTrackReferenceStore()
         tool_context.setdefault("search_wrapper", self._search_wrapper)
         tool_context.setdefault(
-            "crawl4ai_available", self._crawl4ai_capabilities.available
-        )
-        tool_context.setdefault(
             "crawl4ai_proxy_config_available",
             self._crawl4ai_capabilities.proxy_config_available,
         )

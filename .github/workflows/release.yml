@@ -22,6 +22,7 @@ jobs:
   verify-python:
     name: Verify Python package
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     environment: release
     steps:
       - name: Checkout code
@@ -36,7 +37,7 @@ jobs:
           cache-dependency-glob: uv.lock
 
       - name: Install Python dependencies
-        run: uv sync --group ci -p ${{ env.PYTHON_VERSION }}
+        run: uv sync --group dev -p ${{ env.PYTHON_VERSION }}
 
       - name: Validate release tag, build versions, and changelog
         env:
@@ -88,6 +89,7 @@ jobs:
   verify-native-app:
     name: Verify ${{ matrix.product }} app
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     environment: release
     strategy:
       fail-fast: false
@@ -150,6 +152,7 @@ jobs:
   build-tauri-desktop:
     name: Build Tauri desktop (${{ matrix.product }} ${{ matrix.label }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
     environment: release
     needs:
       - verify-python
@@ -338,6 +341,7 @@ jobs:
   build-tauri-android:
     name: Build Tauri Android (${{ matrix.product }} ${{ matrix.abi_label }})
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     environment: release
     needs:
       - verify-python
@@ -646,6 +650,7 @@ jobs:
   publish-release:
     name: Publish release assets
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs:
       - verify-python
       - build-tauri-desktop
@@ -678,6 +683,7 @@ jobs:
   publish-pypi:
     name: Publish Python package to PyPI
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs:
       - verify-python
       - publish-release
