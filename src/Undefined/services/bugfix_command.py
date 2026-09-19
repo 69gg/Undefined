@@ -106,7 +106,12 @@ class BugfixCommandMixin:
             )
 
         try:
-            target_qqs = [int(arg) for arg in args[:-2]]
+            # 防御性归一化：常规路径 parse_command 已把 [@QQ号(昵称)] 转成纯数字，
+            # 这里兜底支持未经过该层的直接调用，保证与用法文案的 <QQ号|@用户> 一致；
+            # 懒加载避免与 command.py 的模块级循环导入
+            from Undefined.services.command import _normalize_qq_arg
+
+            target_qqs = [int(_normalize_qq_arg(arg)) for arg in args[:-2]]
             start_str, end_str_raw = args[-2], args[-1]
             start_date = datetime.strptime(start_str, "%Y/%m/%d/%H:%M")
 

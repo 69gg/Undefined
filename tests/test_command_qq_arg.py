@@ -81,6 +81,44 @@ def test_parse_command_multiple_at_args() -> None:
     }
 
 
+# ---------------------------------------------------------------------------
+# _parse_bugfix_args
+# ---------------------------------------------------------------------------
+
+
+def test_parse_bugfix_args_accepts_at_mentions() -> None:
+    """未经 parse_command 归一化的原始参数也应支持 @ 提及形式。"""
+    d = _dispatcher()
+    parsed = d._parse_bugfix_args(
+        ["[@12345(张三)]", "[@67890]", "2024/12/01/09:00", "now"]
+    )
+    assert not isinstance(parsed, str)
+    target_qqs, start_date, end_date, start_str, end_str = parsed
+    assert target_qqs == [12345, 67890]
+    assert start_str == "2024/12/01/09:00"
+    assert end_str == "now"
+    assert end_date is not None
+
+
+def test_parse_bugfix_args_accepts_plain_digits() -> None:
+    d = _dispatcher()
+    parsed = d._parse_bugfix_args(["12345", "2024/12/01/09:00", "2024/12/02/09:00"])
+    assert not isinstance(parsed, str)
+    assert parsed[0] == [12345]
+
+
+def test_parse_bugfix_args_rejects_non_qq_target() -> None:
+    d = _dispatcher()
+    parsed = d._parse_bugfix_args(["abc", "2024/12/01/09:00", "now"])
+    assert isinstance(parsed, str)
+    assert "格式错误" in parsed
+
+
+def test_parse_bugfix_args_requires_at_least_three_args() -> None:
+    d = _dispatcher()
+    assert isinstance(d._parse_bugfix_args(["12345"]), str)
+
+
 def test_parse_command_no_at_unchanged() -> None:
     d = _dispatcher()
     cmd = d.parse_command("/profile g -r")
