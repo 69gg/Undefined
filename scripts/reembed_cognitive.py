@@ -8,8 +8,10 @@ cognitive_events 和 cognitive_profiles 两个 collection 进行全量重嵌入�
 用新模型重新计算向量，然后通过 upsert 覆写回去。metadata 保持不变。
 
 维度变化：ChromaDB 的 collection 在首次写入时定维，异维向量 upsert 会直接失败
-（InvalidArgumentError）。脚本会先比较新旧向量维度，检测到变化时删除并重建
-collection（先读全量记录再重建，不会丢数据），然后按新维度全量写回。
+（InvalidArgumentError）。脚本会先比较新旧向量维度，检测到变化时把新向量全部
+写入临时 collection（原库在迁移完成前保持不动），全部写完并校验记录数后删除
+原库、把临时 collection 原子换名回正式名称；中途被杀也不会丢库——下次运行会
+自动清理遗留的临时库，或在正式库缺失时从临时库恢复。
 
 用法：
     # 先在 config.toml 中更新 [models.embedding] 为新模型配置
@@ -56,6 +58,13 @@ logger = logging.getLogger("reembed_cognitive")
 
 # ChromaDB get() 单次最大拉取量
 _CHROMA_GET_LIMIT = 5000
+
+# 维度迁移时临时 collection 的后缀
+_STAGING_SUFFIX = "__rebuild_tmp"
+
+
+def _staging_name(collection_name: str) -> str:
+    return f"{collection_name}{_STAGING_SUFFIX}"
 
 
 def _parse_args() -> argparse.Namespace:
@@ -148,21 +157,63 @@ def _collection_dimension(collection: Any) -> int:
         return 0
 
 
-def _recreate_collection(
-    client: Any,
-    collection_name: str,
-    metadata: dict[str, Any] | None,
-) -> Any:
-    """删除并重建 collection，用于向量维度变化后的全量写回。"""
+def _recover_stale_staging(client: Any, collection_name: str) -> None:
+    """处理上次异常中断遗留的临时 collection，保证迁移可安全重跑。
+
+    - 正式库仍存在：临时库只是写了一半的残留，直接删除；
+    - 正式库缺失（中断发生在删原库之后、换名之前）：临时库持有全量数据，
+      换名恢复成正式库。
+    """
+    staging_name = _staging_name(collection_name)
+    names = {c.name for c in client.list_collections()}
+    if staging_name not in names:
+        return
+    if collection_name in names:
+        logger.warning(
+            "发现上次运行遗留的临时 collection %s（正式库完好），已删除",
+            staging_name,
+        )
+        client.delete_collection(staging_name)
+    else:
+        logger.warning(
+            "发现上次运行在换名前中断：正式库 %s 缺失但临时库完好，正在恢复",
+            collection_name,
+        )
+        client.get_collection(staging_name).modify(name=collection_name)
+        logger.warning("恢复完成：%s 已从临时库换名回来", collection_name)
+
+
+def _begin_dimension_migration(client: Any, collection_name: str, metadata: Any) -> Any:
+    """维度变化时创建临时 collection 承接新向量；原库在迁移完成前保持不动。"""
+    staging_name = _staging_name(collection_name)
     logger.warning(
-        "重建 collection %s（原维度与新模型不一致，ChromaDB 不支持原地改维）",
-        collection_name,
+        "向量维度变化，迁移写入临时 collection %s，全部写完并校验后原子换名",
+        staging_name,
     )
-    client.delete_collection(collection_name)
     return client.get_or_create_collection(
-        collection_name,
+        staging_name,
         metadata=metadata or {"hnsw:space": "cosine"},
     )
+
+
+def _finish_dimension_migration(
+    client: Any,
+    collection_name: str,
+    staging_collection: Any,
+    *,
+    expected_count: int,
+) -> None:
+    """校验临时库记录数后删原库、换名；失败时保留原库，可安全重跑。"""
+    staged = staging_collection.count()
+    if staged != expected_count:
+        raise RuntimeError(
+            f"临时 collection {staging_collection.name} 记录数不符: "
+            f"{staged} != {expected_count}；已保留原库 {collection_name}，"
+            "请排查后重跑脚本"
+        )
+    logger.info("临时 collection 校验通过（%d 条），换名为 %s", staged, collection_name)
+    client.delete_collection(collection_name)
+    staging_collection.modify(name=collection_name)
 
 
 async def _reembed_collection(
@@ -171,8 +222,7 @@ async def _reembed_collection(
     embedder: Embedder,
     batch_size: int,
     dry_run: bool,
-    *,
-    client: Any = None,
+    client: Any,
 ) -> int:
     """对单个 collection 执行全量重嵌入，返回处理的记录数。"""
     logger.info("正在读取 %s ...", collection_name)
@@ -196,6 +246,8 @@ async def _reembed_collection(
 
     processed = 0
     dimension_checked = False
+    write_target = collection
+    staging_collection: Any = None
     start_time = time.perf_counter()
 
     for i in range(0, total, batch_size):
@@ -222,21 +274,20 @@ async def _reembed_collection(
                 )
                 if dry_run:
                     logger.info(
-                        "[dry-run] 实际执行时会重建 collection %s 后写入新维度向量",
+                        "[dry-run] 实际执行时会把新维度向量写入临时 collection，"
+                        "全部写完后换名为 %s",
                         collection_name,
                     )
                 else:
-                    if client is None:
-                        raise RuntimeError(
-                            "检测到向量维度变化，但缺少 ChromaDB client，无法重建 collection"
-                        )
-                    collection = _recreate_collection(
+                    write_target = _begin_dimension_migration(
                         client, collection_name, collection.metadata
                     )
+                    staging_collection = write_target
 
         if not dry_run:
-            # upsert 覆写：ID 不变，document 和 metadata 不变，仅更新 embedding
-            collection.upsert(
+            # upsert 覆写：ID 不变，document 和 metadata 不变，仅更新 embedding；
+            # 维度迁移时写入临时 collection，原库保持不动
+            write_target.upsert(
                 ids=batch_ids,
                 documents=batch_docs,
                 embeddings=new_embeddings,
@@ -254,6 +305,11 @@ async def _reembed_collection(
             processed / total * 100,
             rate,
             " (dry-run)" if dry_run else "",
+        )
+
+    if staging_collection is not None:
+        _finish_dimension_migration(
+            client, collection_name, staging_collection, expected_count=total
         )
 
     elapsed_total = time.perf_counter() - start_time
@@ -307,6 +363,7 @@ async def _main(args: argparse.Namespace) -> None:
 
     try:
         if not args.profiles_only:
+            _recover_stale_staging(client, "cognitive_events")
             events_col = client.get_or_create_collection(
                 "cognitive_events", metadata={"hnsw:space": "cosine"}
             )
@@ -316,10 +373,11 @@ async def _main(args: argparse.Namespace) -> None:
                 embedder,
                 args.batch_size,
                 args.dry_run,
-                client=client,
+                client,
             )
 
         if not args.events_only:
+            _recover_stale_staging(client, "cognitive_profiles")
             profiles_col = client.get_or_create_collection(
                 "cognitive_profiles", metadata={"hnsw:space": "cosine"}
             )
@@ -329,7 +387,7 @@ async def _main(args: argparse.Namespace) -> None:
                 embedder,
                 args.batch_size,
                 args.dry_run,
-                client=client,
+                client,
             )
     finally:
         await embedder.stop()
