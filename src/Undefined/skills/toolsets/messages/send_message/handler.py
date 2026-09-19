@@ -21,6 +21,7 @@ from Undefined.skills.toolsets.messages.context_utils import (
     normalize_sent_message_id,
     parse_reply_to,
 )
+from Undefined.skills.shared import private_access_error
 
 logger = logging.getLogger(__name__)
 
@@ -56,20 +57,6 @@ def _group_access_error(runtime_config: Any, target_id: int) -> str:
         )
     return (
         f"发送失败：目标群 {target_id} 不在允许列表内（access.allowed_group_ids），"
-        "已被访问控制拦截"
-    )
-
-
-def _private_access_error(runtime_config: Any, target_id: int) -> str:
-    reason_getter = getattr(runtime_config, "private_access_denied_reason", None)
-    reason = reason_getter(target_id) if callable(reason_getter) else None
-    if reason == "blacklist":
-        return (
-            f"发送失败：目标用户 {target_id} 在黑名单内（access.blocked_private_ids），"
-            "已被访问控制拦截"
-        )
-    return (
-        f"发送失败：目标用户 {target_id} 不在允许列表内（access.allowed_private_ids），"
         "已被访问控制拦截"
     )
 
@@ -143,7 +130,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         if target_type == "private" and not runtime_config.is_private_allowed(
             target_id
         ):
-            return _private_access_error(runtime_config, target_id)
+            return private_access_error(runtime_config, target_id)
 
     if sender:
         try:

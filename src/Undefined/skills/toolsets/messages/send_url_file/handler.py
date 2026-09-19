@@ -22,6 +22,7 @@ from Undefined.utils.http_download import (
     probe_remote_file,
 )
 from Undefined.utils.message_turn import mark_message_sent_this_turn
+from Undefined.skills.shared import parse_positive_int, private_access_error
 
 logger = logging.getLogger(__name__)
 
@@ -30,18 +31,6 @@ TargetType = Literal["group", "private"]
 MAX_FILENAME_LENGTH = 128
 DEFAULT_MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024
 DOWNLOAD_CHUNK_SIZE = 64 * 1024
-
-
-def _parse_positive_int(value: Any, field_name: str) -> tuple[int | None, str | None]:
-    if value is None:
-        return None, None
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return None, f"{field_name} 必须是整数"
-    if parsed <= 0:
-        return None, f"{field_name} 必须是正整数"
-    return parsed, None
 
 
 def _resolve_target(
@@ -68,7 +57,7 @@ def _resolve_target(
         )
 
         if has_target_id:
-            target_id, target_id_error = _parse_positive_int(target_id_raw, "target_id")
+            target_id, target_id_error = parse_positive_int(target_id_raw, "target_id")
             if target_id_error or target_id is None:
                 return None, target_id_error or "target_id 非法"
             return (normalized_target_type, target_id), None
@@ -78,33 +67,33 @@ def _resolve_target(
             return None, "target_type 与当前会话类型不一致，无法推断 target_id"
 
         if normalized_target_type == "group":
-            group_id, group_error = _parse_positive_int(
+            group_id, group_error = parse_positive_int(
                 context.get("group_id"), "group_id"
             )
             if group_error or group_id is None:
                 return None, group_error or "无法根据 target_type 推断 target_id"
             return ("group", group_id), None
 
-        user_id, user_error = _parse_positive_int(context.get("user_id"), "user_id")
+        user_id, user_error = parse_positive_int(context.get("user_id"), "user_id")
         if user_error or user_id is None:
             return None, user_error or "无法根据 target_type 推断 target_id"
         return ("private", user_id), None
 
     request_type = context.get("request_type")
     if request_type == "group":
-        group_id, group_error = _parse_positive_int(context.get("group_id"), "group_id")
+        group_id, group_error = parse_positive_int(context.get("group_id"), "group_id")
         if group_error:
             return None, group_error
         if group_id is not None:
             return ("group", group_id), None
     elif request_type == "private":
-        user_id, user_error = _parse_positive_int(context.get("user_id"), "user_id")
+        user_id, user_error = parse_positive_int(context.get("user_id"), "user_id")
         if user_error:
             return None, user_error
         if user_id is not None:
             return ("private", user_id), None
 
-    fallback_group_id, fallback_group_error = _parse_positive_int(
+    fallback_group_id, fallback_group_error = parse_positive_int(
         context.get("group_id"), "group_id"
     )
     if fallback_group_error:
@@ -112,7 +101,7 @@ def _resolve_target(
     if fallback_group_id is not None:
         return ("group", fallback_group_id), None
 
-    fallback_user_id, fallback_user_error = _parse_positive_int(
+    fallback_user_id, fallback_user_error = parse_positive_int(
         context.get("user_id"), "user_id"
     )
     if fallback_user_error:
@@ -381,14 +370,6 @@ def _group_access_error(runtime_config: Any, group_id: int) -> str:
     return f"发送失败：目标群 {group_id} 不在允许列表内（access.allowed_group_ids）"
 
 
-def _private_access_error(runtime_config: Any, user_id: int) -> str:
-    reason_getter = getattr(runtime_config, "private_access_denied_reason", None)
-    reason = reason_getter(user_id) if callable(reason_getter) else None
-    if reason == "blacklist":
-        return f"发送失败：目标用户 {user_id} 在黑名单内（access.blocked_private_ids）"
-    return f"发送失败：目标用户 {user_id} 不在允许列表内（access.allowed_private_ids）"
-
-
 async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     """从 URL 下载文件并发送到群聊或私聊。"""
     request_id = str(context.get("request_id", "-"))
@@ -417,7 +398,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         if target_type == "private" and not runtime_config.is_private_allowed(
             target_id
         ):
-            return _private_access_error(runtime_config, target_id)
+            return private_access_error(runtime_config, target_id)
 
     send_file_callable, history_recorded_by_sender, sender_error = (
         _resolve_file_send_callable(context, target_type)

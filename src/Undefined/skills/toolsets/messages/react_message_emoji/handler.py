@@ -8,6 +8,7 @@ from typing import Any, Dict, Literal
 from Undefined.context import RequestContext
 from Undefined.utils.qq_emoji import resolve_emoji_id_by_alias, search_emoji_aliases
 from Undefined.skills.toolsets.messages.context_utils import mark_message_sent
+from Undefined.skills.shared import parse_positive_int, private_access_error
 
 logger = logging.getLogger(__name__)
 
@@ -18,18 +19,6 @@ _SEEN_OPS_KEY = "_emoji_reaction_seen_ops"
 _MESSAGE_LOCKS: OrderedDict[int, asyncio.Lock] = OrderedDict()
 _MESSAGE_LOCKS_GUARD = asyncio.Lock()
 _MESSAGE_LOCKS_MAX = 1000
-
-
-def _parse_positive_int(value: Any, field_name: str) -> tuple[int | None, str | None]:
-    if value is None:
-        return None, None
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return None, f"{field_name} 必须是整数"
-    if parsed <= 0:
-        return None, f"{field_name} 必须是正整数"
-    return parsed, None
 
 
 def _parse_bool(value: Any, default: bool) -> bool:
@@ -89,13 +78,13 @@ def _resolve_action(args: Dict[str, Any]) -> tuple[ActionType | None, str | None
 def _resolve_message_id(
     args: Dict[str, Any], snapshot: dict[str, Any]
 ) -> tuple[int | None, str | None]:
-    direct_id, direct_error = _parse_positive_int(args.get("message_id"), "message_id")
+    direct_id, direct_error = parse_positive_int(args.get("message_id"), "message_id")
     if direct_error:
         return None, direct_error
     if direct_id is not None:
         return direct_id, None
 
-    trigger_id, trigger_error = _parse_positive_int(
+    trigger_id, trigger_error = parse_positive_int(
         snapshot.get("trigger_message_id"), "trigger_message_id"
     )
     if trigger_error:
@@ -107,7 +96,7 @@ def _resolve_message_id(
 
 
 def _resolve_emoji_id(args: Dict[str, Any]) -> tuple[int | None, str | None]:
-    emoji_id, emoji_id_error = _parse_positive_int(args.get("emoji_id"), "emoji_id")
+    emoji_id, emoji_id_error = parse_positive_int(args.get("emoji_id"), "emoji_id")
     if emoji_id_error:
         return None, emoji_id_error
     if emoji_id is not None:
@@ -210,7 +199,7 @@ def _resolve_target_constraint(
     if normalized_type not in ("group", "private"):
         return None, "target_type 只能是 group 或 private"
 
-    parsed_target_id, target_id_error = _parse_positive_int(target_id_raw, "target_id")
+    parsed_target_id, target_id_error = parse_positive_int(target_id_raw, "target_id")
     if target_id_error or parsed_target_id is None:
         return None, target_id_error or "target_id 非法"
 
@@ -224,20 +213,20 @@ def _extract_message_location(
     message_type_raw = str(message_detail.get("message_type", "")).strip().lower()
 
     if message_type_raw == "group":
-        group_id, _ = _parse_positive_int(message_detail.get("group_id"), "group_id")
+        group_id, _ = parse_positive_int(message_detail.get("group_id"), "group_id")
         if group_id is not None:
             return ("group", group_id)
     elif message_type_raw == "private":
-        user_id, _ = _parse_positive_int(message_detail.get("user_id"), "user_id")
+        user_id, _ = parse_positive_int(message_detail.get("user_id"), "user_id")
         if user_id is not None:
             return ("private", user_id)
 
     # 兜底推断
-    group_id, _ = _parse_positive_int(message_detail.get("group_id"), "group_id")
+    group_id, _ = parse_positive_int(message_detail.get("group_id"), "group_id")
     if group_id is not None:
         return ("group", group_id)
 
-    user_id, _ = _parse_positive_int(message_detail.get("user_id"), "user_id")
+    user_id, _ = parse_positive_int(message_detail.get("user_id"), "user_id")
     if user_id is not None:
         return ("private", user_id)
     return None
@@ -248,11 +237,11 @@ def _resolve_current_session_target(
 ) -> tuple[TargetType, int] | None:
     request_type = snapshot.get("request_type")
     if request_type == "group":
-        group_id, _ = _parse_positive_int(snapshot.get("group_id"), "group_id")
+        group_id, _ = parse_positive_int(snapshot.get("group_id"), "group_id")
         if group_id is not None:
             return ("group", group_id)
     if request_type == "private":
-        user_id, _ = _parse_positive_int(snapshot.get("user_id"), "user_id")
+        user_id, _ = parse_positive_int(snapshot.get("user_id"), "user_id")
         if user_id is not None:
             return ("private", user_id)
     return None
@@ -268,20 +257,6 @@ def _group_access_error(runtime_config: Any, group_id: int) -> str:
         )
     return (
         f"目标群 {group_id} 不在允许列表内（access.allowed_group_ids），"
-        "已被访问控制拦截"
-    )
-
-
-def _private_access_error(runtime_config: Any, user_id: int) -> str:
-    reason_getter = getattr(runtime_config, "private_access_denied_reason", None)
-    reason = reason_getter(user_id) if callable(reason_getter) else None
-    if reason == "blacklist":
-        return (
-            f"目标用户 {user_id} 在黑名单内（access.blocked_private_ids），"
-            "已被访问控制拦截"
-        )
-    return (
-        f"目标用户 {user_id} 不在允许列表内（access.allowed_private_ids），"
         "已被访问控制拦截"
     )
 
@@ -324,7 +299,7 @@ def _validate_target_and_allowlist(
     if target_type == "group" and not runtime_config.is_group_allowed(target_id):
         return _group_access_error(runtime_config, target_id)
     if target_type == "private" and not runtime_config.is_private_allowed(target_id):
-        return _private_access_error(runtime_config, target_id)
+        return private_access_error(runtime_config, target_id)
     return None
 
 

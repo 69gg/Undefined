@@ -246,32 +246,31 @@ tables = pdf.pages[0].extract_tables()
 
 为了确保技能目录 (`skills/`) 的可移植性（例如直接移动到其他项目中使用），请遵循以下准则：
 
-1.  **避免外部依赖**:
-    -   尽量不要在 `handler.py` 中引用 `skills/` 目录之外的本地模块（如 `from Undefined.xxx import`）。
-    -   如果是通用库（如 `httpx`, `pillow`），直接引用即可。
+1.  **依赖边界（硬规则）**:
+    -   `handler.py` 只允许依赖：Python 标准库、第三方包（如 `httpx`、`pillow`）、`skills/` 内部模块（`Undefined.skills.*` 或同目录相对导入），以及 `context` 注入的依赖。
+    -   **不允许**直接 `import` `skills/` 之外的仓库模块（如 `Undefined.services.*`、`Undefined.utils.*`、`Undefined.config`）；需要跨技能共享的 helper 放到 [`src/Undefined/skills/shared.py`](shared.py) 这类 skills 内模块。
+    -   这条规则由 `tests/test_skills_import_boundary.py` 机械校验：新增越界导入会直接让测试失败。历史越界导入记录在该测试的基线里，重构时应顺带删除对应条目（棘轮只减不增）。
 
-2.  **使用 RequestContext 获取请求信息**（推荐）:
-    -   使用 `RequestContext` 获取当前请求的 group_id、user_id 等信息，无需手动传递参数。
-    -   这是获取请求上下文的首选方式，支持并发隔离。
+2.  **从执行上下文获取请求信息**（推荐）:
+    -   运行时把 group_id、user_id、request_id 等放进 `context`，handler 直接读取即可，不要自己 import 仓库内部的上下文模块。
+    -   若确实需要进程级请求隔离（并发下跨协程读取当前请求），使用 `context` 传入的客户端/服务对象，而不是引入全局状态。
 
     ```python
-    from Undefined.context import get_group_id, get_user_id, get_request_id
-    
     async def execute(args, context):
-        # 优先从 args 获取（用户显式指定）
-        group_id = args.get("group_id") or get_group_id()
-        user_id = args.get("user_id") or get_user_id()
-        request_id = get_request_id()  # 自动UUID追踪
-        
+        # 优先从 args 获取（用户显式指定），否则回退到执行上下文
+        group_id = args.get("group_id") or context.get("group_id")
+        user_id = args.get("user_id") or context.get("user_id")
+        request_id = context.get("request_id", "-")
+
         if not group_id:
             return "无法确定群ID"
-        
+
         # 使用 group_id 进行操作...
     ```
 
 3.  **使用 Context 注入外部依赖**:
     -   如果需要使用外部项目的功能（如数据库连接、特殊的渲染函数），通过 `context` 参数传入。
--   主程序（`handlers.py` 或 `ai/` 运行时）负责在调用时将这些依赖放入 `context`。
+    -   主程序（`handlers/` 或 `ai/` 运行时）负责在调用时将这些依赖放入 `context`。
 
     ```python
     # 错误的做法
@@ -288,15 +287,12 @@ tables = pdf.pages[0].extract_tables()
         await heavy_func()
     ```
 
-4.  **向后兼容的获取方式**（仅在必要时使用）:
-    -   如果 `RequestContext` 不可用，可以回退到从 `context` 获取：
-    
+4.  **兼容旧写法的读取顺序**（仅在必要时使用）:
+    -   历史 handler 可能从多处取值，推荐优先级为：`args` > `context` > 旧字段（已废弃）。
+
     ```python
-    from Undefined.context import get_group_id
-    
     async def execute(args, context):
-        # 优先级：args > RequestContext > context > ai_client（已废弃）
-        group_id = args.get("group_id") or get_group_id() or context.get("group_id")
+        group_id = args.get("group_id") or context.get("group_id")
     ```
 
 5.  **统一的加载机制**:

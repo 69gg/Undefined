@@ -108,7 +108,7 @@ Management / Runtime 请求 → webui/app.py 或 api/app.py → routes/*
 
 - **热重载**：自动扫描 `skills/` 下 `config.json` / `handler.py` 变更并重载
 - **自动处理管线**：`skills/pipelines/<name>/` 使用 `config.json + handler.py`，在斜杠命令之后、AI 自动回复之前并行检测/处理；命令输入和命令输出要写入历史，管线输出通过 `MessageSender` 自动写历史并登记本地媒体/文件附件 UID。
-- **Skills handler 不引用 `skills/` 外的本地模块**，依赖通过 context 注入
+- **Skills handler 不引用 `skills/` 外的本地模块**（`Undefined.skills.*` 与同目录相对导入除外），依赖通过 context 注入；跨技能共享的 helper 放 `skills/shared.py`，越界导入由 `tests/test_skills_import_boundary.py` 棘轮校验
 - **Agent 标准结构**：`config.json` + `handler.py` + `prompt.md` + `intro.md` + `mcp.json`(可选) + `anthropic_skills/`(可选)
 - **共享授权**：通过 `callable.json` 将工具或 Agent 白名单暴露给其他 Agent
 - **Anthropic Skills**：支持 SKILL.md 目录结构与渐进式披露
