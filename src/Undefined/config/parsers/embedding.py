@@ -135,12 +135,19 @@ def _parse_embedding_feature_overrides(
                 type(entry).__name__,
             )
             continue
+        use_proxy_raw = entry.get("use_proxy")
+        if isinstance(use_proxy_raw, str) and not use_proxy_raw.strip():
+            logger.warning(
+                "[配置] models.embedding.features.%s.use_proxy 为空字符串，"
+                '按继承默认配置处理；三态请显式写 "inherit" / true / false',
+                name,
+            )
         overrides[name] = EmbeddingFeatureOverride(
             use_default=_coerce_bool(entry.get("use_default", True), True),
             api_url=_coerce_str(entry.get("api_url"), ""),
             api_key=_coerce_str(entry.get("api_key"), ""),
             model_name=_coerce_str(entry.get("model_name"), ""),
-            use_proxy=_coerce_inheritable_bool(entry.get("use_proxy")),
+            use_proxy=_coerce_inheritable_bool(use_proxy_raw),
             context_window_tokens=_coerce_int(entry.get("context_window_tokens"), 0),
             queue_interval_seconds=_coerce_float(
                 entry.get("queue_interval_seconds"), -1.0

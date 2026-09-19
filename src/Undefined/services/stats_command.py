@@ -48,9 +48,6 @@ _STATS_DATA_SUMMARY_MAX_CHARS = 12000
 _STATS_AI_FLAGS = {"--ai", "-a"}
 _STATS_TIME_RANGE_RE = re.compile(r"^\d+[dwm]?$", re.IGNORECASE)
 
-# matplotlib 为必需依赖；保留标志以兼容既有日志分支
-_MATPLOTLIB_AVAILABLE = True
-
 
 class StatsCommandMixin:
     """`/stats` 命令的统计、绘图与投递实现。"""
@@ -137,12 +134,6 @@ class StatsCommandMixin:
         self, group_id: int, sender_id: int, args: list[str]
     ) -> None:
         """处理 /stats 命令，生成 token 使用统计图表（可选 AI 分析）"""
-        if not _MATPLOTLIB_AVAILABLE:
-            await self.sender.send_group_message(
-                group_id, "❌ 缺少必要的库，无法生成图表。请安装 matplotlib。"
-            )
-            return
-
         days, enable_ai_analysis = self._parse_stats_options(args)
         img_dir: Path | None = None
         try:
@@ -270,15 +261,6 @@ class StatsCommandMixin:
                     summary=summary,
                     days=days,
                 )
-
-            if not _MATPLOTLIB_AVAILABLE:
-                message = "❌ 缺少必要的库，无法生成图表。请安装 matplotlib。"
-                if is_webui_session:
-                    message += "\n\n" + self._build_stats_summary_text(summary)
-                    if ai_analysis:
-                        message += f"\n\n🤖 AI 智能分析\n{ai_analysis}"
-                await _send_private(message)
-                return
 
             img_dir = await self._create_stats_render_dir()
             await self._generate_stats_charts(summary, img_dir, days)

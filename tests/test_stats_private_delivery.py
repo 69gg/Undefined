@@ -12,7 +12,6 @@ from weixin_ilink_client import (
     UnsupportedCapabilityError,
 )
 
-import Undefined.services.stats_command as stats_command_module
 from Undefined.services.command import CommandDispatcher
 from Undefined.utils import io as async_io
 
@@ -74,7 +73,6 @@ async def test_private_stats_uses_one_forward_delivery(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(stats_command_module, "_MATPLOTLIB_AVAILABLE", True)
     dispatcher, render_dir = await _dispatcher(tmp_path)
     send_message = AsyncMock()
     send_forward = AsyncMock()
@@ -101,7 +99,6 @@ async def test_group_stats_waits_for_analysis_before_chart_rendering(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(stats_command_module, "_MATPLOTLIB_AVAILABLE", True)
     dispatcher, render_dir = await _dispatcher(tmp_path)
     events: list[str] = []
 
@@ -136,7 +133,6 @@ async def test_private_stats_callback_only_channel_sends_chart_sequence(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(stats_command_module, "_MATPLOTLIB_AVAILABLE", True)
     dispatcher, render_dir = await _dispatcher(tmp_path)
     send_message = AsyncMock()
 
@@ -160,7 +156,6 @@ async def test_private_stats_definitive_rejection_keeps_text_summary(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(stats_command_module, "_MATPLOTLIB_AVAILABLE", True)
     dispatcher, render_dir = await _dispatcher(tmp_path)
     send_message = AsyncMock()
     send_forward = AsyncMock(side_effect=UnsupportedCapabilityError("item_list"))
@@ -194,7 +189,6 @@ async def test_private_stats_ambiguous_failure_does_not_send_fallback(
     monkeypatch: pytest.MonkeyPatch,
     error: Exception,
 ) -> None:
-    monkeypatch.setattr(stats_command_module, "_MATPLOTLIB_AVAILABLE", True)
     dispatcher, render_dir = await _dispatcher(tmp_path)
     send_message = AsyncMock()
     send_forward = AsyncMock(side_effect=error)
