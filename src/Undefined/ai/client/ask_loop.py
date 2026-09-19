@@ -324,7 +324,8 @@ class ClientAskLoopMixin(ClientQueueMixin):
         tool_context.setdefault("search_wrapper", self._search_wrapper)
         tool_context.setdefault(
             "crawl4ai_proxy_config_available",
-            self._crawl4ai_capabilities.proxy_config_available,
+            self._crawl4ai_capabilities is not None
+            and self._crawl4ai_capabilities.proxy_config_available,
         )
         tool_context.setdefault("end_summary_storage", self._end_summary_storage)
         tool_context.setdefault("end_summaries", self._prompt_builder.end_summaries)

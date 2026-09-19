@@ -17,7 +17,10 @@ from Undefined.ai.llm import ModelRequester
 from Undefined.ai.model_selector import ModelSelector
 from Undefined.ai.multimodal import MultimodalAnalyzer
 from Undefined.ai.prompts import PromptBuilder
-from Undefined.ai.crawl4ai_support import get_crawl4ai_capabilities
+from Undefined.ai.crawl4ai_support import (
+    Crawl4AICapabilities,
+    get_crawl4ai_capabilities,
+)
 from Undefined.ai.summaries import SummaryService
 from Undefined.ai.tokens import TokenCounter
 from Undefined.ai.tool_search import TOOL_SEARCH_NAME
@@ -162,7 +165,18 @@ class ClientSetupMixin:
         self.runtime_config = runtime_config
         self.memory_storage = memory_storage
         self._end_summary_storage = end_summary_storage or EndSummaryStorage()
-        self._crawl4ai_capabilities = get_crawl4ai_capabilities()
+        self._crawl4ai_capabilities: Crawl4AICapabilities | None
+        # crawl4ai 是必需依赖，但安装损坏 / 版本不兼容不应让整个 Bot 启动失败：
+        # 这里降级为能力缺失（网页获取工具运行时会明确报错），并以 error 日志暴露环境问题
+        try:
+            self._crawl4ai_capabilities = get_crawl4ai_capabilities()
+        except Exception as exc:
+            self._crawl4ai_capabilities = None
+            logger.error(
+                "[初始化] crawl4ai 初始化失败，网页获取功能不可用，"
+                "请修复 crawl4ai 安装后重启: %s",
+                exc,
+            )
 
         self._http_client = httpx.AsyncClient(timeout=480.0, trust_env=False)
         self._token_usage_storage = TokenUsageStorage()
@@ -290,10 +304,11 @@ class ClientSetupMixin:
         else:
             logger.info("[初始化] SEARXNG_URL 未配置，搜索功能禁用")
 
-        logger.info(
-            "[初始化] crawl4ai 已就绪，网页获取功能已启用: proxy_config=%s",
-            self._crawl4ai_capabilities.proxy_config_available,
-        )
+        if self._crawl4ai_capabilities is not None:
+            logger.info(
+                "[初始化] crawl4ai 已就绪，网页获取功能已启用: proxy_config=%s",
+                self._crawl4ai_capabilities.proxy_config_available,
+            )
 
         self._prompt_builder = PromptBuilder(
             bot_qq=self.bot_qq,
