@@ -59,6 +59,8 @@ class HistorianWorker:
         self._config_getter = config_getter
         self._model_config = model_config
         self._max_concurrency = max(1, int(max_concurrency))
+        # max_concurrency 仅在启动时读取一次，热更新不生效；若将来开放热更新，
+        # 必须同步重建在途门控（_poll_loop 比较的 _max_concurrency）与 _semaphore
         self._stop_event = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
         self._inflight_tasks: set[asyncio.Task[None]] = set()

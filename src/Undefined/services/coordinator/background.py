@@ -178,6 +178,8 @@ class BackgroundMixin:
             # 重试上限以 QueueManager 为准（与队列实际重试逻辑、等待超时同源），
             # 否则热更新后两边分叉：等待方可能在仍会重试时就收到失败，或在重试
             # 已耗尽时一直挂到 480s 超时。
+            # 约定：后续新增 _execute_queued_* 一律使用 resolve_effective_retry_count
+            # 判断重试耗尽，禁止直接读 config.ai_request_max_retries。
             retry_count = int(request.get("_retry_count", 0) or 0)
             max_retries = resolve_effective_retry_count(
                 self.config, getattr(self, "queue_manager", None)
