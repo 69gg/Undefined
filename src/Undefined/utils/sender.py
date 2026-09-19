@@ -29,6 +29,7 @@ from Undefined.attachments import (
 from Undefined.config import Config
 from Undefined.onebot import OneBotClient
 from Undefined.onebot.client import OneBotDeliveryUncertainError
+from Undefined.onebot.file_errors import FileTransferError
 from Undefined.utils import io
 from Undefined.utils.history import MessageHistoryManager
 from Undefined.utils.common import (
@@ -1289,6 +1290,8 @@ class MessageSender:
                     mark_sent=mark_sent,
                 )
                 return result, temp_group_id
+            except FileTransferError:
+                raise
             except OneBotDeliveryUncertainError:
                 logger.warning(
                     "[发送消息] 复用群临时会话投递结果未确认，停止回退: "
@@ -1319,6 +1322,8 @@ class MessageSender:
                 mark_sent=mark_sent,
             )
             return result, None
+        except FileTransferError:
+            raise
         except OneBotDeliveryUncertainError:
             logger.warning(
                 "[发送消息] 私聊直发投递结果未确认，停止临时会话回退: user=%s",
@@ -1371,6 +1376,8 @@ class MessageSender:
                     group_id,
                 )
                 return result, group_id
+            except FileTransferError:
+                raise
             except OneBotDeliveryUncertainError:
                 logger.warning(
                     "[发送消息] 群临时会话投递结果未确认，停止遍历共享群: "

@@ -8,6 +8,8 @@ from Undefined.attachments import (
 )
 from Undefined.skills.toolsets.messages.context_utils import (
     handle_delivery_uncertain,
+    file_transfer_error_dispatched_count,
+    file_transfer_error_message,
     is_delivery_uncertain_error,
     mark_message_sent,
     normalize_sent_message_id,
@@ -103,6 +105,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             if history_attachments:
                 send_kwargs["attachments"] = history_attachments
             sent_message_id: Any = None
+            body_sent = False
             if has_delivery_message:
                 send_address_message = getattr(sender, "send_address_message", None)
                 if callable(send_address_message):
@@ -119,6 +122,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                     )
                 else:
                     raise RuntimeError("当前 sender 不支持微信投递地址")
+                body_sent = True
                 mark_message_sent(context)
             dispatched_file_count = await dispatch_pending_file_sends(
                 rendered,
@@ -147,6 +151,14 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         except ValueError as exc:
             return f"发送失败：{exc}"
         except Exception as e:
+            if transfer_message := file_transfer_error_message(e):
+                delivered = file_transfer_error_dispatched_count(e)
+                if delivered > 0:
+                    mark_message_sent(context)
+                if not body_sent and delivered <= 0:
+                    return transfer_message
+                prefix = "私聊正文已发送，但仅成功发送 " if body_sent else "仅成功发送 "
+                return f"{prefix}{delivered}/{pending_file_count} 个私聊附件：{transfer_message}"
             if is_delivery_uncertain_error(e):
                 logger.warning(
                     "[私聊发送] 投递结果未确认，阻止自动重试: user=%s request_id=%s",

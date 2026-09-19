@@ -15,6 +15,10 @@ from typing import Any, Awaitable, Callable
 from aiohttp import web
 from aiohttp.web_response import Response
 
+from Undefined.onebot.file_store import FILE_ROUTE, FILE_ROUTE_NAME, OneBotFileStore
+from Undefined.onebot.file_transport import OneBotFileTransport
+from .routes import onebot_files
+
 from ._context import RuntimeAPIContext
 from ._helpers import (
     _apply_cors_headers,
@@ -47,6 +51,8 @@ class RuntimeAPIServer:
         context: RuntimeAPIContext,
         host: str,
         port: int,
+        *,
+        file_store: OneBotFileStore | None = None,
     ) -> None:
         self._context = context
         self._host = host
@@ -56,21 +62,41 @@ class RuntimeAPIServer:
         self._background_tasks: set[asyncio.Task[Any]] = set()
         self._naga_state = NagaState()
         self._chat_job_manager = chat.ChatJobManager(context)
+        transport = getattr(context.onebot, "file_transport", None)
+        self._file_store = (
+            file_store
+            if file_store is not None
+            else (
+                transport.store if isinstance(transport, OneBotFileTransport) else None
+            )
+        )
 
     async def start(self) -> None:
         from Undefined.config.models import resolve_bind_hosts
 
         app = self._create_app()
-        self._runner = web.AppRunner(app)
-        await self._runner.setup()
-        for h in resolve_bind_hosts(self._host):
-            site = web.TCPSite(self._runner, host=h, port=self._port)
-            await site.start()
-            self._sites.append(site)
+        self._runner = web.AppRunner(
+            app, access_log_class=onebot_files.FileAccessLogger
+        )
+        try:
+            await self._runner.setup()
+            port = self._port
+            for h in resolve_bind_hosts(self._host):
+                site = web.TCPSite(self._runner, host=h, port=port)
+                await site.start()
+                self._sites.append(site)
+                port = int(self._runner.addresses[0][1])
+            if self._file_store is not None:
+                await self._file_store.start(port)
+        except BaseException:
+            await self.stop()
+            raise
         cfg = self._context.config_getter()
         logger.info("[RuntimeAPI] 已启动: %s", cfg.api.display_url)
 
     async def stop(self) -> None:
+        if self._file_store is not None:
+            self._file_store.unavailable()
         await self._chat_job_manager.stop()
 
         for task in self._background_tasks:
@@ -83,7 +109,12 @@ class RuntimeAPIServer:
             await self._runner.cleanup()
             logger.info("[RuntimeAPI] 已停止")
         self._runner = None
-        self._site = None
+        self._sites.clear()
+        if self._file_store is not None:
+            await self._file_store.stop()
+
+    async def _onebot_file_handler(self, request: web.Request) -> web.StreamResponse:
+        return await onebot_files.download(request, self._file_store)
 
     def _create_app(self) -> web.Application:
         @web.middleware
@@ -99,7 +130,9 @@ class RuntimeAPIServer:
             if request.path.startswith("/api/"):
                 cfg = self._context.config_getter()
                 is_naga_path = request.path.startswith("/api/v1/naga/")
-                skip_auth = is_naga_path and _naga_runtime_enabled(cfg)
+                skip_auth = (
+                    is_naga_path and _naga_runtime_enabled(cfg)
+                ) or onebot_files.is_file_request(request)
                 if not skip_auth:
                     expected = str(cfg.api.auth_key or "")
                     provided = request.headers.get(_AUTH_HEADER, "")
@@ -117,6 +150,7 @@ class RuntimeAPIServer:
             [
                 web.get("/health", self._health_handler),
                 web.get("/openapi.json", self._openapi_handler),
+                web.get(FILE_ROUTE, self._onebot_file_handler, name=FILE_ROUTE_NAME),
                 web.get("/api/v1/probes/internal", self._internal_probe_handler),
                 web.get("/api/v1/probes/external", self._external_probe_handler),
                 web.get("/api/v1/memory", self._memory_handler),

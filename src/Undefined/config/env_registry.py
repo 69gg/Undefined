@@ -128,6 +128,8 @@ ENV_REGISTRY: Final[dict[tuple[str, ...], str]] = {
     ("messages", "use_proxy"): "MESSAGES_USE_PROXY",
     ("naga", "use_proxy"): "NAGA_USE_PROXY",
     ("onebot", "token"): "ONEBOT_TOKEN",
+    ("onebot", "file_send_mode"): "ONEBOT_FILE_SEND_MODE",
+    ("onebot", "file_send_host"): "ONEBOT_FILE_SEND_HOST",
     ("onebot", "ws_url"): "ONEBOT_WS_URL",
     ("render", "browser_executable_path"): "RENDER_BROWSER_EXECUTABLE_PATH",
     ("render", "long_image_default_padding"): "RENDER_LONG_IMAGE_DEFAULT_PADDING",

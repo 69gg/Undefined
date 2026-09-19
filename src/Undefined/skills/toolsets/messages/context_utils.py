@@ -26,6 +26,19 @@ def is_delivery_uncertain_error(error: BaseException) -> bool:
     return bool(getattr(error, "delivery_uncertain", False))
 
 
+def file_transfer_error_message(error: BaseException) -> str | None:
+    """通过公共错误属性读取可展示说明，技能无需导入运行时传输模块。"""
+    if not getattr(error, "file_transfer_error", False):
+        return None
+    return str(getattr(error, "user_message", str(error)))
+
+
+def file_transfer_error_dispatched_count(error: BaseException) -> int:
+    """读取传输错误携带的已成功派发附件数量，未携带时为 0。"""
+    count = getattr(error, "dispatched_file_count", 0)
+    return count if isinstance(count, int) and count > 0 else 0
+
+
 def handle_delivery_uncertain(context: dict[str, Any]) -> str:
     """Mark an ambiguous attempt as sent and return non-retry tool feedback."""
 

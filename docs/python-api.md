@@ -148,6 +148,18 @@ print(cfg.chat_model.model_name)  # gpt-4o-mini
 
 `strict=True` 时缺失必填项（如 `onebot.ws_url`、各模型 `api_url` 等）会抛出异常；行为与 CLI 严格模式一致。
 
+### `OneBotClient` 文件传输依赖
+
+`OneBotClient(ws_url, token="", *, config_getter=None, file_transport=None)` 保留原有位置参数和发送返回值。未注入配置时本地文件默认使用 `local`，保持旧的本地路径发送行为；库嵌入需要 Stream 上传时可通过 `config_getter` 显式返回 `FileSendSettings("stream")`，运行中需要热更新则注入返回当前 `Config` 的函数：
+
+```python
+from Undefined.onebot import OneBotClient
+
+client = OneBotClient(cfg.onebot_ws_url, cfg.onebot_token, config_getter=lambda: cfg)
+```
+
+`OneBotFileTransport` 的 `chunk_size`、`timeout` 和 `store` 可用于测试注入，不是额外业务配置。URL 模式需要将同一客户端传入 `RuntimeAPIContext.onebot`，并显式启动 `RuntimeAPIServer`；服务会绑定客户端的临时文件存储与实际监听端口，OneBot 发送方法不会自动启动 Runtime。准备错误为 `FileTransferError`，含 `mode`、`stage`、`user_message` 与 `file_transfer_error` 标记；投递发出后结果未确认仍为 `OneBotDeliveryUncertainError`。详细模式与部署要求见 [配置说明](configuration.md#43-onebot-协议端连接)。
+
 ### `Config.builder`
 
 链式构建器，适合在 base mapping 上覆盖少量字段：

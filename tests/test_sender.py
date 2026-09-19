@@ -22,6 +22,7 @@ from weixin_ilink_client import (
 from Undefined.attachments import AttachmentRegistry
 from Undefined.context import RequestContext
 from Undefined.onebot.client import OneBotDeliveryUncertainError
+from Undefined.onebot.file_errors import FileTransferError
 from Undefined.utils import io as async_io
 from Undefined.utils.message_reply import ReplyContext
 from Undefined.utils.message_targets import DeliveryAddress
@@ -51,6 +52,25 @@ def sender() -> MessageSender:
     config.private_access_denied_reason.return_value = None
 
     return MessageSender(onebot, history_manager, bot_qq=10000, config=config)
+
+
+@pytest.mark.parametrize("temp_group_id", [None, 123])
+async def test_private_preparation_error_does_not_try_other_sessions(
+    sender: MessageSender, temp_group_id: int | None
+) -> None:
+    onebot = cast(Any, sender.onebot)
+    onebot.send_private_message = AsyncMock(
+        side_effect=FileTransferError("stream", "unsupported")
+    )
+    onebot.get_group_list = AsyncMock()
+    with pytest.raises(FileTransferError):
+        await sender._send_private_segments(
+            1,
+            [{"type": "image", "data": {"file": "/local/image.png"}}],
+            temp_group_id=temp_group_id,
+        )
+    onebot.send_private_message.assert_awaited_once()
+    onebot.get_group_list.assert_not_awaited()
 
 
 def test_file_uri_path_text_supports_windows_drive_and_unc(

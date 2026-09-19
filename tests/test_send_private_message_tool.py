@@ -12,6 +12,7 @@ from jsonschema import Draft202012Validator
 from Undefined.attachments import AttachmentRegistry
 from Undefined.context import RequestContext
 from Undefined.onebot.client import OneBotDeliveryUncertainError
+from Undefined.onebot.file_errors import FileTransferError
 from Undefined.skills.toolsets.messages.context_utils import DELIVERY_UNCERTAIN_RESULT
 from Undefined.skills.toolsets.messages.send_private_message.handler import execute
 from Undefined.utils import io as async_io
@@ -229,6 +230,74 @@ async def test_send_private_message_dispatches_file_only_without_empty_message(
         "history_attachment": record,
     }
     assert context["message_sent_this_turn"] is True
+
+
+@pytest.mark.asyncio
+async def test_send_private_message_reports_partial_delivery_before_transfer_error(
+    tmp_path: Path,
+) -> None:
+    registry = AttachmentRegistry(
+        registry_path=tmp_path / "attachment_registry.json",
+        cache_dir=tmp_path / "attachments",
+    )
+    first = await registry.register_bytes(
+        "private:12345", b"one", kind="file", display_name="one.txt", source_kind="test"
+    )
+    second = await registry.register_bytes(
+        "private:12345", b"two", kind="file", display_name="two.txt", source_kind="test"
+    )
+    error = FileTransferError("stream", "请切换 onebot.file_send_mode")
+    sender = SimpleNamespace(
+        send_address_message=AsyncMock(),
+        send_address_file=AsyncMock(side_effect=[{"status": "ok"}, error]),
+    )
+    context: dict[str, Any] = _tool_context(
+        request_type="private",
+        user_id=12345,
+        sender_id=12345,
+        request_id="req-private-file-partial",
+        runtime_config=_build_runtime_config(),
+        sender=sender,
+        attachment_registry=registry,
+    )
+
+    result = await execute(
+        {
+            "message": (
+                f'<attachment uid="{first.uid}"/><attachment uid="{second.uid}"/>'
+            )
+        },
+        context,
+    )
+
+    assert result == f"仅成功发送 1/2 个私聊附件：{error.user_message}"
+    assert context["message_sent_this_turn"] is True
+    assert sender.send_address_file.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_send_private_message_does_not_claim_body_sent_when_body_transfer_fails() -> (
+    None
+):
+    error = FileTransferError("url", "Runtime 文件服务未就绪", stage="prepare")
+    sender = SimpleNamespace(
+        send_address_message=AsyncMock(side_effect=error),
+        send_address_file=AsyncMock(),
+    )
+    context: dict[str, Any] = _tool_context(
+        request_type="private",
+        user_id=12345,
+        sender_id=12345,
+        request_id="req-private-body-failure",
+        runtime_config=_build_runtime_config(),
+        sender=sender,
+    )
+
+    result = await execute({"message": "带内联图片的正文"}, context)
+
+    assert result == error.user_message
+    assert not context.get("message_sent_this_turn")
+    sender.send_address_file.assert_not_awaited()
 
 
 @pytest.mark.asyncio

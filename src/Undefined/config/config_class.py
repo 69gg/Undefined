@@ -30,6 +30,7 @@ from .models import (
     WeixinConfig,
 )
 from .toml_io import _load_env, load_toml_data
+from .onebot import FileSendMode
 
 
 @dataclass
@@ -65,6 +66,8 @@ class Config:
     nagaagent_mode_enabled: bool
     onebot_ws_url: str
     onebot_token: str
+    onebot_file_send_mode: FileSendMode
+    onebot_file_send_host: str
     chat_model: ChatModelConfig
     vision_model: VisionModelConfig
     security_model_enabled: bool

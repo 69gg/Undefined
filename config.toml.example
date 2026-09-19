@@ -73,6 +73,13 @@ ws_url = "ws://127.0.0.1:3001"
 # en: Access token (optional).
 token = ""
 
+# zh: 本地文件发送方式：local（共享路径，默认，兼容旧部署）/ url（Runtime 临时链接）/ stream（NapCat Stream API）。支持热更新。
+# en: Local file transport: local (shared paths, default for compatibility), url (temporary Runtime links), or stream (NapCat Stream API). Hot reload supported.
+file_send_mode = "local"
+# zh: 仅 URL 模式使用：OneBot 可访问的 Runtime 主机地址，支持 IPv4、IPv6 或域名，不包含协议、端口或路径；端口使用 Runtime 实际监听端口。
+# en: URL mode only: Runtime host reachable by OneBot, as IPv4, IPv6 or a domain without scheme, port or path. Uses the actual Runtime listening port.
+file_send_host = "127.0.0.1"
+
 [models]
 # zh: 对话模型配置（主模型，处理每一条消息）。
 # en: Chat model config (the main model, processing each message).

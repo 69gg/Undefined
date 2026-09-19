@@ -223,8 +223,20 @@ model_name = "gpt-4o-mini"
 |---|---:|---|---|
 | `ws_url` | `""` | OneBot WebSocket 地址 | 模板示例通常写 `ws://127.0.0.1:3001`；严格模式必填 |
 | `token` | `""` | OneBot token | 同时用于 URL 参数与 `Authorization` 头 |
+| `file_send_mode` | `"local"` | Bot 本地文件发送方式：`local` / `url` / `stream` | 缺省或空值用默认值，兼容旧部署；去除首尾空白并转小写；非法非空值报配置错误 |
+| `file_send_host` | `"127.0.0.1"` | URL 模式传给 OneBot 的 Runtime 下载主机 | IPv4、IPv6 或域名，不包含协议、端口或路径；缺省或空值用默认值 |
 
-`onebot.*` 变更需要重启进程才能生效。
+`onebot.ws_url` / `onebot.token` 变更需要重启进程。`file_send_mode` / `file_send_host` 支持热更新：每次逻辑投递开始时取得独立快照，排队及进行中的投递保持旧值，后续投递使用新值。环境变量为 `ONEBOT_FILE_SEND_MODE` / `ONEBOT_FILE_SEND_HOST`，沿用 TOML 优先、环境变量补缺的规则。
+
+- `local`（默认）：保留原有路径或 `file://` 格式，协议端必须能读取该路径。
+- `url`：复用 Runtime HTTP 监听，将本地文件复制为临时下载资源。URL 使用 `file_send_host` 与 **实际生效的监听端口**，不会使用尚未重启生效的新 `api.port`。需要 `[api].enabled = true` 且协议端能访问该监听；默认 `127.0.0.1` 指协议端自身的回环地址，跨容器时应填写其可达的 Bot 主机或域名，并配置可达的 `[api].host`。
+- `stream`：通过 NapCat `upload_file_stream` 扩展按 64 KiB 分块上传，校验完成后使用协议端路径发送。协议端不支持时明确报错，需手动选择其他模式。零字节文件不支持此模式。
+
+这些选项只影响 Bot 本地文件；已有 HTTP/HTTPS URL、Base64 和协议端资源标识保持原样，展示文件名、附件 UID 和历史来源不变。旧配置未包含新字段且未通过环境变量指定模式时继续采用 `local`，保持原有发送行为；`url` 和 `stream` 需要显式启用。不能假定所有 OneBot 实现或 Lagrange.Core 都支持 NapCat 扩展。
+
+Stream 本地文件投递在同一 Bot 内串行，纯文本不等待上传锁。Stream／URL 文件准备、发送与明确失败后的文件消息段回退共用 8 分钟预算，排队不计时；临时资源保留 16 分钟。URL 副本在源文件删除或切换模式后仍可下载，到期拒绝新请求，已有下载允许完成。文件准备失败不会触发文件消息段回退或标记已发送；投递发出后无法确认结果时禁止自动重发。不会自动切换模式、自动重试上传或启动 Runtime。
+
+传输过程使用分块 IO；现有附件登记与 NapCat 的分块合并仍可能读取完整文件，不保证整个链路固定内存占用。参见 [三模式部署要求](deployment.md#napcat--lagrangecore-部署要求) 与 [临时文件接口](openapi.md#onebot-临时文件下载)。
 
 ---
 
@@ -1332,6 +1344,7 @@ api_key = "replace-with-your-key"
 - `naga.*`（`enabled/api_url/api_key/use_proxy/moderation_enabled/mode/allowed_group_ids/blocked_group_ids/allowed_private_ids/blocked_private_ids`）
 
 ### 5.3 明确“会执行热应用”的字段
+- `onebot.file_send_mode` / `onebot.file_send_host`（新投递读取快照；进行中投递及旧 URL 生命周期不变）
 - 模型发车间隔 / 模型名 / 模型池变更（队列间隔刷新）
 - `models.grok.model_name` / `models.grok.queue_interval_seconds`（队列间隔刷新）
 - `models.summary` / `models.historian` / `models.grok` 的非队列字段会刷新 AI 运行时配置，但不会重建聊天、视觉或 Agent 模型客户端；其中 `models.summary` 热更新会重建摘要服务，`/summary`/`/sum`、SummaryService（如 `/bugfix`）会立即使用专用 summary 模型配置；主 AI 调用的 `summary_agent` 始终走 `models.agent`（及 agent 模型池）。
@@ -1709,6 +1722,8 @@ api_key = "replace-with-your-key"
 | TOML 路径 | 环境变量 |
 |-----------|----------|
 | `onebot.token` | `ONEBOT_TOKEN` |
+| `onebot.file_send_mode` | `ONEBOT_FILE_SEND_MODE` |
+| `onebot.file_send_host` | `ONEBOT_FILE_SEND_HOST` |
 | `onebot.ws_url` | `ONEBOT_WS_URL` |
 
 #### `render`

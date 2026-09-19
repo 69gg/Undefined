@@ -25,6 +25,64 @@ def _read_source(path: Path) -> str:
     return text
 
 
+def test_onebot_file_mode_select_save_reload_and_other_enums() -> None:
+    if shutil.which("node") is None:
+        pytest.skip("node is required")
+    source = _read_source(CONFIG_FORM_JS)
+    section = source[
+        source.index("const FIELD_SELECT_EMPTY_OPTION") : source.index(
+            "const AOT_PATHS"
+        )
+    ]
+    script = r"""
+const fs = require("node:fs");
+const vm = require("node:vm");
+const assert = require("node:assert/strict");
+let saved = null;
+let current = null;
+const context = {
+  document: { createElement(tag) { return {
+    tag, dataset: {}, children: [],
+    appendChild(child) { this.children.push(child); },
+    setAttribute() {},
+  }; } },
+  getComment: () => "仅 URL 模式使用，不包含协议、端口或路径",
+  isSensitiveKey: () => false,
+  isLongText: () => false,
+  autoSave: () => { saved = JSON.stringify({ onebot: { file_send_mode: current.value } }); },
+  scheduleAutoSave() {},
+};
+vm.createContext(context);
+vm.runInContext(fs.readFileSync(0, "utf8"), context);
+for (const mode of ["stream", "local", "url"]) {
+  const group = context.createField("onebot.file_send_mode", mode);
+  const select = group.children.at(-1);
+  assert.equal(select.tag, "select");
+  assert.equal(select.dataset.valueType, "string");
+  assert.deepEqual(select.children.map(o => o.value), ["local", "url", "stream"]);
+  assert.equal(select.children.find(o => o.selected).value, mode);
+  current = select;
+  select.value = mode;
+  select.onchange();
+  const restored = context.createField("onebot.file_send_mode", JSON.parse(saved).onebot.file_send_mode);
+  assert.equal(restored.children.at(-1).children.find(o => o.selected).value, mode);
+}
+const host = context.createField("onebot.file_send_host", "127.0.0.1");
+assert.equal(host.children.at(-1).tag, "input");
+assert.match(host.children[1].innerText, /仅 URL 模式使用/);
+assert.equal(Array.from(context.getFieldSelectOptions("access.mode")).join(","), "off,blacklist,allowlist");
+assert.equal(Array.from(context.getFieldSelectOptions("message_batcher.strategy")).join(","), "extend,fixed");
+"""
+    result = subprocess.run(
+        ["node", "-e", script],
+        input=section,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
 def _has_bare_form_group_query(source: str) -> bool:
     """True if source still queries all .form-group nodes (not only [data-path])."""
     return (

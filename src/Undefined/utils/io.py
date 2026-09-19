@@ -12,9 +12,51 @@ from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 from typing import Any, Optional
 
+import aiofiles
+
 from Undefined.utils.file_lock import FileLock
 
 logger = logging.getLogger(__name__)
+
+
+async def iter_file_chunks(path: Path, chunk_size: int) -> AsyncIterator[bytes]:
+    """逐块读取文件；磁盘操作在线程池中执行。"""
+    if chunk_size <= 0:
+        raise ValueError("chunk_size 必须大于零")
+    async with aiofiles.open(path, "rb") as handle:
+        while chunk := await handle.read(chunk_size):
+            yield chunk
+
+
+async def file_fingerprint(path: Path) -> tuple[int, int, int, int]:
+    """用于检测传输期间源文件替换、大小或修改时间变化。"""
+    info = await asyncio.to_thread(path.stat)
+    if not await is_file(path):
+        raise OSError("文件来源不是普通文件")
+    return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns
+
+
+async def move_path(source: Path, target: Path) -> None:
+    """在同一文件系统中原子移动文件或目录。"""
+    await asyncio.to_thread(os.replace, source, target)
+
+
+async def copy_file_atomic(source: Path, target: Path, chunk_size: int) -> None:
+    """分块复制并原子发布，不把整文件装入内存；失败时删除临时文件。"""
+    await ensure_dir(target.parent)
+    fd, name = await asyncio.to_thread(
+        tempfile.mkstemp, prefix=f".{target.name}.", suffix=".tmp", dir=target.parent
+    )
+    os.close(fd)
+    temporary = Path(name)
+    try:
+        async with aiofiles.open(temporary, "wb") as handle:
+            async for chunk in iter_file_chunks(source, chunk_size):
+                await handle.write(chunk)
+            await handle.flush()
+        await asyncio.to_thread(os.replace, temporary, target)
+    finally:
+        await delete_file(temporary)
 
 
 def iter_text_lines(

@@ -11,6 +11,7 @@ from typing import Any, Dict, Literal, cast
 
 from Undefined.skills.toolsets.messages.context_utils import (
     handle_delivery_uncertain,
+    file_transfer_error_message,
     is_delivery_uncertain_error,
 )
 from Undefined.utils.message_turn import mark_message_sent_this_turn
@@ -464,6 +465,8 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     except UnicodeEncodeError:
         return f"编码 {encoding} 无法表示当前内容，请改用 utf-8"
     except Exception as exc:
+        if transfer_message := file_transfer_error_message(exc):
+            return transfer_message
         if is_delivery_uncertain_error(exc):
             logger.warning(
                 "[发送文本文件] 投递结果未确认，阻止自动重试: "

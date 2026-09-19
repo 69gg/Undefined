@@ -7,6 +7,7 @@ PACKAGE_ROOT: Path = Path(__file__).resolve().parent.parent
 DATA_DIR: Path = Path("data")
 HISTORY_DIR: Path = DATA_DIR / "history"
 CACHE_DIR: Path = DATA_DIR / "cache"
+ONEBOT_FILE_CACHE_DIR: Path = CACHE_DIR / "onebot_files"
 RENDER_CACHE_DIR: Path = CACHE_DIR / "render"
 IMAGE_CACHE_DIR: Path = CACHE_DIR / "images"
 ATTACHMENT_CACHE_DIR: Path = CACHE_DIR / "attachments"

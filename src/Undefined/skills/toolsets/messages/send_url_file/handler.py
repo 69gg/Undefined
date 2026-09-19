@@ -12,6 +12,7 @@ import httpx
 from Undefined.skills.http_config import get_request_timeout
 from Undefined.skills.toolsets.messages.context_utils import (
     handle_delivery_uncertain,
+    file_transfer_error_message,
     is_delivery_uncertain_error,
 )
 from Undefined.utils.http_download import (
@@ -528,6 +529,8 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         )
         return f"发送失败：{exc}"
     except Exception as exc:
+        if transfer_message := file_transfer_error_message(exc):
+            return transfer_message
         if is_delivery_uncertain_error(exc):
             logger.warning(
                 "[URL文件发送] 投递结果未确认，阻止自动重试: "
