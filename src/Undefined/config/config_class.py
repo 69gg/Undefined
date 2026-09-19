@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 
+import logging
 from dataclasses import dataclass, field as dataclass_field, fields
 from pathlib import Path
 from typing import Any, Optional
@@ -32,6 +33,8 @@ from .models import (
 )
 from .toml_io import _load_env, load_toml_data
 from .onebot import FileSendMode
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -596,8 +599,9 @@ class Config:
 
         可见性：整个应用过程没有 `await`，同一事件循环内的读方不会在一次读取中
         看到“改了一半”的对象；跨 `await` 的多次读取仍可能分别落在变更前与变更后，
-        需要严格一致的快照时请在单次读取中取全所需字段。派生集合在 finally 中刷新，
-        即使某个字段解析异常也不会留下过期索引。
+        需要严格一致的快照时请在单次读取中取全所需字段。派生集合在 finally 中刷新：
+        即使某个字段解析异常，也按当前字段状态刷新，保证派生集合与字段一致而不会
+        留下过期索引；此时配置处于部分更新状态，会以 error 日志提示建议重启。
         """
         changes: dict[str, tuple[Any, Any]] = {}
         try:
@@ -620,6 +624,12 @@ class Config:
                 if old_value != new_value:
                     setattr(self, name, new_value)
                     changes[name] = (old_value, new_value)
+        except Exception:
+            logger.exception(
+                "[配置] 热更新应用失败，配置处于部分更新状态（派生集合已按当前"
+                "字段刷新）；建议重启以恢复一致状态"
+            )
+            raise
         finally:
             if changes:
                 self._refresh_runtime_sets()

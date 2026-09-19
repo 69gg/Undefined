@@ -144,8 +144,11 @@ class RetrievalRuntimeRegistry:
         self._runtimes: list[RetrievalRuntime] = []
         self._reranker: Reranker | None = None
         self._reranker_initialized = False
-        # 常规运行只跑单个事件循环，方法内部无 await，本就按协程粒度原子；
-        # 锁用于防御未来从多线程（如 to_thread / 线程池）并发初始化
+        # threading.Lock 是有意选择：for_feature / ensure_reranker 是同步 API
+        # （reranker_provider 为同步 callable），无法改用 asyncio.Lock；锁内
+        # 全是纯内存操作与对象构造、无 await，持锁时间为微秒级，短暂阻塞
+        # 事件循环可接受。约束：临界区永远不得引入 await——一旦初始化需要
+        # 异步操作，应改为 asyncio.Lock 并提供 async 门面，而不是沿用本锁
         self._init_lock = threading.Lock()
 
     def for_feature(self, feature: str) -> RetrievalRuntime:
