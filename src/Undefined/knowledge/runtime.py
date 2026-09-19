@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING
 
@@ -143,23 +144,27 @@ class RetrievalRuntimeRegistry:
         self._runtimes: list[RetrievalRuntime] = []
         self._reranker: Reranker | None = None
         self._reranker_initialized = False
+        # 常规运行只跑单个事件循环，方法内部无 await，本就按协程粒度原子；
+        # 锁用于防御未来从多线程（如 to_thread / 线程池）并发初始化
+        self._init_lock = threading.Lock()
 
     def for_feature(self, feature: str) -> RetrievalRuntime:
         """返回功能对应的检索运行时；相同生效配置复用同一实例。"""
         model = self._embedding_models.get(feature)
         if model is None:
             raise KeyError(f"unknown embedding feature: {feature}")
-        for runtime in self._runtimes:
-            if runtime.embedding_model == model:
-                return runtime
-        runtime = RetrievalRuntime(
-            self._requester,
-            model,
-            self._rerank_model,
-            embed_batch_size=self._embed_batch_size,
-            reranker_provider=self.ensure_reranker,
-        )
-        self._runtimes.append(runtime)
+        with self._init_lock:
+            for runtime in self._runtimes:
+                if runtime.embedding_model == model:
+                    return runtime
+            runtime = RetrievalRuntime(
+                self._requester,
+                model,
+                self._rerank_model,
+                embed_batch_size=self._embed_batch_size,
+                reranker_provider=self.ensure_reranker,
+            )
+            self._runtimes.append(runtime)
         logger.info(
             "[检索运行时] 功能已绑定 embedding 配置: feature=%s model=%s interval=%.2fs",
             feature,
@@ -174,24 +179,29 @@ class RetrievalRuntimeRegistry:
 
     def ensure_reranker(self) -> Reranker | None:
         """共享重排器；未配置完整时返回 None。"""
-        if not self._reranker_initialized:
-            self._reranker_initialized = True
-            if self._rerank_model.api_url and self._rerank_model.model_name:
-                reranker = Reranker(self._requester, self._rerank_model)
-                reranker.start()
-                self._reranker = reranker
-                logger.info(
-                    "[检索运行时] 重排发车器已启动: interval=%.2fs model=%s",
-                    reranker.interval,
-                    self._rerank_model.model_name,
-                )
-        return self._reranker
+        with self._init_lock:
+            if not self._reranker_initialized:
+                self._reranker_initialized = True
+                if self._rerank_model.api_url and self._rerank_model.model_name:
+                    reranker = Reranker(self._requester, self._rerank_model)
+                    reranker.start()
+                    self._reranker = reranker
+                    logger.info(
+                        "[检索运行时] 重排发车器已启动: interval=%.2fs model=%s",
+                        reranker.interval,
+                        self._rerank_model.model_name,
+                    )
+            return self._reranker
 
     async def stop(self) -> None:
-        if self._reranker is not None:
-            await self._reranker.stop()
+        # 锁内只做状态快照与清理，await 放在锁外，避免持有线程锁阻塞事件循环
+        with self._init_lock:
+            reranker = self._reranker
             self._reranker = None
-        self._reranker_initialized = False
-        for runtime in self._runtimes:
+            self._reranker_initialized = False
+            runtimes = list(self._runtimes)
+            self._runtimes.clear()
+        if reranker is not None:
+            await reranker.stop()
+        for runtime in runtimes:
             await runtime.stop()
-        self._runtimes.clear()
