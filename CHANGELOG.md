@@ -1,3 +1,22 @@
+## v3.15.0 按功能拆分 Embedding 配置与稳定性修复
+
+本版本将嵌入模型配置按功能拆分，知识库、认知记忆与表情包可以共用默认模型或各自覆写连接、维度与指令；同时修复侧写并发合并丢失更新、Agent 技能无法加载、热更新静默失效、SIGTERM 停机缺失等多处影响长期运行的问题。
+
+- `[models.embedding]` 保留为全局默认模型与默认参数，新增 `[models.embedding.features.<name>]`（`knowledge` / `cognitive` / `memes`）按功能覆写：`use_default` 整体继承默认表，也可按字段覆写连接信息、`context_window_tokens`、`queue_interval_seconds`、`dimensions`、`query_instruction` / `document_instruction`，`request_params` 与默认表按键合并。WebUI 配置表单同步支持覆写段编辑，`use_proxy` 的三态语义（继承 / 启用 / 禁用）改为下拉选择。
+- 生效配置相同的功能复用同一个 Embedder 与发车队列，重排器全局共享，避免重复加载与重复排队。
+- 修复嵌入指令前缀被剥离的问题：query / document instruction 与文本直接拼接，`"passage: "` 这类带尾随空格的前缀现在原样保留。
+- 修复认知侧写并发合并丢失更新：同一实体的「读取 → LLM 改写 → 写入」整段互斥，后一个合并基于前一个已落盘的结果继续，不再互相覆盖。`ProfileStorage` 新增版本读取与恢复，恢复前自动把当前内容另存为新快照（恢复操作本身可回退）；新增 `scripts/restore_profile.py` 提供 list / show / restore 与 `--dry-run`，侧写回滚不再依赖手工复制文件。
+- 史官 worker 新增并发上限 `[cognitive.historian].max_concurrency`（默认 4），以信号量与在途计数双重约束，不再无上限并发。
+- 修复随包 Agent 的 handler 无法加载：handler 模块改按真实包路径导入，`code_delivery_agent` 等使用相对导入的 Agent 恢复可用；注册阶段即预导入全部 handler，失败项记录 `load_error` 并从 schema 中排除，主 AI 不再看到不可用的技能。
+- 配置热更新失败不再静默：更新改为步骤表逐项执行，单步异常不中断其余步骤，失败项与「未完全生效」汇总以 error 级日志输出；异步热更新任务与配置回调的异常均会被记录。嵌入 / 重排模型配置变更加入需重启提示，避免热重载静默无效。
+- 新增 SIGTERM 优雅停机：容器 / systemd / supervisor 停止时不再被直接终止并跳过落盘清理，SIGTERM 与 SIGINT 收敛到同一停机事件，取消连接任务并等待收敛。
+- 修复消息队列重试上限口径分叉：coordinator 与 QueueManager 各用一套重试上限，热更新后两者可分叉，导致等待方在仍会重试时被误判为失败、或重试已耗尽后干等到 480 秒超时；现统一由 `resolve_effective_retry_count` 计算并与等待超时预算同口径。
+- `scripts/reembed_cognitive.py` 支持维度变化迁移：检测到新旧向量维度不同时先读取全量记录、删除并重建同名 collection（沿用原索引元数据）后按新维度写回，记录不丢；`--dry-run` 不做任何写入。
+- 依赖与配置清理：crawl4ai 与 langchain-community 改为必需依赖，删除「未安装则降级」的静默回退（缺失时直接报错暴露环境问题）；移除零引用的死配置 `cognitive.historian.rewrite_max_retry` 与死依赖 imgkit、croniter。
+- CI 补齐治理：工作流收敛只读权限、并发取消与任务超时，前端行为测试真实执行而非静默跳过，新增 Python 3.11 / 3.13 兼容矩阵，测试开启 65% 覆盖率门禁。
+
+---
+
 ## v3.14.0 OneBot 本地文件三模式传输
 
 本版本为 Bot 本地文件新增统一传输层，支持 `local`、`url`、`stream` 三种发送方式并按投递快照热更新；默认保持 `local` 兼容旧部署，跨文件系统发送可显式启用 Runtime 临时链接或 NapCat Stream 分块上传。
