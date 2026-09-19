@@ -91,6 +91,19 @@ async def test_install_shutdown_signal_handlers_restore_returns_previous_handler
 
 
 @pytest.mark.asyncio
+async def test_install_shutdown_signal_handlers_restore_is_idempotent() -> None:
+    if not hasattr(signal, "SIGTERM"):  # pragma: no cover - 非 POSIX 平台
+        pytest.skip("SIGTERM unavailable")
+
+    original = signal.getsignal(signal.SIGTERM)
+    guard = install_shutdown_signal_handlers(logger)
+    guard.restore()
+    # 二次调用为空操作：previous 已清空，不得抛错或再改信号状态
+    guard.restore()
+    assert signal.getsignal(signal.SIGTERM) is original
+
+
+@pytest.mark.asyncio
 async def test_install_shutdown_signal_handlers_returns_fresh_event() -> None:
     guard = install_shutdown_signal_handlers(logger)
     assert isinstance(guard.event, asyncio.Event)
