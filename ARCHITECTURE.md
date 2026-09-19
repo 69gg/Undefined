@@ -18,7 +18,7 @@ graph TB
         ConfigLoader["ConfigManager<br/>配置管理器<br/>[config/manager.py + loader.py]"]
         ConfigHotReload["ConfigHotReload<br/>热更新应用器<br/>[config/hot_reload.py]"]
         ConfigModels["配置模型<br/>[config/models.py]<br/>ChatModelConfig<br/>VisionModelConfig<br/>SecurityModelConfig<br/>AgentModelConfig"]
-        OneBotClient["OneBotClient<br/>WebSocket 客户端<br/>[onebot/ + onebot.py shim]"]
+        OneBotClient["OneBotClient<br/>WebSocket 客户端<br/>[onebot/]"]
         Context["RequestContext<br/>请求上下文<br/>[context.py]"]
         WebUI["webui.py<br/>配置控制台<br/>[src/Undefined/webui.py]"]
     end
@@ -47,10 +47,10 @@ graph TB
         
         CommandDispatcher["CommandDispatcher<br/>命令分发器<br/>• /help /stats /admin<br/>• /bugfix /faq<br/>[services/command.py]"]
 
-        MessageBatcher["MessageBatcher<br/>同 sender 短时合并<br/>• 按 (scope, sender_id) 分桶<br/>• T1=window_seconds 结束 batch<br/>• T2=pre_send_seconds 投机预发送<br/>• 拍一拍/buffer 内 @bot 旁路<br/>• 首条 @bot 整批走 mention 队列<br/>[services/message_batcher/ + shim]"]
+        MessageBatcher["MessageBatcher<br/>同 sender 短时合并<br/>• 按 (scope, sender_id) 分桶<br/>• T1=window_seconds 结束 batch<br/>• T2=pre_send_seconds 投机预发送<br/>• 拍一拍/buffer 内 @bot 旁路<br/>• 首条 @bot 整批走 mention 队列<br/>[services/message_batcher/]"]
 
         subgraph QueueSystem["车站-列车 队列系统 (services/)"]
-            AICoordinator["AICoordinator<br/>AI 协调器<br/>• Prompt 构建<br/>• 队列管理<br/>• 回复执行<br/>[services/coordinator/ + ai_coordinator.py shim]"]
+            AICoordinator["AICoordinator<br/>AI 协调器<br/>• Prompt 构建<br/>• 队列管理<br/>• 回复执行<br/>[services/coordinator/]"]
             QueueManager["QueueManager<br/>队列管理器<br/>[queue_manager.py]"]
             
             subgraph ModelQueues["ModelQueue 队列组 (按模型隔离)"]
@@ -66,14 +66,14 @@ graph TB
 
     %% ==================== AI 核心能力层 ====================
     subgraph AILayer["AI 核心能力层 (src/Undefined/ai/)"]
-        AIClient["AIClient<br/>AI 客户端主入口<br/>[ai/client/ + client.py shim]<br/>• 技能热重载 • MCP 初始化<br/>• Agent intro 生成"]
+        AIClient["AIClient<br/>AI 客户端主入口<br/>[ai/client/]<br/>• 技能热重载 • MCP 初始化<br/>• Agent intro 生成"]
         
         subgraph AIComponents["AI 组件"]
-            PromptBuilder["PromptBuilder<br/>提示词构建器<br/>[ai/prompts/ + prompts.py shim]"]
+            PromptBuilder["PromptBuilder<br/>提示词构建器<br/>[ai/prompts/]"]
             ToolSearchSession["ToolSearchSession<br/>请求级工具按需投影<br/>[ai/tool_search.py]<br/>• 名称检索 • schema 逐轮扩展"]
-            ModelRequester["ModelRequester<br/>模型请求器<br/>[ai/llm/ + llm.py shim]<br/>• OpenAI SDK • 工具清理<br/>• Thinking 提取"]
+            ModelRequester["ModelRequester<br/>模型请求器<br/>[ai/llm/]<br/>• OpenAI SDK • 工具清理<br/>• Thinking 提取"]
             ToolManager["ToolManager<br/>工具管理器<br/>[tooling.py]<br/>• 工具执行 • Agent 工具合并<br/>• MCP 工具注入"]
-            MultimodalAnalyzer["MultimodalAnalyzer<br/>多模态分析器<br/>[ai/multimodal/ + multimodal.py shim]<br/>• 图片/音频/视频"]
+            MultimodalAnalyzer["MultimodalAnalyzer<br/>多模态分析器<br/>[ai/multimodal/]<br/>• 图片/音频/视频"]
             SummaryService["SummaryService<br/>总结服务<br/>[summaries.py]<br/>• 聊天记录总结<br/>• 标题生成"]
             TokenCounter["TokenCounter<br/>Token 统计<br/>[tokens.py]"]
             Parsing["Parsing<br/>响应解析<br/>[parsing.py]"]
@@ -663,7 +663,7 @@ graph TB
         
         subgraph Features["特性"]
             F1["非阻塞: 即使前一个请求未完成,<br/>新请求也会按时分发"]
-            F2["优先级: 四级优先级,<br/>确保重要消息优先响应"]
+            F2["优先级: 六条车道,<br/>确保重要消息优先响应"]
             F3["隔离性: 每个模型独立队列,<br/>互不干扰"]
             F4["自动修剪: 普通队列超过10条时,<br/>只保留最新2条"]
             F5["可配置节奏: 每个模型可独立设置<br/>队列发车间隔"]
@@ -860,10 +860,10 @@ description: 从 PDF 文件中提取文本和表格，填写表单。当用户�
 ### 8层架构分层
 
 1. **外部实体层**：用户、管理员、OneBot 协议端 (NapCat/Lagrange.Core)、大模型 API 服务商
-2. **核心入口层**：main.py 启动入口、配置管理器 (config/loader.py + parsers/ + load_sections/)、热更新应用器 (config/hot_reload.py)、OneBotClient (onebot/ + onebot.py shim)、WeixinService (`weixin/` + `weixin-ilink-client`)、RequestContext (context.py)、Runtime API Server (api/app.py → api/routes/ 路由子模块，含 naga/ 子包)
-3. **消息处理层**：MessageHandler (`handlers/`)、统一 DeliveryAddress 路由 (`utils/message_targets.py`)、SecurityService (security.py)、CommandDispatcher (services/command.py + commands/ mixins)、自动处理管线 (skills/pipelines/)、AutomationService (`automations/service.py`，pipeline 之后、对应 AI loop 之前 await，命中可拦截)、MessageBatcher (services/message_batcher/)、AICoordinator (services/coordinator/ + ai_coordinator.py 门面)、QueueManager (queue_manager.py)、Bilibili/arXiv/GitHub 解析与发送模块
+2. **核心入口层**（目录级事实来源见 [docs/development.md](docs/development.md)）：main.py 启动入口、配置管理器 (config/loader.py + parsers/ + load_sections/)、热更新应用器 (config/hot_reload.py)、OneBotClient (onebot/)、WeixinService (`weixin/` + `weixin-ilink-client`)、RequestContext (context.py)、Runtime API Server (api/app.py → api/routes/ 路由子模块，含 naga/ 子包)
+3. **消息处理层**：MessageHandler (`handlers/`)、统一 DeliveryAddress 路由 (`utils/message_targets.py`)、SecurityService (security.py)、CommandDispatcher (services/command.py + services/commands/)、自动处理管线 (skills/pipelines/)、AutomationService (`automations/service.py`，pipeline 之后、对应 AI loop 之前 await，命中可拦截)、MessageBatcher (services/message_batcher/)、AICoordinator (services/coordinator/)、QueueManager (queue_manager.py)、Bilibili/arXiv/GitHub 解析与发送模块
     自动提取由 `PipelineRegistry` 并行检测、并行处理全部命中的管线；随后 `await` 自动化工作流，未拦截时再进入 AI 自动回复。
-4. **AI 核心能力层**：AIClient (ai/client/ + client.py shim)、PromptBuilder (ai/prompts/ + prompts.py shim)、ModelRequester (ai/llm/ + llm.py shim)、ToolManager (tooling.py)、MultimodalAnalyzer (ai/multimodal/ + multimodal.py shim)、SummaryService (summaries.py)、TokenCounter (tokens.py)。OpenAI Chat Completions / Responses、Anthropic Messages SDK 归一化、CoT 续传与文本 Tool Call 容错见[模型 API 与兼容层](docs/model-compatibility.md)。
+4. **AI 核心能力层**：AIClient (ai/client/)、PromptBuilder (ai/prompts/)、ModelRequester (ai/llm/)、ToolManager (tooling.py)、MultimodalAnalyzer (ai/multimodal/)、SummaryService (summaries.py)、TokenCounter (tokens.py)。OpenAI Chat Completions / Responses、Anthropic Messages SDK 归一化、CoT 续传与文本 Tool Call 容错见[模型 API 与兼容层](docs/model-compatibility.md)。
 5. **存储与上下文层**：MessageHistoryManager (utils/history.py, 10000条限制)、MemoryStorage (memory.py, 置顶备忘录, 500条上限)、EndSummaryStorage、CognitiveService + JobQueue + HistorianWorker + VectorStore + ProfileStorage、MemeService + MemeWorker + MemeStore + MemeVectorStore (表情包库)、FAQStorage、AutomationStorage (`data/automations.json`；旧 `scheduled_tasks.json` 启动时一次性转为新格式，不删旧文件、不双写)、TokenUsageStorage (自动归档)
 6. **技能系统层**：ToolRegistry (registry.py)、AgentRegistry、7个 Agents、13类 Toolsets
 7. **异步 IO 层**：统一 IO 工具 (utils/io.py)，包含 write_json、read_json、append_line、跨平台文件锁 (flock/msvcrt)
@@ -880,7 +880,7 @@ description: 从 PDF 文件中提取文本和表格，填写表单。当用户�
 *   **多模型隔离**：每个 AI 模型拥有独立的请求队列组（"站台"），互不干扰。
 *   **非阻塞发车**：实现了可配置节奏的非阻塞调度循环（默认 **1Hz**）。列车按节奏出发，带走一个请求到后台异步处理。
 *   **高可用性**：即使前一个请求仍在处理（如耗时的网络搜索），新的请求也会按时被分发，不会造成队列堵塞。
-*   **优先级管理**：支持四级优先级（超级管理员 > 私聊 > 群聊@ > 群聊普通），确保重要消息优先响应。
+*   **优先级管理**：支持六条车道（超级管理员私聊 > 群聊超级管理员 > 普通私聊 > 群聊@ > 群聊普通 > 后台请求），前两条为严格优先级、中间三条轮转发车，确保重要消息优先响应。
 *   **关停收敛**：`MessageHandler.close()` 会先 flush `MessageBatcher`，再调用 `QueueManager.drain()` 等待已入队请求和在途请求自然完成，最后才停止队列处理器，避免缓冲消息只入队未执行。
 
 ### 7个智能体 Agent

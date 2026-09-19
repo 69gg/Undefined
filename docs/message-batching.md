@@ -97,13 +97,13 @@ allow_cancel_after_send = false
 
 ## 相关文件
 
-- 实现：[src/Undefined/services/message_batcher/](src/Undefined/services/message_batcher/)
-- 接入：[src/Undefined/services/coordinator/](src/Undefined/services/coordinator/) 中 `handle_auto_reply` / `handle_private_reply` / `_dispatch_grouped_request`
-- 创建/注入：[src/Undefined/handlers/message_flow.py](src/Undefined/handlers/message_flow.py)
-- 关停 flush：[src/Undefined/main.py](src/Undefined/main.py)
-- 热更新：[src/Undefined/config/hot_reload.py](src/Undefined/config/hot_reload.py)
-- 提示词：[res/prompts/undefined.xml](res/prompts/undefined.xml)、[res/prompts/undefined_nagaagent.xml](res/prompts/undefined_nagaagent.xml)
-- 测试：[tests/test_message_batcher.py](tests/test_message_batcher.py)
+- 实现：[src/Undefined/services/message_batcher/](../src/Undefined/services/message_batcher/)
+- 接入：[src/Undefined/services/coordinator/](../src/Undefined/services/coordinator/) 中 `handle_auto_reply` / `handle_private_reply` / `_dispatch_grouped_request`
+- 创建/注入：[src/Undefined/handlers/message_flow.py](../src/Undefined/handlers/message_flow.py)
+- 关停 flush：[src/Undefined/main.py](../src/Undefined/main.py)
+- 热更新：[src/Undefined/config/hot_reload.py](../src/Undefined/config/hot_reload.py)
+- 提示词：[res/prompts/undefined.xml](../res/prompts/undefined.xml)、[res/prompts/undefined_nagaagent.xml](../res/prompts/undefined_nagaagent.xml)
+- 测试：[tests/test_message_batcher.py](../tests/test_message_batcher.py)
 
 ## 投机预发送（Speculative Pre-fire）
 

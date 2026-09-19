@@ -57,14 +57,14 @@ bash scripts/install_git_hooks.sh
 
 ## 架构分层
 
-核心源码位于 `src/Undefined/`，主要模块如下：
+核心源码位于 `src/Undefined/`，主要模块如下（目录级事实来源是 [docs/development.md](docs/development.md) 的目录树，本表只做职责概览）：
 
 | 目录 / 文件 | 职责 |
 |---|---|
-| `ai/` | AI 运行时核心：`client.py`(主入口)、`llm.py`(模型请求)、`prompts.py`(Prompt 构建)、`tooling.py`(工具管理)、`multimodal.py`(多模态)、`model_selector.py`(模型选择)、`summaries.py`(短期总结) |
-| `services/` | 运行服务：`ai_coordinator.py`(协调器+队列投递)、`queue_manager.py`(车站-列车队列)、`message_batcher.py`(同 sender 短时合并)、`command.py`(命令分发)、`model_pool.py`(多模型池)、`security.py`(安全防护) |
+| `ai/` | AI 运行时核心：`client/`(主入口与 ask 循环)、`llm/`(模型请求与重试)、`prompts/`(Prompt 构建)、`tooling.py`(工具管理)、`multimodal/`(多模态)、`model_selector.py`(模型选择)、`summaries.py`(短期总结)、`retrieval.py`(嵌入/重排请求) |
+| `services/` | 运行服务：`coordinator/`(协调器 + 队列投递)、`queue_manager.py`(车站-列车队列)、`message_batcher/`(同 sender 短时合并)、`command.py`(命令分发)、`commands/`(命令注册表与目录)、`model_pool.py`(多模型池)、`security.py`(安全防护) |
 | `skills/` | 热重载技能系统：`tools/`(原子工具)、`toolsets/`(按域分组工具)、`agents/`(智能体)、`commands/`(斜杠指令)、`anthropic_skills/`(SKILL.md 知识注入) |
-| `cognitive/` | 认知记忆：`service.py`(入口)、`vector_store.py`(ChromaDB)、`historian.py`(后台史官异步改写+侧写合并)、`job_queue.py`、`profile_storage.py` |
+| `cognitive/` | 认知记忆：`service/`(入口)、`vector_store.py`(ChromaDB)、`historian/`(后台史官异步改写+侧写合并)、`job_queue.py`、`profile_storage.py` |
 | `memes/` | 表情包库：两阶段 AI 管线、异步处理队列、SQLite 元数据、ChromaDB 向量检索 |
 | `knowledge/` | 本地知识库：文本切分、嵌入、重排、ChromaDB 存储与运行时检索 |
 | `arxiv/` | arXiv 论文解析、元信息获取、PDF 下载与发送 |
@@ -75,20 +75,20 @@ bash scripts/install_git_hooks.sh
 | `mcp/` | MCP 工具注册、连接与转换 |
 | `automations/` | 条件驱动的轻量工作流：`AutomationService` 运行时、start 匹配、@ 消费、DAG / 分支 / 循环、旧定时任务迁移 |
 | `config/` | 配置系统：`loader.py`(TOML 解析+类型化)、`models.py`(数据模型)、`hot_reload.py`(热更新) |
-| `attachments.py` | 富媒体/附件注册、作用域隔离、`<attachment uid="..."/>` 统一标签（`<pic>` 向后兼容）渲染 |
+| `attachments/` | 富媒体/附件注册、作用域隔离、`<attachment uid="..."/>` 统一标签（`<pic>` 向后兼容）渲染 |
 | `utils/` | `io.py`(异步 IO)、`history.py`(消息历史)、`paths.py`、`logging.py`、`sender.py` 等通用能力 |
 
 ### 消息处理流程
 
 ```text
-OneBot WebSocket → onebot.py → handlers.py
+OneBot WebSocket → onebot/ → handlers/
   → 附件登记 / 访问控制 / 表情包入库
   → SecurityService(注入检测)
   → CommandDispatcher(斜杠指令，命中即结束后续处理)
   → skills/pipelines(Bilibili / arXiv / GitHub 并行自动提取)
   → Automations(pipeline 后接入；consume_ai_loop 时 await 并拦截对应 AI，否则后台执行并立刻放行；发生在 MessageBatcher 之前)
   → MessageBatcher(同 sender 短时合并；拍一拍/buffer 内 @bot 旁路)
-  → AICoordinator → QueueManager(按模型隔离, 4 级优先级)
+  → AICoordinator → QueueManager(按模型隔离, 6 条车道)
   → AIClient → LLM API / Skills / MCP
 
 Management / Runtime 请求 → webui/app.py 或 api/app.py → routes/*
@@ -99,9 +99,9 @@ Management / Runtime 请求 → webui/app.py 或 api/app.py → routes/*
 
 - `ai/model_selector.py` — 纯选择逻辑（策略 / 偏好 / compare 状态），无 IO 副作用
 - `services/model_pool.py` — 私聊交互服务，持有 ai/config/sender，处理 `/compare`、`选X`、`select_chat_config`
-- `services/ai_coordinator.py` — 持有 `ModelPoolService`（`self.model_pool`），私聊队列投递时通过它选模型
-- `handlers.py` — 私聊消息只调 `await self.ai_coordinator.model_pool.handle_private_message(user_id, text)`，不直接感知选择细节
-- `skills/agents/runner.py` — Agent 直接调用 `ai_client.model_selector.select_agent_config(...)`，无 `hasattr`
+- `services/coordinator/` — 持有 `ModelPoolService`（`self.model_pool`），私聊队列投递时通过它选模型
+- `handlers/` — 私聊消息只调 `await self.ai_coordinator.model_pool.handle_private_message(user_id, text)`，不直接感知选择细节
+- `skills/agents/runner/` — Agent 直接调用 `ai_client.model_selector.select_agent_config(...)`，无 `hasattr`
 - 默认关闭：`models.pool_enabled = false`；群聊不参与多模型，始终走主模型
 
 ### Skills 系统
@@ -122,7 +122,7 @@ Management / Runtime 请求 → webui/app.py 或 api/app.py → routes/*
 
 ### 队列模型
 
-车站-列车模型（QueueManager）：按模型隔离队列组，4 级优先级（超管 > 私聊 > @提及 > 普通群聊），普通队列自动修剪保留最新 2 条，非阻塞按节奏发车（默认 1Hz）。
+车站-列车模型（QueueManager）：按模型隔离队列组，6 条车道按序发车（超管私聊 / 群聊超管 / 普通私聊 / 群聊@ / 群聊普通 / 后台请求；前两条为严格优先级，中间三条轮转发车），普通队列自动修剪保留最新 2 条，非阻塞按节奏发车（默认 1Hz）。
 
 ### 同 sender 短时消息合并（MessageBatcher）
 
