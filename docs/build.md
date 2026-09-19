@@ -266,7 +266,7 @@ Release workflow 会分别为 Console 和 Chat 构建 `arm64-v8a`、`armeabi-v7a
 
 WebUI、Console 和 Chat 统一使用 **Biome 2.5.10**。两个 App 的 `package.json` 固定该版本，锁文件与根目录及两个 App 的 `biome.json` schema 同步维护；使用 `npm ci` 安装锁定的工具版本。
 
-Biome v2 通过 `files.includes` 表达检查范围和排除规则。两个 App 配置设置 `root: false`，但不继承根目录的 WebUI 格式规则，保持各自原有的缩进风格和检查范围。后续升级应同时迁移三份配置并运行两个 App 的 `npm run check`，不能只修改 schema 版本号。迁移方式见 [Biome v2 官方指南](https://biomejs.dev/guides/upgrade-to-biome-v2/)。
+Biome v2 通过 `files.includes` 表达检查范围和排除规则。两个 App 的 `biome.json` 使用 `extends: []` **显式声明不继承根配置**，并各自声明 `formatter.indentStyle = "tab"`，因此 App 代码的格式与规则完全由本目录配置决定，根目录的 WebUI 规则（4 空格缩进、9 条关闭的 lint 规则）不会渗入 App 检查；反过来 WebUI 脚本由根配置的 `files.includes` 单独圈定，Console 的 `npm run lint:webui` 通过 `--config-path ../../biome.json` 显式使用根配置。后续升级应同时迁移三份配置并运行两个 App 的 `npm run check`，不能只修改 schema 版本号。迁移方式见 [Biome v2 官方指南](https://biomejs.dev/guides/upgrade-to-biome-v2/)。
 
 仓库内已提供可版本化维护的 git hooks：
 
