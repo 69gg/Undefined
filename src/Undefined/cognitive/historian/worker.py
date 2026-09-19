@@ -107,7 +107,10 @@ class HistorianWorker:
                 float(config.poll_interval_seconds),
             )
             if len(self._inflight_tasks) >= self._max_concurrency:
-                # 在途任务达到上限时先不取新任务，避免无界并发与内存堆积
+                # 第一层约束（发车门控）：在途任务达到上限时先不取新任务。
+                # 它限制的是「同时存在的任务对象数量」，让 dequeue 暂停，
+                # 避免任务堆积在内存里排队；与 _semaphore 互补，见
+                # _process_job_with_retry 处的说明。
                 await asyncio.sleep(poll_interval)
                 continue
             result = await self._job_queue.dequeue()
@@ -150,7 +153,12 @@ class HistorianWorker:
         logger.info("[史官] 轮询循环已结束")
 
     async def _process_job_with_retry(self, job_id: str, job: dict[str, Any]) -> None:
-        # 并发上限由 _poll_loop 的在途计数与这里的信号量双重约束
+        # 第二层约束（信号量）：与 _poll_loop 的在途计数门控互补。
+        # 当前唯一发车路径是 _poll_loop，且两者上限同为 _max_concurrency，
+        # 因此正常情况下任务在信号量上不会真正阻塞；保留它是为了约束
+        # 未来绕过发车门控的直接调用（如手动重放、管理接口触发）。
+        # stop() 的收敛语义不受影响：两层上限一致，poll 退出后统一
+        # gather 全部在途任务（含正在信号量上等待的任务）。
         async with self._semaphore:
             await self._process_job_with_retry_inner(job_id, job)
 
