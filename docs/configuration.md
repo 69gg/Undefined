@@ -531,7 +531,7 @@ document_instruction = "passage: "
 | `context_window_tokens` | `<=0` | 覆写上下文窗口上限 |
 | `queue_interval_seconds` | `<0` | `0` 表示请求到达立即发车 |
 | `dimensions` | `<0` | `0` 表示使用模型默认维度 |
-| `query_instruction` / `document_instruction` | `""` | 覆写指令前缀；空字符串表示继承。如需“默认带前缀、个别功能不带”，请把默认前缀留空、只在需要的功能上单独设置 |
+| `query_instruction` / `document_instruction` | `""` | 覆写指令前缀；空字符串**或纯空白**都表示继承。指令与文本直接拼接、首尾空白有意义；覆写表无法表达“显式清空”——如需“默认带前缀、个别功能不带”，请把默认前缀留空、只在需要的功能上单独设置 |
 | `[.request_params]` | 空表 | 按 key 合并到默认 `request_params` 之上，同名以本表为准 |
 
 语义说明：

@@ -710,8 +710,11 @@ queue_interval_seconds = 0.0
 # zh: 向量维度（可选）。0 或留空表示使用模型默认维度。
 # en: Embedding dimensions (optional). Use 0/empty to use model defaults.
 dimensions = 0
-# zh: 查询端指令前缀（可选，Qwen3/BGE 等模型常用）。
+# zh: 查询端指令前缀（可选，Qwen3/BGE 等模型常用）。指令与文本直接拼接，
+#     首尾空白与换行原样保留；留空表示不使用指令。
 # en: Query instruction prefix (optional, common for Qwen3/BGE-style models).
+#     The instruction is concatenated directly with the text, whitespace and
+#     newlines preserved; leave empty to disable.
 query_instruction = ""
 # zh: 文档端指令前缀（可选，E5 等模型常用，例如 "passage: "）。
 # en: Document instruction prefix (optional, common for E5-style models, e.g. "passage: ").
@@ -754,11 +757,16 @@ queue_interval_seconds = -1.0
 # zh: 覆写向量维度；<0 表示继承默认配置，0 表示使用模型默认维度。
 # en: Override embedding dimensions; <0 inherits the default, 0 uses the model default.
 dimensions = -1
-# zh: 覆写查询端指令前缀；空字符串表示继承默认配置。
-# en: Override the query instruction prefix; an empty string inherits the default.
+# zh: 覆写查询端指令前缀；空字符串或纯空白都表示继承默认配置。覆写表无法表达
+#     「显式清空」——若默认表带前缀而本功能不需要，请把默认前缀留空、只在需要
+#     的功能上单独设置。
+# en: Override the query instruction prefix; an empty or whitespace-only string
+#     inherits the default. Overrides cannot express "explicitly empty" — if the
+#     default table has a prefix this feature does not need, keep the default
+#     empty and set the prefix only on the features that need it.
 query_instruction = ""
-# zh: 覆写文档端指令前缀；空字符串表示继承默认配置。
-# en: Override the document instruction prefix; an empty string inherits the default.
+# zh: 覆写文档端指令前缀；语义同 query_instruction（空/纯空白 = 继承）。
+# en: Override the document instruction prefix; same semantics as query_instruction (empty/whitespace = inherit).
 document_instruction = ""
 
 # zh: 覆写额外请求体参数，按 key 合并到默认 request_params 之上（同名以本表为准）。
@@ -791,11 +799,16 @@ queue_interval_seconds = -1.0
 # zh: 覆写向量维度；<0 表示继承默认配置，0 表示使用模型默认维度。
 # en: Override embedding dimensions; <0 inherits the default, 0 uses the model default.
 dimensions = -1
-# zh: 覆写查询端指令前缀；空字符串表示继承默认配置。
-# en: Override the query instruction prefix; an empty string inherits the default.
+# zh: 覆写查询端指令前缀；空字符串或纯空白都表示继承默认配置。覆写表无法表达
+#     「显式清空」——若默认表带前缀而本功能不需要，请把默认前缀留空、只在需要
+#     的功能上单独设置。
+# en: Override the query instruction prefix; an empty or whitespace-only string
+#     inherits the default. Overrides cannot express "explicitly empty" — if the
+#     default table has a prefix this feature does not need, keep the default
+#     empty and set the prefix only on the features that need it.
 query_instruction = ""
-# zh: 覆写文档端指令前缀；空字符串表示继承默认配置。
-# en: Override the document instruction prefix; an empty string inherits the default.
+# zh: 覆写文档端指令前缀；语义同 query_instruction（空/纯空白 = 继承）。
+# en: Override the document instruction prefix; same semantics as query_instruction (empty/whitespace = inherit).
 document_instruction = ""
 
 # zh: 覆写额外请求体参数，按 key 合并到默认 request_params 之上（同名以本表为准）。
@@ -828,11 +841,16 @@ queue_interval_seconds = -1.0
 # zh: 覆写向量维度；<0 表示继承默认配置，0 表示使用模型默认维度。
 # en: Override embedding dimensions; <0 inherits the default, 0 uses the model default.
 dimensions = -1
-# zh: 覆写查询端指令前缀；空字符串表示继承默认配置。
-# en: Override the query instruction prefix; an empty string inherits the default.
+# zh: 覆写查询端指令前缀；空字符串或纯空白都表示继承默认配置。覆写表无法表达
+#     「显式清空」——若默认表带前缀而本功能不需要，请把默认前缀留空、只在需要
+#     的功能上单独设置。
+# en: Override the query instruction prefix; an empty or whitespace-only string
+#     inherits the default. Overrides cannot express "explicitly empty" — if the
+#     default table has a prefix this feature does not need, keep the default
+#     empty and set the prefix only on the features that need it.
 query_instruction = ""
-# zh: 覆写文档端指令前缀；空字符串表示继承默认配置。
-# en: Override the document instruction prefix; an empty string inherits the default.
+# zh: 覆写文档端指令前缀；语义同 query_instruction（空/纯空白 = 继承）。
+# en: Override the document instruction prefix; same semantics as query_instruction (empty/whitespace = inherit).
 document_instruction = ""
 
 # zh: 覆写额外请求体参数，按 key 合并到默认 request_params 之上（同名以本表为准）。
