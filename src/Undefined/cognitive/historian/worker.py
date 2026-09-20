@@ -60,11 +60,10 @@ class HistorianWorker:
         self._model_config = model_config
         self._max_concurrency = max(1, int(max_concurrency))
         # max_concurrency 仅在启动时读取一次，热更新不生效；若将来开放热更新，
-        # 必须同步重建在途门控（_poll_loop 比较的 _max_concurrency）与 _semaphore
+        # 必须同步更新在途门控（_poll_loop 比较的 _max_concurrency）
         self._stop_event = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
         self._inflight_tasks: set[asyncio.Task[None]] = set()
-        self._semaphore = asyncio.Semaphore(self._max_concurrency)
 
     async def _prepare_query_embedding(self, query_text: str) -> list[float] | None:
         embed_query = getattr(self._vector_store, "embed_query", None)
@@ -109,10 +108,11 @@ class HistorianWorker:
                 float(config.poll_interval_seconds),
             )
             if len(self._inflight_tasks) >= self._max_concurrency:
-                # 第一层约束（发车门控）：在途任务达到上限时先不取新任务。
-                # 它限制的是「同时存在的任务对象数量」，让 dequeue 暂停，
-                # 避免任务堆积在内存里排队；与 _semaphore 互补，见
-                # _process_job_with_retry 处的说明。
+                # 唯一的并发门禁（发车门控）：在途任务达到上限时先不取新任务，
+                # 限制「同时存在的任务对象数量」让 dequeue 暂停，既保证在途
+                # 处理不超过 max_concurrency，也避免任务与队列取出的消息
+                # 无界堆积在内存里。任务数可能因 done 回调尚未触发而短暂
+                # 偏高，最多多休眠一个轮询周期，不做补偿。
                 await asyncio.sleep(poll_interval)
                 continue
             result = await self._job_queue.dequeue()
@@ -155,18 +155,11 @@ class HistorianWorker:
         logger.info("[史官] 轮询循环已结束")
 
     async def _process_job_with_retry(self, job_id: str, job: dict[str, Any]) -> None:
-        # 第二层约束（信号量）：与 _poll_loop 的在途计数门控互补。
-        # 当前唯一发车路径是 _poll_loop，且两者上限同为 _max_concurrency，
-        # 因此正常情况下任务在信号量上不会真正阻塞；保留它是为了约束
-        # 未来绕过发车门控的直接调用（如手动重放、管理接口触发）。
-        # stop() 的收敛语义不受影响：两层上限一致，poll 退出后统一
-        # gather 全部在途任务（含正在信号量上等待的任务）。
-        async with self._semaphore:
-            await self._process_job_with_retry_inner(job_id, job)
-
-    async def _process_job_with_retry_inner(
-        self, job_id: str, job: dict[str, Any]
-    ) -> None:
+        # 并发上限由 _poll_loop 的在途计数门控统一保证（见 worker 构造处的
+        # 说明）：发车前限制任务对象数量，最多同时存在 _max_concurrency 个，
+        # 因此这里不再叠加同上限的 Semaphore——两个上限一致时后者恒不阻塞，
+        # 只会让维护者误以为并发由两层共同决定。若将来新增绕过发车门控的
+        # 调用路径，必须一并接入门禁，而不是在这里补锁。
         try:
             await self._process_job(job_id, job)
         except Exception as e:

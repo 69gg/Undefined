@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional, Protocol
 
 import httpx
-from langchain_community.utilities import SearxSearchWrapper
 
 from Undefined.attachments import AttachmentRegistry
 from Undefined.ai.llm import ModelRequester
@@ -132,6 +131,17 @@ def _resolve_summary_model_config(
         return summary_model
     # 回退到默认/主配置
     return fallback
+
+
+def _build_searx_wrapper(searxng_url: str) -> Any:
+    """构造 SearxSearchWrapper；langchain_community 为必需依赖。
+
+    导入放在使用点而非模块顶层：依赖缺失或版本不兼容时不会让整个 AI 客户端
+    无法构造，搜索能力降级为不可用，并由调用方的 error 日志暴露环境问题。
+    """
+    from langchain_community.utilities import SearxSearchWrapper  # noqa: PLC0415
+
+    return SearxSearchWrapper(searx_host=searxng_url, k=10)
 
 
 class ClientSetupMixin:
@@ -294,13 +304,17 @@ class ClientSetupMixin:
         searxng_url = runtime_config.searxng_url
         if searxng_url:
             try:
-                self._search_wrapper = SearxSearchWrapper(searx_host=searxng_url, k=10)
+                self._search_wrapper = _build_searx_wrapper(searxng_url)
                 logger.info(
                     "[初始化] SearxSearchWrapper 初始化成功: url=%s k=10",
                     redact_string(searxng_url),
                 )
             except Exception as exc:
-                logger.warning("[初始化] SearxSearchWrapper 初始化失败: %s", exc)
+                logger.error(
+                    "[初始化] SearxSearchWrapper 初始化失败，搜索功能不可用，"
+                    "请修复 langchain-community 安装: %s",
+                    exc,
+                )
         else:
             logger.info("[初始化] SEARXNG_URL 未配置，搜索功能禁用")
 
@@ -552,13 +566,13 @@ class ClientSetupMixin:
             return
 
         try:
-            self._search_wrapper = SearxSearchWrapper(searx_host=searxng_url, k=10)
+            self._search_wrapper = _build_searx_wrapper(searxng_url)
             logger.info(
                 "[配置] 搜索服务已更新: url=%s k=10",
                 redact_string(searxng_url),
             )
         except Exception as exc:
-            logger.warning("[配置] 搜索服务更新失败: %s", exc)
+            logger.error("[配置] 搜索服务更新失败: %s", exc)
             self._search_wrapper = None
             logger.info("[配置] 搜索服务已回退为禁用")
 
