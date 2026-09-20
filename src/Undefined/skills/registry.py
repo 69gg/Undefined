@@ -158,10 +158,23 @@ class BaseRegistry:
             name: self._stats.get(name, SkillStats()) for name in active_names
         }
 
-        item_names = list(self._items.keys())
+        item_names = sorted(self._items.keys())
+        failed_names = {name for name, item in self._items.items() if item.load_error}
+        ok_names = [name for name in item_names if name not in failed_names]
+        # 计数与列表必须同源：get_schema() 已排除加载失败项，这里只能用成功项
         logger.info(
-            f"[{self.__class__.__name__}] 成功加载了 {len(self.get_schema())} 个项目: {', '.join(item_names)}"
+            "[%s] 成功加载了 %d 个项目: %s",
+            self.__class__.__name__,
+            len(ok_names),
+            ", ".join(ok_names),
         )
+        if failed_names:
+            logger.warning(
+                "[%s] %d 个项目加载失败，已排除: %s",
+                self.__class__.__name__,
+                len(failed_names),
+                ", ".join(name for name in item_names if name in failed_names),
+            )
 
     def _discover_items_in_dir(self, parent_dir: Path, prefix: str) -> None:
         for item in parent_dir.iterdir():

@@ -229,6 +229,11 @@ def _finish_dimension_migration(
         staged_dimension or expected_dimension,
         collection_name,
     )
+    if not callable(getattr(staging_collection, "modify", None)):
+        raise RuntimeError(
+            "当前 ChromaDB 版本不支持 collection 换名（Collection.modify），"
+            "无法安全完成维度迁移；已保留原库，请升级 chromadb 后重跑脚本"
+        )
     client.delete_collection(collection_name)
     staging_collection.modify(name=collection_name)
 
@@ -265,6 +270,7 @@ async def _reembed_collection(
     dimension_checked = False
     write_target = collection
     staging_collection: Any = None
+    new_dimension = 0  # 首批实测维度，后续批次逐一比对
     migration_dimension = 0
     start_time = time.perf_counter()
 
@@ -276,9 +282,20 @@ async def _reembed_collection(
         # 计算新向量
         new_embeddings = await embedder.embed(batch_docs)
 
+        # 无论是否触发迁移，都要求所有批次维度一致：空库（current_dimension=0）
+        # 或维度恰好一致时没有临时库兜底，批次漂移会直接写进 Chroma 才报错
+        batch_dimension = len(new_embeddings[0]) if new_embeddings else 0
+        if dimension_checked:
+            if batch_dimension and batch_dimension != new_dimension:
+                raise RuntimeError(
+                    f"{collection_name} 批次向量维度漂移: "
+                    f"{batch_dimension} != {new_dimension}（第 {i} 条起）；"
+                    "已保留原库，请排查嵌入模型输出后重跑脚本"
+                )
+
         if not dimension_checked:
             dimension_checked = True
-            new_dimension = len(new_embeddings[0]) if new_embeddings else 0
+            new_dimension = batch_dimension
             if (
                 current_dimension
                 and new_dimension
@@ -302,15 +319,6 @@ async def _reembed_collection(
                     )
                     staging_collection = write_target
                     migration_dimension = new_dimension
-        elif staging_collection is not None and migration_dimension:
-            # 迁移期间批次维度必须与首批一致，异常立即中止且原库未动
-            batch_dimension = len(new_embeddings[0]) if new_embeddings else 0
-            if batch_dimension and batch_dimension != migration_dimension:
-                raise RuntimeError(
-                    f"{collection_name} 迁移期间批次维度漂移: "
-                    f"{batch_dimension} != {migration_dimension}（第 {i} 条起）；"
-                    "已保留原库，请排查嵌入模型输出后重跑脚本"
-                )
 
         if not dry_run:
             # upsert 覆写：ID 不变，document 和 metadata 不变，仅更新 embedding；

@@ -186,6 +186,56 @@ async def test_reembed_aborts_on_batch_dimension_drift(tmp_path: Path) -> None:
     assert len(sample["embeddings"][0]) == 3
 
 
+@pytest.mark.asyncio
+async def test_reembed_aborts_on_batch_dimension_drift_without_migration(
+    tmp_path: Path,
+) -> None:
+    """维度与原库一致（不触发迁移）时，批次漂移同样必须中止而不是写坏原库。"""
+    module = _load_script_module()
+    client = chromadb.PersistentClient(path=str(tmp_path))
+    collection = _seed_collection(client, "cognitive_events", dimension=3)
+
+    with pytest.raises(RuntimeError, match="批次向量维度漂移"):
+        await module._reembed_collection(
+            collection,
+            "cognitive_events",
+            _DriftingDimEmbedder(3, 5),
+            batch_size=2,
+            dry_run=False,
+            client=client,
+        )
+
+    original = client.get_collection("cognitive_events")
+    assert original.count() == 3
+    sample = cast(Any, original.get(limit=1, include=["embeddings"]))
+    assert len(sample["embeddings"][0]) == 3
+
+
+@pytest.mark.asyncio
+async def test_reembed_checks_drift_when_current_dimension_unknown(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """读不到原维度（返回 0）时同样校验批次漂移，不能静默写坏原库。"""
+    module = _load_script_module()
+    client = chromadb.PersistentClient(path=str(tmp_path))
+    collection = _seed_collection(client, "cognitive_events", dimension=3)
+    monkeypatch.setattr(module, "_collection_dimension", lambda _c: 0)
+
+    with pytest.raises(RuntimeError, match="批次向量维度漂移"):
+        await module._reembed_collection(
+            collection,
+            "cognitive_events",
+            _DriftingDimEmbedder(3, 5),
+            batch_size=2,
+            dry_run=False,
+            client=client,
+        )
+
+    original = client.get_collection("cognitive_events")
+    assert original.count() == 3
+
+
 def test_recover_stale_staging_deletes_residue_when_original_intact(
     tmp_path: Path,
 ) -> None:

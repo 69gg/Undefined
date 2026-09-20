@@ -565,13 +565,23 @@ class ShutdownSignalGuard:
         self._logger = logger
 
     def restore(self) -> None:
-        """恢复安装前的信号处理器；须从安装时的同一线程调用。"""
+        """恢复安装前的信号处理器；须从安装时的同一线程调用。
+
+        `remove_signal_handler` 与 `signal.signal` 分开捕获：循环已关闭时前者
+        必然抛 RuntimeError，但不能因此跳过还原信号处理器的动作。
+        """
         for signum, handler in self._previous.items():
-            try:
-                if signum in self._loop_based:
+            if signum in self._loop_based:
+                try:
                     self._loop.remove_signal_handler(signum)
+                except (OSError, RuntimeError, ValueError):
+                    self._logger.debug(
+                        "[退出] 卸载信号 %s 的事件循环处理器失败（循环可能已关闭）",
+                        signum,
+                    )
+            try:
                 signal.signal(signum, handler)
-            except (OSError, RuntimeError, ValueError):
+            except (OSError, ValueError):
                 self._logger.warning("[退出] 恢复信号 %s 的原处理器失败", signum)
         self._previous.clear()
 
@@ -603,6 +613,12 @@ def install_shutdown_signal_handlers(logger: logging.Logger) -> ShutdownSignalGu
             loop_based.add(signum)
         except (NotImplementedError, RuntimeError, ValueError):
             # Windows 的事件循环不支持 add_signal_handler，退回到 signal.signal
+            # add_signal_handler 可能已部分注册（改过 wakeup fd / handler），
+            # 先尽力卸载，避免叠加两套处理器
+            try:
+                loop.remove_signal_handler(signum)
+            except (NotImplementedError, RuntimeError, ValueError, OSError):
+                pass
             try:
                 signal.signal(
                     signum,
