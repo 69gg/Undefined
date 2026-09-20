@@ -112,6 +112,14 @@ _CONFIG_HOT_RELOAD_KEYS: set[str] = {
 
 _SEARCH_KEYS: set[str] = {"searxng_url"}
 
+# 安全服务持有的是同一个 Config 实例（原地更新即可见），只有注入回复 Agent
+# 依赖的模型配置与重试次数变化时才需要重建该步骤
+_SECURITY_KEYS: set[str] = {
+    "security_model",
+    "security_model_enabled",
+    "ai_request_max_retries",
+}
+
 _ATTACHMENT_KEYS: set[str] = {
     "attachment_remote_download_max_size_mb",
     "attachment_cache_max_total_size_mb",
@@ -268,9 +276,9 @@ def apply_config_updates(
             "config-watcher",
         )
 
-    steps: list[tuple[str, Callable[[], None]]] = [
-        ("security", _apply_security),
-    ]
+    steps: list[tuple[str, Callable[[], None]]] = []
+    if _needs_security_update(changed_keys):
+        steps.append(("security", _apply_security))
     if "ai_request_max_retries" in changed_keys:
         steps.append(("ai_request_max_retries", _apply_retries))
     if _needs_queue_interval_update(changed_keys):
@@ -336,6 +344,12 @@ def _needs_config_hot_reload_update(changed_keys: set[str]) -> bool:
 
 def _needs_search_update(changed_keys: set[str]) -> bool:
     return bool(changed_keys & _SEARCH_KEYS)
+
+
+def _needs_security_update(changed_keys: set[str]) -> bool:
+    if changed_keys & _SECURITY_KEYS:
+        return True
+    return any(key.startswith("security_model.") for key in changed_keys)
 
 
 def _needs_attachment_update(changed_keys: set[str]) -> bool:

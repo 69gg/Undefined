@@ -149,8 +149,16 @@ class ProfileStorage:
     @staticmethod
     def _normalize_revision_name(revision: str) -> str:
         name = str(revision).strip()
-        # 只接受历史目录下的单层文件名，阻断路径穿越
-        if not name or name != Path(name).name or not name.endswith(".md"):
+        # 只接受历史目录下的单层文件名，阻断路径穿越。
+        # 两种分隔符都显式拒绝：Windows 上 \ 是路径分隔符，Linux 上它不是，
+        # 只靠 Path(...).name 判断会因平台而异。
+        if (
+            not name
+            or name != Path(name).name
+            or "/" in name
+            or "\\" in name
+            or not name.endswith(".md")
+        ):
             raise ValueError(f"非法的侧写历史版本名: {revision!r}")
         return name
 

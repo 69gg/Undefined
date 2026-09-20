@@ -159,7 +159,7 @@ def test_apply_config_updates_propagates_to_security_service() -> None:
 
     apply_config_updates(
         updated,
-        {"naga_model.model_name": ("old", "new")},
+        {"security_model.model_name": ("old", "new")},
         context,
     )
 
@@ -694,7 +694,7 @@ def test_apply_config_updates_isolates_failed_step(
     with caplog.at_level("ERROR"):
         apply_config_updates(
             updated,
-            {"naga_model.model_name": ("old", "new")},
+            {"security_model.model_name": ("old", "new")},
             context,
         )
 
@@ -771,3 +771,32 @@ def test_weixin_config_updates_in_place_for_hot_reload(tmp_path: Path) -> None:
     assert held is base.weixin  # 身份未变，组件不会读到旧对象
     assert held.enabled is True
     assert dc_replace(updated.weixin, enabled=False) != updated.weixin
+
+
+def test_security_step_skipped_when_unrelated_keys_change() -> None:
+    """安全服务持有同一个 Config 实例，无关变更不需要重建注入回复 Agent。"""
+    updated = cast(
+        Any,
+        SimpleNamespace(
+            searxng_url="",
+            ai_request_max_retries=7,
+            agent_intro_autogen_enabled=False,
+            agent_intro_autogen_queue_interval=0.0,
+            message_batcher=SimpleNamespace(),
+            automations=SimpleNamespace(),
+            skills_hot_reload=False,
+            skills_hot_reload_interval=1.0,
+            skills_hot_reload_debounce=1.0,
+        ),
+    )
+    security_service = _FakeSecurityService()
+    context = HotReloadContext(
+        ai_client=cast(Any, SimpleNamespace()),
+        queue_manager=cast(Any, _FakeQueueManager()),
+        config_manager=cast(Any, SimpleNamespace()),
+        security_service=cast(Any, security_service),
+    )
+
+    apply_config_updates(updated, {"searxng_url": ("old", "new")}, context)
+
+    assert security_service.applied == []
