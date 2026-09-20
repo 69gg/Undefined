@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -746,3 +747,27 @@ def test_config_manager_notify_survives_failing_callback(
     assert seen == [{"core.bot_qq": (1, 2)}]
     assert "热更新回调执行失败" in caplog.text
     assert "回调未完成" in caplog.text
+
+
+def test_weixin_config_updates_in_place_for_hot_reload(tmp_path: Path) -> None:
+    """WeixinService 持有 config.weixin 对象，热更新必须原地改字段而非换身份。"""
+    from dataclasses import replace as dc_replace
+
+    from Undefined.config.loader import Config
+
+    def _load(text: str, name: str) -> Config:
+        path = tmp_path / name
+        path.write_text(text, encoding="utf-8")
+        return Config.load(path, strict=False)
+
+    base = _load("[weixin]\nenabled = false\n", "base.toml")
+    updated = _load("[weixin]\nenabled = true\n", "updated.toml")
+    assert base.weixin.enabled is False
+
+    held = base.weixin  # 模拟组件构造时持有的引用
+    changes = base.update_from(updated)
+
+    assert any(key.startswith("weixin.") for key in changes)
+    assert held is base.weixin  # 身份未变，组件不会读到旧对象
+    assert held.enabled is True
+    assert dc_replace(updated.weixin, enabled=False) != updated.weixin

@@ -617,6 +617,9 @@ class Config:
                         SecurityModelConfig,
                         AgentModelConfig,
                         GrokModelConfig,
+                        # WeixinService 等组件在构造时持有该对象，替换身份会导致
+                        # 热更新后仍读到旧值，因此同样原地展开更新
+                        WeixinConfig,
                     ),
                 ):
                     changes.update(_update_dataclass(old_value, new_value, prefix=name))
