@@ -128,3 +128,19 @@ def test_preload_handlers_returns_failures(tmp_path: Path) -> None:
     failures = registry.preload_handlers()
 
     assert any(name == "boom" and "boom at import" in error for name, error in failures)
+
+
+def test_purge_submodules_covers_cross_level_relative_imports() -> None:
+    """跨层相对导入的助手模块（from ...docker_utils import）也必须随技能失效。"""
+    handler_module = (
+        "Undefined.skills.agents.code_delivery_agent.tools.init_docker.handler"
+    )
+    helper_module = "Undefined.skills.agents.code_delivery_agent.docker_utils"
+
+    registry = AgentRegistry(AgentRegistry(PACKAGE_ROOT / "skills" / "agents").base_dir)
+    sys.modules.setdefault(helper_module, object())  # type: ignore[arg-type]
+    try:
+        registry._purge_submodules(handler_module)
+        assert helper_module not in sys.modules
+    finally:
+        sys.modules.pop(helper_module, None)

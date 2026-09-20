@@ -343,13 +343,31 @@ class BaseRegistry:
         return module
 
     @staticmethod
-    def _purge_submodules(module_name: str) -> None:
-        """清理 handler 同目录相对导入产生的子模块缓存。
+    def _skill_root_package(module_name: str) -> str:
+        """返回该 handler 所属技能单元的根包。
 
-        `handler.py` 内的 `from .xxx import ...` 会把同目录模块注册成
-        `<父包>.<模块>`；热重载时要一并失效，否则仍会使用旧代码。
+        随包技能形如 ``Undefined.skills.<kind>.<item>[.子目录...].handler``（如
+        ``Undefined.skills.agents.code_delivery_agent.tools.init_docker.handler``），
+        技能单元根包为 ``Undefined.skills.<kind>.<item>``。按单元而不是按 handler
+        所在目录定位，才能清理由跨层相对导入加载的模块（``from ...docker_utils
+        import``）。
         """
-        package_name = module_name.rpartition(".")[0]
+        parts = module_name.split(".")
+        package_depth = len(_PACKAGE_PREFIX.split("."))
+        if len(parts) <= package_depth + 1:
+            return module_name.rpartition(".")[0]
+        return ".".join(parts[: package_depth + 2])
+
+    @classmethod
+    def _purge_submodules(cls, module_name: str) -> None:
+        """清理 handler 相对导入产生的子模块缓存。
+
+        handler.py 内的相对导入（同目录的 ``from .x import`` 与跨层的
+        ``from ...x import``）会把技能单元内的模块注册到 sys.modules；热重载时
+        必须整单元失效，否则像 ``code_delivery_agent.docker_utils`` 这样的
+        跨层助手仍会沿用旧代码。
+        """
+        package_name = cls._skill_root_package(module_name)
         parent_prefix = f"{package_name}."
         stale = [
             name
