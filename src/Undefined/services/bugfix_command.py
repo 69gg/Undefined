@@ -1,12 +1,9 @@
-"""Bug 修复归档命令（/bugfix）的实现逻辑。
+"""Bugfix（/bugfix）命令实现：读取群上下文并生成娱乐性诊断。
 
-本模块提供 ``BugfixCommandMixin``，供 ``CommandDispatcher`` 通过多重继承组合。
-通过回溯群聊记录并调用 AI 摘要，自动生成 FAQ 归档条目。
+从 `services/command.py` 拆出，作为 `CommandDispatcher` 的 mixin。
 """
 
 from __future__ import annotations
-
-# 斜杠命令：目录扫描注册、权限/限流/子命令路由
 
 import logging
 from datetime import datetime
@@ -21,8 +18,9 @@ from Undefined.onebot import (
 )
 
 if TYPE_CHECKING:
-    from Undefined.config import Config
+    from Undefined.ai import AIClient
     from Undefined.faq import FAQStorage
+    from Undefined.config import Config
     from Undefined.onebot import OneBotClient
     from Undefined.utils.sender import MessageSender
 
@@ -30,19 +28,20 @@ logger = logging.getLogger(__name__)
 
 
 class BugfixCommandMixin:
-    """``/bugfix`` 命令相关方法集合，作为 ``CommandDispatcher`` 的 mixin 使用。"""
+    """`/bugfix` 命令的上下文收集与诊断实现。"""
 
     if TYPE_CHECKING:
-        ai: Any
         config: Config
-        faq_storage: FAQStorage
-        onebot: OneBotClient
+        ai: AIClient
         sender: MessageSender
+        onebot: OneBotClient
+        faq_storage: FAQStorage
 
-    async def _handle_bugfix(
+    async def handle_bugfix(
         self, group_id: int, admin_id: int, args: list[str]
     ) -> None:
-        """处理 ``/bugfix`` 命令，通过分析聊天记录自动生成 FAQ 归档。"""
+        """处理 /bugfix 命令，通过分析聊天记录自动生成 FAQ 归档"""
+        # 1. 参数解析
         parsed = self._parse_bugfix_args(args)
         if isinstance(parsed, str):
             await self.sender.send_group_message(group_id, parsed)
@@ -55,6 +54,7 @@ class BugfixCommandMixin:
         )
 
         try:
+            # 2. 获取并处理消息
             messages = await self._fetch_messages(
                 group_id, target_qqs, start_date, end_date
             )
@@ -65,8 +65,11 @@ class BugfixCommandMixin:
                 return
 
             processed_text = await self._process_messages(messages)
+
+            # 3. 生成摘要总结
             summary = await self._obtain_bugfix_summary(group_id, processed_text)
 
+            # 4. 生成标题并入库
             title = extract_faq_title(summary)
             if not title or title == "未命名问题":
                 title = await self.ai.generate_title(summary)
@@ -94,7 +97,7 @@ class BugfixCommandMixin:
     def _parse_bugfix_args(
         self, args: list[str]
     ) -> tuple[list[int], datetime, datetime, str, str] | str:
-        """解析 ``/bugfix`` 命令的参数。"""
+        """解析 bugfix 命令的参数"""
         if len(args) < 3:
             return (
                 "❌ 用法: /bugfix <QQ号|@用户1> [QQ号|@用户2] ... <开始时间> <结束时间>\n"
@@ -103,7 +106,12 @@ class BugfixCommandMixin:
             )
 
         try:
-            target_qqs = [int(arg) for arg in args[:-2]]
+            # 防御性归一化：常规路径 parse_command 已把 [@QQ号(昵称)] 转成纯数字，
+            # 这里兜底支持未经过该层的直接调用，保证与用法文案的 <QQ号|@用户> 一致；
+            # 懒加载避免与 command.py 的模块级循环导入
+            from Undefined.services.command import _normalize_qq_arg
+
+            target_qqs = [int(_normalize_qq_arg(arg)) for arg in args[:-2]]
             start_str, end_str_raw = args[-2], args[-1]
             start_date = datetime.strptime(start_str, "%Y/%m/%d/%H:%M")
 
@@ -120,7 +128,7 @@ class BugfixCommandMixin:
             return "❌ 参数格式错误：QQ号应为数字或 @ 提及，时间格式应为 YYYY/MM/DD/HH:MM。"
 
     async def _obtain_bugfix_summary(self, group_id: int, processed_text: str) -> str:
-        """利用 AI 生成聊天记录的 Bug 分析摘要。"""
+        """利用 AI 生成聊天记录的 Bug 分析摘要"""
         total_tokens = self.ai.count_tokens(processed_text)
         max_tokens = self.config.chat_model.max_tokens
 
@@ -141,7 +149,6 @@ class BugfixCommandMixin:
         start_date: datetime,
         end_date: datetime,
     ) -> list[dict[str, Any]]:
-        """从 OneBot 拉取指定时间范围内目标用户的消息。"""
         batch = await self.onebot.get_group_msg_history(group_id, count=2500)
         if not batch:
             return []
@@ -153,13 +160,10 @@ class BugfixCommandMixin:
                 start_date <= msg_time <= end_date
                 and get_message_sender_id(msg) in target_qqs_set
             ):
-                # 后台循环处理队列
                 results.append(msg)
         return sorted(results, key=lambda m: m.get("time", 0))
 
-    # 后台循环处理队列
     async def _process_messages(self, messages: list[dict[str, Any]]) -> str:
-        """将原始 OneBot 消息序列化为 AI 可读的纯文本。"""
         lines = []
         for msg in messages:
             sender_id = get_message_sender_id(msg)

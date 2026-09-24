@@ -58,6 +58,10 @@ enable_rerank = true              # 是否启用重排（可被 tool 参数覆�
 rerank_top_k = 3                  # 重排后返回数量（必须小于 default_top_k）
 ```
 
+> `[models.embedding]` 是知识库、认知记忆、梗库共用的默认嵌入配置。若知识库需要独立的模型或参数，
+> 在 `[models.embedding.features.knowledge]` 中设置 `use_default = false` 后按字段覆写；
+> 详见 [配置文档](configuration.md#44101-modelsembeddingfeaturesname-按功能覆写)。
+
 **2. 准备知识库目录（含 `intro.md`）**
 
 ```

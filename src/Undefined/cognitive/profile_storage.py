@@ -18,6 +18,9 @@ class ProfileStorage:
         self._base = Path(base_path)
         self._revision_keep = revision_keep
         self._locks: dict[str, asyncio.Lock] = {}
+        self._merge_locks: dict[str, asyncio.Lock] = {}
+        # 两张表按 (entity_type, entity_id) 增长，实体总量即 user/group 数量级，
+        # 有限且不随消息量增长，故不做淘汰；若未来出现高频实体类型再引入 LRU
         logger.info(
             "[认知侧写] 初始化完成: base=%s revision_keep=%s",
             str(self._base),
@@ -25,10 +28,20 @@ class ProfileStorage:
         )
 
     def _get_lock(self, entity_type: str, entity_id: str) -> asyncio.Lock:
-        key = f"{entity_type}:{entity_id}"
-        if key not in self._locks:
-            self._locks[key] = asyncio.Lock()
-        return self._locks[key]
+        # setdefault 原子插入：并发首次进入同一实体时双方拿到同一把锁，
+        # 不会出现各自建锁、后建覆盖先建导致互斥失效
+        return self._locks.setdefault(f"{entity_type}:{entity_id}", asyncio.Lock())
+
+    def merge_guard(self, entity_type: str, entity_id: str) -> asyncio.Lock:
+        """跨「读 → LLM → 写」整段侧写合并的互斥锁。
+
+        只串行化同一实体的合并周期，避免两个 job 各自基于旧快照改写后互相覆盖
+        （后写覆盖先写，先前的观察永久丢失）。与文件写入锁分开，避免与
+        `write_profile` 的锁重入死锁。锁的创建经 `dict.setdefault` 原子完成。
+        """
+        return self._merge_locks.setdefault(
+            f"{entity_type}:{entity_id}", asyncio.Lock()
+        )
 
     def _profile_path(self, entity_type: str, entity_id: str) -> Path:
         return self._base / f"{entity_type}s" / f"{entity_id}.md"
@@ -132,6 +145,71 @@ class ProfileStorage:
             len(result),
         )
         return result
+
+    @staticmethod
+    def _normalize_revision_name(revision: str) -> str:
+        name = str(revision).strip()
+        # 只接受历史目录下的单层文件名，阻断路径穿越。
+        # 两种分隔符都显式拒绝：Windows 上 \ 是路径分隔符，Linux 上它不是，
+        # 只靠 Path(...).name 判断会因平台而异。
+        if (
+            not name
+            or name != Path(name).name
+            or "/" in name
+            or "\\" in name
+            or not name.endswith(".md")
+        ):
+            raise ValueError(f"非法的侧写历史版本名: {revision!r}")
+        return name
+
+    async def read_revision(
+        self, entity_type: str, entity_id: str, revision: str
+    ) -> str | None:
+        """读取指定历史版本内容；版本名取 `list_revisions` 的返回值。"""
+        name = self._normalize_revision_name(revision)
+        path = self._history_dir(entity_type, entity_id) / name
+
+        def _read() -> str | None:
+            if not path.exists():
+                return None
+            return path.read_text(encoding="utf-8")
+
+        content = await asyncio.to_thread(_read)
+        logger.info(
+            "[认知侧写] 读取历史版本: entity_type=%s entity_id=%s revision=%s found=%s",
+            entity_type,
+            entity_id,
+            name,
+            content is not None,
+        )
+        return content
+
+    async def restore_revision(
+        self, entity_type: str, entity_id: str, revision: str
+    ) -> str:
+        """把指定历史版本恢复为当前侧写。
+
+        恢复前会把当前内容按常规流程存成新快照，因此恢复操作本身也可回退。
+        版本读取在 `merge_guard` 内进行，与史官合并的「读 → 写」整段互斥；
+        在恢复取锁之前已落盘的并发合并会被本次恢复覆盖，但那份内容已由
+        `write_profile` 存入历史快照，可再次恢复找回。
+        返回被恢复的版本名。
+        """
+        name = self._normalize_revision_name(revision)
+        async with self.merge_guard(entity_type, entity_id):
+            content = await self.read_revision(entity_type, entity_id, name)
+            if content is None:
+                raise FileNotFoundError(
+                    f"侧写历史版本不存在: {entity_type}:{entity_id}/{name}"
+                )
+            await self.write_profile(entity_type, entity_id, content)
+        logger.info(
+            "[认知侧写] 已恢复历史版本: entity_type=%s entity_id=%s revision=%s",
+            entity_type,
+            entity_id,
+            name,
+        )
+        return name
 
     @staticmethod
     def _sanitize_profile(content: str, entity_type: str, entity_id: str) -> str:

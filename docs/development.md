@@ -38,9 +38,9 @@ src/Undefined/
 ├── memes/         # 表情包库 (service + ingest/ + search/ + store + vector_store)
 ├── services/      # 核心运行服务
 │   ├── coordinator/     # AICoordinator 唯一实现（群聊 / 私聊 / 批处理 / 后台任务 mixins）
-│   ├── commands/          # CommandDispatcher mixins（stats / bugfix）
+│   ├── commands/          # 命令注册表、命令元数据与目录（catalog / registry / context）
 │   ├── message_batcher/   # 同 sender 短时合并
-│   ├── command.py         # 命令分发门面 + shim 组合
+│   ├── command.py         # 命令分发主体（斜杠指令解析、权限与限流）
 │   ├── queue_manager.py   # 车站-列车队列
 │   └── security.py        # 注入检测与速率限制
 ├── utils/         # 通用支持工具组 (__init__.py 聚合 io/paths/resources；io.py 异步原子读写, history.py, coerce.py 类型强转)
@@ -94,8 +94,10 @@ npm run check
 
 ```text
 .githooks/pre-commit
-.githooks/pre-tag
 ```
+
+> Git 没有 `pre-tag` 钩子事件，打 tag 前的版本校验由 Release workflow 调用
+> `uv run python scripts/release_notes.py validate --tag <tag>` 完成。
 
 启用方式：
 

@@ -494,6 +494,8 @@ Prompt caching 补充：
 
 ### 4.4.10 `[models.embedding]` 嵌入模型
 
+`[models.embedding]` 是所有功能共用的**默认**嵌入配置，也是唯一需要配置的嵌入表。
+
 | 字段 | 默认值 | 说明 |
 |---|---:|---|
 | `api_url` | `""` | 嵌入 API 地址 |
@@ -502,9 +504,43 @@ Prompt caching 补充：
 | `use_proxy` | `false` | 是否使用 `[proxy]` 中的代理地址 |
 | `queue_interval_seconds` | `0.0` | 发车间隔；`<=0` 表示请求到达立即发车，`>0` 表示两次发车间隔 |
 | `dimensions` | `0` | 向量维度；`0`/空视为 `None`（模型默认） |
-| `query_instruction` | `""` | 查询前缀 |
-| `document_instruction` | `""` | 文档前缀 |
+| `query_instruction` | `""` | 查询前缀；原样保留首尾空白，与查询文本直接拼接 |
+| `document_instruction` | `""` | 文档前缀；原样保留首尾空白，与文档文本直接拼接 |
 | `request_params` | `{}` | 额外请求体参数；保留字段如 `model`/`input`/`dimensions` 会忽略 |
+
+#### 4.4.10.1 `[models.embedding.features.<name>]` 按功能覆写
+
+支持单独设置的功能名：`knowledge`（知识库）、`cognitive`（认知记忆）、`memes`（梗库）。
+每个功能都可以选择完全继承默认配置，或按字段覆写：
+
+```toml
+[models.embedding.features.cognitive]
+use_default = false          # 单独设置
+model_name = "qwen3-embedding-4b"
+dimensions = 2560
+queue_interval_seconds = 1.0
+query_instruction = "Instruct: 检索相关记忆\nQuery: "
+document_instruction = "passage: "
+```
+
+| 字段 | 哨兵值（= 继承默认） | 说明 |
+|---|---:|---|
+| `use_default` | `true` | `true` 时本表其余字段全部忽略 |
+| `api_url` / `api_key` / `model_name` | `""` | 覆写连接与模型名 |
+| `use_proxy` | `"inherit"` | 也可写 `"default"`；`true`/`false` 覆盖默认值 |
+| `context_window_tokens` | `<=0` | 覆写上下文窗口上限 |
+| `queue_interval_seconds` | `<0` | `0` 表示请求到达立即发车 |
+| `dimensions` | `<0` | `0` 表示使用模型默认维度 |
+| `query_instruction` / `document_instruction` | `""` | 覆写指令前缀；空字符串**或纯空白**都表示继承。指令与文本直接拼接、首尾空白有意义；覆写表无法表达“显式清空”——如需“默认带前缀、个别功能不带”，请把默认前缀留空、只在需要的功能上单独设置 |
+| `[.request_params]` | 空表 | 按 key 合并到默认 `request_params` 之上，同名以本表为准 |
+
+语义说明：
+
+- 未出现在本表中的字段，以及取哨兵值的字段，都表示继续继承 `[models.embedding]`；
+- **`dimensions` 的三态区别**：`-1`（或留空默认值）= 继承默认表的 `dimensions`，`0` = 不传维度、使用模型自带默认维度，`>0` = 显式指定维度。继承与“用模型默认”是两回事：默认表配了具体维度（如 `2560`）时，覆写表写 `0` 得到的是模型默认维度而不是默认表的值；ChromaDB 首次写入即定维，改动维度需要跑重嵌入脚本；
+- 生效配置完全相同（含指令前缀）的功能共用同一个 Embedder 与发车队列；任一字段不同则该功能拥有独立的 Embedder 与队列，重排器在所有功能间共享；
+- 功能名拼写错误或写成未知功能名时会被忽略并记录警告，该功能回落到默认配置；
+- 嵌入配置（含 `features` 子表）与 `[models.rerank]` 都在启动时构造运行时，热更新只提示“需要重启生效”，不会改变已运行实例。
 
 ### 4.4.11 `[models.rerank]` 重排模型
 
@@ -1195,12 +1231,12 @@ api_key = "replace-with-your-key"
 
 | 字段 | 默认值 | 说明 |
 |---|---:|---|
-| `rewrite_max_retry` | `2` | 绝对化改写最大重试 |
 | `recent_messages_inject_k` | `12` | 注入给史官的近期消息条数 |
 | `recent_message_line_max_len` | `240` | 每条近期消息最大字符数 |
 | `source_message_max_len` | `800` | 当前触发消息最大字符数 |
 | `poll_interval_seconds` | `1.0` | 队列轮询间隔；小于 `0.1` 时按 `0.1` 秒处理，避免空队列忙循环 |
 | `stale_job_timeout_seconds` | `300.0` | processing 超时回收阈值 |
+| `max_concurrency` | `4` | 史官同时在途任务上限（最小 `1`）；超出后暂停取新任务，需重启生效 |
 
 ### 4.26.5 `[cognitive.profile]`
 
@@ -1342,6 +1378,7 @@ api_key = "replace-with-your-key"
 - `memes.vector_store_path`
 - `memes.queue_path`
 - `naga.*`（`enabled/api_url/api_key/use_proxy/moderation_enabled/mode/allowed_group_ids/blocked_group_ids/allowed_private_ids/blocked_private_ids`）
+- `models.embedding` / `models.embedding.features.*` / `models.rerank`（嵌入与重排运行时在启动时构造，热更新只提示需重启）
 
 ### 5.3 明确“会执行热应用”的字段
 - `onebot.file_send_mode` / `onebot.file_send_host`（新投递读取快照；进行中投递及旧 URL 生命周期不变）
@@ -1372,6 +1409,14 @@ api_key = "replace-with-your-key"
 
 ### 5.4 其他字段
 - `Config` 对象本身会更新。
+
+### 5.5 热更新失败的可见性
+
+热更新在共享的 `Config` 实例上逐字段就地生效，整个过程没有 `await`，同一事件循环内的读方不会在一次读取里看到“改了一半”的对象；跨 `await` 的多次读取仍可能分别落在变更前后，需要严格一致的快照时请在单次读取中取全所需字段。
+
+应用阶段按步骤隔离：单步抛错不会中断后续步骤，失败步骤会以 `error` 级日志逐条打印（`热更新步骤失败`），并在末尾汇总一条“热更新未完全生效（运行时状态与 config.toml 不一致）”。异步步骤（技能热重载、自动化并发、配置监听器重启）使用被强引用跟踪的后台任务，任务异常同样以 `error` 级日志输出（`热更新后台任务失败`）。配置订阅者回调抛错时记录失败回调名单，其余回调继续执行。
+
+因此若看到上述日志，说明 `config.toml` 已改但对应运行时未生效，需要修复报错原因后重新保存配置；必要时重启进程。
 - 具体功能是否“立刻体现”，取决于模块是“每次读取配置”还是“启动时缓存”。
 - 对于行为不确定项，建议改完观察日志；必要时重启进程确认。
 

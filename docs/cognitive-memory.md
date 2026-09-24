@@ -42,6 +42,9 @@ queue_interval_seconds = 0.0
 ```
 
 > `models.embedding` 是必要前提。未配置时，即使 `cognitive.enabled = true`，启动时也会自动降级并打印警告。
+> 认知记忆默认复用 `[models.embedding]`；如需独立模型或参数，在
+> `[models.embedding.features.cognitive]` 中设置 `use_default = false` 后按字段覆写，
+> 详见 [配置文档](configuration.md#44101-modelsembeddingfeaturesname-按功能覆写)。
 
 启动后验证：
 
@@ -328,12 +331,12 @@ data/cognitive/
 
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `rewrite_max_retry` | int | `2` | 绝对化改写最大重试次数（支持热更新） |
 | `recent_messages_inject_k` | int | `12` | 提供给史官的最近消息参考条数（0=禁用，支持热更新） |
 | `recent_message_line_max_len` | int | `240` | 最近消息参考中每条文本最大长度（支持热更新） |
 | `source_message_max_len` | int | `800` | 当前消息原文最大长度（支持热更新） |
 | `poll_interval_seconds` | float | `1.0` | 史官轮询间隔秒数，小于 `0.1` 时按 `0.1` 处理（支持热更新） |
 | `stale_job_timeout_seconds` | float | `300.0` | 启动时恢复 stale 任务的超时阈值 |
+| `max_concurrency` | int | `4` | 史官同时在途任务上限（最小 `1`），超出后暂停取新任务；需重启生效 |
 
 ### [cognitive.profile]
 
@@ -354,7 +357,8 @@ data/cognitive/
 
 ### [models.embedding]（必须配置）
 
-复用知识库的 embedding 配置，无需重复配置：
+默认复用知识库、梗库的 embedding 配置，无需重复配置；需要独立模型时用
+`[models.embedding.features.cognitive]` 覆写：
 
 | 字段 | 说明 |
 |------|------|
@@ -364,9 +368,12 @@ data/cognitive/
 | `queue_interval_seconds` | 发车间隔（默认 `0.0`；`<=0` 请求到达立即发车） |
 | `dimensions` | 向量维度（可选，模型默认值） |
 
+向量库维度由首次写入确定；更换 `dimensions` 或嵌入模型会改变向量维度，
+需要先按 [更换嵌入模型](#更换嵌入模型) 的说明重建向量库。
+
 ### 热更新说明
 
-- **支持热更新**：`cognitive.query.*`、`cognitive.historian.poll_interval_seconds`、`cognitive.historian.rewrite_max_retry`、`cognitive.historian.recent_messages_inject_k`、`cognitive.historian.recent_message_line_max_len`、`cognitive.historian.source_message_max_len`
+- **支持热更新**：`cognitive.query.*`、`cognitive.historian.poll_interval_seconds`、`cognitive.historian.recent_messages_inject_k`、`cognitive.historian.recent_message_line_max_len`、`cognitive.historian.source_message_max_len`
 - **需重启**：`cognitive.enabled`、`cognitive.vector_store.*`、`models.embedding.*`、`models.rerank.*`
 
 说明：
@@ -431,6 +438,8 @@ data/cognitive/
 
 更换嵌入模型（维度变化或模型升级）后，需要对向量库进行全量重嵌入。详见 [`scripts/reembed_cognitive.py`](../scripts/reembed_cognitive.py)。
 
+向量维度发生变化时脚本会先读全量记录、再删除并重建 collection 后写回（ChromaDB 定维后无法原地改维，直接 upsert 异维向量会失败）；建议先 `--dry-run` 确认维度变化与记录数。
+
 ```bash
 # 1. 先在 config.toml 中更新 [models.embedding] 为新模型配置
 # 2. 停止机器人
@@ -454,16 +463,23 @@ enabled = false
 
 **级别 2：侧写回滚**
 
-若某用户侧写被错误更新，从快照目录恢复：
+若某用户侧写被错误更新，用 [`scripts/restore_profile.py`](../scripts/restore_profile.py) 从快照目录恢复。
+恢复前会把当前内容另存为新快照，因此恢复操作本身也可再次回退：
 
 ```bash
 # 查看快照列表
-ls data/cognitive/profiles/history/users/{user_id}/
+uv run python scripts/restore_profile.py list --entity-type user --entity-id {user_id}
 
-# 覆盖回正确版本
-cp data/cognitive/profiles/history/users/{user_id}/{timestamp}.md \
-   data/cognitive/profiles/users/{user_id}.md
+# 预览某个版本内容（不改动文件）
+uv run python scripts/restore_profile.py show --entity-type user --entity-id {user_id} --revision {timestamp}.md
+
+# 恢复该版本（先 dry-run 确认，再实际恢复）
+uv run python scripts/restore_profile.py restore --entity-type user --entity-id {user_id} --revision {timestamp}.md --dry-run
+uv run python scripts/restore_profile.py restore --entity-type user --entity-id {user_id} --revision {timestamp}.md
 ```
+
+恢复只改侧写 Markdown 与历史快照，不会更新 ChromaDB 中的侧写向量；若同一实体在
+`cognitive_profiles` 里有旧向量，请按[更换嵌入模型](#更换嵌入模型)的方式重嵌入侧写。
 
 **级别 3：完整移除**
 
@@ -524,4 +540,8 @@ failed 文件中包含原始 job 数据和 `error` 字段，记录失败原因�
 
 **Q: 史官处理速度跟不上怎么办？**
 
-默认是单 worker 串行处理，每个任务需要 1-2 次 LLM 调用。高并发场景下 `pending/` 目录会积压，但不影响前台响应。可适当降低 `poll_interval_seconds` 或扩展多 worker 加快消费速度。
+单个 worker 按 `cognitive.historian.max_concurrency`（默认 4）并发处理任务，每个任务需要 1-2 次 LLM 调用。高并发场景下 `pending/` 目录会积压，但不影响前台响应；可提高 `max_concurrency`（需重启）或降低 `poll_interval_seconds` 加快消费速度。提高并发会同步放大 LLM 调用量与费用，请按模型配额评估。
+
+**Q: 同一实体的两个任务同时改写侧写，会不会丢观察？**
+
+不会。侧写合并的「读取 → LLM 改写 → 写入」整段按实体互斥执行，同一用户/群聊的相邻任务会串行改写，后一个任务基于前一个任务已落盘的侧写继续合并。

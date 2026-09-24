@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import signal
 import time
 import sys
 from typing import Any
@@ -177,7 +178,7 @@ async def main() -> None:
     meme_service = None
     meme_worker = None
     meme_job_queue = None
-    retrieval_runtime = None
+    retrieval_registry = None
     runtime_api_server: RuntimeAPIServer | None = None
     weixin_service: WeixinService | None = None
     _reranker: Any = None
@@ -201,19 +202,27 @@ async def main() -> None:
         )
         await ai.attachment_registry.load()
         faq_storage = FAQStorage()
-        from Undefined.knowledge import RetrievalRuntime
+        from Undefined.config.models import EMBEDDING_FEATURES
+        from Undefined.knowledge import RetrievalRuntimeRegistry
 
-        retrieval_runtime = RetrievalRuntime(
+        retrieval_registry = RetrievalRuntimeRegistry(
             ai._requester,
-            config.embedding_model,
-            config.rerank_model,
+            embedding_models={
+                feature: config.resolve_embedding_model(feature)
+                for feature in EMBEDDING_FEATURES
+            },
+            rerank_model=config.rerank_model,
             embed_batch_size=config.knowledge_embed_batch_size,
         )
+        retrieval_runtime = retrieval_registry.for_feature("knowledge")
+        cognitive_retrieval_runtime = retrieval_registry.for_feature("cognitive")
+        meme_retrieval_runtime = retrieval_registry.for_feature("memes")
 
         # === Cognitive Memory ===
+        cognitive_embedding = config.resolve_embedding_model("cognitive")
         cognitive_actually_enabled = config.cognitive.enabled
         if cognitive_actually_enabled and (
-            not config.embedding_model.api_url or not config.embedding_model.model_name
+            not cognitive_embedding.api_url or not cognitive_embedding.model_name
         ):
             logger.warning(
                 "[认知记忆] cognitive.enabled=true 但 models.embedding 未配置，自动降级禁用"
@@ -231,7 +240,7 @@ async def main() -> None:
             need_reranker_for_knowledge or need_reranker_for_cognitive
         )
         if need_shared_reranker:
-            _reranker = retrieval_runtime.ensure_reranker()
+            _reranker = retrieval_registry.ensure_reranker()
             if _reranker is None:
                 if need_reranker_for_knowledge:
                     logger.warning(
@@ -245,12 +254,11 @@ async def main() -> None:
         if config.knowledge_enabled:
             from Undefined.knowledge import KnowledgeManager
 
-            if (
-                not config.embedding_model.api_url
-                or not config.embedding_model.model_name
-            ):
+            knowledge_embedding = config.resolve_embedding_model("knowledge")
+            if not knowledge_embedding.api_url or not knowledge_embedding.model_name:
                 raise ValueError(
-                    "知识库已启用，但 models.embedding.api_url / model_name 未配置完整"
+                    "知识库已启用，但 models.embedding.api_url / model_name "
+                    "（或 models.embedding.features.knowledge 覆写）未配置完整"
                 )
 
             knowledge_manager = KnowledgeManager(
@@ -295,7 +303,7 @@ async def main() -> None:
 
             vector_store = CognitiveVectorStore(
                 str(_cog_chroma),
-                retrieval_runtime,
+                cognitive_retrieval_runtime,
                 scheduler_foreground_burst=config.cognitive.vector_store_scheduler_foreground_burst,
             )
             job_queue = JobQueue(str(_cog_queues))
@@ -308,7 +316,7 @@ async def main() -> None:
                 vector_store=vector_store,
                 job_queue=job_queue,
                 profile_storage=profile_storage,
-                retrieval_runtime=retrieval_runtime,
+                retrieval_runtime=cognitive_retrieval_runtime,
             )
             historian_worker = HistorianWorker(
                 job_queue=job_queue,
@@ -317,6 +325,7 @@ async def main() -> None:
                 ai_client=ai,
                 config_getter=lambda: get_config(strict=False).cognitive,
                 model_config=config.historian_model,
+                max_concurrency=config.cognitive.historian_max_concurrency,
             )
             ai.set_cognitive_service(cognitive_service)
             logger.info(
@@ -339,7 +348,7 @@ async def main() -> None:
             meme_store = MemeStore(config.memes.db_path)
             meme_vector_store = MemeVectorStore(
                 config.memes.vector_store_path,
-                retrieval_runtime,
+                meme_retrieval_runtime,
             )
             meme_job_queue = JobQueue(config.memes.queue_path)
             meme_service = MemeService(
@@ -349,7 +358,7 @@ async def main() -> None:
                 job_queue=meme_job_queue,
                 ai_client=ai,
                 attachment_registry=ai.attachment_registry,
-                retrieval_runtime=retrieval_runtime,
+                retrieval_runtime=meme_retrieval_runtime,
             )
             meme_worker = MemeWorker(
                 job_queue=meme_job_queue,
@@ -498,9 +507,12 @@ async def main() -> None:
                 "/naga 命令和 /api/v1/naga/* 端点都不会可用"
             )
 
+    shutdown_guard = install_shutdown_signal_handlers(logger)
     try:
-        await onebot.run_with_reconnect()
+        await _run_until_shutdown(onebot, shutdown_guard.event, logger)
     except KeyboardInterrupt:
+        # 仅在信号处理器注册全部失败（如非主线程运行）时才会走到这里；
+        # 正常安装后 SIGINT 会转为停机事件，不再抛 KeyboardInterrupt
         logger.info("[退出] 收到退出信号 (Ctrl+C)")
     except Exception as exc:
         logger.exception("[异常] 运行期间发生未捕获的错误: %s", exc)
@@ -526,12 +538,132 @@ async def main() -> None:
             await historian_worker.stop()
         await onebot.disconnect()
         await ai.close()
-        if retrieval_runtime is not None:
-            await retrieval_runtime.stop()
+        if retrieval_registry is not None:
+            await retrieval_registry.stop()
         await config_manager.stop_hot_reload()
         await close_render_browser()
         await close_render_cache()
+        shutdown_guard.restore()
         logger.info("[退出] 机器人已停止运行")
+
+
+class ShutdownSignalGuard:
+    """优雅停机信号注册的句柄：携带停机事件并支持恢复安装前的信号状态。"""
+
+    def __init__(
+        self,
+        event: asyncio.Event,
+        previous: dict[int, Any],
+        loop_based: set[int],
+        loop: asyncio.AbstractEventLoop,
+        logger: logging.Logger,
+    ) -> None:
+        self.event = event
+        self._previous = previous
+        self._loop_based = loop_based
+        self._loop = loop
+        self._logger = logger
+
+    def restore(self) -> None:
+        """恢复安装前的信号处理器；须从安装时的同一线程调用。
+
+        `remove_signal_handler` 与 `signal.signal` 分开捕获：循环已关闭时前者
+        必然抛 RuntimeError，但不能因此跳过还原信号处理器的动作。
+        """
+        for signum, handler in self._previous.items():
+            if signum in self._loop_based:
+                try:
+                    self._loop.remove_signal_handler(signum)
+                except (OSError, RuntimeError, ValueError):
+                    self._logger.debug(
+                        "[退出] 卸载信号 %s 的事件循环处理器失败（循环可能已关闭）",
+                        signum,
+                    )
+            try:
+                signal.signal(signum, handler)
+            except (OSError, ValueError):
+                self._logger.warning("[退出] 恢复信号 %s 的原处理器失败", signum)
+        self._previous.clear()
+
+
+def install_shutdown_signal_handlers(logger: logging.Logger) -> ShutdownSignalGuard:
+    """注册 SIGTERM / SIGINT 的优雅停机事件。
+
+    容器与服务管理器默认发送 SIGTERM（而非 Ctrl+C 的 SIGINT），此前未处理会直接
+    终止进程并跳过后面的落盘清理。这里把两个信号都收敛到同一个事件，由主循环在
+    被唤醒后走正常关闭流程。
+
+    安装前会保存原有处理器，停机完成后调用 `ShutdownSignalGuard.restore()`
+    归还信号控制权，避免作为库被导入时永久劫持调用方的信号处理。
+    """
+    stop_event = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    previous: dict[int, Any] = {}
+    loop_based: set[int] = set()
+    for signame in ("SIGTERM", "SIGINT"):
+        signum = getattr(signal, signame, None)
+        if signum is None:
+            continue
+        try:
+            previous[signum] = signal.getsignal(signum)
+        except (OSError, ValueError):
+            continue
+        try:
+            loop.add_signal_handler(signum, stop_event.set)
+            loop_based.add(signum)
+        except (NotImplementedError, RuntimeError, ValueError):
+            # Windows 的事件循环不支持 add_signal_handler，退回到 signal.signal
+            # add_signal_handler 可能已部分注册（改过 wakeup fd / handler），
+            # 先尽力卸载，避免叠加两套处理器
+            try:
+                loop.remove_signal_handler(signum)
+            except (NotImplementedError, RuntimeError, ValueError, OSError):
+                pass
+            try:
+                signal.signal(
+                    signum,
+                    lambda *_args, _loop=loop, _event=stop_event: (
+                        _loop.call_soon_threadsafe(_event.set)
+                    ),
+                )
+            except (ValueError, OSError):
+                logger.warning("[退出] 无法注册 %s 处理器", signame)
+                # 未安装成功就没有需要恢复的状态
+                previous.pop(signum, None)
+    return ShutdownSignalGuard(stop_event, previous, loop_based, loop, logger)
+
+
+async def _run_until_shutdown(
+    onebot: OneBotClient,
+    shutdown_event: asyncio.Event,
+    logger: logging.Logger,
+) -> None:
+    """运行 OneBot 连接，收到停止信号或连接任务结束时返回。"""
+    run_task = asyncio.create_task(onebot.run_with_reconnect(), name="onebot-run")
+    stop_task = asyncio.create_task(shutdown_event.wait(), name="shutdown-wait")
+    try:
+        done, _pending = await asyncio.wait(
+            {run_task, stop_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if run_task in done:
+            # 连接任务自行结束：把异常抛给上层处理
+            run_task.result()
+            return
+        logger.info("[退出] 收到停止信号 (SIGTERM/SIGINT)，正在优雅停机...")
+        run_task.cancel()
+        try:
+            await run_task
+        except asyncio.CancelledError:
+            pass
+        except Exception as exc:
+            logger.warning("[退出] 停止 OneBot 连接时发生异常: %s", exc)
+    finally:
+        stop_task.cancel()
+        try:
+            await stop_task
+        except asyncio.CancelledError:
+            pass
 
 
 def run() -> None:

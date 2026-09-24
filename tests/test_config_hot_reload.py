@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -158,7 +159,7 @@ def test_apply_config_updates_propagates_to_security_service() -> None:
 
     apply_config_updates(
         updated,
-        {"naga_model.model_name": ("old", "new")},
+        {"security_model.model_name": ("old", "new")},
         context,
     )
 
@@ -644,3 +645,158 @@ async def test_apply_config_updates_refreshes_automation_concurrency() -> None:
     await asyncio.sleep(0)
 
     assert message_handler.automation_updates == [7]
+
+
+def test_apply_config_updates_isolates_failed_step(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """单个步骤失败不应中断其余步骤，且必须以 error 日志暴露。"""
+    updated = cast(
+        Any,
+        SimpleNamespace(
+            ai_request_max_retries=7,
+            chat_model=SimpleNamespace(
+                model_name="chat",
+                queue_interval_seconds=1.0,
+                pool=SimpleNamespace(enabled=False),
+            ),
+            agent_model=SimpleNamespace(
+                model_name="agent",
+                queue_interval_seconds=1.0,
+                pool=SimpleNamespace(enabled=False),
+            ),
+            vision_model=SimpleNamespace(
+                model_name="vision", queue_interval_seconds=1.0
+            ),
+            security_model=SimpleNamespace(
+                model_name="security", queue_interval_seconds=1.0
+            ),
+            naga_model=SimpleNamespace(model_name="naga", queue_interval_seconds=1.0),
+            grok_model=SimpleNamespace(model_name="grok", queue_interval_seconds=1.0),
+            historian_model=SimpleNamespace(
+                model_name="historian", queue_interval_seconds=1.0
+            ),
+        ),
+    )
+
+    class _BrokenSecurity:
+        def apply_config(self, config: Any) -> None:
+            raise RuntimeError("security boom")
+
+    queue_manager = _FakeQueueManager()
+    context = HotReloadContext(
+        ai_client=cast(Any, SimpleNamespace()),
+        queue_manager=cast(Any, queue_manager),
+        config_manager=cast(Any, SimpleNamespace()),
+        security_service=cast(Any, _BrokenSecurity()),
+    )
+
+    with caplog.at_level("ERROR"):
+        apply_config_updates(
+            updated,
+            {"security_model.model_name": ("old", "new")},
+            context,
+        )
+
+    # 后续步骤仍然执行
+    assert len(queue_manager.intervals) == 1
+    assert "security" in caplog.text
+    assert "热更新步骤失败" in caplog.text
+    assert "热更新未完全生效" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_spawned_hot_reload_task_logs_failure(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from Undefined.config.hot_reload import _spawn_hot_reload_task
+
+    async def _boom() -> None:
+        raise RuntimeError("background boom")
+
+    with caplog.at_level("ERROR"):
+        _spawn_hot_reload_task(_boom(), "unit-test-task")
+        for _ in range(5):
+            await asyncio.sleep(0)
+
+    assert "热更新后台任务失败" in caplog.text
+    assert "unit-test-task" in caplog.text
+
+
+def test_config_manager_notify_survives_failing_callback(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from Undefined.config.manager import ConfigManager
+
+    manager = ConfigManager()
+    seen: list[dict[str, Any]] = []
+
+    def _boom(config: Any, changes: dict[str, Any]) -> None:
+        raise RuntimeError("callback boom")
+
+    def _record(config: Any, changes: dict[str, Any]) -> None:
+        seen.append(changes)
+
+    manager._config = cast(Any, SimpleNamespace())
+    manager.subscribe(_boom)
+    manager.subscribe(_record)
+
+    with caplog.at_level("ERROR"):
+        manager._notify({"core.bot_qq": (1, 2)})
+
+    assert seen == [{"core.bot_qq": (1, 2)}]
+    assert "热更新回调执行失败" in caplog.text
+    assert "回调未完成" in caplog.text
+
+
+def test_weixin_config_updates_in_place_for_hot_reload(tmp_path: Path) -> None:
+    """WeixinService 持有 config.weixin 对象，热更新必须原地改字段而非换身份。"""
+    from dataclasses import replace as dc_replace
+
+    from Undefined.config.loader import Config
+
+    def _load(text: str, name: str) -> Config:
+        path = tmp_path / name
+        path.write_text(text, encoding="utf-8")
+        return Config.load(path, strict=False)
+
+    base = _load("[weixin]\nenabled = false\n", "base.toml")
+    updated = _load("[weixin]\nenabled = true\n", "updated.toml")
+    assert base.weixin.enabled is False
+
+    held = base.weixin  # 模拟组件构造时持有的引用
+    changes = base.update_from(updated)
+
+    assert any(key.startswith("weixin.") for key in changes)
+    assert held is base.weixin  # 身份未变，组件不会读到旧对象
+    assert held.enabled is True
+    assert dc_replace(updated.weixin, enabled=False) != updated.weixin
+
+
+def test_security_step_skipped_when_unrelated_keys_change() -> None:
+    """安全服务持有同一个 Config 实例，无关变更不需要重建注入回复 Agent。"""
+    updated = cast(
+        Any,
+        SimpleNamespace(
+            searxng_url="",
+            ai_request_max_retries=7,
+            agent_intro_autogen_enabled=False,
+            agent_intro_autogen_queue_interval=0.0,
+            message_batcher=SimpleNamespace(),
+            automations=SimpleNamespace(),
+            skills_hot_reload=False,
+            skills_hot_reload_interval=1.0,
+            skills_hot_reload_debounce=1.0,
+        ),
+    )
+    security_service = _FakeSecurityService()
+    context = HotReloadContext(
+        ai_client=cast(Any, SimpleNamespace()),
+        queue_manager=cast(Any, _FakeQueueManager()),
+        config_manager=cast(Any, SimpleNamespace()),
+        security_service=cast(Any, security_service),
+    )
+
+    apply_config_updates(updated, {"searxng_url": ("old", "new")}, context)
+
+    assert security_service.applied == []

@@ -15,7 +15,7 @@ async def test_build_private_stats_image_message_uses_base64_when_requested(
     image = tmp_path / "stats.png"
     image.write_bytes(b"\x89PNG\r\n\x1a\n")
 
-    message = await dispatcher._build_private_stats_image_message(
+    message = await dispatcher.build_private_stats_image_message(
         image,
         inline_base64=True,
     )
@@ -32,7 +32,7 @@ async def test_build_private_stats_image_message_uses_path_for_normal_private(
     image = tmp_path / "stats.png"
     image.write_bytes(b"fake")
 
-    message = await dispatcher._build_private_stats_image_message(
+    message = await dispatcher.build_private_stats_image_message(
         image,
         inline_base64=False,
     )

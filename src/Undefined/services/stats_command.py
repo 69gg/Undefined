@@ -1,12 +1,10 @@
-"""Token 使用统计命令（/stats）的实现逻辑。
+"""Stats（/stats）命令实现：统计汇总、图表绘制与私聊投递。
 
-本模块提供 ``StatsCommandMixin``，供 ``CommandDispatcher`` 通过多重继承组合。
-群聊与私聊统计、图表生成、AI 分析队列交互均在此实现。
+从 `services/command.py` 拆出，作为 `CommandDispatcher` 的 mixin；
+绘图依赖 matplotlib（必需依赖），相关常量也随实现一起迁移。
 """
 
 from __future__ import annotations
-
-# 斜杠命令：目录扫描注册、权限/限流/子命令路由
 
 import asyncio
 import base64
@@ -15,28 +13,29 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
+from collections.abc import Awaitable, Callable
+
+import matplotlib.pyplot as plt
 
 from Undefined.ai.queue_budget import (
     compute_queued_llm_timeout_seconds,
     resolve_effective_retry_count,
 )
-from Undefined.token_usage_storage import TokenUsageStorage
+from Undefined.services.commands.context import PrivateForwardCallback
+from Undefined.utils import io
+from Undefined.utils.paths import RENDER_CACHE_DIR
+from Undefined.utils.sender import is_definitive_weixin_delivery_rejection
 
 if TYPE_CHECKING:
+    from Undefined.ai import AIClient
     from Undefined.config import Config
+    from Undefined.faq import FAQStorage
     from Undefined.onebot import OneBotClient
+    from Undefined.services.commands.registry import CommandRegistry
+    from Undefined.token_usage_storage import TokenUsageStorage
     from Undefined.utils.history import MessageHistoryManager
+    from Undefined.services.queue_manager import QueueManager
     from Undefined.utils.sender import MessageSender
-
-# 尝试导入 matplotlib（可选依赖）
-plt: Any
-try:
-    import matplotlib.pyplot as plt
-
-    _MATPLOTLIB_AVAILABLE = True
-except ImportError:
-    plt = None
-    _MATPLOTLIB_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -51,28 +50,30 @@ _STATS_TIME_RANGE_RE = re.compile(r"^\d+[dwm]?$", re.IGNORECASE)
 
 
 class StatsCommandMixin:
-    """``/stats`` 命令相关方法集合，作为 ``CommandDispatcher`` 的 mixin 使用。"""
+    """`/stats` 命令的统计、绘图与投递实现。"""
 
     if TYPE_CHECKING:
-        ai: Any
         config: Config
-        history_manager: MessageHistoryManager
-        onebot: OneBotClient
-        queue_manager: Any
+        ai: AIClient
         sender: MessageSender
-
-    _token_usage_storage: TokenUsageStorage
-    _stats_analysis_results: dict[str, str]
-    _stats_analysis_events: dict[str, asyncio.Event]
+        onebot: OneBotClient
+        faq_storage: FAQStorage
+        command_registry: CommandRegistry
+        history_manager: MessageHistoryManager
+        queue_manager: QueueManager
+        _token_usage_storage: TokenUsageStorage
+        _stats_analysis_results: dict[str, str]
+        _stats_analysis_events: dict[str, asyncio.Event]
+        _stats_render_lock: asyncio.Lock
 
     def _parse_time_range(self, time_str: str) -> int:
-        """解析时间范围字符串，返回天数。
+        """解析时间范围字符串，返回天数
 
         参数:
-            time_str: 时间范围字符串（如 ``7d``、``1w``、``30d``）。
+            time_str: 时间范围字符串（如 "7d", "1w", "30d"）
 
         返回:
-             clamp 在 ``[_STATS_MIN_DAYS, _STATS_MAX_DAYS]`` 内的天数。
+            天数
         """
         if not time_str:
             return _STATS_DEFAULT_DAYS
@@ -86,29 +87,31 @@ class StatsCommandMixin:
 
         time_str = time_str.lower().strip()
 
+        # 解析快捷格式
         if time_str.endswith("d"):
             try:
                 return _clamp_days(int(time_str[:-1]))
             except ValueError:
                 return _STATS_DEFAULT_DAYS
-        if time_str.endswith("w"):
+        elif time_str.endswith("w"):
             try:
                 return _clamp_days(int(time_str[:-1]) * 7)
             except ValueError:
                 return _STATS_DEFAULT_DAYS
-        if time_str.endswith("m"):
+        elif time_str.endswith("m"):
             try:
                 return _clamp_days(int(time_str[:-1]) * 30)
             except ValueError:
                 return _STATS_DEFAULT_DAYS
 
+        # 尝试直接解析为数字（默认为天）
         try:
             return _clamp_days(int(time_str))
         except ValueError:
             return _STATS_DEFAULT_DAYS
 
     def _parse_stats_options(self, args: list[str]) -> tuple[int, bool]:
-        """解析 ``/stats`` 参数：时间范围 + AI 分析开关。"""
+        """解析 /stats 参数：时间范围 + AI 分析开关。"""
         days = _STATS_DEFAULT_DAYS
         enable_ai_analysis = False
         picked_days = False
@@ -127,18 +130,12 @@ class StatsCommandMixin:
 
         return days, enable_ai_analysis
 
-    async def _handle_stats(
+    async def handle_stats(
         self, group_id: int, sender_id: int, args: list[str]
     ) -> None:
-        """处理群聊 ``/stats`` 命令，生成 token 使用统计图表（可选 AI 分析）。"""
-        if not _MATPLOTLIB_AVAILABLE:
-            await self.sender.send_group_message(
-                group_id, "❌ 缺少必要的库，无法生成图表。请安装 matplotlib。"
-            )
-            return
-
+        """处理 /stats 命令，生成 token 使用统计图表（可选 AI 分析）"""
         days, enable_ai_analysis = self._parse_stats_options(args)
-
+        img_dir: Path | None = None
         try:
             summary = await self._token_usage_storage.get_summary(days=days)
             if summary["total_calls"] == 0:
@@ -146,14 +143,6 @@ class StatsCommandMixin:
                     group_id, f"📊 最近 {days} 天内无 Token 使用记录。"
                 )
                 return
-
-            from Undefined.utils.paths import RENDER_CACHE_DIR, ensure_dir
-
-            img_dir = ensure_dir(RENDER_CACHE_DIR)
-            await self._generate_line_chart(summary, img_dir, days)
-            await self._generate_bar_chart(summary, img_dir)
-            await self._generate_pie_chart(summary, img_dir)
-            await self._generate_stats_table(summary, img_dir)
 
             ai_analysis = ""
             if enable_ai_analysis:
@@ -165,7 +154,10 @@ class StatsCommandMixin:
                     days=days,
                 )
 
-            forward_messages = self._build_stats_forward_nodes(
+            img_dir = await self._create_stats_render_dir()
+            await self._generate_stats_charts(summary, img_dir, days)
+
+            forward_messages = await self._build_stats_forward_nodes(
                 summary, img_dir, days, ai_analysis
             )
             await self._send_group_forward_message(
@@ -178,10 +170,6 @@ class StatsCommandMixin:
                 ),
             )
 
-            from Undefined.utils.cache import cleanup_cache_dir
-
-            cleanup_cache_dir(RENDER_CACHE_DIR)
-
         except Exception as e:
             error_id = uuid4().hex[:8]
             logger.exception(
@@ -191,6 +179,9 @@ class StatsCommandMixin:
                 group_id,
                 f"❌ 生成统计图表失败，请稍后重试（错误码: {error_id}）",
             )
+        finally:
+            if img_dir is not None:
+                await io.delete_tree(img_dir)
 
     async def _send_group_forward_message(
         self,
@@ -199,7 +190,6 @@ class StatsCommandMixin:
         *,
         history_message: str,
     ) -> None:
-        """发送群组合并转发消息，并在需要时写入历史记录。"""
         send_forward = getattr(self.sender, "send_group_forward_message", None)
         if callable(send_forward):
             await send_forward(group_id, messages, history_message=history_message)
@@ -211,7 +201,6 @@ class StatsCommandMixin:
         text_content = history_message.strip()
         if not text_content:
             return
-
         await self.history_manager.add_group_message(
             group_id=group_id,
             sender_id=getattr(self.config, "bot_qq", 0),
@@ -226,7 +215,6 @@ class StatsCommandMixin:
         days: int,
         ai_analysis: str,
     ) -> str:
-        """构建写入群聊历史的 ``/stats`` 输出摘要文本。"""
         lines = [
             f"[命令输出] /stats 最近 {days} 天 Token 使用统计",
             f"总调用: {summary.get('total_calls', 0)}",
@@ -238,16 +226,17 @@ class StatsCommandMixin:
             lines.extend(["", "AI 分析:", ai_analysis.strip()])
         return "\n".join(lines)
 
-    async def _handle_stats_private(
+    async def handle_stats_private(
         self,
         user_id: int,
         sender_id: int,
         args: list[str],
-        send_message: Any = None,
+        send_message: Callable[[str], Awaitable[None]] | None = None,
+        send_forward: PrivateForwardCallback | None = None,
         *,
         is_webui_session: bool = False,
     ) -> None:
-        """处理私聊 ``/stats``（含 WebUI 虚拟私聊适配）。"""
+        """处理私聊 /stats（含 WebUI 虚拟私聊适配）。"""
 
         async def _send_private(message: str) -> None:
             if send_message is not None:
@@ -256,6 +245,7 @@ class StatsCommandMixin:
                 await self.sender.send_private_message(user_id, message)
 
         days, enable_ai_analysis = self._parse_stats_options(args)
+        img_dir: Path | None = None
         try:
             summary = await self._token_usage_storage.get_summary(days=days)
             if summary["total_calls"] == 0:
@@ -272,29 +262,52 @@ class StatsCommandMixin:
                     days=days,
                 )
 
-            if not _MATPLOTLIB_AVAILABLE:
-                message = "❌ 缺少必要的库，无法生成图表。请安装 matplotlib。"
-                if is_webui_session:
-                    message += "\n\n" + self._build_stats_summary_text(summary)
+            img_dir = await self._create_stats_render_dir()
+            await self._generate_stats_charts(summary, img_dir, days)
+
+            if send_forward is not None:
+                nodes = await self._build_stats_forward_nodes(
+                    summary,
+                    img_dir,
+                    days,
+                    ai_analysis,
+                )
+                try:
+                    await send_forward(
+                        user_id,
+                        nodes,
+                        history_message=self._build_stats_history_message(
+                            summary,
+                            days,
+                            ai_analysis,
+                        ),
+                    )
+                except Exception as exc:
+                    if not is_definitive_weixin_delivery_rejection(exc):
+                        logger.exception(
+                            "[Stats] 私聊图表投递结果不确定，不执行二次发送: "
+                            "user=%s err=%s",
+                            user_id,
+                            exc,
+                        )
+                        return
+                    logger.exception(
+                        "[Stats] 私聊图表投递失败，回退文本摘要: user=%s err=%s",
+                        user_id,
+                        exc,
+                    )
+                    fallback = self._build_stats_summary_text(summary)
                     if ai_analysis:
-                        message += f"\n\n🤖 AI 智能分析\n{ai_analysis}"
-                await _send_private(message)
+                        fallback += f"\n\n🤖 AI 智能分析\n{ai_analysis}"
+                    fallback += "\n\n⚠️ 图表发送失败，已保留统计摘要。"
+                    await _send_private(fallback)
                 return
-
-            from Undefined.utils.cache import cleanup_cache_dir
-            from Undefined.utils.paths import RENDER_CACHE_DIR, ensure_dir
-
-            img_dir = ensure_dir(RENDER_CACHE_DIR)
-            await self._generate_line_chart(summary, img_dir, days)
-            await self._generate_bar_chart(summary, img_dir)
-            await self._generate_pie_chart(summary, img_dir)
-            await self._generate_stats_table(summary, img_dir)
 
             await _send_private(f"📊 最近 {days} 天的 Token 使用统计：")
             for img_name in ["line_chart", "bar_chart", "pie_chart", "table"]:
                 img_path = img_dir / f"stats_{img_name}.png"
-                if img_path.exists():
-                    message = await self._build_private_stats_image_message(
+                if await io.is_file(img_path):
+                    message = await self.build_private_stats_image_message(
                         img_path,
                         inline_base64=is_webui_session,
                     )
@@ -303,8 +316,6 @@ class StatsCommandMixin:
             await _send_private(self._build_stats_summary_text(summary))
             if ai_analysis:
                 await _send_private(f"🤖 AI 智能分析\n{ai_analysis}")
-
-            cleanup_cache_dir(RENDER_CACHE_DIR)
         except Exception as e:
             error_id = uuid4().hex[:8]
             logger.exception(
@@ -316,22 +327,23 @@ class StatsCommandMixin:
             await _send_private(
                 f"❌ 生成统计图表失败，请稍后重试（错误码: {error_id}）"
             )
+        finally:
+            if img_dir is not None:
+                await io.delete_tree(img_dir)
 
-    async def _build_private_stats_image_message(
+    async def build_private_stats_image_message(
         self,
         image_path: Path,
         *,
         inline_base64: bool,
     ) -> str:
-        """构建私聊统计图片的 OneBot CQ 码消息。"""
         file_uri = image_path.absolute().as_uri()
         if not inline_base64:
             return f"[CQ:image,file={file_uri}]"
 
         try:
-            encoded = await asyncio.to_thread(
-                lambda: base64.b64encode(image_path.read_bytes()).decode("ascii")
-            )
+            content = await io.read_bytes(image_path)
+            encoded = base64.b64encode(content).decode("ascii")
         except Exception as exc:
             logger.warning(
                 "[Stats] 图像 base64 编码失败，回退文件路径: path=%s err=%s",
@@ -351,7 +363,6 @@ class StatsCommandMixin:
         summary: dict[str, Any],
         days: int,
     ) -> str:
-        """投递并等待 AI 对统计数据的分析结果。"""
         if not self.queue_manager:
             return ""
 
@@ -398,17 +409,18 @@ class StatsCommandMixin:
                 scope_id,
                 wait_timeout,
             )
-            return "AI 分析超时，已先发送图表与汇总数据。"
+            return "AI 分析在当前动态等待期限内超时。"
         finally:
             self._stats_analysis_events.pop(request_id, None)
             self._stats_analysis_results.pop(request_id, None)
 
     def _build_data_summary(self, summary: dict[str, Any], days: int) -> str:
-        """构建用于 AI 分析的统计数据摘要。"""
+        """构建用于 AI 分析的统计数据摘要"""
         lines = []
         lines.append("📊 Token 使用综合分析数据：")
         lines.append("")
 
+        # 整体概况
         lines.append("【整体概况】")
         lines.append(f"统计周期: {days} 天")
         lines.append(f"总调用次数: {summary['total_calls']}")
@@ -417,6 +429,7 @@ class StatsCommandMixin:
         lines.append(f"涉及模型数: {len(summary['models'])}")
         lines.append("")
 
+        # 时间维度
         daily_stats = summary.get("daily_stats", {})
         if daily_stats:
             dates = sorted(daily_stats.keys())
@@ -425,6 +438,7 @@ class StatsCommandMixin:
             avg_daily_calls = total_daily_calls / len(dates) if dates else 0
             avg_daily_tokens = total_daily_tokens / len(dates) if dates else 0
 
+            # 找出高峰日
             peak_day = (
                 max(dates, key=lambda d: daily_stats[d]["tokens"]) if dates else ""
             )
@@ -437,6 +451,7 @@ class StatsCommandMixin:
             lines.append(f"高峰日期: {peak_day} ({peak_day_tokens:,} tokens)")
             lines.append("")
 
+        # 模型维度
         models = summary.get("models", {})
         if models:
             lines.append("【模型维度】")
@@ -481,6 +496,7 @@ class StatsCommandMixin:
                 )
                 lines.append("")
 
+        # 调用类型维度
         call_types = summary.get("call_types", {})
         if call_types:
             lines.append("【调用类型维度】")
@@ -501,6 +517,7 @@ class StatsCommandMixin:
                 )
             lines.append("")
 
+        # 效率指标
         prompt_tokens = summary.get("prompt_tokens", 0)
         completion_tokens = summary.get("completion_tokens", 0)
         total_tokens = summary.get("total_tokens", 0)
@@ -516,6 +533,7 @@ class StatsCommandMixin:
         lines.append(f"输入/输出比: 1:{output_per_input:.2f}")
         lines.append("")
 
+        # 趋势分析
         if daily_stats and len(daily_stats) > 1:
             lines.append("【趋势分析】")
             dates = sorted(daily_stats.keys())
@@ -547,19 +565,18 @@ class StatsCommandMixin:
         return summary_text
 
     def _build_stats_summary_text(self, summary: dict[str, Any]) -> str:
-        """构建统计结果的纯文本摘要。"""
         return f"""📈 摘要汇总:
-• 总调用次数: {summary["total_calls"]}
-• 总消耗 Tokens: {summary["total_tokens"]:,}
-  └─ 输入: {summary["prompt_tokens"]:,}
-  └─ 输出: {summary["completion_tokens"]:,}
-• 平均耗时: {summary["avg_duration"]:.2f}s
-• 涉及模型数: {len(summary["models"])}"""
+    • 总调用次数: {summary["total_calls"]}
+    • 总消耗 Tokens: {summary["total_tokens"]:,}
+      └─ 输入: {summary["prompt_tokens"]:,}
+      └─ 输出: {summary["completion_tokens"]:,}
+    • 平均耗时: {summary["avg_duration"]:.2f}s
+    • 涉及模型数: {len(summary["models"])}"""
 
     def set_stats_analysis_result(
         self, group_id: int, request_id: str, analysis: str
     ) -> None:
-        """设置 AI 分析结果（由队列处理器调用）。"""
+        """设置 AI 分析结果（由队列处理器调用）"""
         event = self._stats_analysis_events.get(request_id)
         if not event:
             logger.warning(
@@ -571,19 +588,48 @@ class StatsCommandMixin:
         self._stats_analysis_results[request_id] = analysis
         event.set()
 
-    def _build_stats_forward_nodes(
+    async def _create_stats_render_dir(self) -> Path:
+
+        base_dir = await io.ensure_dir(RENDER_CACHE_DIR)
+        return await io.ensure_dir(base_dir / f"stats_{uuid4().hex}")
+
+    async def _generate_stats_charts(
+        self,
+        summary: dict[str, Any],
+        img_dir: Path,
+        days: int,
+    ) -> None:
+        async with self._stats_render_lock:
+            await asyncio.to_thread(
+                self._generate_stats_charts_sync,
+                summary,
+                img_dir,
+                days,
+            )
+
+    def _generate_stats_charts_sync(
+        self,
+        summary: dict[str, Any],
+        img_dir: Path,
+        days: int,
+    ) -> None:
+        self._generate_line_chart(summary, img_dir, days)
+        self._generate_bar_chart(summary, img_dir)
+        self._generate_pie_chart(summary, img_dir)
+        self._generate_stats_table(summary, img_dir)
+
+    async def _build_stats_forward_nodes(
         self,
         summary: dict[str, Any],
         img_dir: Path,
         days: int,
         ai_analysis: str = "",
     ) -> list[dict[str, Any]]:
-        """构建用于合并转发的统计图表节点列表。"""
-        # 对外入队 API
+        """构建用于合并转发的统计图表节点列表"""
         nodes = []
         bot_qq = str(self.config.bot_qq)
 
-        # 对外入队 API
+        # 辅助函数：创建消息节点
         def add_node(content: str) -> None:
             nodes.append(
                 {
@@ -594,33 +640,39 @@ class StatsCommandMixin:
 
         add_node(f"📊 最近 {days} 天的 Token 使用统计：")
 
+        # 添加所有生成的图片
         for img_name in ["line_chart", "bar_chart", "pie_chart", "table"]:
             img_path = img_dir / f"stats_{img_name}.png"
-            if img_path.exists():
+            if await io.is_file(img_path):
                 add_node(f"[CQ:image,file={img_path.absolute().as_uri()}]")
 
+        # 添加文本摘要
         add_node(self._build_stats_summary_text(summary))
 
+        # 添加 AI 分析结果（如果有）
         if ai_analysis:
             add_node(f"🤖 AI 智能分析\n{ai_analysis}")
 
         return nodes
 
-    async def _generate_line_chart(
+    def _generate_line_chart(
         self, summary: dict[str, Any], img_dir: Path, days: int
     ) -> None:
-        """生成折线图：时间趋势。"""
+        """生成折线图：时间趋势"""
         daily_stats = summary["daily_stats"]
         if not daily_stats:
             return
 
+        # 准备数据
         dates = sorted(daily_stats.keys())
         tokens = [daily_stats[d]["tokens"] for d in dates]
         prompt_tokens = [daily_stats[d]["prompt_tokens"] for d in dates]
         completion_tokens = [daily_stats[d]["completion_tokens"] for d in dates]
 
+        # 创建图表
         fig, ax = plt.subplots(figsize=(12, 7))
 
+        # 绘制折线
         ax.plot(
             dates, tokens, marker="o", linewidth=2, label="Total Token", color="#2196F3"
         )
@@ -641,6 +693,7 @@ class StatsCommandMixin:
             color="#FF9800",
         )
 
+        # 设置标题和标签
         ax.set_title(
             f"Token Usage Trend for Last {days} Days", fontsize=16, fontweight="bold"
         )
@@ -649,29 +702,37 @@ class StatsCommandMixin:
         ax.legend(loc="upper left", fontsize=10)
         ax.grid(True, alpha=0.3)
 
+        # 旋转 x 轴标签
         plt.xticks(rotation=45, ha="right")
+
+        # 调整布局
         plt.tight_layout()
 
+        # 保存图表
         filepath = img_dir / "stats_line_chart.png"
         plt.savefig(filepath, dpi=150, bbox_inches="tight")
         plt.close(fig)
 
-    async def _generate_bar_chart(self, summary: dict[str, Any], img_dir: Path) -> None:
-        """生成柱状图：模型对比。"""
+    def _generate_bar_chart(self, summary: dict[str, Any], img_dir: Path) -> None:
+        """生成柱状图：模型对比"""
         models = summary["models"]
         if not models:
             return
 
+        # 准备数据
         model_names = list(models.keys())
         tokens = [models[m]["tokens"] for m in model_names]
         prompt_tokens = [models[m]["prompt_tokens"] for m in model_names]
         completion_tokens = [models[m]["completion_tokens"] for m in model_names]
 
+        # 创建图表
         fig, ax = plt.subplots(figsize=(14, 8))
 
+        # 设置柱状图位置
         x = range(len(model_names))
         width = 0.25
 
+        # 绘制柱状图
         bars1 = ax.bar(
             [i - width for i in x],
             tokens,
@@ -697,6 +758,7 @@ class StatsCommandMixin:
             alpha=0.8,
         )
 
+        # 设置标题和标签
         ax.set_title("Token Usage Comparison by Model", fontsize=16, fontweight="bold")
         ax.set_xlabel("Model", fontsize=12)
         ax.set_ylabel("Token Count", fontsize=12)
@@ -705,6 +767,7 @@ class StatsCommandMixin:
         ax.legend(loc="upper right", fontsize=10)
         ax.grid(True, alpha=0.3, axis="y")
 
+        # 在柱子上添加数值标签
         for bars in [bars1, bars2, bars3]:
             for bar in bars:
                 height = bar.get_height()
@@ -718,27 +781,32 @@ class StatsCommandMixin:
                         fontsize=8,
                     )
 
+        # 调整布局
         plt.tight_layout()
 
+        # 保存图表
         filepath = img_dir / "stats_bar_chart.png"
         plt.savefig(filepath, dpi=150, bbox_inches="tight")
         plt.close(fig)
 
-    async def _generate_pie_chart(self, summary: dict[str, Any], img_dir: Path) -> None:
-        """生成饼图：输入/输出比例。"""
+    def _generate_pie_chart(self, summary: dict[str, Any], img_dir: Path) -> None:
+        """生成饼图：输入/输出比例"""
         prompt_tokens = summary["prompt_tokens"]
         completion_tokens = summary["completion_tokens"]
 
         if prompt_tokens == 0 and completion_tokens == 0:
             return
 
+        # 创建图表
         fig, ax = plt.subplots(figsize=(12, 8))
 
+        # 准备数据
         labels = ["Input Token", "Output Token"]
         sizes = [prompt_tokens, completion_tokens]
         colors = ["#4CAF50", "#FF9800"]
-        explode = (0.05, 0.05)
+        explode = (0.05, 0.05)  # 突出显示
 
+        # 绘制饼图
         wedges, *_ = ax.pie(
             sizes,
             explode=explode,
@@ -749,8 +817,10 @@ class StatsCommandMixin:
             textprops={"fontsize": 12},
         )
 
+        # 设置标题
         ax.set_title("Input/Output Token Ratio", fontsize=16, fontweight="bold", pad=20)
 
+        # 添加图例
         ax.legend(
             wedges,
             [f"{labels[i]}: {sizes[i]:,}" for i in range(len(labels))],
@@ -759,20 +829,21 @@ class StatsCommandMixin:
             fontsize=10,
         )
 
+        # 调整布局
         plt.tight_layout()
 
+        # 保存图表
         filepath = img_dir / "stats_pie_chart.png"
         plt.savefig(filepath, dpi=150, bbox_inches="tight")
         plt.close(fig)
 
-    async def _generate_stats_table(
-        self, summary: dict[str, Any], img_dir: Path
-    ) -> None:
-        """生成统计表格图片。"""
+    def _generate_stats_table(self, summary: dict[str, Any], img_dir: Path) -> None:
+        """生成统计表格"""
         models = summary["models"]
         if not models:
             return
 
+        # 准备数据
         model_names = list(models.keys())
         data = []
         for model in model_names:
@@ -787,10 +858,12 @@ class StatsCommandMixin:
                 ]
             )
 
+        # 创建图表
         fig, ax = plt.subplots(figsize=(14, 9))
         ax.axis("tight")
         ax.axis("off")
 
+        # 创建表格
         table = ax.table(
             cellText=data,
             colLabels=["Model", "Calls", "Total Token", "Input Token", "Output Token"],
@@ -798,25 +871,31 @@ class StatsCommandMixin:
             loc="center",
         )
 
+        # 设置表格样式
         table.auto_set_font_size(False)
         table.set_fontsize(10)
         table.scale(1.2, 1.5)
 
+        # 设置表头样式
         for i in range(5):
             table[(0, i)].set_facecolor("#2196F3")
             table[(0, i)].set_text_props(weight="bold", color="white")
 
+        # 设置行样式
         for i in range(1, len(data) + 1):
             for j in range(5):
                 if i % 2 == 0:
                     table[(i, j)].set_facecolor("#f0f0f0")
 
+        # 设置标题
         ax.set_title(
             "Model Usage Statistics Details", fontsize=16, fontweight="bold", pad=20
         )
 
+        # 调整布局
         plt.tight_layout()
 
+        # 保存图表
         filepath = img_dir / "stats_table.png"
         plt.savefig(filepath, dpi=150, bbox_inches="tight")
         plt.close(fig)

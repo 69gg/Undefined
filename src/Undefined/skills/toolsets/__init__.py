@@ -44,6 +44,8 @@ class ToolSetRegistry(BaseRegistry):
             category = category_dir.name
             self._discover_items_in_dir(category_dir, prefix=f"{category}.")
 
+        self.preload_handlers()
+
         active_names = set(self._items.keys())
         self._stats = {
             name: self._stats.get(name, SkillStats()) for name in active_names
@@ -51,7 +53,7 @@ class ToolSetRegistry(BaseRegistry):
 
         tool_names = list(self._items.keys())
         logger.info(
-            f"成功加载了 {len(self._items_schema)} 个工具集工具: {', '.join(tool_names)}"
+            f"成功加载了 {len(self.get_schema())} 个工具集工具: {', '.join(tool_names)}"
         )
 
     def get_tools_schema(self) -> List[Dict[str, Any]]:

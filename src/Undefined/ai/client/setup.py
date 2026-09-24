@@ -7,7 +7,7 @@ import logging
 import re
 from collections.abc import Collection
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Optional, Protocol, TYPE_CHECKING
+from typing import Any, Awaitable, Callable, Optional, Protocol
 
 import httpx
 
@@ -16,7 +16,10 @@ from Undefined.ai.llm import ModelRequester
 from Undefined.ai.model_selector import ModelSelector
 from Undefined.ai.multimodal import MultimodalAnalyzer
 from Undefined.ai.prompts import PromptBuilder
-from Undefined.ai.crawl4ai_support import get_crawl4ai_capabilities
+from Undefined.ai.crawl4ai_support import (
+    Crawl4AICapabilities,
+    get_crawl4ai_capabilities,
+)
 from Undefined.ai.summaries import SummaryService
 from Undefined.ai.tokens import TokenCounter
 from Undefined.ai.tool_search import TOOL_SEARCH_NAME
@@ -98,27 +101,6 @@ class SendPrivateMessageCallback(Protocol):
     ) -> Awaitable[None]: ...
 
 
-# 尝试导入 langchain SearxSearchWrapper
-if TYPE_CHECKING:
-    from langchain_community.utilities import (
-        SearxSearchWrapper as SearxSearchWrapperType,
-    )
-else:
-    SearxSearchWrapperType = object
-
-_SearxSearchWrapper: type[SearxSearchWrapperType] | None
-try:
-    from langchain_community.utilities import SearxSearchWrapper as _SearxSearchWrapper
-
-    _SEARX_AVAILABLE = True
-except Exception:
-    _SearxSearchWrapper = None
-    _SEARX_AVAILABLE = False
-    logger.warning(
-        "[初始化] langchain_community 未安装或 SearxSearchWrapper 不可用，搜索功能将禁用"
-    )
-
-
 def _attachment_remote_download_max_bytes(runtime_config: Config) -> int:
     value = int(runtime_config.attachment_remote_download_max_size_mb)
     return max(0, value) * 1024 * 1024
@@ -149,6 +131,17 @@ def _resolve_summary_model_config(
         return summary_model
     # 回退到默认/主配置
     return fallback
+
+
+def _build_searx_wrapper(searxng_url: str) -> Any:
+    """构造 SearxSearchWrapper；langchain_community 为必需依赖。
+
+    导入放在使用点而非模块顶层：依赖缺失或版本不兼容时不会让整个 AI 客户端
+    无法构造，搜索能力降级为不可用，并由调用方的 error 日志暴露环境问题。
+    """
+    from langchain_community.utilities import SearxSearchWrapper  # noqa: PLC0415
+
+    return SearxSearchWrapper(searx_host=searxng_url, k=10)
 
 
 class ClientSetupMixin:
@@ -182,7 +175,18 @@ class ClientSetupMixin:
         self.runtime_config = runtime_config
         self.memory_storage = memory_storage
         self._end_summary_storage = end_summary_storage or EndSummaryStorage()
-        self._crawl4ai_capabilities = get_crawl4ai_capabilities()
+        self._crawl4ai_capabilities: Crawl4AICapabilities | None
+        # crawl4ai 是必需依赖，但安装损坏 / 版本不兼容不应让整个 Bot 启动失败：
+        # 这里降级为能力缺失（网页获取工具运行时会明确报错），并以 error 日志暴露环境问题
+        try:
+            self._crawl4ai_capabilities = get_crawl4ai_capabilities()
+        except Exception as exc:
+            self._crawl4ai_capabilities = None
+            logger.error(
+                "[初始化] crawl4ai 初始化失败，网页获取功能不可用，"
+                "请修复 crawl4ai 安装后重启: %s",
+                exc,
+            )
 
         self._http_client = httpx.AsyncClient(timeout=480.0, trust_env=False)
         self._token_usage_storage = TokenUsageStorage()
@@ -295,35 +299,30 @@ class ClientSetupMixin:
         else:
             logger.info("[初始化] 技能热重载已禁用")
 
-        # 初始化搜索 wrapper
+        # 初始化搜索 wrapper（langchain_community 为必需依赖）
         self._search_wrapper: Optional[Any] = None
-        if _SEARX_AVAILABLE and _SearxSearchWrapper is not None:
-            searxng_url = runtime_config.searxng_url
-            if searxng_url:
-                try:
-                    self._search_wrapper = _SearxSearchWrapper(
-                        searx_host=searxng_url, k=10
-                    )
-                    logger.info(
-                        "[初始化] SearxSearchWrapper 初始化成功: url=%s k=10",
-                        redact_string(searxng_url),
-                    )
-                except Exception as exc:
-                    logger.warning("[初始化] SearxSearchWrapper 初始化失败: %s", exc)
-            else:
-                logger.info("[初始化] SEARXNG_URL 未配置，搜索功能禁用")
-
-        if self._crawl4ai_capabilities.available:
-            logger.info("[初始化] crawl4ai 可用，网页获取功能已启用")
-        else:
-            detail = self._crawl4ai_capabilities.error
-            if detail:
-                logger.warning(
-                    "[初始化] crawl4ai 不可用，网页获取功能将禁用: %s",
-                    detail,
+        searxng_url = runtime_config.searxng_url
+        if searxng_url:
+            try:
+                self._search_wrapper = _build_searx_wrapper(searxng_url)
+                logger.info(
+                    "[初始化] SearxSearchWrapper 初始化成功: url=%s k=10",
+                    redact_string(searxng_url),
                 )
-            else:
-                logger.warning("[初始化] crawl4ai 不可用，网页获取功能将禁用")
+            except Exception as exc:
+                logger.error(
+                    "[初始化] SearxSearchWrapper 初始化失败，搜索功能不可用，"
+                    "请修复 langchain-community 安装: %s",
+                    exc,
+                )
+        else:
+            logger.info("[初始化] SEARXNG_URL 未配置，搜索功能禁用")
+
+        if self._crawl4ai_capabilities is not None:
+            logger.info(
+                "[初始化] crawl4ai 已就绪，网页获取功能已启用: proxy_config=%s",
+                self._crawl4ai_capabilities.proxy_config_available,
+            )
 
         self._prompt_builder = PromptBuilder(
             bot_qq=self.bot_qq,
@@ -561,30 +560,19 @@ class ClientSetupMixin:
 
     def apply_search_config(self, searxng_url: str) -> None:
         """应用搜索服务配置（支持热更新）。"""
-        if not _SEARX_AVAILABLE or _SearxSearchWrapper is None:
-            if searxng_url:
-                logger.warning(
-                    "[配置] 搜索组件不可用，已忽略 SEARXNG_URL=%s",
-                    redact_string(searxng_url),
-                )
-            else:
-                logger.info("[配置] 搜索组件不可用，搜索已禁用")
-            self._search_wrapper = None
-            return
-
         if not searxng_url:
             self._search_wrapper = None
             logger.info("[配置] SEARXNG_URL 未配置，搜索功能已禁用")
             return
 
         try:
-            self._search_wrapper = _SearxSearchWrapper(searx_host=searxng_url, k=10)
+            self._search_wrapper = _build_searx_wrapper(searxng_url)
             logger.info(
                 "[配置] 搜索服务已更新: url=%s k=10",
                 redact_string(searxng_url),
             )
         except Exception as exc:
-            logger.warning("[配置] 搜索服务更新失败: %s", exc)
+            logger.error("[配置] 搜索服务更新失败: %s", exc)
             self._search_wrapper = None
             logger.info("[配置] 搜索服务已回退为禁用")
 

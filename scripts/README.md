@@ -62,6 +62,8 @@ python scripts/sync_config_template.py --stdout
 
 **原理**：ChromaDB 存储了完整的原文本（`documents`），脚本读取所有记录，用新模型重新计算向量后 upsert 覆写，metadata 保持不变。
 
+**维度变化**：collection 在首次写入时定维，异维 upsert 会直接报 `InvalidArgumentError`。脚本会先比较新旧向量维度，检测到变化时先读全量记录、再删除并重建 collection，最后按新维度写回；`--dry-run` 只提示会重建，不做任何写入。
+
 **前置条件**：先在 `config.toml` 中将 `[models.embedding]` 更新为新模型配置。
 
 ```bash
@@ -88,6 +90,26 @@ uv run python scripts/reembed_cognitive.py -v
 - 运行期间不要同时启动机器人，避免 ChromaDB 写入冲突
 - 大量记录时注意 API 限速，可通过 `--batch-size` 降低并发
 - 建议先用 `--dry-run` 确认记录数量和配置正确性
+
+### [`restore_profile.py`](restore_profile.py) — 认知记忆侧写历史版本恢复
+
+侧写每次写入前会把旧内容存成历史快照（`cognitive.profile.revision_keep`，默认 5 份）。本脚本提供历史版本的列出、查看与恢复入口。
+
+```bash
+# 列出某用户/群聊的历史版本
+uv run python scripts/restore_profile.py list --entity-type user --entity-id 123456
+
+# 查看某个历史版本内容
+uv run python scripts/restore_profile.py show --entity-type user --entity-id 123456 --revision 20260101000000000000.md
+
+# 恢复某个历史版本（恢复前会把当前内容另存为新快照，可再次回退）
+uv run python scripts/restore_profile.py restore --entity-type user --entity-id 123456 --revision 20260101000000000000.md
+
+# 仅预览，不写盘
+uv run python scripts/restore_profile.py restore --entity-type user --entity-id 123456 --revision 20260101000000000000.md --dry-run
+```
+
+**注意**：恢复只改侧写 Markdown 与历史快照，不会更新 ChromaDB 中的侧写向量；需要同步检索结果时按 `docs/cognitive-memory.md` 的说明重嵌入。
 
 ### release_notes.py — 发布版本校验与 Release notes 生成
 

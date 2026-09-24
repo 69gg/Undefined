@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 from datetime import datetime, timezone, tzinfo
@@ -49,6 +50,7 @@ class HistorianWorker:
         ai_client: Any,
         config_getter: Callable[[], Any],
         model_config: Any = None,
+        max_concurrency: int = 4,
     ) -> None:
         self._job_queue = job_queue
         self._vector_store = vector_store
@@ -56,6 +58,9 @@ class HistorianWorker:
         self._ai_client = ai_client
         self._config_getter = config_getter
         self._model_config = model_config
+        self._max_concurrency = max(1, int(max_concurrency))
+        # max_concurrency 仅在启动时读取一次，热更新不生效；若将来开放热更新，
+        # 必须同步更新在途门控（_poll_loop 比较的 _max_concurrency）
         self._stop_event = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
         self._inflight_tasks: set[asyncio.Task[None]] = set()
@@ -97,8 +102,20 @@ class HistorianWorker:
         dispatch_count = 0
         logger.info("[史官] 轮询循环已开始")
         while not self._stop_event.is_set():
-            result = await self._job_queue.dequeue()
             config = self._config_getter()
+            poll_interval = max(
+                HISTORIAN_MIN_POLL_INTERVAL_SECONDS,
+                float(config.poll_interval_seconds),
+            )
+            if len(self._inflight_tasks) >= self._max_concurrency:
+                # 唯一的并发门禁（发车门控）：在途任务达到上限时先不取新任务，
+                # 限制「同时存在的任务对象数量」让 dequeue 暂停，既保证在途
+                # 处理不超过 max_concurrency，也避免任务与队列取出的消息
+                # 无界堆积在内存里。任务数可能因 done 回调尚未触发而短暂
+                # 偏高，最多多休眠一个轮询周期，不做补偿。
+                await asyncio.sleep(poll_interval)
+                continue
+            result = await self._job_queue.dequeue()
             if result:
                 job_id, job = result
                 task = asyncio.create_task(self._process_job_with_retry(job_id, job))
@@ -128,12 +145,7 @@ class HistorianWorker:
                         config.failed_max_files,
                     )
 
-            await asyncio.sleep(
-                max(
-                    HISTORIAN_MIN_POLL_INTERVAL_SECONDS,
-                    float(config.poll_interval_seconds),
-                )
-            )
+            await asyncio.sleep(poll_interval)
 
         if self._inflight_tasks:
             logger.info(
@@ -143,6 +155,11 @@ class HistorianWorker:
         logger.info("[史官] 轮询循环已结束")
 
     async def _process_job_with_retry(self, job_id: str, job: dict[str, Any]) -> None:
+        # 并发上限由 _poll_loop 的在途计数门控统一保证（见 worker 构造处的
+        # 说明）：发车前限制任务对象数量，最多同时存在 _max_concurrency 个，
+        # 因此这里不再叠加同上限的 Semaphore——两个上限一致时后者恒不阻塞，
+        # 只会让维护者误以为并发由两层共同决定。若将来新增绕过发车门控的
+        # 调用路径，必须一并接入门禁，而不是在这里补锁。
         try:
             await self._process_job(job_id, job)
         except Exception as e:
@@ -449,14 +466,16 @@ class HistorianWorker:
         success_count = 0
         for index, target in enumerate(targets, start=1):
             try:
-                merged = await self._merge_profile_target(
-                    job=job,
-                    canonical=canonical,
-                    event_id=event_id,
-                    target=target,
-                    target_index=index,
-                    target_count=len(targets),
-                )
+                # 同一实体的「读 → LLM → 写」整段互斥，避免并发合并互相覆盖
+                async with self._profile_merge_guard(target):
+                    merged = await self._merge_profile_target(
+                        job=job,
+                        canonical=canonical,
+                        event_id=event_id,
+                        target=target,
+                        target_index=index,
+                        target_count=len(targets),
+                    )
                 if merged:
                     success_count += 1
             except Exception as exc:
@@ -474,6 +493,17 @@ class HistorianWorker:
             success_count,
             len(targets),
         )
+
+    def _profile_merge_guard(self, target: dict[str, str]) -> Any:
+        """返回目标实体的合并互斥锁；存储层未提供时退化为无锁上下文。"""
+        guard = getattr(self._profile_storage, "merge_guard", None)
+        if not callable(guard):
+            return contextlib.nullcontext()
+        entity_type = str(target.get("entity_type", ""))
+        entity_id = str(target.get("entity_id", ""))
+        if not entity_type or not entity_id:
+            return contextlib.nullcontext()
+        return guard(entity_type, entity_id)
 
     async def _write_profile(
         self,

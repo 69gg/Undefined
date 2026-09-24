@@ -266,14 +266,15 @@ Release workflow 会分别为 Console 和 Chat 构建 `arm64-v8a`、`armeabi-v7a
 
 WebUI、Console 和 Chat 统一使用 **Biome 2.5.10**。两个 App 的 `package.json` 固定该版本，锁文件与根目录及两个 App 的 `biome.json` schema 同步维护；使用 `npm ci` 安装锁定的工具版本。
 
-Biome v2 通过 `files.includes` 表达检查范围和排除规则。两个 App 配置设置 `root: false`，但不继承根目录的 WebUI 格式规则，保持各自原有的缩进风格和检查范围。后续升级应同时迁移三份配置并运行两个 App 的 `npm run check`，不能只修改 schema 版本号。迁移方式见 [Biome v2 官方指南](https://biomejs.dev/guides/upgrade-to-biome-v2/)。
+Biome v2 通过 `files.includes` 表达检查范围和排除规则。两个 App 的 `biome.json` 使用 `extends: []` **显式声明不继承根配置**，并各自声明 `formatter.indentStyle = "tab"`，因此 App 代码的格式与规则完全由本目录配置决定，根目录的 WebUI 规则（4 空格缩进、9 条关闭的 lint 规则）不会渗入 App 检查；反过来 WebUI 脚本由根配置的 `files.includes` 单独圈定，Console 的 `npm run lint:webui` 通过 `--config-path ../../biome.json` 显式使用根配置。后续升级应同时迁移三份配置并运行两个 App 的 `npm run check`，不能只修改 schema 版本号。迁移方式见 [Biome v2 官方指南](https://biomejs.dev/guides/upgrade-to-biome-v2/)。
 
 仓库内已提供可版本化维护的 git hooks：
 
 ```text
 .githooks/pre-commit
-.githooks/pre-tag
 ```
+
+> 打 tag 前的版本一致性校验不在本地钩子中执行（git 没有 `pre-tag` 事件），由 Release workflow 调用 `scripts/release_notes.py validate` 完成。
 
 安装方式：
 
@@ -319,6 +320,16 @@ npm install
 4. `build-tauri-android`：分别构建 Console / Chat 的 Android `.apk`。
 5. `publish-release`：汇总所有产物并上传 GitHub Release；Release notes 从 `CHANGELOG.md` 最新版本条目生成，不读取 tag 注释。
 6. `publish-pypi`：发布 Python 包到 PyPI。
+
+### CI 工作流（ci.yml）
+
+拉取请求与 `main` / `develop` 推送会触发 `.github/workflows/ci.yml`，工作流级声明 `permissions: contents: read` 与并发取消（同一 ref 的新推送会取消旧运行），每个 job 都带 `timeout-minutes`：
+
+1. `quality-check`（Python 3.12）：`ruff` + `ruff format --check` + `mypy` + `pytest tests/ --cov`（覆盖率低于 `pyproject.toml` 的 `fail_under` 即失败）+ `uv build --wheel` 并校验 wheel 内含资源。该 job 会 `setup-node`，以便 WebUI 前端的 4 个 node 行为测试真正执行而不是静默 skip。
+2. `python-compat`（3.11 / 3.13）：`pyproject.toml` 声明 `>=3.11,<3.14`，因此两端边界各跑一次 `mypy` 与 `pytest`。
+3. `native-app-quality-check`（Console / Chat 矩阵）：`npm run check`。
+
+依赖统一通过 `uv sync --group dev` 安装：`dev` 是唯一一份工具清单（含 `pytest-cov` 与 `types-*` 类型桩），不再维护与它重复的 `ci` 组或 `[project.optional-dependencies]`。
 
 ## 8. 手动 Artifact 工作流
 
@@ -394,7 +405,7 @@ uv sync --group dev -p 3.12
 uv run ruff check .
 uv run ruff format --check .
 uv run mypy .
-uv run pytest tests/
+uv run pytest tests/ --cov
 uv build
 ```
 

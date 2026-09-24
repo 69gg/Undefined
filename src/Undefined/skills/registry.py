@@ -13,6 +13,21 @@ from Undefined.utils.tool_calls import parse_tool_arguments
 
 logger = logging.getLogger(__name__)
 
+# handler 模块名的前缀必须是真实可导入的包路径，否则 handler.py 内的
+# 相对导入（如 `from .docker_utils import ...`）会因为顶层包不存在而失败。
+_PACKAGE_PREFIX: str = __package__ or "Undefined.skills"
+_REAL_PACKAGE_ROOT: Path = Path(__file__).resolve().parent
+_SYNTHETIC_PREFIX = "_undefined_skill_modules"
+
+
+def _is_under_real_package(path: Path) -> bool:
+    """判断目录是否属于随包发布的 skills 目录。"""
+    try:
+        path.resolve().relative_to(_REAL_PACKAGE_ROOT)
+    except (OSError, ValueError):
+        return False
+    return True
+
 
 class RegistryExecutionTimeoutError(asyncio.TimeoutError):
     """由注册表超时包装器抛出的超时异常。"""
@@ -63,6 +78,8 @@ class SkillItem:
     module_name: Optional[str]
     handler: Optional[Callable[[Dict[str, Any], Dict[str, Any]], Awaitable[Any]]] = None
     loaded: bool = False
+    # handler 导入失败的原因；不为空表示该项不可执行，也不会进入对外 schema
+    load_error: Optional[str] = None
 
 
 class BaseRegistry:
@@ -86,7 +103,6 @@ class BaseRegistry:
         self.kind = kind
         self.timeout_seconds = timeout_seconds
         self._items: Dict[str, SkillItem] = {}
-        self._items_schema: List[Dict[str, Any]] = []
         self._stats: Dict[str, SkillStats] = {}
 
         self._items_lock = asyncio.Lock()
@@ -125,10 +141,9 @@ class BaseRegistry:
 
     def _reset_items(self) -> None:
         self._items = {}
-        self._items_schema = []
 
     def load_items(self) -> None:
-        """从 base_dir 自动发现并加载技能定义（仅加载 config 配置文件，不导入 handler 代码）"""
+        """从 base_dir 自动发现技能定义，并导入 handler 暴露加载失败。"""
         self._reset_items()
 
         if not self.base_dir.exists():
@@ -136,16 +151,30 @@ class BaseRegistry:
             return
 
         self._discover_items_in_dir(self.base_dir, prefix="")
+        self.preload_handlers()
 
         active_names = set(self._items.keys())
         self._stats = {
             name: self._stats.get(name, SkillStats()) for name in active_names
         }
 
-        item_names = list(self._items.keys())
+        item_names = sorted(self._items.keys())
+        failed_names = {name for name, item in self._items.items() if item.load_error}
+        ok_names = [name for name in item_names if name not in failed_names]
+        # 计数与列表必须同源：get_schema() 已排除加载失败项，这里只能用成功项
         logger.info(
-            f"[{self.__class__.__name__}] 成功加载了 {len(self._items_schema)} 个项目: {', '.join(item_names)}"
+            "[%s] 成功加载了 %d 个项目: %s",
+            self.__class__.__name__,
+            len(ok_names),
+            ", ".join(ok_names),
         )
+        if failed_names:
+            logger.warning(
+                "[%s] %d 个项目加载失败，已排除: %s",
+                self.__class__.__name__,
+                len(failed_names),
+                ", ".join(name for name in item_names if name in failed_names),
+            )
 
     def _discover_items_in_dir(self, parent_dir: Path, prefix: str) -> None:
         for item in parent_dir.iterdir():
@@ -175,7 +204,6 @@ class BaseRegistry:
 
             item = self._build_skill_item(item_dir, config, handler_path, prefix)
             self._items[item.name] = item
-            self._items_schema.append(item.config)
             self._stats.setdefault(item.name, SkillStats())
 
             if logger.isEnabledFor(logging.DEBUG):
@@ -226,13 +254,21 @@ class BaseRegistry:
         )
 
     def _build_module_name(self, item_dir: Path) -> str:
+        """合成 handler 的模块名。
+
+        随包技能形如 ``Undefined.skills.agents.code_delivery_agent.handler``：
+        父包真实存在，因此 handler.py 内的相对导入（``from .docker_utils import``）
+        可以正常解析到同目录模块。不随包的目录（测试或外部注入）使用独立前缀，
+        避免污染真实包命名空间。
+        """
         try:
             relative = item_dir.relative_to(self.skills_root)
-            parts = [self.skills_root.name] + list(relative.parts)
-            return ".".join(parts)
         except ValueError:
-            parts = list(item_dir.parts[-3:])
-            return ".".join(parts)
+            relative = Path(*item_dir.parts[-3:])
+        prefix = (
+            _PACKAGE_PREFIX if _is_under_real_package(item_dir) else _SYNTHETIC_PREFIX
+        )
+        return ".".join([*prefix.split("."), *relative.parts, "handler"])
 
     def _load_handler_for_item(
         self, item: SkillItem, reload_module: bool = False
@@ -244,30 +280,138 @@ class BaseRegistry:
         if not item.handler_path or not item.module_name:
             return
 
-        if reload_module and item.module_name in sys.modules:
-            del sys.modules[item.module_name]
-
-        spec = importlib.util.spec_from_file_location(
-            item.module_name, item.handler_path
-        )
-        if spec is None or spec.loader is None:
-            raise RuntimeError(f"加载处理器 spec 失败: {item.handler_path}")
-
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[item.module_name] = module
-        try:
-            spec.loader.exec_module(module)
-        except Exception:
-            current = sys.modules.get(item.module_name)
-            if current is module:
-                del sys.modules[item.module_name]
-            raise
-
+        module = self._resolve_handler_module(item)
         if not hasattr(module, "execute"):
+            item.load_error = "RuntimeError: 处理器缺少 'execute' 函数"
             raise RuntimeError(f"{item.handler_path} 的处理器缺少 'execute' 函数")
 
         item.handler = module.execute
         item.loaded = True
+        item.load_error = None
+
+    def _resolve_handler_module(self, item: SkillItem) -> Any:
+        """取得 handler 的模块对象；失败时给 item 记上 load_error。"""
+        assert item.module_name is not None and item.handler_path is not None
+        try:
+            if _is_under_real_package(item.handler_path.parent):
+                return self._import_packaged_handler(
+                    item.module_name, item.handler_path
+                )
+            return self._exec_handler_from_path(item.module_name, item.handler_path)
+        except Exception as exc:
+            item.load_error = f"{type(exc).__name__}: {exc}"
+            raise
+
+    def _import_packaged_handler(self, module_name: str, handler_path: Path) -> Any:
+        """按真实包路径导入 handler。
+
+        走标准 import 机制（而不是按文件路径注册），这样同一份源码只有一份模块
+        对象：handler.py 内的相对导入能沿真实包链解析，其他位置的常规 import 也
+        不会拿到重复状态。
+        """
+        self._purge_submodules(module_name)
+        current = sys.modules.get(module_name)
+        if current is None:
+            return importlib.import_module(module_name)
+        # 已有模块对象时按文件重新执行：热重载与首次加载都以磁盘内容为准，
+        # 同时保留模块对象身份，外部持有的引用不会指向另一份模块状态。
+        try:
+            return importlib.reload(current)
+        except Exception:
+            logger.warning(
+                "[%s] reload 处理器失败，改为按文件重新导入: %s",
+                self.__class__.__name__,
+                module_name,
+                exc_info=True,
+            )
+            return self._exec_handler_from_path(module_name, handler_path)
+
+    @staticmethod
+    def _exec_handler_from_path(module_name: str, handler_path: Path) -> Any:
+        """按文件路径导入不随包发布的 handler（测试或外部目录）。"""
+        spec = importlib.util.spec_from_file_location(module_name, handler_path)
+        if spec is None or spec.loader is None:
+            raise RuntimeError(f"加载处理器 spec 失败: {handler_path}")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        try:
+            spec.loader.exec_module(module)
+        except Exception:
+            if sys.modules.get(module_name) is module:
+                del sys.modules[module_name]
+            raise
+        return module
+
+    @staticmethod
+    def _skill_root_package(module_name: str) -> str:
+        """返回该 handler 所属技能单元的根包。
+
+        随包技能形如 ``Undefined.skills.<kind>.<item>[.子目录...].handler``（如
+        ``Undefined.skills.agents.code_delivery_agent.tools.init_docker.handler``），
+        技能单元根包为 ``Undefined.skills.<kind>.<item>``。按单元而不是按 handler
+        所在目录定位，才能清理由跨层相对导入加载的模块（``from ...docker_utils
+        import``）。
+        """
+        parts = module_name.split(".")
+        package_depth = len(_PACKAGE_PREFIX.split("."))
+        if len(parts) <= package_depth + 1:
+            return module_name.rpartition(".")[0]
+        return ".".join(parts[: package_depth + 2])
+
+    @classmethod
+    def _purge_submodules(cls, module_name: str) -> None:
+        """清理 handler 相对导入产生的子模块缓存。
+
+        handler.py 内的相对导入（同目录的 ``from .x import`` 与跨层的
+        ``from ...x import``）会把技能单元内的模块注册到 sys.modules；热重载时
+        必须整单元失效，否则像 ``code_delivery_agent.docker_utils`` 这样的
+        跨层助手仍会沿用旧代码。
+        """
+        package_name = cls._skill_root_package(module_name)
+        parent_prefix = f"{package_name}."
+        stale = [
+            name
+            for name in sys.modules
+            if not name.endswith(".handler") and name.startswith(parent_prefix)
+        ]
+        for name in stale:
+            sys.modules.pop(name, None)
+
+    def preload_handlers(self) -> List[tuple[str, str]]:
+        """在注册阶段导入全部 handler，尽早暴露加载失败。
+
+        失败的项会被记录 `load_error` 并从对外 schema 中排除，避免主 AI
+        被告知一个实际不可用的技能。返回 `(技能名, 错误)` 列表。
+        """
+        failures: List[tuple[str, str]] = []
+        for name, item in self._items.items():
+            if item.handler is not None:
+                continue
+            try:
+                self._load_handler_for_item(item)
+            except Exception as exc:
+                if not item.load_error:
+                    item.load_error = f"{type(exc).__name__}: {exc}"
+            if item.load_error:
+                failures.append((name, item.load_error))
+
+        if failures:
+            logger.error(
+                "[%s] %s 个技能加载失败，已从工具列表中排除:",
+                self.__class__.__name__,
+                len(failures),
+            )
+            for name, error in failures:
+                logger.error("  - %s: %s", name, error)
+        return failures
+
+    def get_load_failures(self) -> Dict[str, str]:
+        """返回 handler 加载失败的技能名与错误信息。"""
+        return {
+            name: item.load_error
+            for name, item in self._items.items()
+            if item.load_error
+        }
 
     def register_external_item(
         self,
@@ -293,11 +437,11 @@ class BaseRegistry:
             loaded=True,
         )
         self._items[name] = item
-        self._items_schema.append(schema)
         self._stats.setdefault(name, SkillStats())
 
     def get_schema(self) -> List[Dict[str, Any]]:
-        return self._items_schema
+        """返回可用技能的 schema；handler 加载失败的项不对外暴露。"""
+        return [item.config for item in self._items.values() if not item.load_error]
 
     def get_stats(self) -> Dict[str, SkillStats]:
         return self._stats

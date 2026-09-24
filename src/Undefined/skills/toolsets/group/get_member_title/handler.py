@@ -5,20 +5,9 @@ from datetime import datetime
 from typing import Any
 
 from Undefined.context import RequestContext
+from Undefined.skills.shared import parse_positive_int
 
 logger = logging.getLogger(__name__)
-
-
-def _parse_positive_int(value: Any, field_name: str) -> tuple[int | None, str | None]:
-    if value is None:
-        return None, None
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return None, f"{field_name} 必须是整数"
-    if parsed <= 0:
-        return None, f"{field_name} 必须是正整数"
-    return parsed, None
 
 
 def _snapshot_context(context: dict[str, Any]) -> dict[str, Any]:
@@ -66,7 +55,7 @@ def _resolve_group_id(
     if group_id_raw is None:
         return None, "请提供群号（group_id 参数），或者在群聊中调用"
 
-    group_id, group_err = _parse_positive_int(group_id_raw, "group_id")
+    group_id, group_err = parse_positive_int(group_id_raw, "group_id")
     if group_err or group_id is None:
         return None, group_err or "group_id 非法"
     return group_id, None
@@ -79,8 +68,8 @@ def _resolve_user_id(args: dict[str, Any]) -> tuple[int | None, str | None]:
     if user_id_raw is None and qq_raw is None:
         return None, "请提供要查询的群成员 QQ 号（user_id 或 qq 参数）"
 
-    user_id, user_id_err = _parse_positive_int(user_id_raw, "user_id")
-    qq, qq_err = _parse_positive_int(qq_raw, "qq")
+    user_id, user_id_err = parse_positive_int(user_id_raw, "user_id")
+    qq, qq_err = parse_positive_int(qq_raw, "qq")
 
     if user_id_raw is not None and user_id_err:
         return None, user_id_err

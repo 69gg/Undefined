@@ -15,22 +15,9 @@ from Undefined.skills.toolsets.messages.context_utils import (
     normalize_sent_message_id,
     parse_reply_to,
 )
+from Undefined.skills.shared import private_access_error
 
 logger = logging.getLogger(__name__)
-
-
-def _private_access_error(runtime_config: Any, user_id: int) -> str:
-    reason_getter = getattr(runtime_config, "private_access_denied_reason", None)
-    reason = reason_getter(user_id) if callable(reason_getter) else None
-    if reason == "blacklist":
-        return (
-            f"发送失败：目标用户 {user_id} 在黑名单内（access.blocked_private_ids），"
-            "已被访问控制拦截"
-        )
-    return (
-        f"发送失败：目标用户 {user_id} 不在允许列表内（access.allowed_private_ids），"
-        "已被访问控制拦截"
-    )
 
 
 def _format_send_success(user_id: int, message_id: Any) -> str:
@@ -91,7 +78,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     runtime_config = context.get("runtime_config")
     if runtime_config is not None:
         if not runtime_config.is_private_allowed(user_id):
-            return _private_access_error(runtime_config, user_id)
+            return private_access_error(runtime_config, user_id)
 
     send_private_message_callback = context.get("send_private_message_callback")
     sender = context.get("sender")

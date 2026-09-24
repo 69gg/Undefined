@@ -1,3 +1,16 @@
+"""WebUI / Chat 前端静态契约测试（历史遗留，勿继续扩张）。
+
+本文件大量使用「读取源码文本 + assert 子串」的写法，属于变更检测器：
+重构必然变红，真正的行为回归却测不出来（全仓 ~800 处此类断言里本文件占 500+，
+由 ``tests/test_source_assertion_budget.py`` 的预算棘轮看住总量，只减不增）。
+
+新增前端契约时请写行为断言：
+
+- 用 node + ``vm`` 执行真实 JS（参考 ``tests/test_webui_config_form_frontend.py``）；
+- 原生 App 的断言迁移到各自 App 的 Vitest / cargo 测试；
+- 结构化资源（JSON/TOML）断言解析后的字段而非原文子串。
+"""
+
 from __future__ import annotations
 
 import asyncio

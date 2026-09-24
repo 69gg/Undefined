@@ -1,6 +1,6 @@
 {
-    "root": false,
     "$schema": "https://biomejs.dev/schemas/2.5.10/schema.json",
+    "extends": [],
     "files": {
         "includes": [
             "**/src/**/*.ts",
@@ -17,5 +17,8 @@
                 "noUnusedVariables": "warn"
             }
         }
+    },
+    "formatter": {
+        "indentStyle": "tab"
     }
 }

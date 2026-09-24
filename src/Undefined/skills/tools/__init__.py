@@ -43,12 +43,15 @@ class ToolRegistry(BaseRegistry):
         # 3) MCP 工具集（创建注册表，但不初始化）
         self._load_mcp_toolsets()
 
+        # 4) 立即导入全部 handler：加载失败的项不会进入对外 schema
+        self.preload_handlers()
+
         active_names = set(self._items.keys())
         self._stats = {
             name: self._stats.get(name, SkillStats()) for name in active_names
         }
 
-        # 4) 输出工具列表（不包含 MCP 工具，因为 MCP 还未初始化）
+        # 5) 输出工具列表（不包含 MCP 工具，因为 MCP 还未初始化）
         self._log_tools_summary(include_mcp=False)
 
     def _categorize_tools(

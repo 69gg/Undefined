@@ -12,7 +12,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
     search_wrapper = context.get("search_wrapper")
     if not search_wrapper:
-        return "搜索功能未启用（SEARXNG_URL 未配置或 langchain_community 未安装）"
+        return "搜索功能未启用（未配置 SEARXNG_URL）"
 
     num_results = args.get("num_results", 5)
 

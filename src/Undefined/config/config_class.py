@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 
+import logging
 from dataclasses import dataclass, field as dataclass_field, fields
 from pathlib import Path
 from typing import Any, Optional
@@ -15,6 +16,7 @@ from .models import (
     AutomationsConfig,
     ChatModelConfig,
     CognitiveConfig,
+    EmbeddingFeatureOverride,
     EmbeddingModelConfig,
     GrokModelConfig,
     ImageGenConfig,
@@ -31,6 +33,8 @@ from .models import (
 )
 from .toml_io import _load_env, load_toml_data
 from .onebot import FileSendMode
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -177,6 +181,8 @@ class Config:
     lxmusic2api_api_key: str
     # 嵌入模型
     embedding_model: EmbeddingModelConfig
+    # 按功能覆写的嵌入配置（key 见 EMBEDDING_FEATURES）
+    embedding_features: dict[str, EmbeddingFeatureOverride]
     rerank_model: RerankModelConfig
     # 知识库
     knowledge_enabled: bool
@@ -572,31 +578,64 @@ class Config:
 
         return bool(self.security_model_enabled)
 
+    def resolve_embedding_model(self, feature: str) -> EmbeddingModelConfig:
+        """返回指定功能实际生效的 embedding 配置。
+
+        `feature` 取 `EMBEDDING_FEATURES` 之一；未单独设置（或缺省）的功能
+        使用 `[models.embedding]` 默认配置。
+        """
+        override = self.embedding_features.get(feature)
+        if override is None:
+            return self.embedding_model
+        return override.resolve(self.embedding_model)
+
     # 热更新运行时参数
     def update_from(self, new_config: "Config") -> dict[str, tuple[Any, Any]]:
-        # 逐字段 diff；嵌套模型配置用 _update_dataclass 展开为 chat_model.api_url 等键
+        """就地应用热更新，返回 `{字段路径: (旧值, 新值)}`。
+
+        逐字段 diff；嵌套模型配置用 `_update_dataclass` 原地展开为
+        `chat_model.api_url` 等键，保留对象身份，因此已经持有该对象的组件
+        （队列间隔、HistorianWorker 等）能同步看到新值。
+
+        可见性：整个应用过程没有 `await`，同一事件循环内的读方不会在一次读取中
+        看到“改了一半”的对象；跨 `await` 的多次读取仍可能分别落在变更前与变更后，
+        需要严格一致的快照时请在单次读取中取全所需字段。派生集合在 finally 中刷新：
+        即使某个字段解析异常，也按当前字段状态刷新，保证派生集合与字段一致而不会
+        留下过期索引；此时配置处于部分更新状态，会以 error 日志提示建议重启。
+        """
         changes: dict[str, tuple[Any, Any]] = {}
-        for field in fields(self):
-            name = field.name
-            old_value = getattr(self, name)
-            new_value = getattr(new_config, name)
-            if isinstance(
-                old_value,
-                (
-                    ChatModelConfig,
-                    VisionModelConfig,
-                    SecurityModelConfig,
-                    AgentModelConfig,
-                    GrokModelConfig,
-                ),
-            ):
-                changes.update(_update_dataclass(old_value, new_value, prefix=name))
-                continue
-            if old_value != new_value:
-                setattr(self, name, new_value)
-                changes[name] = (old_value, new_value)
-        if changes:
-            self._refresh_runtime_sets()
+        try:
+            for field in fields(self):
+                name = field.name
+                old_value = getattr(self, name)
+                new_value = getattr(new_config, name)
+                if isinstance(
+                    old_value,
+                    (
+                        ChatModelConfig,
+                        VisionModelConfig,
+                        SecurityModelConfig,
+                        AgentModelConfig,
+                        GrokModelConfig,
+                        # WeixinService 等组件在构造时持有该对象，替换身份会导致
+                        # 热更新后仍读到旧值，因此同样原地展开更新
+                        WeixinConfig,
+                    ),
+                ):
+                    changes.update(_update_dataclass(old_value, new_value, prefix=name))
+                    continue
+                if old_value != new_value:
+                    setattr(self, name, new_value)
+                    changes[name] = (old_value, new_value)
+        except Exception:
+            logger.exception(
+                "[配置] 热更新应用失败，配置处于部分更新状态（派生集合已按当前"
+                "字段刷新）；建议重启以恢复一致状态"
+            )
+            raise
+        finally:
+            if changes:
+                self._refresh_runtime_sets()
         return changes
 
     def reload(self, strict: bool = False) -> dict[str, tuple[Any, Any]]:

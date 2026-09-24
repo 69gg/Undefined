@@ -3,6 +3,12 @@
 from Undefined.knowledge.embedder import Embedder
 from Undefined.knowledge.manager import KnowledgeManager
 from Undefined.knowledge.reranker import Reranker
-from Undefined.knowledge.runtime import RetrievalRuntime
+from Undefined.knowledge.runtime import RetrievalRuntime, RetrievalRuntimeRegistry
 
-__all__ = ["Embedder", "Reranker", "KnowledgeManager", "RetrievalRuntime"]
+__all__ = [
+    "Embedder",
+    "Reranker",
+    "KnowledgeManager",
+    "RetrievalRuntime",
+    "RetrievalRuntimeRegistry",
+]

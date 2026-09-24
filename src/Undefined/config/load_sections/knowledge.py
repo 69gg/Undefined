@@ -16,6 +16,7 @@ from ..coercers import (
     _get_value,
 )
 from ..parsers import (
+    _parse_embedding_feature_overrides,
     _parse_embedding_model_config,
     _parse_rerank_model_config,
 )
@@ -28,6 +29,7 @@ def load_knowledge(
 ) -> dict[str, Any]:
     # 知识库段多数项仅读 TOML（env_key=None），避免与 embedding 模型 env 混淆
     embedding_model = _parse_embedding_model_config(data)
+    embedding_features = _parse_embedding_feature_overrides(data)
     rerank_model = _parse_rerank_model_config(data)
 
     knowledge_enabled = _coerce_bool(
@@ -107,6 +109,7 @@ def load_knowledge(
 
     return {
         "embedding_model": embedding_model,
+        "embedding_features": embedding_features,
         "rerank_model": rerank_model,
         "knowledge_enabled": knowledge_enabled,
         "knowledge_base_dir": knowledge_base_dir,

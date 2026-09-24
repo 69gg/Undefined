@@ -279,14 +279,6 @@ class SecurityService:
             logger.exception("[安全] 注入检测失败: %s 耗时=%.2fs", exc, duration)
             return True  # 安全起见默认检测到
 
-    def check_rate_limit(self, user_id: int) -> tuple[bool, int]:
-        """检查速率限制"""
-        return self.rate_limiter.check(user_id)
-
-    def record_rate_limit(self, user_id: int) -> None:
-        """记录速率限制"""
-        self.rate_limiter.record(user_id)
-
     async def generate_injection_response(self, original_message: str) -> str:
         """生成注入攻击响应"""
         return await self.injection_response_agent.generate_response(original_message)
