@@ -18,7 +18,7 @@ src/Undefined/
 │   └── multimodal/# 多模态检测、解析与分析
 ├── attachments/   # 附件注册、渲染、作用域隔离
 ├── arxiv/         # arXiv 论文解析、元信息获取、PDF 下载与发送
-├── bilibili/      # B站视频流解析、分段下载与异步发送
+├── bilibili/      # B站视频流解析、分段下载、异步发送；图文（opus）解析与合并转发
 ├── cognitive/     # 认知记忆系统（service/ 门面 + historian/ 史官后台）
 ├── config/        # 配置系统（parsers/ 域解析 + load_sections/ 分段加载 + loader shim）
 ├── handlers/      # OneBot 消息分流（message_flow / poke / repeat / auto_extract）
@@ -29,7 +29,7 @@ src/Undefined/
 │   │   └── cognitive/   # 认知记忆主动暴露工具 (search_events, get_profile 等)
 │   ├── agents/          # 智能体 (含 runner/ 通用循环子包)
 │   ├── commands/        # 中心化斜杠指令系统 (实现如 /help, /stats, /admin 等平台功能)
-│   ├── pipelines/     # 自动提取管线 (bilibili / arxiv / github 等)
+│   ├── pipelines/     # 自动提取管线 (bilibili / bilibili_opus / arxiv / github 等)
 │   └── anthropic_skills/# Anthropic 协议集成的外部 Skills (兼容 SKILL.md 格式)
 ├── api/           # Management API + Runtime API
 │   ├── routes/    # 路由子模块 (chat, tools, naga/, system, memes, memory, cognitive, health)

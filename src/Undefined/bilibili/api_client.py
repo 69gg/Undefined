@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import httpx
 
-from Undefined.bilibili.errors import ApiResponseError
+from Undefined.bilibili.errors import ApiResponseError, OpusUnavailableError
 from Undefined.bilibili.models import VideoInfo, VideoStats
 from Undefined.bilibili.wbi import build_signed_params_sync, parse_cookie_string
 from Undefined.skills.http_config import build_httpx_client_kwargs
@@ -15,6 +16,39 @@ _BILIBILI_API_VIEW = "https://api.bilibili.com/x/web-interface/view"
 _BILIBILI_API_VIEW_WBI = "https://api.bilibili.com/x/web-interface/wbi/view"
 _BILIBILI_API_PLAYURL = "https://api.bilibili.com/x/player/playurl"
 _BILIBILI_API_PLAYURL_WBI = "https://api.bilibili.com/x/player/wbi/playurl"
+_BILIBILI_API_OPUS_DETAIL = (
+    "https://api.bilibili.com/x/polymer/web-dynamic/v1/opus/detail"
+)
+_BILIBILI_API_DYNAMIC_DETAIL = (
+    "https://api.bilibili.com/x/polymer/web-dynamic/v1/detail"
+)
+
+# 图文详情接口的 features 参数；htmlNewStyle 用于让旧版专栏返回新版正文结构
+OPUS_DETAIL_FEATURES: tuple[str, ...] = (
+    "onlyfansVote",
+    "onlyfansAssetsV2",
+    "decorationCard",
+    "htmlNewStyle",
+    "ugcDelete",
+    "editable",
+    "opusPrivateVisible",
+    "tribeeEdit",
+    "avatarAutoTheme",
+    "avatarTypeOpus",
+)
+
+# 通用动态详情接口的 features 参数；itemOpusStyle 让动态按图文风格返回
+DYNAMIC_DETAIL_FEATURES: tuple[str, ...] = (
+    "itemOpusStyle",
+    "opusBigCover",
+    "onlyfansVote",
+    "endFooterHidden",
+    "decorationCard",
+    "onlyfansAssetsV2",
+    "ugcDelete",
+    "onlyfansQaCard",
+    "commentsNewVersion",
+)
 
 DEFAULT_HEADERS: dict[str, str] = {
     "User-Agent": (
@@ -24,6 +58,8 @@ DEFAULT_HEADERS: dict[str, str] = {
     ),
     "Referer": "https://www.bilibili.com",
 }
+
+logger = logging.getLogger(__name__)
 
 
 def _api_message(data: dict[str, Any]) -> str:
@@ -186,3 +222,76 @@ class BilibiliApiClient:
         if not isinstance(data, dict):
             raise ApiResponseError("播放流响应缺少 data")
         return data
+
+    def get_opus_item(self, dynamic_id: str) -> dict[str, Any]:
+        """获取图文 / 动态的 ``data.item`` 原始结构。
+
+        先请求 ``opus/detail``；失败（含 ``-352`` 风控、旧版专栏要求
+        ``htmlNewStyle``、以及图文详情接口未覆盖的动态）时回退到通用
+        ``web-dynamic/v1/detail``（带 WBI 签名）。
+        """
+        opus_id = str(dynamic_id).strip()
+        if not opus_id:
+            raise OpusUnavailableError("图文 ID 为空")
+
+        primary_error: Exception | None = None
+        try:
+            payload = self._request_json(
+                _BILIBILI_API_OPUS_DETAIL,
+                {
+                    "id": opus_id,
+                    "features": ",".join(OPUS_DETAIL_FEATURES),
+                    "timezone_offset": -480,
+                },
+            )
+            if int(payload.get("code", -1)) == 0:
+                return self._extract_opus_item(payload, opus_id)
+            primary_error = OpusUnavailableError(
+                f"获取图文信息失败: {_api_message(payload)}"
+            )
+        except OpusUnavailableError as exc:
+            primary_error = exc
+        except Exception as exc:  # 网络 / JSON 异常都走回退
+            primary_error = exc
+            logger.debug("[Bilibili] opus/detail 请求异常，尝试通用动态接口: %s", exc)
+
+        fallback_error: Exception | None = None
+        try:
+            payload = self.request_with_wbi_fallback(
+                endpoint=_BILIBILI_API_DYNAMIC_DETAIL,
+                params={
+                    "id": opus_id,
+                    "features": ",".join(DYNAMIC_DETAIL_FEATURES),
+                    "timezone_offset": -480,
+                },
+            )
+            if int(payload.get("code", -1)) == 0:
+                return self._extract_opus_item(payload, opus_id)
+            fallback_error = OpusUnavailableError(
+                f"获取动态信息失败: {_api_message(payload)}"
+            )
+        except OpusUnavailableError as exc:
+            fallback_error = exc
+        except Exception as exc:
+            fallback_error = exc
+
+        raise OpusUnavailableError(
+            f"图文 {opus_id} 不可用: {fallback_error or primary_error or '未知错误'}"
+        )
+
+    @staticmethod
+    def _extract_opus_item(payload: dict[str, Any], opus_id: str) -> dict[str, Any]:
+        """校验响应并返回 ``data.item``。"""
+        data = payload.get("data")
+        if not isinstance(data, dict):
+            raise OpusUnavailableError(f"图文 {opus_id} 响应缺少 data")
+        # data.fallback 非空表示该动态无法以图文形态返回（例如过旧的内容）
+        fallback = data.get("fallback")
+        item = data.get("item")
+        if not isinstance(item, dict) or not item:
+            detail = f"（fallback={fallback!r}）" if fallback else ""
+            raise OpusUnavailableError(f"图文 {opus_id} 没有可用内容{detail}")
+        modules = item.get("modules")
+        if not isinstance(modules, (list, dict)) or not modules:
+            raise OpusUnavailableError(f"图文 {opus_id} 响应缺少 modules")
+        return item

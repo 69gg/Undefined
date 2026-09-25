@@ -1,0 +1,61 @@
+{
+    "type": "function",
+    "function": {
+        "name": "bilibili_opus",
+        "description": "处理 Bilibili 图文（opus / 动态）。默认发送合并转发到群聊或私聊；可设置 output_mode=uid 只登记图片附件 UID，output_mode=info 只获取图文信息，或 output_mode=text 按字数区间 / 关键词读取正文文字（默认返回前 1000 字，可用 start / end 定位、keyword 查询）。支持 bilibili.com/opus/<id>、t.bilibili.com/<id>、b23.tv 短链或裸动态 ID。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "opus_id": {
+                    "type": "string",
+                    "description": "Bilibili 图文标识：动态 ID（如 933099353259638816）、bilibili.com/opus/<id>、t.bilibili.com/<id> 或 b23.tv 短链"
+                },
+                "target_type": {
+                    "type": "string",
+                    "enum": [
+                        "group",
+                        "private"
+                    ],
+                    "description": "可选。目标会话类型"
+                },
+                "target_id": {
+                    "type": "integer",
+                    "description": "可选。目标会话 ID"
+                },
+                "output_mode": {
+                    "type": "string",
+                    "enum": [
+                        "send",
+                        "uid",
+                        "info",
+                        "text"
+                    ],
+                    "description": "输出模式：send（默认，发送图文合并转发）、uid（仅把正文图片登记为附件 UID，不发送）、info（仅返回图文元信息）、text（只返回正文文字，受 start / end / limit / keyword 控制）"
+                },
+                "max_images": {
+                    "type": "integer",
+                    "description": "可选。output_mode=uid 时最多登记多少张图片，默认 9"
+                },
+                "start": {
+                    "type": "integer",
+                    "description": "可选，output_mode=text 用。起始字位置，从 0 开始；不填即从正文开头读取"
+                },
+                "end": {
+                    "type": "integer",
+                    "description": "可选，output_mode=text 用。结束字位置（不含该字）；不填则为 start + limit。只给 end 时不再套默认 1000 字，limit 仍作为上界"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "可选，output_mode=text 用。单次返回的字数上限，默认 1000，最大 20000；给了 end 时仍作为上界生效"
+                },
+                "keyword": {
+                    "type": "string",
+                    "description": "可选，output_mode=text 用。关键词查询：返回该词在正文中的命中位置与前后文片段（最多 5 处），此时 start / end 被忽略"
+                }
+            },
+            "required": [
+                "opus_id"
+            ]
+        }
+    }
+}

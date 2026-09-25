@@ -38,6 +38,41 @@ class AutoExtractMixin:
             bvids = await extract_from_json_message(message_content)
         return list(bvids)
 
+    async def _extract_bilibili_opus_ids(
+        self,
+        text: str,
+        message_content: list[dict[str, Any]],
+        *,
+        limit: int | None = None,
+    ) -> list[str]:
+        """从文本和消息段中提取 B 站图文（opus / 动态）ID。
+
+        ``limit`` 为发送预算：命中数量达到预算后不再解析剩余 b23.tv 短链。
+        正文与分享卡片两处都会提取并去重，只有卡片时也不会漏。
+        """
+        from Undefined.bilibili.opus_parser import (
+            extract_opus_from_json_message,
+            extract_opus_ids_with_shortlinks,
+        )
+
+        opus_ids = await extract_opus_ids_with_shortlinks(text, limit=limit)
+        if limit is not None and len(opus_ids) >= limit:
+            # 正文已占满预算：不必再解析分享卡片
+            return opus_ids
+
+        # 卡片里可能重复正文已命中的图文：把这些 ID 作为已知项传下去，
+        # 它们不占预算，否则重复项会把名额吃光、漏掉卡片里的新图文
+        known = set(opus_ids)
+        remaining = None if limit is None else max(0, limit - len(opus_ids))
+        for opus_id in await extract_opus_from_json_message(
+            message_content, limit=remaining, exclude=known
+        ):
+            if opus_id in known:
+                continue
+            known.add(opus_id)
+            opus_ids.append(opus_id)
+        return opus_ids if limit is None else opus_ids[:limit]
+
     def _extract_douyin_ids(
         self, text: str, message_content: list[dict[str, Any]]
     ) -> list[str]:
@@ -152,6 +187,51 @@ class AutoExtractMixin:
                 )
                 try:
                     error_msg = f"视频提取失败: {exc}"
+                    if target_type == "group":
+                        await resolved_sender.send_group_message(target_id, error_msg)
+                    else:
+                        await resolved_sender.send_private_message(target_id, error_msg)
+                except Exception:
+                    pass
+
+    async def _handle_bilibili_opus_extract(
+        self,
+        target_id: int,
+        opus_ids: list[str],
+        target_type: str,
+        sender: Any | None = None,
+    ) -> None:
+        """处理 bilibili 图文（opus）自动提取和发送。"""
+        from Undefined.bilibili.opus_sender import send_opus
+
+        max_items = max(1, int(getattr(self.config, "bilibili_opus_max_items", 3)))
+        resolved_sender = sender or self.sender
+        for opus_id in opus_ids[:max_items]:
+            try:
+                result = await send_opus(
+                    opus_id,
+                    sender=resolved_sender,
+                    target_type=target_type,  # type: ignore[arg-type]
+                    target_id=target_id,
+                    cookie=self.config.bilibili_cookie,
+                    config=self.config,
+                )
+                logger.info(
+                    "[Bilibili] 图文自动提取完成 %s → %s:%s: %s",
+                    opus_id,
+                    target_type,
+                    target_id,
+                    result,
+                )
+            except Exception as exc:
+                logger.exception(
+                    "[Bilibili] 图文自动提取失败 %s → %s:%s",
+                    opus_id,
+                    target_type,
+                    target_id,
+                )
+                try:
+                    error_msg = f"图文提取失败: {exc}"
                     if target_type == "group":
                         await resolved_sender.send_group_message(target_id, error_msg)
                     else:

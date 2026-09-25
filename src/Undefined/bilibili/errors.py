@@ -11,6 +11,10 @@ class ApiResponseError(BilibiliError):
     """B 站 API 返回失败或格式异常。"""
 
 
+class OpusUnavailableError(ApiResponseError):
+    """图文不存在、已删除，或响应缺少可用内容。"""
+
+
 class DownloadError(BilibiliError):
     """视频流下载或合并失败。"""
 

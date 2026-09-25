@@ -2,15 +2,27 @@ import "@testing-library/jest-dom/vitest";
 import { beforeEach, vi } from "vitest";
 import { LOCALE_STORAGE_KEY } from "./i18n";
 
+// vitest 4 把 jsdom 的 window 复制到测试全局时会丢掉 Storage 的方法：
+// 复制出来的 window.localStorage 没有 setItem/getItem（原型退化成 Object.prototype），
+// 而 globalThis.jsdom.window.localStorage 仍是完整的 Storage 实例。
+// 这里把真身挂回 window，保证 App 代码与测试用例读写的是同一个可用的 localStorage。
+// 参考 vitest populateGlobal 对 Storage/accessor 属性的处理限制。
+const jsdomWindow = (globalThis as unknown as { jsdom?: { window?: Window } })
+	.jsdom?.window;
+const jsdomStorage = jsdomWindow?.localStorage as Storage | undefined;
+if (jsdomStorage && typeof jsdomStorage.setItem === "function") {
+	Object.defineProperty(window, "localStorage", {
+		writable: true,
+		configurable: true,
+		value: jsdomStorage,
+	});
+}
+
 // 全局锁定 zh-CN：jsdom 默认 navigator.language=en-US 会让 LanguageProvider 回退到 en，
 // 破坏现有中文文案断言。每个测试前显式写入 localStorage，确保默认中文；
 // 需要测试英文的用例可在测试内自行覆盖（setLocale 或写入 localStorage）。
 beforeEach(() => {
-	try {
-		window.localStorage.setItem(LOCALE_STORAGE_KEY, "zh-CN");
-	} catch {
-		// localStorage 不可用时忽略
-	}
+	window.localStorage.setItem(LOCALE_STORAGE_KEY, "zh-CN");
 });
 
 // Mock Tauri API

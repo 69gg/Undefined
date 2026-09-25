@@ -1473,6 +1473,18 @@ auto_extract_group_ids = []
 # zh: 自动提取功能的私聊白名单（空=跟随全局 access.allowed_private_ids）。
 # en: Private chat allowlist for auto-extraction (empty = follow global access.allowed_private_ids).
 auto_extract_private_ids = []
+# zh: 是否在自动提取中处理 B 站图文（opus / 动态）链接。仍需 auto_extract_enabled 打开。
+# en: Whether Bilibili opus/dynamic links are handled during auto-extraction. auto_extract_enabled must also be on.
+opus_enabled = true
+# zh: 单条消息最多自动处理几篇图文。<=0 回退 3，>10 截断到 10。
+# en: Max number of opus posts to auto-process from one message. <=0 falls back to 3, >10 is capped to 10.
+opus_max_items = 3
+# zh: 图文正文里的图文/视频卡片最多再展开几层（每层都是嵌套合并转发）。0=不展开，只给链接；上限 5。
+# en: Max nesting depth for opus/video cards inside a post body (each level is a nested forward). 0=link only; capped at 5.
+opus_nested_depth = 5
+# zh: 单篇图文最多展开多少张嵌套卡片，超出部分降级为一行文本+链接。上限 20。
+# en: Max nested cards expanded per post; extras degrade to a single text line with the link. Capped at 20.
+opus_nested_max_cards = 8
 
 # zh: 抖音视频自动提取配置。
 # en: Douyin video auto-extraction settings.
