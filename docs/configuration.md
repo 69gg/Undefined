@@ -219,6 +219,8 @@ model_name = "gpt-4o-mini"
 
 ### 4.3 `[onebot]` 协议端连接
 
+> **部署前提**：QQ 消息的收发完全由外部协议端决定，本节只描述如何连接。请先按官方说明部署 OneBot V11 协议端（如 [NapCatQQ](https://github.com/NapNeko/NapCatQQ)、[Lagrange.Core](https://github.com/LagrangeDev/Lagrange.Core)）并配置 WebSocket 连接，再填写下列字段。四项自托管服务概览见[需要一并部署的自托管服务](deployment.md#需要一并部署的自托管服务概览)。
+
 | 字段 | 默认值 | 说明 | 约束/回退 |
 |---|---:|---|---|
 | `ws_url` | `""` | OneBot WebSocket 地址 | 模板示例通常写 `ws://127.0.0.1:3001`；严格模式必填 |
@@ -236,7 +238,7 @@ model_name = "gpt-4o-mini"
 
 Stream 本地文件投递在同一 Bot 内串行，纯文本不等待上传锁。Stream／URL 文件准备、发送与明确失败后的文件消息段回退共用 8 分钟预算，排队不计时；临时资源保留 16 分钟。URL 副本在源文件删除或切换模式后仍可下载，到期拒绝新请求，已有下载允许完成。文件准备失败不会触发文件消息段回退或标记已发送；投递发出后无法确认结果时禁止自动重发。不会自动切换模式、自动重试上传或启动 Runtime。
 
-传输过程使用分块 IO；现有附件登记与 NapCat 的分块合并仍可能读取完整文件，不保证整个链路固定内存占用。参见 [三模式部署要求](deployment.md#napcat--lagrangecore-部署要求) 与 [临时文件接口](openapi.md#onebot-临时文件下载)。
+传输过程使用分块 IO；现有附件登记与 NapCat 的分块合并仍可能读取完整文件，不保证整个链路固定内存占用。参见 [三模式部署要求](deployment.md#napcat--lagrangecore-部署要求)、[自托管服务概览](deployment.md#需要一并部署的自托管服务概览) 与 [临时文件接口](openapi.md#onebot-临时文件下载)。
 
 ---
 
@@ -835,6 +837,11 @@ summary = ""
 - `grok_search_enabled`、`firecrawl_search_enabled`、`search.firecrawl.*`、`priority` 不需要重建客户端；它们影响 `web_agent` 的工具暴露和提示词优先级。
 - `firecrawl_search` 调用 Firecrawl `POST /v2/search`；配置 `api_key` 时发送 `Authorization: Bearer`，为空则走 Firecrawl keyless。
 
+搜索服务部署说明（两者都是可选项，不部署时联网检索仍可由其他子工具承担，概览见[需要一并部署的自托管服务](deployment.md#需要一并部署的自托管服务概览)）：
+
+- **SearXNG**：`searxng_url` 需要指向一个可用的 SearXNG 实例，该实例不由本项目提供。请先按 [SearXNG 官方部署说明](https://docs.searxng.org/) 完成自托管再填写地址；留空时内置 `web_search` 工具不可用（调用会返回“搜索功能未启用”），`grok_search`、`firecrawl_search`、`crawl_webpage` 不受影响。
+- **Firecrawl**：`firecrawl_search_enabled = true` 后有三种用法，按需选择其一——① 官方 keyless（`api_key` 留空，受官方配额与限流约束）；② 官方 + 自己的 API Key（填写 `api_key`，指向默认 `base_url`）；③ 自部署实例（把 `base_url` 改为自部署地址，通常可留空 `api_key`，接口契约仍为 `POST /v2/search`）。自部署请参考 [Firecrawl 自托管说明](https://docs.firecrawl.dev/contributing/self-host)，并注意其搜索能力通常需要另行配置搜索后端（例如 SearXNG）。
+
 ---
 
 ### 4.13 `[proxy]` 代理
@@ -975,7 +982,7 @@ summary = ""
 
 ### 4.20.1 `[lxmusic2api]` 音乐服务
 
-`music.*` 工具由独立部署的 [lxmusic2api](https://github.com/69gg/lxmusic2api) 提供数据与音频解析能力。请先按照上游仓库说明完成部署，配置单个自定义音源脚本或音源目录中的多个脚本，并确认其许可证及使用限制，再填写：
+`music.*` 工具由独立部署的 [lxmusic2api](https://github.com/69gg/lxmusic2api) 提供数据与音频解析能力，该服务不随本项目发布，属于可选项：不部署时 `music.*` 整组工具隐藏，其余功能不受影响。请先按照上游仓库说明完成部署，配置单个自定义音源脚本或音源目录中的多个脚本，并确认其许可证及使用限制，再填写（概览见[需要一并部署的自托管服务](deployment.md#需要一并部署的自托管服务概览)）：
 
 | 字段 | 默认值 | 说明 | 约束/回退 |
 |---|---:|---|---|
