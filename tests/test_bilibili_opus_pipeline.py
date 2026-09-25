@@ -188,3 +188,86 @@ async def test_bilibili_opus_handler_reports_failure(
     sender_mock = cast(Any, dummy.sender)
     sender_mock.send_private_message.assert_awaited_once()
     assert "图文提取失败" in sender_mock.send_private_message.await_args.args[1]
+
+
+@pytest.mark.asyncio
+async def test_detect_passes_item_budget_to_extractor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """检测阶段就把发送预算交给提取器，超出的短链不再解析。"""
+    # 管线 handler 按目录动态加载，不是可 import 的包模块
+    registry = PipelineRegistry()
+    registry.load_items()
+    detect = registry._items["bilibili_opus"].detect
+
+    extractor = AsyncMock(return_value=["1", "2", "3", "4", "5"])
+    detection = await detect(
+        {
+            "config": _config(bilibili_opus_max_items=2),
+            "target_id": 20001,
+            "target_type": "private",
+            "text": "https://www.bilibili.com/opus/1",
+            "message_content": [],
+            "extract_bilibili_opus_ids": extractor,
+        }
+    )
+
+    assert detection is not None
+    assert detection.items == ("1", "2")
+    extractor.assert_awaited_once()
+    call = extractor.await_args
+    assert call is not None
+    assert call.kwargs["limit"] == 2
+
+
+@pytest.mark.asyncio
+async def test_mixin_extracts_text_and_share_card_together(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """正文里有图文链接、卡片里是另一篇图文时，两篇都要处理。"""
+    import Undefined.bilibili.opus_parser as opus_parser
+    from Undefined.handlers.auto_extract import AutoExtractMixin
+
+    monkeypatch.setattr(
+        opus_parser,
+        "extract_opus_ids_with_shortlinks",
+        AsyncMock(return_value=["111"]),
+    )
+    monkeypatch.setattr(
+        opus_parser,
+        "extract_opus_from_json_message",
+        AsyncMock(return_value=["222", "111"]),
+    )
+
+    dummy = cast(Any, SimpleNamespace())
+    opus_ids = await AutoExtractMixin._extract_bilibili_opus_ids(
+        dummy,
+        "https://www.bilibili.com/opus/111",
+        [{"type": "json", "data": {"data": "{}"}}],
+    )
+
+    assert opus_ids == ["111", "222"]
+
+
+@pytest.mark.asyncio
+async def test_mixin_skips_card_lookup_when_budget_full(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import Undefined.bilibili.opus_parser as opus_parser
+    from Undefined.handlers.auto_extract import AutoExtractMixin
+
+    monkeypatch.setattr(
+        opus_parser,
+        "extract_opus_ids_with_shortlinks",
+        AsyncMock(return_value=["111", "222"]),
+    )
+    card_lookup = AsyncMock(return_value=["333"])
+    monkeypatch.setattr(opus_parser, "extract_opus_from_json_message", card_lookup)
+
+    dummy = cast(Any, SimpleNamespace())
+    opus_ids = await AutoExtractMixin._extract_bilibili_opus_ids(
+        dummy, "text", [], limit=2
+    )
+
+    assert opus_ids == ["111", "222"]
+    card_lookup.assert_not_awaited()

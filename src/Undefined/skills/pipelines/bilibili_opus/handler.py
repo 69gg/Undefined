@@ -26,12 +26,16 @@ async def detect(context: PipelineContext) -> PipelineDetection | None:
     if not _is_allowed(config, target_type, target_id):
         return None
 
+    # 检测阶段就按发送预算截断：超出的短链不必再解析
+    max_items = max(1, int(getattr(config, "bilibili_opus_max_items", 3)))
     extractor = context["extract_bilibili_opus_ids"]
-    opus_ids = await extractor(context["text"], context["message_content"])
+    opus_ids = await extractor(
+        context["text"], context["message_content"], limit=max_items
+    )
     if not opus_ids:
         return None
     return PipelineDetection(
-        name="bilibili_opus", items=tuple(str(item) for item in opus_ids)
+        name="bilibili_opus", items=tuple(str(item) for item in opus_ids[:max_items])
     )
 
 

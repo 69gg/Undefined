@@ -127,3 +127,61 @@ async def test_extract_opus_from_json_message_skips_invalid_payloads() -> None:
         _json_segment({"meta": {"detail_1": {"qqdocurl": "https://example.com/x"}}}),
     ]
     assert await extract_opus_from_json_message(segments) == []
+
+
+@pytest.mark.asyncio
+async def test_extract_stops_resolving_short_links_at_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """给了发送预算后，命中数量够了就不再解析剩余短链。"""
+    resolver = AsyncMock(return_value="https://www.bilibili.com/opus/555555555555555")
+    monkeypatch.setattr(opus_parser, "resolve_short_url", resolver)
+
+    text = " ".join(f"https://b23.tv/link{index}" for index in range(6))
+    assert await extract_opus_ids_with_shortlinks(text, limit=1) == ["555555555555555"]
+    assert resolver.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_extract_limit_zero_resolves_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    resolver = AsyncMock(return_value="https://www.bilibili.com/opus/1")
+    monkeypatch.setattr(opus_parser, "resolve_short_url", resolver)
+
+    result = await extract_opus_ids_with_shortlinks(
+        "https://b23.tv/x https://www.bilibili.com/opus/2", limit=0
+    )
+
+    assert result == []
+    resolver.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_extract_limit_skips_links_when_text_already_fills_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    resolver = AsyncMock(return_value="https://www.bilibili.com/opus/9")
+    monkeypatch.setattr(opus_parser, "resolve_short_url", resolver)
+
+    text = "https://www.bilibili.com/opus/1 https://www.bilibili.com/opus/2 https://b23.tv/x"
+    assert await extract_opus_ids_with_shortlinks(text, limit=2) == ["1", "2"]
+    resolver.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_extract_without_limit_resolves_all_short_links(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    resolver = AsyncMock(
+        side_effect=[
+            "https://www.bilibili.com/opus/11",
+            "https://www.bilibili.com/opus/22",
+        ]
+    )
+    monkeypatch.setattr(opus_parser, "resolve_short_url", resolver)
+
+    result = await extract_opus_ids_with_shortlinks("https://b23.tv/a https://b23.tv/b")
+
+    assert result == ["11", "22"]
+    assert resolver.await_count == 2

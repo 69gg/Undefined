@@ -39,18 +39,33 @@ class AutoExtractMixin:
         return list(bvids)
 
     async def _extract_bilibili_opus_ids(
-        self, text: str, message_content: list[dict[str, Any]]
+        self,
+        text: str,
+        message_content: list[dict[str, Any]],
+        *,
+        limit: int | None = None,
     ) -> list[str]:
-        """从文本和消息段中提取 B 站图文（opus / 动态）ID。"""
+        """从文本和消息段中提取 B 站图文（opus / 动态）ID。
+
+        ``limit`` 为发送预算：命中数量达到预算后不再解析剩余 b23.tv 短链。
+        正文与分享卡片两处都会提取并去重，只有卡片时也不会漏。
+        """
         from Undefined.bilibili.opus_parser import (
             extract_opus_from_json_message,
             extract_opus_ids_with_shortlinks,
         )
 
-        opus_ids = await extract_opus_ids_with_shortlinks(text)
-        if not opus_ids:
-            opus_ids = await extract_opus_from_json_message(message_content)
-        return list(opus_ids)
+        opus_ids = await extract_opus_ids_with_shortlinks(text, limit=limit)
+        if limit is not None and len(opus_ids) >= limit:
+            return opus_ids
+
+        seen = set(opus_ids)
+        for opus_id in await extract_opus_from_json_message(message_content):
+            if opus_id in seen:
+                continue
+            seen.add(opus_id)
+            opus_ids.append(opus_id)
+        return opus_ids if limit is None else opus_ids[:limit]
 
     def _extract_douyin_ids(
         self, text: str, message_content: list[dict[str, Any]]

@@ -52,26 +52,41 @@ def _extract_opus_ids_from_text(text: str) -> list[str]:
     return opus_ids
 
 
-async def extract_opus_ids_with_shortlinks(text: str) -> list[str]:
-    """从纯文本中提取图文 ID，并解析 b23.tv 短链后二次提取（去重、保序）。"""
+def _extend_unique(target: list[str], seen: set[str], candidates: list[str]) -> None:
+    for opus_id in candidates:
+        if opus_id not in seen:
+            seen.add(opus_id)
+            target.append(opus_id)
+
+
+async def extract_opus_ids_with_shortlinks(
+    text: str, *, limit: int | None = None
+) -> list[str]:
+    """从纯文本中提取图文 ID，并解析 b23.tv 短链后二次提取（去重、保序）。
+
+    ``limit`` 给出发送预算时，解析短链的数量会按剩余名额收敛，避免一条消息
+    里塞了多个短链时把用不到的短链都请求一遍。
+    """
+    max_items = None if limit is None else max(0, int(limit))
+    if max_items == 0:
+        return []
+
     opus_ids: list[str] = []
     seen: set[str] = set()
 
-    for opus_id in _extract_opus_ids_from_text(text):
-        if opus_id not in seen:
-            seen.add(opus_id)
-            opus_ids.append(opus_id)
+    _extend_unique(opus_ids, seen, _extract_opus_ids_from_text(text))
+    if max_items is not None and len(opus_ids) >= max_items:
+        return opus_ids
 
     for match in SHORT_URL_PATTERN.finditer(text):
         real_url = await resolve_short_url(match.group(0))
         if not real_url:
             continue
-        for opus_id in _extract_opus_ids_from_text(real_url):
-            if opus_id not in seen:
-                seen.add(opus_id)
-                opus_ids.append(opus_id)
+        _extend_unique(opus_ids, seen, _extract_opus_ids_from_text(real_url))
+        if max_items is not None and len(opus_ids) >= max_items:
+            break
 
-    return opus_ids
+    return opus_ids[:max_items] if max_items is not None else opus_ids
 
 
 async def extract_opus_from_json_message(
@@ -118,9 +133,10 @@ async def extract_opus_from_json_message(
                     urls_to_check.append(str(jump_url))
 
         for url in urls_to_check:
-            for opus_id in await extract_opus_ids_with_shortlinks(url):
-                if opus_id not in seen:
-                    seen.add(opus_id)
-                    opus_ids.append(opus_id)
+            _extend_unique(
+                opus_ids,
+                seen,
+                await extract_opus_ids_with_shortlinks(url),
+            )
 
     return opus_ids
