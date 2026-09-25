@@ -38,25 +38,46 @@ DYNAMIC_ID_URL_PATTERN = re.compile(
 )
 
 
+_DIRECT_URL_PATTERNS = (OPUS_URL_PATTERN, DYNAMIC_ID_URL_PATTERN)
+
+
+def _collect_direct_ids(text: str) -> list[tuple[int, str]]:
+    """收集直链图文 ID，返回 ``(位置, ID)`` 并按出现顺序排列。
+
+    两条正则分两趟扫会打乱顺序（``t.bilibili.com/9`` 写在
+    ``bilibili.com/opus/8`` 前面也会先返回 8），因此按位置统一排序。
+    """
+    matches: list[tuple[int, str]] = []
+    for pattern in _DIRECT_URL_PATTERNS:
+        for match in pattern.finditer(text):
+            matches.append((match.start(), match.group(1)))
+    matches.sort(key=lambda item: item[0])
+    return matches
+
+
 def _extract_opus_ids_from_text(text: str) -> list[str]:
     """从纯文本中提取图文 ID（不做短链解析，同步操作）。"""
     opus_ids: list[str] = []
     seen: set[str] = set()
-    for pattern in (OPUS_URL_PATTERN, DYNAMIC_ID_URL_PATTERN):
-        for match in pattern.finditer(text):
-            opus_id = match.group(1)
-            if opus_id in seen:
-                continue
-            seen.add(opus_id)
-            opus_ids.append(opus_id)
+    for _position, opus_id in _collect_direct_ids(text):
+        if opus_id in seen:
+            continue
+        seen.add(opus_id)
+        opus_ids.append(opus_id)
     return opus_ids
 
 
-def _extend_unique(target: list[str], seen: set[str], candidates: list[str]) -> None:
-    for opus_id in candidates:
-        if opus_id not in seen:
-            seen.add(opus_id)
-            target.append(opus_id)
+def _append_unique(target: list[str], seen: set[str], opus_id: str) -> bool:
+    if not opus_id or opus_id in seen:
+        return False
+    seen.add(opus_id)
+    target.append(opus_id)
+    return True
+
+
+def _remaining(max_items: int | None, collected: int) -> int | None:
+    """把总预算换算成剩余名额；``None`` 表示不限。"""
+    return None if max_items is None else max(0, max_items - collected)
 
 
 async def extract_opus_ids_with_shortlinks(
@@ -64,25 +85,37 @@ async def extract_opus_ids_with_shortlinks(
 ) -> list[str]:
     """从纯文本中提取图文 ID，并解析 b23.tv 短链后二次提取（去重、保序）。
 
-    ``limit`` 给出发送预算时，解析短链的数量会按剩余名额收敛，避免一条消息
-    里塞了多个短链时把用不到的短链都请求一遍。
+    ``limit`` 给出发送预算时，直链与短链按在文本中的出现顺序统一排队，
+    先出现的先占名额；名额用完后剩余短链不再请求（每个短链一次 HEAD 请求，
+    超时配置最长 480 秒）。
     """
     max_items = None if limit is None else max(0, int(limit))
     if max_items == 0:
         return []
 
+    # 直链与短链按位置合并成一个序列，保证「先出现的先返回」
+    entries: list[tuple[int, str, bool]] = [
+        (position, opus_id, True) for position, opus_id in _collect_direct_ids(text)
+    ]
+    entries.extend(
+        (match.start(), match.group(0), False)
+        for match in SHORT_URL_PATTERN.finditer(text)
+    )
+    entries.sort(key=lambda item: item[0])
+
     opus_ids: list[str] = []
     seen: set[str] = set()
-
-    _extend_unique(opus_ids, seen, _extract_opus_ids_from_text(text))
-    if max_items is not None and len(opus_ids) >= max_items:
-        return opus_ids
-
-    for match in SHORT_URL_PATTERN.finditer(text):
-        real_url = await resolve_short_url(match.group(0))
-        if not real_url:
-            continue
-        _extend_unique(opus_ids, seen, _extract_opus_ids_from_text(real_url))
+    for _position, payload, is_direct in entries:
+        if is_direct:
+            _append_unique(opus_ids, seen, payload)
+        else:
+            if max_items is not None and len(opus_ids) >= max_items:
+                # 预算已满：后面的短链不必再解析
+                break
+            real_url = await resolve_short_url(payload)
+            if real_url:
+                for resolved_id in _extract_opus_ids_from_text(real_url):
+                    _append_unique(opus_ids, seen, resolved_id)
         if max_items is not None and len(opus_ids) >= max_items:
             break
 
@@ -91,8 +124,17 @@ async def extract_opus_ids_with_shortlinks(
 
 async def extract_opus_from_json_message(
     segments: list[dict[str, Any]],
+    *,
+    limit: int | None = None,
 ) -> list[str]:
-    """从 QQ 消息段中检测 JSON 小程序消息，提取 B 站图文 ID。"""
+    """从 QQ 消息段中检测 JSON 小程序消息，提取 B 站图文 ID。
+
+    ``limit`` 给出剩余发送预算：名额用完后不再解析后续卡片的短链。
+    """
+    max_items = None if limit is None else max(0, int(limit))
+    if max_items == 0:
+        return []
+
     opus_ids: list[str] = []
     seen: set[str] = set()
 
@@ -133,10 +175,14 @@ async def extract_opus_from_json_message(
                     urls_to_check.append(str(jump_url))
 
         for url in urls_to_check:
-            _extend_unique(
-                opus_ids,
-                seen,
-                await extract_opus_ids_with_shortlinks(url),
+            if max_items is not None and len(opus_ids) >= max_items:
+                break
+            resolved = await extract_opus_ids_with_shortlinks(
+                url, limit=_remaining(max_items, len(opus_ids))
             )
+            for opus_id in resolved:
+                _append_unique(opus_ids, seen, opus_id)
+        if max_items is not None and len(opus_ids) >= max_items:
+            break
 
-    return opus_ids
+    return opus_ids[:max_items] if max_items is not None else opus_ids

@@ -185,3 +185,81 @@ async def test_extract_without_limit_resolves_all_short_links(
 
     assert result == ["11", "22"]
     assert resolver.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_extract_orders_direct_ids_by_position(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """两条正则分两趟扫会打乱顺序：t.bilibili.com 写在前面就必须先返回。"""
+    monkeypatch.setattr(opus_parser, "resolve_short_url", AsyncMock(return_value=None))
+
+    text = "https://t.bilibili.com/9 然后 https://www.bilibili.com/opus/8"
+    assert await extract_opus_ids_with_shortlinks(text) == ["9", "8"]
+
+
+@pytest.mark.asyncio
+async def test_extract_short_link_before_direct_wins_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """短链出现在直链之前时，预算名额应该先给短链。"""
+    resolver = AsyncMock(return_value="https://www.bilibili.com/opus/111")
+    monkeypatch.setattr(opus_parser, "resolve_short_url", resolver)
+
+    text = "https://b23.tv/A https://www.bilibili.com/opus/222"
+    assert await extract_opus_ids_with_shortlinks(text, limit=1) == ["111"]
+    assert resolver.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_extract_direct_before_short_link_wins_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    resolver = AsyncMock(return_value="https://www.bilibili.com/opus/111")
+    monkeypatch.setattr(opus_parser, "resolve_short_url", resolver)
+
+    text = "https://www.bilibili.com/opus/222 https://b23.tv/A"
+    assert await extract_opus_ids_with_shortlinks(text, limit=1) == ["222"]
+    resolver.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_extract_json_card_respects_remaining_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """卡片链路也要受剩余预算约束，名额用完不再解析后续卡片短链。"""
+
+    async def _resolve(url: str) -> str:
+        return (
+            "https://www.bilibili.com/opus/111"
+            if url.endswith("one")
+            else "https://www.bilibili.com/opus/222"
+        )
+
+    resolver = AsyncMock(side_effect=_resolve)
+    monkeypatch.setattr(opus_parser, "resolve_short_url", resolver)
+
+    segments = [
+        _json_segment({"meta": {"detail_1": {"qqdocurl": "https://b23.tv/one"}}}),
+        _json_segment({"meta": {"news": {"jumpUrl": "https://b23.tv/two"}}}),
+    ]
+
+    assert await extract_opus_from_json_message(segments, limit=1) == ["111"]
+    assert resolver.await_count == 1
+
+    assert await extract_opus_from_json_message(segments) == ["111", "222"]
+    assert resolver.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_extract_json_card_limit_zero_skips_everything(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    resolver = AsyncMock(return_value="https://www.bilibili.com/opus/111")
+    monkeypatch.setattr(opus_parser, "resolve_short_url", resolver)
+    segments = [
+        _json_segment({"meta": {"detail_1": {"qqdocurl": "https://b23.tv/one"}}})
+    ]
+
+    assert await extract_opus_from_json_message(segments, limit=0) == []
+    resolver.assert_not_awaited()

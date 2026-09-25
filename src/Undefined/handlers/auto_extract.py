@@ -60,7 +60,10 @@ class AutoExtractMixin:
             return opus_ids
 
         seen = set(opus_ids)
-        for opus_id in await extract_opus_from_json_message(message_content):
+        remaining = None if limit is None else max(0, limit - len(opus_ids))
+        for opus_id in await extract_opus_from_json_message(
+            message_content, limit=remaining
+        ):
             if opus_id in seen:
                 continue
             seen.add(opus_id)
