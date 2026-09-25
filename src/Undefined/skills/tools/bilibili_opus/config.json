@@ -12,7 +12,10 @@
                 },
                 "target_type": {
                     "type": "string",
-                    "enum": ["group", "private"],
+                    "enum": [
+                        "group",
+                        "private"
+                    ],
                     "description": "可选。目标会话类型"
                 },
                 "target_id": {
@@ -21,7 +24,12 @@
                 },
                 "output_mode": {
                     "type": "string",
-                    "enum": ["send", "uid", "info", "text"],
+                    "enum": [
+                        "send",
+                        "uid",
+                        "info",
+                        "text"
+                    ],
                     "description": "输出模式：send（默认，发送图文合并转发）、uid（仅把正文图片登记为附件 UID，不发送）、info（仅返回图文元信息）、text（只返回正文文字，受 start / end / limit / keyword 控制）"
                 },
                 "max_images": {
@@ -34,18 +42,20 @@
                 },
                 "end": {
                     "type": "integer",
-                    "description": "可选，output_mode=text 用。结束字位置（不含该字）；不填则为 start + limit"
+                    "description": "可选，output_mode=text 用。结束字位置（不含该字）；不填则为 start + limit。只给 end 时不再套默认 1000 字，limit 仍作为上界"
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "可选，output_mode=text 用。未显式给 end 时返回的字数上限，默认 1000，最大 20000"
+                    "description": "可选，output_mode=text 用。单次返回的字数上限，默认 1000，最大 20000；给了 end 时仍作为上界生效"
                 },
                 "keyword": {
                     "type": "string",
                     "description": "可选，output_mode=text 用。关键词查询：返回该词在正文中的命中位置与前后文片段（最多 5 处），此时 start / end 被忽略"
                 }
             },
-            "required": ["opus_id"]
+            "required": [
+                "opus_id"
+            ]
         }
     }
 }

@@ -82,8 +82,10 @@ async def _normalize_opus_id(raw: str) -> str | None:
         if match:
             return match.group(1)
 
-    if SHORT_URL_PATTERN.search(text):
-        real_url = await resolve_short_url(text)
+    match = SHORT_URL_PATTERN.search(text)
+    if match:
+        # 只把匹配到的短链交给解析器：整段文本或伪造的 other-host/b23.tv/x 都不该被请求
+        real_url = await resolve_short_url(match.group(0))
         if real_url:
             return await _normalize_opus_id(real_url)
     return None
@@ -120,13 +122,20 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         if output_mode == "text":
             info = await fetch_opus_info(opus_id, cookie=cookie)
             try:
-                limit = _optional_int(args, "limit")
+                requested_end = _optional_int(args, "end")
+                requested_limit = _optional_int(args, "limit")
+                if requested_limit is not None:
+                    limit: int | None = requested_limit
+                elif requested_end is not None:
+                    # 只给 end 时不套默认 1000 字上限，让 end 单独决定范围
+                    limit = None
+                else:
+                    limit = OPUS_TEXT_DEFAULT_LIMIT
                 segment = extract_opus_text(
                     info,
                     start=_optional_int(args, "start"),
-                    end=_optional_int(args, "end"),
-                    # 未显式传 limit 时用默认 1000；显式传 0 交给校验报错
-                    limit=OPUS_TEXT_DEFAULT_LIMIT if limit is None else limit,
+                    end=requested_end,
+                    limit=limit,
                     keyword=str(args.get("keyword") or ""),
                 )
             except ValueError as exc:

@@ -655,13 +655,15 @@ def extract_opus_text(
     *,
     start: int | None = None,
     end: int | None = None,
-    limit: int | None = OPUS_TEXT_DEFAULT_LIMIT,
+    limit: int | None = None,
     keyword: str = "",
 ) -> OpusSegment:
     """返回正文纯文本的可见片段。
 
     - 指定 ``keyword`` 时按关键词返回上下文片段，忽略 ``start`` / ``end``；
-    - 否则按 ``[start, end)`` 返回字符区间，``end`` 缺省时取 ``start + limit``。
+    - 否则按 ``[start, end)`` 返回字符区间，``end`` 缺省时取 ``start + limit``；
+    - ``limit=None`` 表示不设窗口上限（只受 ``end`` 或正文长度约束），
+      ``end`` 与 ``limit`` 同时给出时取二者较紧的一个。
 
     ``offset`` 为该片段在完整正文中的起始字符位置，供调用方继续翻页。
     参数非法（负数、limit<=0、关键词过长）时抛 :class:`ValueError`，
@@ -685,14 +687,16 @@ def extract_opus_text(
     if not text:
         return OpusSegment(text="", total_chars=0)
 
-    if limit is None:
-        size = OPUS_TEXT_DEFAULT_LIMIT
-    else:
+    # ``limit`` 只约束「未显式给 end」的窗口与「end < start」的兜底；
+    # 显式 end 时以 end 为准，不受上限影响
+    if limit is not None:
         size = int(limit)
         if size <= 0:
             raise ValueError("limit 必须大于 0")
         if size > OPUS_TEXT_MAX_LIMIT:
             raise ValueError(f"limit 过大（{size}，上限 {OPUS_TEXT_MAX_LIMIT}）")
+    else:
+        size = OPUS_TEXT_DEFAULT_LIMIT
 
     if start is not None and int(start) < 0:
         raise ValueError("start 不能为负数")
@@ -708,8 +712,11 @@ def extract_opus_text(
             has_more=False,
             ranges=(),
         )
-    finish = total if end is None else int(end)
-    finish = min(finish, begin + size, total)
+    # limit 的语义是「单次返回的字数上限」：未给 end 时决定窗口大小，
+    # 给了 end 时作为上界一起生效（调用方若想让 end 单独决定范围，传 limit=None）
+    finish = total if end is None else min(int(end), total)
+    if limit is not None:
+        finish = min(finish, begin + size)
     if finish <= begin:
         finish = min(begin + size, total)
     return OpusSegment(

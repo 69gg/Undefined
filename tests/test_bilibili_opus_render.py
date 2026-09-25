@@ -14,6 +14,7 @@ from Undefined.bilibili.models import (
     VideoCardBlock,
 )
 from Undefined.bilibili.opus_render import (
+    OPUS_TEXT_DEFAULT_LIMIT,
     extract_opus_text,
     format_opus_history_message,
     format_opus_info,
@@ -512,13 +513,24 @@ def _text_info(body: str, *, parts: int = 1) -> OpusInfo:
 def test_text_default_returns_first_1000_chars() -> None:
     info = _text_info("甲" * 2500)
 
-    segment = extract_opus_text(info)
+    # 默认 1000 字由工具层补上（未显式传 limit 时传 OPUS_TEXT_DEFAULT_LIMIT）
+    segment = extract_opus_text(info, limit=OPUS_TEXT_DEFAULT_LIMIT)
 
     assert segment.total_chars == 2500
     assert segment.offset == 0
     assert len(segment.text) == 1000
     assert segment.has_more is True
     assert segment.ranges == ((0, 1000),)
+
+
+def test_text_without_limit_returns_whole_body() -> None:
+    """纯函数层不隐式设上限：limit=None 且无 end 时返回完整正文。"""
+    info = _text_info("甲" * 2500)
+
+    segment = extract_opus_text(info)
+
+    assert len(segment.text) == 2500
+    assert segment.has_more is False
 
 
 def test_text_start_and_end_select_exact_range() -> None:
@@ -720,3 +732,41 @@ def test_format_opus_segment_start_beyond_total() -> None:
 
     assert "start=500 已超出正文范围（正文共 100 字）" in message
     assert "---" not in message
+
+
+def test_text_explicit_end_is_not_capped_by_default_limit() -> None:
+    """显式 end 时不再套默认 1000 字上限（此前 end=5000 只会返回 1000 字）。"""
+    info = _text_info("子" * 8000)
+
+    segment = extract_opus_text(info, start=0, end=5000)
+
+    assert len(segment.text) == 5000
+    assert segment.offset == 0
+    assert segment.has_more is True
+
+
+def test_text_explicit_end_still_capped_by_total() -> None:
+    info = _text_info("丑" * 300)
+
+    segment = extract_opus_text(info, start=0, end=9999)
+
+    assert len(segment.text) == 300
+    assert segment.has_more is False
+
+
+def test_text_explicit_limit_still_applies_with_end() -> None:
+    """同时给 end 与 limit 时，limit 仍然生效（显式上限优先）。"""
+    info = _text_info("寅" * 8000)
+
+    segment = extract_opus_text(info, start=0, end=5000, limit=200)
+
+    assert len(segment.text) == 200
+
+
+def test_text_end_before_start_falls_back_to_limit_value() -> None:
+    info = _text_info("卯" * 3000)
+
+    segment = extract_opus_text(info, start=100, end=50, limit=50)
+
+    assert len(segment.text) == 50
+    assert segment.offset == 100

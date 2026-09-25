@@ -514,3 +514,64 @@ async def test_text_mode_reports_empty_body(monkeypatch: pytest.MonkeyPatch) -> 
     result = await execute({"opus_id": "1", "output_mode": "text"}, _context())
 
     assert "（该图文没有正文文字）" in result
+
+
+# ---------- 短链解析与输出模式回归 ----------
+
+
+@pytest.mark.asyncio
+async def test_normalize_short_link_passes_only_matched_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """只把匹配到的短链交给解析器，避免整段分享文案或伪造域名被请求。"""
+    import Undefined.skills.tools.bilibili_opus.handler as handler_module
+
+    resolver = AsyncMock(return_value="https://www.bilibili.com/opus/777777777777777")
+    monkeypatch.setattr(handler_module, "resolve_short_url", resolver)
+
+    result = await _normalized("看看这个 https://b23.tv/abc123 挺好")
+
+    assert result == "777777777777777"
+    resolver.assert_awaited_once()
+    call = resolver.await_args
+    assert call is not None
+    assert call.args[0] == "https://b23.tv/abc123"
+
+
+@pytest.mark.asyncio
+async def test_text_mode_explicit_end_beats_default_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """显式 end 时不再被默认 1000 字截断（回归）。"""
+    monkeypatch.setattr(
+        opus_sender, "_fetch_opus_info", AsyncMock(return_value=_long_info("未" * 5000))
+    )
+
+    result = await execute(
+        {"opus_id": "1", "output_mode": "text", "start": 0, "end": 3000}, _context()
+    )
+
+    assert "本次返回 0-3000 字" in result
+    assert "未" * 3000 in result
+
+
+@pytest.mark.asyncio
+async def test_text_mode_explicit_limit_with_end_still_caps(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        opus_sender, "_fetch_opus_info", AsyncMock(return_value=_long_info("申" * 5000))
+    )
+
+    result = await execute(
+        {
+            "opus_id": "1",
+            "output_mode": "text",
+            "start": 0,
+            "end": 3000,
+            "limit": 200,
+        },
+        _context(),
+    )
+
+    assert "本次返回 0-200 字" in result
