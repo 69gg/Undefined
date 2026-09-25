@@ -271,3 +271,40 @@ async def test_mixin_skips_card_lookup_when_budget_full(
 
     assert opus_ids == ["111", "222"]
     card_lookup.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_duplicate_card_does_not_consume_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """卡片里的重复图文不能吃掉名额，否则卡片中的新图文会被漏掉。"""
+    import Undefined.bilibili.opus_parser as opus_parser
+    from Undefined.handlers.auto_extract import AutoExtractMixin
+
+    async def _resolve(url: str) -> str:
+        suffix = "111" if url.endswith("dup") else "222"
+        return f"https://www.bilibili.com/opus/{suffix}"
+
+    monkeypatch.setattr(
+        opus_parser, "resolve_short_url", AsyncMock(side_effect=_resolve)
+    )
+
+    def _card(url: str) -> dict[str, Any]:
+        import html
+        import json
+
+        payload = {"meta": {"detail_1": {"qqdocurl": url}}}
+        return {"type": "json", "data": {"data": html.escape(json.dumps(payload))}}
+
+    dummy = cast(Any, SimpleNamespace())
+    text = "https://www.bilibili.com/opus/111 https://b23.tv/dup"
+    segments = [_card("https://b23.tv/dup"), _card("https://b23.tv/new")]
+
+    # 正文已命中 111，卡片给出重复的 111 + 新的 222；预算 2 应拿到两个 ID
+    assert await AutoExtractMixin._extract_bilibili_opus_ids(
+        dummy, text, segments, limit=2
+    ) == ["111", "222"]
+    # 预算 1 时正文已占满，卡片不再贡献
+    assert await AutoExtractMixin._extract_bilibili_opus_ids(
+        dummy, text, segments, limit=1
+    ) == ["111"]

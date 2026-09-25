@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
 import html
 import json
 import logging
@@ -126,17 +127,20 @@ async def extract_opus_from_json_message(
     segments: list[dict[str, Any]],
     *,
     limit: int | None = None,
+    exclude: Collection[str] = (),
 ) -> list[str]:
     """从 QQ 消息段中检测 JSON 小程序消息，提取 B 站图文 ID。
 
     ``limit`` 给出剩余发送预算：名额用完后不再解析后续卡片的短链。
+    ``exclude`` 是已知 ID（例如正文里已经命中的），它们不占用预算，
+    避免重复卡片把名额吃光后漏掉真正的新图文。
     """
     max_items = None if limit is None else max(0, int(limit))
     if max_items == 0:
         return []
 
     opus_ids: list[str] = []
-    seen: set[str] = set()
+    seen: set[str] = set(exclude)
 
     for seg in segments:
         if seg.get("type") != "json":

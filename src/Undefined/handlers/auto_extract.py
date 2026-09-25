@@ -57,16 +57,19 @@ class AutoExtractMixin:
 
         opus_ids = await extract_opus_ids_with_shortlinks(text, limit=limit)
         if limit is not None and len(opus_ids) >= limit:
+            # 正文已占满预算：不必再解析分享卡片
             return opus_ids
 
-        seen = set(opus_ids)
+        # 卡片里可能重复正文已命中的图文：把这些 ID 作为已知项传下去，
+        # 它们不占预算，否则重复项会把名额吃光、漏掉卡片里的新图文
+        known = set(opus_ids)
         remaining = None if limit is None else max(0, limit - len(opus_ids))
         for opus_id in await extract_opus_from_json_message(
-            message_content, limit=remaining
+            message_content, limit=remaining, exclude=known
         ):
-            if opus_id in seen:
+            if opus_id in known:
                 continue
-            seen.add(opus_id)
+            known.add(opus_id)
             opus_ids.append(opus_id)
         return opus_ids if limit is None else opus_ids[:limit]
 
