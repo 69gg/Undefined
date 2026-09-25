@@ -65,7 +65,40 @@ uv run playwright install
 
 如果 Playwright 自带 Chromium 未安装，渲染器会尝试复用系统已安装的 Chrome/Chromium。需要指定其他路径时，设置 `[render].browser_executable_path`；与 Playwright 自带版本相比，系统浏览器的版本兼容性不受 Playwright 保证，因此生产环境仍优先执行 `uv run playwright install`。
 
-### 4. 配置环境
+#### 其它宿主环境依赖
+
+以下依赖按启用的功能决定是否需要，缺少时只影响对应能力：
+
+- **Docker**：Code Delivery Agent 需要 `docker` 可执行文件与可用守护进程（镜像由 `[code_delivery].docker_image` 指定，默认 `ubuntu:24.04`，首次运行会拉取）。不使用该 Agent 时可设 `[code_delivery].enabled = false`。
+- **FFmpeg**：必须能从 `PATH` 找到。Bilibili DASH 音视频合并、`messages.send_voice` 与微信侧语音转 SILK 都依赖它；缺失时相关操作会明确报错。
+- **MCP 服务器的运行时**：仅在 `config/mcp.json` 中配置本地子进程 MCP 服务器时需要——`command` 为 `npx` 等 Node 命令时需要 Node.js；为 `uvx` 时需要 `uv`（`uvx` 是 `uv tool run` 的别名，随 `uv` 一同安装，见上文[安装依赖](#2-安装依赖)）。
+
+### 4. 需要一并部署的自托管服务（概览）
+
+除 Python 运行环境外，下列服务由部署方自行搭建；后面的 pip/uv tool 部署方式同样适用。本节只说明**必要性与配置位置**，不重复各上游仓库的安装步骤——请按官方部署说明完成部署后，再在 `config.toml` 中填写地址与凭据。
+
+| 服务 | 必要性 | 配置位置 | 官方部署说明 |
+|---|---|---|---|
+| **OneBot V11 协议端**（NapCat / Lagrange.Core） | **必需**：Undefined 自身不实现 QQ 协议，QQ 消息的收发完全由协议端决定 | `[onebot]`，见[配置说明](configuration.md#43-onebot-协议端连接) | [NapCatQQ](https://github.com/NapNeko/NapCatQQ)、[Lagrange.Core](https://github.com/LagrangeDev/Lagrange.Core)、[OneBot V11 标准](https://github.com/botuniverse/onebot-11) |
+| **SearXNG 搜索服务** | 可选：只影响 `web_agent` 的内置 `web_search` 工具 | `[search].searxng_url`，见[配置说明](configuration.md#412-search-搜索) | [SearXNG（自托管）](https://docs.searxng.org/) |
+| **Firecrawl 搜索服务** | 可选，且默认关闭（`firecrawl_search_enabled = false`）：可用官方 keyless，或官方 + 自己的 API Key，或指向自部署实例 | `[search.firecrawl]`，见[配置说明](configuration.md#412-search-搜索) | [Firecrawl 自托管说明](https://docs.firecrawl.dev/contributing/self-host) |
+| **lxmusic2api 音乐服务** | 可选：为 `music.*` 工具集提供数据与音频解析能力，不随本项目发布 | `[lxmusic2api]`，见[配置说明](configuration.md#4201-lxmusic2api-音乐服务) | [lxmusic2api](https://github.com/69gg/lxmusic2api) |
+
+各项不部署时的具体影响：
+
+- **不部署 OneBot 协议端**：Bot 无法登录，收发不了任何 QQ 消息；严格模式缺少 `onebot.ws_url` 会直接报错退出。
+- **不部署 SearXNG**：`web_search` 调用时提示未启用；`grok_search`、`firecrawl_search`、`crawl_webpage` 不受影响，联网检索能力不中断。
+- **不启用 Firecrawl**：仅 `firecrawl_search` 工具不可用。
+- **不部署 lxmusic2api**（或 `[lxmusic2api].api_key` 留空）：全部 `music.*` 工具从模型工具列表隐藏，其余功能不受影响。
+
+补充说明：
+
+- 上表只列“需要自己起一个服务”的项。模型端点（`[models.*]`）不在此列：它既可以是自部署的 OpenAI 兼容服务，也可以是远端 API，按需选择即可。
+- OneBot 协议端除自身部署外，还要按文件发送模式确认文件系统可见性，见下文 [NapCat / Lagrange.Core 部署要求](#napcat--lagrangecore-部署要求)。
+- 若使用 `config/mcp.json` 中基于 `npx` 的 MCP 服务器，宿主机还需具备 Node.js 运行时。
+- Code Delivery Agent 需要宿主机提供 Docker，发送原生语音与 B 站视频合并需要 FFmpeg，详见上文[其它宿主环境依赖](#其它宿主环境依赖)。
+
+### 5. 配置环境
 
 复制示例配置文件 `config.toml.example` 为 `config.toml` 并填写你的配置信息。
 
@@ -100,7 +133,7 @@ summary = ""
 
 > Git 与构建排除只防止私有文件被提交或打包；插入后的内容仍会作为 system Prompt 发送给模型供应商，不要在其中保存 API Key 等凭据。
 
-### 5. 启动运行
+### 6. 启动运行
 
 启动方式（二选一）：
 
@@ -131,7 +164,7 @@ autostart_bot = true
 
 这样运行 `uv run Undefined-webui` 时会自动启动 bot，无需手动操作。默认为 `false`。
 
-### 6. 跨平台与资源路径（重要）
+### 7. 跨平台与资源路径（重要）
 
 - **资源读取**：运行时会优先从运行目录加载同名 `res/...` / `img/...`（便于覆盖），若不存在再使用安装包自带资源；并提供仓库结构兜底查找，因此从任意目录启动也能正常加载提示词与资源文案。
 - **并发写入**：运行时会为 JSON/日志类文件使用”锁文件 + 原子替换”写入策略，Windows/Linux/macOS 行为一致（会生成 `*.lock` 文件）。
