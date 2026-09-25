@@ -126,7 +126,7 @@ async def test_empty_opus_id_and_bad_mode() -> None:
     assert await execute({"opus_id": "  "}, _context()) == "opus_id 不能为空"
     assert (
         await execute({"opus_id": "1", "output_mode": "bogus"}, _context())
-        == "output_mode 只能是 send、uid 或 info"
+        == "output_mode 只能是 send、uid、info 或 text"
     )
 
 
@@ -398,3 +398,119 @@ def test_opus_parser_patterns_are_reused_by_tool() -> None:
     assert (
         opus_parser.DYNAMIC_ID_URL_PATTERN.search("t.bilibili.com/123456") is not None
     )
+
+
+# ---------- output_mode=text ----------
+
+
+def _long_info(body: str) -> OpusInfo:
+    return _info(TextBlock(body), title="长文图文")
+
+
+@pytest.mark.asyncio
+async def test_text_mode_defaults_to_first_1000_chars(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        opus_sender, "_fetch_opus_info", AsyncMock(return_value=_long_info("甲" * 2500))
+    )
+
+    result = await execute({"opus_id": "1", "output_mode": "text"}, _context())
+
+    assert "正文共 2500 字，本次返回 0-1000 字" in result
+    assert "可用 start=1000 继续读取" in result
+    assert "甲" * 1000 in result
+    assert "甲" * 1001 not in result
+
+
+@pytest.mark.asyncio
+async def test_text_mode_start_and_end(monkeypatch: pytest.MonkeyPatch) -> None:
+    body = "".join(str(index % 10) for index in range(500))
+    monkeypatch.setattr(
+        opus_sender, "_fetch_opus_info", AsyncMock(return_value=_long_info(body))
+    )
+
+    result = await execute(
+        {"opus_id": "1", "output_mode": "text", "start": 120, "end": 130}, _context()
+    )
+
+    assert "本次返回 120-130 字" in result
+    assert "0123456789" in result
+
+
+@pytest.mark.asyncio
+async def test_text_mode_keyword_query(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        opus_sender,
+        "_fetch_opus_info",
+        AsyncMock(return_value=_long_info("甲" * 200 + "目标词" + "乙" * 200)),
+    )
+
+    result = await execute(
+        {"opus_id": "1", "output_mode": "text", "keyword": "目标词"}, _context()
+    )
+
+    assert "关键词「目标词」命中位置: 140-263" in result
+    assert "目标词" in result
+
+
+@pytest.mark.asyncio
+async def test_text_mode_keyword_miss(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        opus_sender, "_fetch_opus_info", AsyncMock(return_value=_long_info("甲" * 100))
+    )
+
+    result = await execute(
+        {"opus_id": "1", "output_mode": "text", "keyword": "没有这个词"}, _context()
+    )
+
+    assert "在正文中没有命中" in result
+
+
+@pytest.mark.asyncio
+async def test_text_mode_invalid_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        opus_sender, "_fetch_opus_info", AsyncMock(return_value=_long_info("甲" * 100))
+    )
+    context = _context()
+
+    assert await execute(
+        {"opus_id": "1", "output_mode": "text", "start": "abc"}, context
+    ) == ("start 必须是整数")
+    assert await execute(
+        {"opus_id": "1", "output_mode": "text", "limit": 0}, context
+    ) == ("limit 必须大于 0")
+    assert await execute(
+        {"opus_id": "1", "output_mode": "text", "limit": 99999}, context
+    ) == ("limit 过大（99999，上限 20000）")
+    assert await execute(
+        {"opus_id": "1", "output_mode": "text", "keyword": "短"}, context
+    ) == ("keyword 至少 2 个字，过短会命中大量无关位置")
+
+
+@pytest.mark.asyncio
+async def test_text_mode_does_not_send_or_register(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        opus_sender, "_fetch_opus_info", AsyncMock(return_value=_long_info("甲" * 50))
+    )
+    context = _context()
+
+    await execute({"opus_id": "1", "output_mode": "text"}, context)
+
+    context["sender"].send_group_message.assert_not_awaited()
+    context["attachment_registry"].register_remote_url.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_text_mode_reports_empty_body(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        opus_sender,
+        "_fetch_opus_info",
+        AsyncMock(return_value=_info(TextBlock(""), title="空")),
+    )
+
+    result = await execute({"opus_id": "1", "output_mode": "text"}, _context())
+
+    assert "（该图文没有正文文字）" in result

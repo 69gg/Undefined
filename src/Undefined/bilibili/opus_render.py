@@ -39,6 +39,15 @@ _OPUS_ID_PATTERN = re.compile(r"/opus/(\d+)")
 _EMOJI_PLACEHOLDER = "[表情]"
 _EMPTY_BODY_PLACEHOLDER = "（该图文没有正文内容）"
 
+# ``output_mode=text`` 的默认与边界
+OPUS_TEXT_DEFAULT_LIMIT = 1000
+OPUS_TEXT_MAX_LIMIT = 20000
+# 关键词上下文字符数、最多返回多少处命中、关键词长度边界
+OPUS_TEXT_KEYWORD_CONTEXT = 60
+OPUS_TEXT_KEYWORD_MAX_MATCHES = 5
+OPUS_TEXT_MIN_KEYWORD_LENGTH = 2
+OPUS_TEXT_MAX_KEYWORD_LENGTH = 200
+
 # para_type 常量
 _PARA_TEXT = 1
 _PARA_IMAGE = 2
@@ -611,3 +620,197 @@ def format_blocks_text(blocks: tuple[OpusBlock, ...]) -> str:
         else:
             parts.append(f"[卡片] {block.title} {block.jump_url}".strip())
     return "\n\n".join(part for part in parts if part)
+
+
+@dataclass(slots=True, frozen=True)
+class OpusSegment:
+    """按字符区间或在关键词上下文里截取的正文片段。"""
+
+    text: str
+    total_chars: int
+    offset: int = 0
+    has_more: bool = False
+    ranges: tuple[tuple[int, int], ...] = ()
+    query: str = "range"
+    keyword: str = ""
+
+
+def _merge_ranges(ranges: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    """合并重叠或相邻的区间，避免上下文重复。"""
+    if not ranges:
+        return []
+    ordered = sorted(ranges)
+    merged: list[list[int]] = [[ordered[0][0], ordered[0][1]]]
+    for start, end in ordered[1:]:
+        last = merged[-1]
+        if start <= last[1]:
+            last[1] = max(last[1], end)
+        else:
+            merged.append([start, end])
+    return [(start, end) for start, end in merged]
+
+
+def extract_opus_text(
+    info: OpusInfo,
+    *,
+    start: int | None = None,
+    end: int | None = None,
+    limit: int | None = OPUS_TEXT_DEFAULT_LIMIT,
+    keyword: str = "",
+) -> OpusSegment:
+    """返回正文纯文本的可见片段。
+
+    - 指定 ``keyword`` 时按关键词返回上下文片段，忽略 ``start`` / ``end``；
+    - 否则按 ``[start, end)`` 返回字符区间，``end`` 缺省时取 ``start + limit``。
+
+    ``offset`` 为该片段在完整正文中的起始字符位置，供调用方继续翻页。
+    参数非法（负数、limit<=0、关键词过长）时抛 :class:`ValueError`，
+    由工具层转成可读提示。
+    """
+    text = format_blocks_text(info.blocks)
+    total = len(text)
+
+    query = str(keyword or "").strip()
+    if query:
+        if len(query) > OPUS_TEXT_MAX_KEYWORD_LENGTH:
+            raise ValueError(
+                f"keyword 过长（{len(query)} 字，上限 {OPUS_TEXT_MAX_KEYWORD_LENGTH}）"
+            )
+        if len(query) < OPUS_TEXT_MIN_KEYWORD_LENGTH:
+            raise ValueError(
+                f"keyword 至少 {OPUS_TEXT_MIN_KEYWORD_LENGTH} 个字，过短会命中大量无关位置"
+            )
+        return _keyword_segment(text, query) if text else OpusSegment("", 0)
+
+    if not text:
+        return OpusSegment(text="", total_chars=0)
+
+    if limit is None:
+        size = OPUS_TEXT_DEFAULT_LIMIT
+    else:
+        size = int(limit)
+        if size <= 0:
+            raise ValueError("limit 必须大于 0")
+        if size > OPUS_TEXT_MAX_LIMIT:
+            raise ValueError(f"limit 过大（{size}，上限 {OPUS_TEXT_MAX_LIMIT}）")
+
+    if start is not None and int(start) < 0:
+        raise ValueError("start 不能为负数")
+    if end is not None and int(end) < 0:
+        raise ValueError("end 不能为负数")
+
+    begin = max(0, int(start or 0))
+    if begin >= total:
+        return OpusSegment(
+            text="",
+            total_chars=total,
+            offset=begin,
+            has_more=False,
+            ranges=(),
+        )
+    finish = total if end is None else int(end)
+    finish = min(finish, begin + size, total)
+    if finish <= begin:
+        finish = min(begin + size, total)
+    return OpusSegment(
+        text=text[begin:finish],
+        total_chars=total,
+        offset=begin,
+        has_more=finish < total,
+        ranges=((begin, finish),),
+    )
+
+
+def _keyword_segment(text: str, keyword: str) -> OpusSegment:
+    total = len(text)
+    matches: list[int] = []
+    cursor = text.find(keyword)
+    while cursor != -1:
+        matches.append(cursor)
+        cursor = text.find(keyword, cursor + len(keyword))
+
+    if not matches:
+        return OpusSegment(
+            text="",
+            total_chars=total,
+            has_more=False,
+            ranges=(),
+            query="keyword",
+            keyword=keyword,
+        )
+
+    ranges = _merge_ranges(
+        [
+            (
+                max(0, index - OPUS_TEXT_KEYWORD_CONTEXT),
+                min(total, index + len(keyword) + OPUS_TEXT_KEYWORD_CONTEXT),
+            )
+            for index in matches[:OPUS_TEXT_KEYWORD_MAX_MATCHES]
+        ]
+    )
+    parts: list[str] = []
+    offset = ranges[0][0]
+    for index, (range_start, range_end) in enumerate(ranges, start=1):
+        if index > 1:
+            parts.append(f"\n…\n（片段 {index}）")
+        parts.append(text[range_start:range_end])
+    return OpusSegment(
+        text="".join(parts),
+        total_chars=total,
+        offset=offset,
+        has_more=len(matches) > OPUS_TEXT_KEYWORD_MAX_MATCHES,
+        ranges=tuple(ranges),
+        query="keyword",
+        keyword=keyword,
+    )
+
+
+def format_opus_segment(info: OpusInfo, segment: OpusSegment) -> str:
+    """把正文片段渲染成 ``output_mode=text`` 的返回文案。"""
+    lines = [
+        f"「{info.title or '无标题'}」",
+        f"图文 ID: {info.opus_id}",
+        f"UP主: {info.author.name or '未知'}",
+        f"发布时间: {format_timestamp(info.pub_ts) or '未知'}",
+    ]
+
+    if segment.query == "keyword":
+        if not segment.text:
+            lines.append(
+                f"关键词「{segment.keyword}」在正文中没有命中（正文共 {segment.total_chars} 字）"
+            )
+            lines.append(info.url)
+            return "\n".join(lines)
+        occurrence_text = "、".join(f"{start}-{end}" for start, end in segment.ranges)
+        lines.append(
+            f"关键词「{segment.keyword}」命中位置: {occurrence_text}"
+            f"（正文共 {segment.total_chars} 字，本次给出 {len(segment.ranges)} 个片段）"
+        )
+    elif segment.total_chars == 0:
+        lines.append("（该图文没有正文文字）")
+        lines.append(info.url)
+        return "\n".join(lines)
+    elif not segment.text:
+        lines.append(
+            f"start={segment.offset} 已超出正文范围（正文共 {segment.total_chars} 字）"
+        )
+        lines.append(info.url)
+        return "\n".join(lines)
+    else:
+        lines.append(
+            f"正文共 {segment.total_chars} 字，本次返回 {segment.offset}-"
+            f"{segment.offset + len(segment.text)} 字"
+        )
+
+    lines.extend(["---", segment.text, "---"])
+    if segment.query == "keyword":
+        if segment.has_more:
+            lines.append(f"（命中较多，仅展示前 {OPUS_TEXT_KEYWORD_MAX_MATCHES} 处）")
+    elif segment.has_more:
+        lines.append(
+            f"（还有后续内容，可用 start={segment.offset + len(segment.text)} 继续读取）"
+        )
+    else:
+        lines.append("（已到正文结尾）")
+    lines.append(info.url)
+    return "\n".join(lines)

@@ -2,7 +2,7 @@
     "type": "function",
     "function": {
         "name": "bilibili_opus",
-        "description": "处理 Bilibili 图文（opus / 动态）。默认发送合并转发到群聊或私聊；可设置 output_mode=uid 只登记图片附件 UID，或 output_mode=info 只获取图文信息。支持 bilibili.com/opus/<id>、t.bilibili.com/<id>、b23.tv 短链或裸动态 ID。",
+        "description": "处理 Bilibili 图文（opus / 动态）。默认发送合并转发到群聊或私聊；可设置 output_mode=uid 只登记图片附件 UID，output_mode=info 只获取图文信息，或 output_mode=text 按字数区间 / 关键词读取正文文字（默认返回前 1000 字，可用 start / end 定位、keyword 查询）。支持 bilibili.com/opus/<id>、t.bilibili.com/<id>、b23.tv 短链或裸动态 ID。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -21,12 +21,28 @@
                 },
                 "output_mode": {
                     "type": "string",
-                    "enum": ["send", "uid", "info"],
-                    "description": "输出模式：send（默认，发送图文合并转发）、uid（仅把正文图片登记为附件 UID，不发送消息）或 info（仅返回图文信息，不发送）"
+                    "enum": ["send", "uid", "info", "text"],
+                    "description": "输出模式：send（默认，发送图文合并转发）、uid（仅把正文图片登记为附件 UID，不发送）、info（仅返回图文元信息）、text（只返回正文文字，受 start / end / limit / keyword 控制）"
                 },
                 "max_images": {
                     "type": "integer",
                     "description": "可选。output_mode=uid 时最多登记多少张图片，默认 9"
+                },
+                "start": {
+                    "type": "integer",
+                    "description": "可选，output_mode=text 用。起始字位置，从 0 开始；不填即从正文开头读取"
+                },
+                "end": {
+                    "type": "integer",
+                    "description": "可选，output_mode=text 用。结束字位置（不含该字）；不填则为 start + limit"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "可选，output_mode=text 用。未显式给 end 时返回的字数上限，默认 1000，最大 20000"
+                },
+                "keyword": {
+                    "type": "string",
+                    "description": "可选，output_mode=text 用。关键词查询：返回该词在正文中的命中位置与前后文片段（最多 5 处），此时 start / end 被忽略"
                 }
             },
             "required": ["opus_id"]

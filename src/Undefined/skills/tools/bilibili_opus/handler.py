@@ -5,7 +5,12 @@ from typing import Any, Dict, Literal
 
 from Undefined.attachments import scope_from_context
 from Undefined.bilibili.opus_parser import DYNAMIC_ID_URL_PATTERN, OPUS_URL_PATTERN
-from Undefined.bilibili.opus_render import format_opus_info
+from Undefined.bilibili.opus_render import (
+    OPUS_TEXT_DEFAULT_LIMIT,
+    extract_opus_text,
+    format_opus_info,
+    format_opus_segment,
+)
 from Undefined.bilibili.opus_sender import (
     fetch_bilibili_opus_attachment,
     fetch_opus_info,
@@ -53,6 +58,17 @@ def _resolve_target(
     return None, "无法确定目标会话，请提供 target_type 与 target_id"
 
 
+def _optional_int(args: Dict[str, Any], name: str) -> int | None:
+    """把可选整型参数解析成 int；非法值抛 ``ValueError``（由调用方转成提示）。"""
+    raw = args.get(name)
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} 必须是整数") from exc
+
+
 async def _normalize_opus_id(raw: str) -> str | None:
     """把动态 ID / 图文链接 / 短链统一成裸动态 ID。"""
     text = raw.strip()
@@ -80,8 +96,8 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         return "opus_id 不能为空"
 
     output_mode = str(args.get("output_mode", "send") or "send").strip().lower()
-    if output_mode not in {"send", "uid", "info"}:
-        return "output_mode 只能是 send、uid 或 info"
+    if output_mode not in {"send", "uid", "info", "text"}:
+        return "output_mode 只能是 send、uid、info 或 text"
 
     runtime_config = context.get("runtime_config")
     sender = context.get("sender")
@@ -100,6 +116,22 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
         if output_mode == "info":
             return format_opus_info(await fetch_opus_info(opus_id, cookie=cookie))
+
+        if output_mode == "text":
+            info = await fetch_opus_info(opus_id, cookie=cookie)
+            try:
+                limit = _optional_int(args, "limit")
+                segment = extract_opus_text(
+                    info,
+                    start=_optional_int(args, "start"),
+                    end=_optional_int(args, "end"),
+                    # 未显式传 limit 时用默认 1000；显式传 0 交给校验报错
+                    limit=OPUS_TEXT_DEFAULT_LIMIT if limit is None else limit,
+                    keyword=str(args.get("keyword") or ""),
+                )
+            except ValueError as exc:
+                return str(exc)
+            return format_opus_segment(info, segment)
 
         if output_mode == "uid":
             attachment_registry = context.get("attachment_registry")

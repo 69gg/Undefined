@@ -369,7 +369,7 @@ QQ/NapCat 在 `sendMsg` 阶段返回超时并不等于消息未送达：服务�
 | `qq_like` | 给指定 QQ 号的资料卡点赞（默认 10 次） |
 | `python_interpreter` | 在隔离的 **Docker 容器**中执行 Python 代码，支持按需安装第三方库，可在执行后自动发送生成的文件（图片、CSV 等） |
 | `bilibili_video` | 发送哔哩哔哩视频、返回视频附件 UID，或只获取视频信息（支持 BV 号、AV 号、链接） |
-| `bilibili_opus` | 发送哔哩哔哩图文（opus）合并转发、返回正文图片附件 UID，或只获取图文信息（支持动态 ID、图文链接、b23.tv 短链） |
+| `bilibili_opus` | 发送哔哩哔哩图文（opus）合并转发、返回正文图片附件 UID、获取图文信息，或按字数区间 / 关键词读取正文文字（支持动态 ID、图文链接、b23.tv 短链） |
 | `douyin_video` | 发送抖音视频、返回视频附件 UID，或只获取视频信息（支持短链、长链、aweme_id） |
 | `arxiv_paper` | 发送 arXiv 论文 PDF、返回 PDF 附件 UID，或只获取论文信息（支持 arXiv ID、链接） |
 | `fetch_image_uid` | 将指定 URL 的图片下载并转换为系统内部 uid |
