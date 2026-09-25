@@ -703,6 +703,8 @@ jobs:
           tags: |
             ${{ env.BOT_IMAGE }}:${{ steps.pins.outputs.tag }}
             ${{ env.BOT_IMAGE }}:latest
+          build-args: |
+            UV_VERSION=0.9.7
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.version=${{ steps.pins.outputs.tag }}

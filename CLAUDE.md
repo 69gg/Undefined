@@ -77,6 +77,7 @@ bash scripts/install_git_hooks.sh
 | `config/` | 配置系统：`loader.py`(TOML 解析+类型化)、`models.py`(数据模型)、`hot_reload.py`(热更新) |
 | `attachments/` | 富媒体/附件注册、作用域隔离、`<attachment uid="..."/>` 统一标签（`<pic>` 向后兼容）渲染 |
 | `utils/` | `io.py`(异步 IO)、`history.py`(消息历史)、`paths.py`、`logging.py`、`sender.py` 等通用能力 |
+| `deploy/` | 容器化一键部署（`uv run deploy`）：`catalog.py`(服务与默认值唯一事实来源)、`generate.py`(compose/配置生成)、`config_patch.py`(config.toml 最小差异写入)、`nagaagent.py`(子模块与开关)、`docker_cli.py`、`runner.py`、`templates/`(compose 片段与本体 Dockerfile) |
 
 ### 消息处理流程
 

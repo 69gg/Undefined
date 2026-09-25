@@ -2,6 +2,9 @@
 
 运维与维护脚本集合。
 
+> 容器化部署入口不是脚本，而是包内命令 `uv run deploy`（实现位于
+> `src/Undefined/deploy/`），见 [容器化一键部署](../docs/docker-deploy.md)。
+
 ## 脚本列表
 
 ### [`build_native_apps.py`](build_native_apps.py) — 本地原生 App 构建

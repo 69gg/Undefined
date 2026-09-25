@@ -868,6 +868,7 @@ description: 从 PDF 文件中提取文本和表格，填写表单。当用户�
 6. **技能系统层**：ToolRegistry (registry.py)、AgentRegistry、7个 Agents、13类 Toolsets
 7. **异步 IO 层**：统一 IO 工具 (utils/io.py)，包含 write_json、read_json、append_line、跨平台文件锁 (flock/msvcrt)
 8. **数据持久化层**：历史数据目录、FAQ 目录、Token 归档目录、记忆文件、总结文件、自动化文件、微信绑定/游标/隔离/审计状态
+9. **部署编排层**（`deploy/`，不参与运行时）：`uv run deploy` 把本体与 NapCat、可选自托管服务（SearXNG / Firecrawl / lxmusic2api）编排成一份 Docker Compose。`catalog.py` 是服务与默认值的唯一事实来源，`generate.py` 由包内 compose 片段与配置模板渲染出 `deploy/` 下的运行态，`config_patch.py` 按最小差异把服务地址写回 `config.toml`（复用 WebUI 的 `render_toml` 保留注释），`nagaagent.py` 负责子模块就绪与「只开问答、不开外部网关」的开关写入，`docker_cli.py` 是唯一的进程外调用边界。注意 `deploy/` 运行态目录不入库，模板随 wheel 分发；详见 [容器化一键部署](docs/docker-deploy.md)。
 
 ### 微信 iLink 路由边界
 
