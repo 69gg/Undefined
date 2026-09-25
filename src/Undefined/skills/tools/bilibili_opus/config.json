@@ -1,0 +1,35 @@
+{
+    "type": "function",
+    "function": {
+        "name": "bilibili_opus",
+        "description": "处理 Bilibili 图文（opus / 动态）。默认发送合并转发到群聊或私聊；可设置 output_mode=uid 只登记图片附件 UID，或 output_mode=info 只获取图文信息。支持 bilibili.com/opus/<id>、t.bilibili.com/<id>、b23.tv 短链或裸动态 ID。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "opus_id": {
+                    "type": "string",
+                    "description": "Bilibili 图文标识：动态 ID（如 933099353259638816）、bilibili.com/opus/<id>、t.bilibili.com/<id> 或 b23.tv 短链"
+                },
+                "target_type": {
+                    "type": "string",
+                    "enum": ["group", "private"],
+                    "description": "可选。目标会话类型"
+                },
+                "target_id": {
+                    "type": "integer",
+                    "description": "可选。目标会话 ID"
+                },
+                "output_mode": {
+                    "type": "string",
+                    "enum": ["send", "uid", "info"],
+                    "description": "输出模式：send（默认，发送图文合并转发）、uid（仅把正文图片登记为附件 UID，不发送消息）或 info（仅返回图文信息，不发送）"
+                },
+                "max_images": {
+                    "type": "integer",
+                    "description": "可选。output_mode=uid 时最多登记多少张图片，默认 9"
+                }
+            },
+            "required": ["opus_id"]
+        }
+    }
+}

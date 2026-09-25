@@ -42,6 +42,7 @@ from Undefined.bilibili.models import (
 )
 from Undefined.bilibili.opus_render import (
     format_opus_history_message,
+    format_opus_info,
     format_opus_stats,
     parse_opus_item,
 )
@@ -55,6 +56,9 @@ logger = logging.getLogger(__name__)
 
 _BOT_NAME = "Undefined"
 _DEFAULT_BOT_UIN = "10000"
+
+# ``output_mode=uid`` 默认最多登记多少张图片，避免超大图文刷满附件表
+_UID_IMAGE_LIMIT = 9
 
 # 获取失败时可降级的语义（投递不确定 / 文件传输错误必须上抛）
 _FATAL_ERROR_FLAGS = ("delivery_uncertain", "file_transfer_error")
@@ -442,6 +446,96 @@ async def _fetch_opus_info(opus_id: str, *, cookie: str, config: Any) -> OpusInf
     return parse_opus_item(item).info
 
 
+async def fetch_opus_info(opus_id: str, *, cookie: str = "") -> OpusInfo:
+    """只获取图文信息（``output_mode=info`` 使用，不发送、不注册附件）。"""
+    return await _fetch_opus_info(opus_id, cookie=cookie, config=None)
+
+
+# ---------- 附件 UID / 纯信息模式 ----------
+
+
+def format_opus_uid_message(
+    info: OpusInfo,
+    *,
+    uids: list[str],
+    image_total: int,
+    failures: list[str] | None = None,
+) -> str:
+    """生成 ``output_mode=uid`` 的返回文案（含 ``<attachment uid=.../>``）。"""
+    lines = [
+        f"已获取 Bilibili 图文：{info.title or '无标题'}",
+        f"图文 ID: {info.opus_id}",
+        f"UP主: {info.author.name or '未知'}",
+        format_opus_stats(info.stats),
+    ]
+    published = format_timestamp(info.pub_ts)
+    if published:
+        lines.append(f"发布时间: {published}")
+    lines.append(f"图片: 已登记 {len(uids)}/{image_total} 张")
+    lines.extend(
+        f'图片 {index}: <attachment uid="{uid}"/>'
+        for index, uid in enumerate(uids, start=1)
+    )
+    for failure in failures or []:
+        lines.append(f"图片登记失败: {failure}")
+    lines.append(info.url)
+    return "\n".join(lines)
+
+
+async def fetch_bilibili_opus_attachment(
+    opus_id: str,
+    *,
+    attachment_registry: Any,
+    scope_key: str,
+    cookie: str = "",
+    config: Any = None,
+    max_images: int = _UID_IMAGE_LIMIT,
+) -> str:
+    """获取图文并把图片注册为当前会话附件 UID（不发送消息）。"""
+    if not str(opus_id or "").strip():
+        return "图文 ID 不能为空"
+    if attachment_registry is None:
+        return "缺少必要的运行时组件（attachment_registry）"
+    if not str(scope_key or "").strip():
+        return "无法确定附件作用域，不能注册图文图片"
+
+    info = await _fetch_opus_info(str(opus_id), cookie=cookie, config=config)
+    images = info.images
+    if not images:
+        return f"{format_opus_info(info)}\n\n（该图文没有可登记的图片）"
+
+    limit = max(1, int(max_images))
+    uids: list[str] = []
+    failures: list[str] = []
+    for index, url in enumerate(images[:limit], start=1):
+        try:
+            record = await attachment_registry.register_remote_url(
+                scope_key,
+                url,
+                kind="image",
+                source_kind="bilibili_opus",
+                source_ref=info.url,
+                segment_data={"opus_id": info.opus_id, "title": info.title},
+            )
+        except Exception as exc:
+            logger.warning(
+                "[Bilibili] 图文图片登记失败: opus=%s #%s err=%s", opus_id, index, exc
+            )
+            failures.append(f"#{index} {exc}")
+            continue
+        uids.append(str(record.uid))
+
+    message = format_opus_uid_message(
+        info,
+        uids=uids,
+        image_total=len(images),
+        failures=failures,
+    )
+    if len(images) > limit:
+        message = f"{message}\n（仅登记前 {limit} 张图片，其余请见原文链接）"
+    return message
+
+
 # ---------- 发送 ----------
 
 
@@ -528,6 +622,9 @@ async def send_opus(
 
 __all__ = [
     "build_opus_nodes",
+    "fetch_bilibili_opus_attachment",
+    "fetch_opus_info",
+    "format_opus_uid_message",
     "render_blocks_to_nodes",
     "send_opus",
 ]
