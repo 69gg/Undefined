@@ -66,6 +66,9 @@ jobs:
         run: uv run mypy .
 
       - name: Run Tests (with coverage gate)
+        env:
+          # 让部署模板的「wheel 内容」测试真正构建一次 wheel（本地默认跳过）
+          UNDEFINED_DEPLOY_WHEEL_CHECK: "1"
         run: uv run pytest tests/ --cov --cov-report=term
 
       - name: Build wheel
@@ -73,7 +76,7 @@ jobs:
 
       - name: Verify wheel contains resources
         run: |
-          uv run python -c "import glob, zipfile; whl=glob.glob('dist/*.whl')[0]; z=zipfile.ZipFile(whl); names=set(z.namelist()); required={'config.toml.example','res/prompts/undefined.xml','img/xlwy.jpg'}; missing=sorted([p for p in required if p not in names]); assert not missing, f'missing in wheel: {missing}'"
+          uv run python -c "import glob, zipfile; whl=glob.glob('dist/*.whl')[0]; z=zipfile.ZipFile(whl); names=set(z.namelist()); required={'config.toml.example','res/prompts/undefined.xml','img/xlwy.jpg','Undefined/deploy/cli.py','Undefined/deploy/templates/Dockerfile.bot','Undefined/deploy/templates/compose.base.yaml'}; missing=sorted([p for p in required if p not in names]); assert not missing, f'missing in wheel: {missing}'"
 
   python-compat:
     name: Python compat (${{ matrix.python-version }})

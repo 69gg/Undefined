@@ -118,6 +118,15 @@ def test_lxmusic2api_pin_is_full_sha() -> None:
     assert images.LXMUSIC2API_UPSTREAM_REPO.endswith(".git")
 
 
+def test_lxmusic2api_slug_matches_repo_url() -> None:
+    """CI 用 slug 形式 checkout、用 URL 形式展示；两者必须指向同一仓库。"""
+    repo = images.LXMUSIC2API_UPSTREAM_REPO
+    assert repo.startswith("https://github.com/")
+    assert repo.removeprefix("https://github.com/").removesuffix(".git") == (
+        images.LXMUSIC2API_UPSTREAM_SLUG
+    )
+
+
 def test_short_sha_rejects_invalid_input() -> None:
     with pytest.raises(ValueError):
         images.short_sha("main")

@@ -43,6 +43,8 @@ FIRECRAWL_RABBITMQ_IMAGE: Final[str] = "rabbitmq:3-management"
 
 #: lxmusic2api 上游无 tag、无 release，只能锚定 commit；CI 用它 clone 并构建镜像。
 LXMUSIC2API_UPSTREAM_REPO: Final[str] = "https://github.com/69gg/lxmusic2api.git"
+#: 同一仓库的 ``owner/name`` 形式，供 actions/checkout 的 repository 参数使用。
+LXMUSIC2API_UPSTREAM_SLUG: Final[str] = "69gg/lxmusic2api"
 LXMUSIC2API_UPSTREAM_SHA: Final[str] = "a79c496836f9ce37ba7baf1331b2b01467373568"
 
 #: Firecrawl 官方 compose 自带的资源上限（沿用其默认值，官方声明非最低要求）。
@@ -161,6 +163,7 @@ __all__ = [
     "LXMUSIC2API_IMAGE_REPO",
     "LXMUSIC2API_UPSTREAM_REPO",
     "LXMUSIC2API_UPSTREAM_SHA",
+    "LXMUSIC2API_UPSTREAM_SLUG",
     "NAPCAT_IMAGE",
     "PIN_VERIFIED_ON",
     "SEARXNG_IMAGE",
