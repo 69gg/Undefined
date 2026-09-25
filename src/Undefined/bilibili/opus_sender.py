@@ -210,6 +210,7 @@ async def _nested_opus_node(
     config: Any,
     budget: _ExpansionBudget,
     depth: int,
+    pending_cleanup: list[Path],
 ) -> dict[str, Any]:
     label = f"嵌套图文: {block.title}" if block.title else "嵌套图文"
     try:
@@ -223,6 +224,7 @@ async def _nested_opus_node(
             config=config,
             budget=budget,
             depth=depth,
+            pending_cleanup=pending_cleanup,
         )
         return _node(nested_nodes, name=label)
     except Exception as exc:
@@ -317,49 +319,49 @@ async def _nested_video_node(
     *,
     cookie: str,
     config: Any,
+    pending_cleanup: list[Path],
 ) -> dict[str, Any]:
     label = f"嵌套视频: {block.title}" if block.title else "嵌套视频"
 
     video_path, video_info, video_status, info_prefix = await _resolve_nested_video(
         block, cookie=cookie, config=config
     )
-    try:
-        if video_info is None:
-            # 拿不到视频信息时退化为卡片信息节点
-            lines = [f"「{block.title or '视频'}」", f"BV: {block.bvid or '未知'}"]
-            if block.jump_url:
-                lines.extend(["---", block.jump_url])
-            segments: list[dict[str, Any]] = []
-            if block.cover_url:
-                segments.append({"type": "image", "data": {"file": block.cover_url}})
-            segments.append(
-                {
-                    "type": "text",
-                    "data": {"text": f"{video_status}\n" + "\n".join(lines)},
-                }
-            )
-            return _node(segments, name=label)
+    # 视频文件要等到外层转发真正发出去之后才能删：节点里只留 file:// 路径，
+    # 提前清理会让发送方拿到已经不存在的文件。路径交给调用方统一收尾。
+    if video_path is not None:
+        pending_cleanup.append(video_path)
 
-        danmaku_enabled = bool(_config_value(config, "bilibili_danmaku_enabled", True))
-        nodes, _danmaku, _error = await build_bilibili_video_nodes(
-            video_info,
-            video_path=video_path,
-            video_status=video_status,
-            info_prefix=info_prefix,
-            cookie=cookie,
-            danmaku_enabled=danmaku_enabled,
-            danmaku_batch_size=int(
-                _config_value(config, "bilibili_danmaku_batch_size", 100)
-            ),
-            danmaku_max_count=int(
-                _config_value(config, "bilibili_danmaku_max_count", 0)
-            ),
-            info_node_name=label,
+    if video_info is None:
+        # 拿不到视频信息时退化为卡片信息节点
+        lines = [f"「{block.title or '视频'}」", f"BV: {block.bvid or '未知'}"]
+        if block.jump_url:
+            lines.extend(["---", block.jump_url])
+        segments: list[dict[str, Any]] = []
+        if block.cover_url:
+            segments.append({"type": "image", "data": {"file": block.cover_url}})
+        segments.append(
+            {
+                "type": "text",
+                "data": {"text": f"{video_status}\n" + "\n".join(lines)},
+            }
         )
-        return _node(nodes, name=label)
-    finally:
-        if video_path is not None:
-            cleanup_file(video_path)
+        return _node(segments, name=label)
+
+    danmaku_enabled = bool(_config_value(config, "bilibili_danmaku_enabled", True))
+    nodes, _danmaku, _error = await build_bilibili_video_nodes(
+        video_info,
+        video_path=video_path,
+        video_status=video_status,
+        info_prefix=info_prefix,
+        cookie=cookie,
+        danmaku_enabled=danmaku_enabled,
+        danmaku_batch_size=int(
+            _config_value(config, "bilibili_danmaku_batch_size", 100)
+        ),
+        danmaku_max_count=int(_config_value(config, "bilibili_danmaku_max_count", 0)),
+        info_node_name=label,
+    )
+    return _node(nodes, name=label)
 
 
 def _config_value(config: Any, name: str, default: Any) -> Any:
@@ -380,12 +382,19 @@ async def build_opus_nodes(
     config: Any = None,
     budget: _ExpansionBudget | None = None,
     depth: int = 0,
+    pending_cleanup: list[Path] | None = None,
 ) -> list[dict[str, Any]]:
-    """按「元数据 → 内容 → 嵌套」顺序构建合并转发节点。"""
+    """按「元数据 → 内容 → 嵌套」顺序构建合并转发节点。
+
+    ``pending_cleanup`` 收集嵌套视频下载产生的临时文件，由调用方在转发
+    真正发出之后统一清理（节点里只有 ``file://`` 路径，提前删会发不出去）。
+    """
     max_depth = int(_config_value(config, "bilibili_opus_nested_depth", 5))
     max_cards = int(_config_value(config, "bilibili_opus_nested_max_cards", 8))
     if budget is None:
         budget = _ExpansionBudget(max_cards)
+    if pending_cleanup is None:
+        pending_cleanup = []
 
     nodes: list[dict[str, Any]] = [_build_meta_node(info)]
     nodes.extend(render_blocks_to_nodes(info.blocks))
@@ -416,10 +425,18 @@ async def build_opus_nodes(
                     config=config,
                     budget=budget,
                     depth=depth + 1,
+                    pending_cleanup=pending_cleanup,
                 )
             )
         else:
-            nodes.append(await _nested_video_node(block, cookie=cookie, config=config))
+            nodes.append(
+                await _nested_video_node(
+                    block,
+                    cookie=cookie,
+                    config=config,
+                    pending_cleanup=pending_cleanup,
+                )
+            )
     return nodes
 
 
@@ -574,6 +591,8 @@ async def send_opus(
 ) -> str:
     """获取图文并发送合并转发，返回可读结果文案。"""
     info: OpusInfo | None = None
+    # 嵌套视频下载的临时文件：转发真正发出（或彻底失败）之后才清理
+    pending_cleanup: list[Path] = []
     try:
         info = await _fetch_opus_info(opus_id, cookie=cookie, config=config)
         nodes = await build_opus_nodes(
@@ -585,6 +604,7 @@ async def send_opus(
             config=config,
             budget=budget,
             depth=depth,
+            pending_cleanup=pending_cleanup,
         )
         await _send_forward(
             sender,
@@ -618,6 +638,9 @@ async def send_opus(
                 raise
             raise OpusUnavailableError(f"图文处理失败: {exc}") from fallback_exc
         return f"处理失败，已发送 Bilibili 图文信息合并转发: {exc}"
+    finally:
+        for path in pending_cleanup:
+            cleanup_file(path)
 
 
 __all__ = [

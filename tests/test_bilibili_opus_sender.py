@@ -504,3 +504,99 @@ async def test_send_opus_degrades_when_build_fails(
     assert nodes[0]["data"]["name"] == "图文信息"
     assert nodes[1]["data"]["name"] == "正文"
     assert "构建失败" in nodes[1]["data"]["content"]
+
+
+# ---------- 嵌套视频文件生命周期（回归：不能提前删除） ----------
+
+
+@pytest.mark.asyncio
+async def test_nested_video_file_survives_until_forward_is_sent(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """嵌套视频的临时文件必须活到转发真正发出去之后。
+
+    回归：此前 _nested_video_node 在 finally 里立刻 cleanup，而节点里只有
+    file:// 路径，发送方会拿到已被删除的文件。
+    """
+    video_path = tmp_path / "v.mp4"
+    video_path.write_bytes(b"video")
+    seen: list[bool] = []
+
+    async def _fake_build(info: Any, **kwargs: Any) -> tuple[Any, Any, Any]:
+        # 节点构建时文件必须还在
+        seen.append(video_path.exists())
+        return [{"type": "video", "data": {"file": f"file://{video_path}"}}], [], None
+
+    monkeypatch.setattr(opus_sender, "download_video", _download_video_stub(video_path))
+    monkeypatch.setattr(
+        opus_sender,
+        "_fetch_opus_info",
+        AsyncMock(
+            return_value=_info(
+                TextBlock("正文"), VideoCardBlock(bvid="BV1xx411c7mD", title="投稿视频")
+            )
+        ),
+    )
+    monkeypatch.setattr(opus_sender, "build_bilibili_video_nodes", _fake_build)
+    removed: list[Path] = []
+    monkeypatch.setattr(opus_sender, "cleanup_file", lambda p: removed.append(Path(p)))
+
+    sender = _sender()
+
+    async def _send(*args: Any, **kwargs: Any) -> None:
+        # 发送时文件同样必须还在
+        seen.append(video_path.exists())
+
+    sender.send_group_forward_message = AsyncMock(side_effect=_send)
+
+    await opus_sender.send_opus(
+        "933099353259638816",
+        sender=sender,
+        target_type="group",
+        target_id=10001,
+        config=_config(),
+    )
+
+    assert seen == [True, True], "嵌套视频文件在构建或发送时已被删除"
+    assert removed == [video_path], "发送结束后应清理一次临时文件"
+
+
+@pytest.mark.asyncio
+async def test_nested_video_file_is_cleaned_when_build_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    video_path = tmp_path / "v.mp4"
+    video_path.write_bytes(b"video")
+    monkeypatch.setattr(opus_sender, "download_video", _download_video_stub(video_path))
+    monkeypatch.setattr(
+        opus_sender,
+        "_fetch_opus_info",
+        AsyncMock(
+            return_value=_info(
+                TextBlock("正文"), VideoCardBlock(bvid="BV1xx411c7mD", title="视频")
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        opus_sender,
+        "build_bilibili_video_nodes",
+        AsyncMock(side_effect=RuntimeError("构建失败")),
+    )
+    pending_cleanup: list[Path] = []
+
+    with pytest.raises(RuntimeError):
+        await opus_sender.build_opus_nodes(
+            _info(TextBlock("正文"), VideoCardBlock(bvid="BV1xx411c7mD", title="视频")),
+            sender=_sender(),
+            target_type="group",
+            target_id=1,
+            config=_config(),
+            pending_cleanup=pending_cleanup,
+        )
+
+    # 构建失败时路径仍留在待清理列表里，交给调用方收尾，不会泄漏临时文件
+    assert pending_cleanup == [video_path]
+
+
+def _download_video_stub(video_path: Path) -> Any:
+    return AsyncMock(return_value=(video_path, _video_info(), 80))
