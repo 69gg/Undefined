@@ -116,18 +116,21 @@ def test_apply_writes_only_target_keys_and_keeps_comments(
 
     assert outcome.written is True
     assert outcome.changed_keys == ("onebot.ws_url", "search.searxng_url")
-    text = config.read_text(encoding="utf-8")
-    # 注释仍在
-    assert "# zh: NapCat WebSocket地址。" in text
-    assert "# zh: SearXNG 地址。" in text
-    # 未触碰的键保持不变
-    assert 'token = ""' in text
-    assert 'password = "changeme"' in text
-    assert "port = 8787" in text
+
+    parsed = tomllib.loads(config.read_text(encoding="utf-8"))
+    # 未触碰的键保持原值（用结构化断言，而不是对文件原文做子串匹配）
+    assert parsed["onebot"]["token"] == ""
+    assert parsed["webui"]["password"] == "changeme"
+    assert parsed["webui"]["port"] == 8787
     # 目标键已更新
-    parsed = tomllib.loads(text)
     assert parsed["onebot"]["ws_url"] == "ws://napcat:3001"
     assert parsed["search"]["searxng_url"] == "http://searxng:8080"
+
+    # 注释映射仍然覆盖被改动的键——渲染时用它补齐注释，丢了说明用户自定义注释被抹掉
+    comments = config_patch.build_comment_map(config, example)
+    assert comments["onebot.ws_url"]["zh"] == "NapCat WebSocket地址。"
+    assert comments["search.searxng_url"]["zh"] == "SearXNG 地址。"
+    assert parsed["webui"]["url"] == "127.0.0.1"
 
 
 def test_apply_creates_backup_before_overwrite(

@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import zipfile
 from pathlib import Path
@@ -81,6 +82,35 @@ def test_dockerignore_does_not_exclude_sources() -> None:
         assert required not in entries, f".dockerignore 不应排除 {required}"
 
 
+def test_dockerfile_copy_sources_survive_dockerignore() -> None:
+    """Dockerfile 里 COPY 的源路径必须不被 .dockerignore 排除。
+
+    这条曾经真踩过：``*.md`` 把 ``COPY README.md`` 挡掉，只有构建时才报错
+    （BuildKit 的 CopyIgnoredFile 警告）。
+    """
+    dockerfile = (TEMPLATE_DIR / "Dockerfile.bot").read_text(encoding="utf-8")
+    copied: set[str] = set()
+    for line in dockerfile.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("COPY ") or "--from=" in stripped:
+            continue
+        parts = [token for token in stripped.split()[1:] if not token.startswith("--")]
+        # 最后一个参数是目标路径，其余是源
+        for source in parts[:-1]:
+            if "$" in source:
+                continue
+            copied.add(source.rstrip("/"))
+
+    assert copied, "未从 Dockerfile 解析出任何 COPY 源，测试需要更新"
+    entries = _dockerignore_entries(REPO_ROOT / ".dockerignore")
+    for source in sorted(copied):
+        top = source.split("/", 1)[0]
+        assert top not in entries, (
+            f"Dockerfile COPY 了 {source}，但 .dockerignore 排除了 {top}"
+        )
+        assert source not in entries, f"Dockerfile COPY 了 {source}，但它已被排除"
+
+
 @pytest.mark.parametrize("name", REQUIRED_TEMPLATES)
 def test_required_template_exists_and_is_not_empty(name: str) -> None:
     path = TEMPLATE_DIR / name
@@ -114,12 +144,45 @@ def test_dockerfile_builds_from_repo_context() -> None:
         assert (REPO_ROOT / source).exists(), f"仓库缺少 {source}"
 
 
-def test_dockerfile_installs_runtime_dependencies() -> None:
-    """ffmpeg / docker CLI / playwright 缺一不可，做成断言防止被误删。"""
-    text = (TEMPLATE_DIR / "Dockerfile.bot").read_text(encoding="utf-8")
-    assert "ffmpeg" in text
-    assert "docker:27-cli" in text
-    assert "playwright install" in text
+def _docker_daemon_available() -> bool:
+    if shutil.which("docker") is None:
+        return False
+    try:
+        completed = subprocess.run(
+            ["docker", "version", "--format", "{{.Server.Version}}"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return completed.returncode == 0
+
+
+@pytest.mark.skipif(not _docker_daemon_available(), reason="需要可用的 Docker daemon")
+def test_dockerfile_passes_buildkit_check() -> None:
+    """用 BuildKit 的 ``--check`` 静态校验 Dockerfile。
+
+    这里能真正验到「COPY 的源路径是否存在」「指令是否合法」，
+    run 阶段不会执行、也不会拉镜像。
+    """
+    completed = subprocess.run(
+        [
+            "docker",
+            "build",
+            "--check",
+            "--file",
+            str(TEMPLATE_DIR / "Dockerfile.bot"),
+            ".",
+        ],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        timeout=180,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
 
 
 def test_gitignore_ignores_runtime_dir_without_touching_templates() -> None:

@@ -438,6 +438,9 @@ def run_up(options: dict[str, Any]) -> int:
         "  额外服务：" + (", ".join(services) if services else "无（仅本体 + NapCat）")
     )
     print(f"  端口绑定：{port_bind}")
+    if nagaagent_enabled:
+        # 明确告知：只开问答能力，外部网关始终关闭，避免误解为已接通 Naga 服务端
+        print("  NagaAgent：开启代码问答能力；外部网关 [naga].enabled 保持关闭")
     describe_patch_plan(plan, existing_config)
 
     if not dry_run and wizard.enabled:

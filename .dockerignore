@@ -43,9 +43,10 @@ apps/**/src-tauri/target
 apps/**/src-tauri/gen
 apps/**/src-tauri/.cargo
 
-# 文档（镜像不需要；README.md 由 Dockerfile 显式 COPY）
-docs
+# 文档（镜像不需要；README.md 由 Dockerfile 显式 COPY，靠末尾的 ! 放行）
+docs/
 *.md
+!README.md
 
 # NagaAgent 子模块（体积大，container 模式按需 bind mount）
 code
