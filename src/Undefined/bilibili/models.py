@@ -64,3 +64,100 @@ class DanmakuItem:
     mid_hash: str = ""
     color: int = 0
     weight: int = 0
+
+
+@dataclass(slots=True, frozen=True)
+class OpusStats:
+    """图文互动统计。"""
+
+    view: int = 0
+    like: int = 0
+    comment: int = 0
+    repost: int = 0
+    coin: int = 0
+    favorite: int = 0
+
+
+@dataclass(slots=True, frozen=True)
+class OpusAuthor:
+    """图文作者信息。"""
+
+    mid: int = 0
+    name: str = ""
+    avatar_url: str = ""
+
+
+@dataclass(slots=True, frozen=True)
+class TextBlock:
+    """图文段落中的纯文本。"""
+
+    text: str
+
+
+@dataclass(slots=True, frozen=True)
+class ImageBlock:
+    """图文段落中的图片组。"""
+
+    urls: tuple[str, ...]
+
+
+@dataclass(slots=True, frozen=True)
+class VideoCardBlock:
+    """指向投稿视频的卡片段落。"""
+
+    bvid: str = ""
+    title: str = ""
+    cover_url: str = ""
+    jump_url: str = ""
+
+
+@dataclass(slots=True, frozen=True)
+class OpusCardBlock:
+    """指向另一篇图文的卡片段落。"""
+
+    opus_id: str = ""
+    title: str = ""
+    cover_url: str = ""
+    jump_url: str = ""
+
+
+@dataclass(slots=True, frozen=True)
+class LinkCardBlock:
+    """其它类型的卡片段落（商品 / 直播 / 投票 / 通用链接等）。"""
+
+    title: str = ""
+    jump_url: str = ""
+    cover_url: str = ""
+
+
+OpusBlock = TextBlock | ImageBlock | VideoCardBlock | OpusCardBlock | LinkCardBlock
+
+
+@dataclass(slots=True, frozen=True)
+class OpusInfo:
+    """图文（opus / 动态）基本信息。"""
+
+    opus_id: str
+    title: str
+    blocks: tuple[OpusBlock, ...]
+    author: OpusAuthor = OpusAuthor()
+    stats: OpusStats = OpusStats()
+    pub_ts: int = 0
+    cover_url: str = ""
+    dynamic_type_id: str = ""
+    is_forward: bool = False
+    forward_origin: OpusAuthor | None = None
+
+    @property
+    def url(self) -> str:
+        """标准图文链接。"""
+        return f"https://www.bilibili.com/opus/{self.opus_id}"
+
+    @property
+    def images(self) -> tuple[str, ...]:
+        """按顺序收集全部图片 URL。"""
+        urls: list[str] = []
+        for block in self.blocks:
+            if isinstance(block, ImageBlock):
+                urls.extend(block.urls)
+        return tuple(urls)

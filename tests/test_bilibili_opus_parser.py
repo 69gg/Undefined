@@ -1,0 +1,129 @@
+from __future__ import annotations
+
+import html
+import json
+from typing import Any
+from unittest.mock import AsyncMock
+
+import pytest
+
+from Undefined.bilibili import opus_parser
+from Undefined.bilibili.opus_parser import (
+    extract_opus_from_json_message,
+    extract_opus_ids_with_shortlinks,
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("https://www.bilibili.com/opus/933099353259638816", ["933099353259638816"]),
+        ("https://m.bilibili.com/opus/106514206257210983", ["106514206257210983"]),
+        ("看这个 bilibili.com/opus/123456789012345", ["123456789012345"]),
+        ("https://t.bilibili.com/718384798557536290", ["718384798557536290"]),
+        ("http://t.bilibili.com/718384798557536290", ["718384798557536290"]),
+        (
+            "两个 https://www.bilibili.com/opus/111111111111111 和 "
+            "https://t.bilibili.com/222222222222222",
+            ["111111111111111", "222222222222222"],
+        ),
+        (
+            "重复 https://www.bilibili.com/opus/111111111111111 "
+            "https://www.bilibili.com/opus/111111111111111",
+            ["111111111111111"],
+        ),
+    ],
+)
+async def test_extract_opus_ids_from_plain_text(text: str, expected: list[str]) -> None:
+    assert await extract_opus_ids_with_shortlinks(text) == expected
+
+
+@pytest.mark.asyncio
+async def test_extract_opus_ids_ignores_video_links_and_bare_numbers() -> None:
+    text = "https://www.bilibili.com/video/BV1xx411c7mD 933099353259638816"
+    assert await extract_opus_ids_with_shortlinks(text) == []
+
+
+@pytest.mark.asyncio
+async def test_extract_opus_ids_resolves_short_link(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        opus_parser,
+        "resolve_short_url",
+        AsyncMock(return_value="https://www.bilibili.com/opus/555555555555555"),
+    )
+    assert await extract_opus_ids_with_shortlinks("https://b23.tv/abcd123") == [
+        "555555555555555"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_extract_opus_ids_keeps_direct_hits_when_short_link_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(opus_parser, "resolve_short_url", AsyncMock(return_value=None))
+    text = "https://b23.tv/abcd123 https://www.bilibili.com/opus/777777777777777"
+    assert await extract_opus_ids_with_shortlinks(text) == ["777777777777777"]
+
+
+def _json_segment(payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "type": "json",
+        "data": {"data": html.escape(json.dumps(payload, ensure_ascii=False))},
+    }
+
+
+@pytest.mark.asyncio
+async def test_extract_opus_from_json_message_detail_1() -> None:
+    segments = [
+        _json_segment(
+            {
+                "app": "com.tencent.structmsg",
+                "meta": {
+                    "detail_1": {
+                        "qqdocurl": "https://www.bilibili.com/opus/888888888888888?share_source=qq"
+                    }
+                },
+            }
+        )
+    ]
+    assert await extract_opus_from_json_message(segments) == ["888888888888888"]
+
+
+@pytest.mark.asyncio
+async def test_extract_opus_from_json_message_news() -> None:
+    segments = [
+        _json_segment(
+            {"meta": {"news": {"jumpUrl": "https://t.bilibili.com/999999999999999"}}}
+        )
+    ]
+    assert await extract_opus_from_json_message(segments) == ["999999999999999"]
+
+
+@pytest.mark.asyncio
+async def test_extract_opus_from_json_message_short_link(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        opus_parser,
+        "resolve_short_url",
+        AsyncMock(return_value="https://www.bilibili.com/opus/121212121212121"),
+    )
+    segments = [
+        _json_segment({"meta": {"detail_1": {"qqdocurl": "https://b23.tv/xyz987"}}})
+    ]
+    assert await extract_opus_from_json_message(segments) == ["121212121212121"]
+
+
+@pytest.mark.asyncio
+async def test_extract_opus_from_json_message_skips_invalid_payloads() -> None:
+    segments: list[dict[str, Any]] = [
+        {"type": "text", "data": {"text": "https://www.bilibili.com/opus/1"}},
+        {"type": "json", "data": {"data": "not json"}},
+        {"type": "json", "data": {"data": '"just a string"'}},
+        {"type": "json", "data": {}},
+        _json_segment({"meta": {"detail_1": {"qqdocurl": "https://example.com/x"}}}),
+    ]
+    assert await extract_opus_from_json_message(segments) == []

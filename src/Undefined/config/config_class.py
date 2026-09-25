@@ -209,6 +209,11 @@ class Config:
     bilibili_danmaku_max_count: int
     bilibili_auto_extract_group_ids: list[int]
     bilibili_auto_extract_private_ids: list[int]
+    # Bilibili 图文（opus）提取；与视频共用 auto_extract_enabled 与白名单
+    bilibili_opus_enabled: bool
+    bilibili_opus_max_items: int
+    bilibili_opus_nested_depth: int
+    bilibili_opus_nested_max_cards: int
     # Douyin 视频提取
     douyin_use_proxy: bool
     douyin_auto_extract_enabled: bool

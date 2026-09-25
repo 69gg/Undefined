@@ -6,6 +6,7 @@ import asyncio
 from functools import partial
 import logging
 from pathlib import Path
+from typing import Any
 import uuid
 
 from Undefined.bilibili.api_client import BilibiliApiClient
@@ -23,6 +24,7 @@ __all__ = [
     "VideoInfo",
     "cleanup_file",
     "download_video",
+    "get_opus_item",
     "get_video_info",
 ]
 
@@ -37,6 +39,21 @@ async def get_video_info(
         cookie = sessdata
 
     return await asyncio.to_thread(partial(_get_video_info_sync, bvid, cookie=cookie))
+
+
+async def get_opus_item(
+    dynamic_id: str,
+    cookie: str = "",
+) -> dict[str, Any]:
+    """获取图文 / 动态的原始 ``data.item`` 结构。"""
+    return await asyncio.to_thread(
+        partial(_get_opus_item_sync, dynamic_id, cookie=cookie)
+    )
+
+
+def _get_opus_item_sync(dynamic_id: str, *, cookie: str = "") -> dict[str, Any]:
+    with BilibiliApiClient(cookie=cookie, timeout=_DEFAULT_TIMEOUT_SECONDS) as client:
+        return client.get_opus_item(dynamic_id)
 
 
 def _get_video_info_sync(bvid: str, *, cookie: str = "") -> VideoInfo:

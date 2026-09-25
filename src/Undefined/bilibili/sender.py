@@ -14,6 +14,11 @@ from Undefined.bilibili.downloader import (
     download_video,
     get_video_info,
 )
+from Undefined.bilibili.format import (
+    format_count as _format_count,
+    format_duration as _format_duration,
+    format_progress as _format_progress,
+)
 from Undefined.bilibili.models import DanmakuItem, VideoStats
 from Undefined.bilibili.parser import normalize_to_bvid
 from Undefined.utils.io import get_file_size
@@ -27,30 +32,6 @@ logger = logging.getLogger(__name__)
 
 _BOT_NAME = "Undefined"
 _DEFAULT_BOT_UIN = "10000"
-
-
-def _format_count(value: int) -> str:
-    if value < 0:
-        value = 0
-    if value >= 100_000_000:
-        return f"{value / 100_000_000:.1f}亿"
-    if value >= 10_000:
-        return f"{value / 10_000:.1f}万"
-    return str(value)
-
-
-def _format_duration(seconds: int) -> str:
-    seconds = max(0, seconds)
-    hours, remainder = divmod(seconds, 3600)
-    minutes, secs = divmod(remainder, 60)
-    if hours:
-        return f"{hours}:{minutes:02d}:{secs:02d}"
-    return f"{minutes}:{secs:02d}"
-
-
-def _format_progress(progress_ms: int) -> str:
-    seconds = max(0, progress_ms) // 1000
-    return _format_duration(seconds)
 
 
 def _format_stats_line(stats: VideoStats) -> str:
@@ -158,6 +139,11 @@ def format_bilibili_video_info(info: "VideoInfo") -> str:
     return "\n".join(lines)
 
 
+def format_bilibili_video_stats(stats: VideoStats) -> str:
+    """格式化视频互动数据行（图文嵌套视频节点复用）。"""
+    return _format_stats_line(stats)
+
+
 def _build_uid_message(
     info: "VideoInfo",
     *,
@@ -206,6 +192,57 @@ def _build_danmaku_groups(
             )
         )
     return groups
+
+
+async def build_bilibili_video_nodes(
+    info: "VideoInfo",
+    *,
+    video_path: Path | None = None,
+    video_status: str = "未发送视频",
+    info_prefix: str = "",
+    cookie: str = "",
+    danmaku_enabled: bool = True,
+    danmaku_batch_size: int = 100,
+    danmaku_max_count: int = 0,
+    info_node_name: str = "视频信息",
+) -> tuple[list[dict[str, Any]], list[DanmakuItem], str | None]:
+    """构建视频合并转发节点（视频信息 / 视频文件或状态 / 弹幕）。
+
+    供视频自动提取与图文嵌套视频卡片复用；返回
+    ``(nodes, danmaku, danmaku_error)``，拉取弹幕失败时降级为错误文案节点。
+    """
+    danmaku, danmaku_error = await _fetch_danmaku_best_effort(
+        info,
+        cookie=cookie,
+        enabled=danmaku_enabled,
+        max_count=danmaku_max_count,
+    )
+
+    info_node = _node(
+        _build_info_segments(info, prefix=info_prefix), name=info_node_name
+    )
+
+    if video_path is not None:
+        video_content: str | list[dict[str, Any]] = [
+            {
+                "type": "video",
+                "data": {"file": f"file://{video_path.resolve()}"},
+            }
+        ]
+    else:
+        video_content = video_status
+    video_node = _node(video_content, name="视频")
+
+    if not danmaku_enabled:
+        return [info_node, video_node], danmaku, danmaku_error
+
+    danmaku_content: str | list[dict[str, Any]]
+    if danmaku_error:
+        danmaku_content = f"弹幕获取失败: {danmaku_error}"
+    else:
+        danmaku_content = _build_danmaku_groups(danmaku, batch_size=danmaku_batch_size)
+    danmaku_node = _node(danmaku_content, name="弹幕")
+    return [info_node, video_node, danmaku_node], danmaku, danmaku_error
 
 
 def _build_forward_nodes(

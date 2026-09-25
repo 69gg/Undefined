@@ -79,6 +79,31 @@ def load_integrations(
     bilibili_auto_extract_private_ids = _coerce_int_list(
         _get_value(data, ("bilibili", "auto_extract_private_ids"), None)
     )
+    # 图文（opus）：与视频共用 auto_extract_enabled 与白名单，只额外提供独立开关
+    bilibili_opus_enabled = _coerce_bool(
+        _get_value(data, ("bilibili", "opus_enabled"), None), True
+    )
+    bilibili_opus_max_items = _coerce_int(
+        _get_value(data, ("bilibili", "opus_max_items"), None), 3
+    )
+    if bilibili_opus_max_items <= 0:
+        bilibili_opus_max_items = 3
+    elif bilibili_opus_max_items > 10:
+        bilibili_opus_max_items = 10
+    bilibili_opus_nested_depth = _coerce_int(
+        _get_value(data, ("bilibili", "opus_nested_depth"), None), 5
+    )
+    if bilibili_opus_nested_depth < 0:
+        bilibili_opus_nested_depth = 0
+    elif bilibili_opus_nested_depth > 5:
+        bilibili_opus_nested_depth = 5
+    bilibili_opus_nested_max_cards = _coerce_int(
+        _get_value(data, ("bilibili", "opus_nested_max_cards"), None), 8
+    )
+    if bilibili_opus_nested_max_cards < 0:
+        bilibili_opus_nested_max_cards = 0
+    elif bilibili_opus_nested_max_cards > 20:
+        bilibili_opus_nested_max_cards = 20
 
     # Douyin 配置
     douyin_use_proxy = _coerce_bool(
@@ -334,6 +359,10 @@ def load_integrations(
         "bilibili_danmaku_max_count": bilibili_danmaku_max_count,
         "bilibili_auto_extract_group_ids": bilibili_auto_extract_group_ids,
         "bilibili_auto_extract_private_ids": bilibili_auto_extract_private_ids,
+        "bilibili_opus_enabled": bilibili_opus_enabled,
+        "bilibili_opus_max_items": bilibili_opus_max_items,
+        "bilibili_opus_nested_depth": bilibili_opus_nested_depth,
+        "bilibili_opus_nested_max_cards": bilibili_opus_nested_max_cards,
         "douyin_use_proxy": douyin_use_proxy,
         "douyin_auto_extract_enabled": douyin_auto_extract_enabled,
         "douyin_max_duration": douyin_max_duration,

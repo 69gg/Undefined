@@ -1,6 +1,6 @@
 # 自动处理管线开发指南
 
-自动处理管线位于 `src/Undefined/skills/pipelines/`，用于在普通消息进入 AI 自动回复前执行自动提取，例如 Bilibili 视频、抖音视频、arXiv 论文和 GitHub 仓库卡片。斜杠命令优先级高于自动处理管线，命中命令后不会继续触发自动提取或 AI 回复。
+自动处理管线位于 `src/Undefined/skills/pipelines/`，用于在普通消息进入 AI 自动回复前执行自动提取，例如 Bilibili 视频、Bilibili 图文（opus）、抖音视频、arXiv 论文和 GitHub 仓库卡片。斜杠命令优先级高于自动处理管线，命中命令后不会继续触发自动提取或 AI 回复。
 
 `MessageHandler` 启动时会通过异步初始化在线程中加载管线配置和 handler 模块，避免目录扫描、`config.json` 读取和模块导入阻塞事件循环；注册 OneBot 消息回调前会等待首次加载完成，后续热重载也在线程中执行。
 
@@ -30,6 +30,24 @@ Douyin 自动提取管线命中 `v.douyin.com/...`、`douyin.com/video/<id>` 或
 
 下载链路读取抖音 SSR share 页中的 `window._ROUTER_DATA`，从 `video.play_addr` 提取 token，再按 `[douyin].prefer_ratios` 探测 `aweme/v1/play/`。探测使用 2 字节 Range GET，并优先按 `Content-Range` 中的总长度对重复文件去重，缺失时回退 `Content-Length`。
 
+## 内置 Bilibili 图文（opus）管线
+
+Bilibili 图文管线命中 `bilibili.com/opus/<id>`、`t.bilibili.com/<id>`、`b23.tv` 短链或 QQ 小程序分享卡片后，发送一次外层合并转发，节点顺序固定：
+
+1. `图文信息`：封面 + 标题 / UP主 / 时间 / 阅读点赞评论转发 / 原文链接；
+2. `正文 …`：正文文本与图片按原始顺序混排，按单节点 4000 字切分（`正文 1/3` 这类节点名），不截断、不丢内容；
+3. 嵌套节点：正文里的图文卡片与视频卡片各自成为独立嵌套合并转发（`嵌套图文: …` / `嵌套视频: …`），其它卡片类型渲染为单个 `链接卡片` 节点。
+
+嵌套展开受 `[bilibili].opus_nested_depth`（默认 5 层）与 `opus_nested_max_cards`（默认 8 张）约束，超出边界时卡片降级为一行 `标题 — 链接` 文本节点。嵌套视频会真实下载视频文件并复用视频侧的清晰度/时长/体积限制，超限或失败时只发信息节点。
+
+数据来源与解析：
+
+- 优先 `https://api.bilibili.com/x/polymer/web-dynamic/v1/opus/detail`（`modules` 为列表，按 `module_type` 分组）；
+- 失败时回退 `https://api.bilibili.com/x/polymer/web-dynamic/v1/detail`（`modules` 为字典，正文在 `module_dynamic.desc.text`，图片在 `module_dynamic.major.draw`）；
+- `OpusInfo` 的 `blocks` 由 `module_content.paragraphs[]` 按 `para_type` 转换而来：文本 1、图片 2、分割线 3、块引用 4、列表 5、链接卡片 6、代码 7。
+
+管线只在 `auto_extract_enabled` 与 `opus_enabled` 同时为真、且会话命中白名单时生效；与视频管线相互独立，同一条消息同时包含 BV 号与图文链接时两条管线各自发送。
+
 ## 目录结构
 
 ```text
@@ -39,6 +57,9 @@ src/Undefined/skills/pipelines/
 ├── models.py
 ├── context.py
 ├── bilibili/
+│   ├── config.json
+│   └── handler.py
+├── bilibili_opus/
 │   ├── config.json
 │   └── handler.py
 ├── douyin/
