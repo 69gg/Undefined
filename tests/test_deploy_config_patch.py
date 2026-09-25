@@ -255,3 +255,48 @@ def test_rendered_output_is_valid_toml(config_dir: tuple[Path, Path, Path]) -> N
     parsed = tomllib.loads(rendered)
     assert parsed["webui"]["password"] == "p@ss word"
     assert parsed["api"]["auth_key"] == "k" * 40
+
+
+# --------------------------------------------------------------------------- #
+# 合并写入计划
+# --------------------------------------------------------------------------- #
+
+
+def test_merge_plans_combines_keys(tmp_path: Path) -> None:
+    config = tmp_path / "config.toml"
+    first = config_patch.PatchPlan(config, {"onebot.ws_url": "ws://napcat:3001"})
+    second = config_patch.PatchPlan(
+        config, {"features.nagaagent_mode_enabled": True}, about={"a": "b"}
+    )
+    merged = config_patch.merge_plans(first, second)
+    assert merged.desired == {
+        "onebot.ws_url": "ws://napcat:3001",
+        "features.nagaagent_mode_enabled": True,
+    }
+    assert merged.about == {"a": "b"}
+
+
+def test_merge_plans_later_wins(tmp_path: Path) -> None:
+    config = tmp_path / "config.toml"
+    first = config_patch.PatchPlan(config, {"webui.url": "127.0.0.1"})
+    second = config_patch.PatchPlan(config, {"webui.url": "0.0.0.0"})
+    assert config_patch.merge_plans(first, second).desired["webui.url"] == "0.0.0.0"
+
+
+def test_merge_plans_rejects_different_targets(tmp_path: Path) -> None:
+    first = config_patch.PatchPlan(tmp_path / "a.toml", {"x": 1})
+    second = config_patch.PatchPlan(tmp_path / "b.toml", {"y": 2})
+    with pytest.raises(ValueError, match="不同文件"):
+        config_patch.merge_plans(first, second)
+
+
+def test_merge_plans_requires_at_least_one_plan() -> None:
+    with pytest.raises(ValueError, match="没有可合并"):
+        config_patch.merge_plans()
+
+
+def test_merge_plans_ignores_empty_plans(tmp_path: Path) -> None:
+    config = tmp_path / "config.toml"
+    empty = config_patch.PatchPlan(tmp_path / "other.toml", {})
+    real = config_patch.PatchPlan(config, {"x": 1})
+    assert config_patch.merge_plans(empty, real).config_path == config

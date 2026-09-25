@@ -204,6 +204,27 @@ def apply_plan(
     )
 
 
+def merge_plans(*plans: PatchPlan) -> PatchPlan:
+    """合并多个写入计划（同一 ``config.toml``）。
+
+    键重复时后者优先；任一计划的 ``config_path`` 不一致直接报错，避免把两份
+    不同文件的计划悄悄混在一起。
+    """
+    relevant = [plan for plan in plans if plan.desired]
+    if not relevant:
+        raise ValueError("没有可合并的写入计划")
+    targets = {plan.config_path for plan in relevant}
+    if len(targets) != 1:
+        raise ValueError(f"写入计划指向了不同文件：{sorted(str(p) for p in targets)}")
+
+    desired: dict[str, Any] = {}
+    about: dict[str, str] = {}
+    for plan in relevant:
+        desired.update(plan.desired)
+        about.update(plan.about)
+    return PatchPlan(config_path=relevant[0].config_path, desired=desired, about=about)
+
+
 __all__ = [
     "BACKUP_DIR_NAME",
     "BACKUP_FILE_PREFIX",
@@ -215,5 +236,6 @@ __all__ = [
     "build_comment_map",
     "ensure_config_file",
     "load_toml",
+    "merge_plans",
     "render_patched",
 ]
