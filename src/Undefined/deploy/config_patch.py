@@ -156,12 +156,14 @@ def apply_plan(
     example_path: Path,
     backup_dir: Path,
     comment_map: dict[str, Any] | None = None,
+    dry_run: bool = False,
 ) -> PatchOutcome:
     """写盘：备份现有文件 → 原子替换。
 
     - 无差异时不写文件、不备份，返回 ``changed_keys=()``
     - 目标键当前值与原值不同时**照常写入**：是否覆盖由调用方在
       :meth:`PatchPlan.items` 的 ``is_conflict`` 上先做确认
+    - ``dry_run=True`` 时只渲染并校验，不写任何文件（含备份）
     """
     current = load_toml(plan.config_path)
     items = plan.items(current)
@@ -188,6 +190,16 @@ def apply_plan(
     except tomllib.TOMLDecodeError as exc:
         raise ConfigError(f"渲染结果不是合法 TOML，已放弃写入：{exc}") from exc
 
+    changed_keys = tuple(item.key for item in changes)
+    if dry_run:
+        return PatchOutcome(
+            path=plan.config_path,
+            written=False,
+            changed_keys=changed_keys,
+            backup_path=None,
+            rendered=rendered,
+        )
+
     backup_path: Path | None = None
     if plan.config_path.is_file():
         backup_dir.mkdir(parents=True, exist_ok=True)
@@ -198,7 +210,7 @@ def apply_plan(
     return PatchOutcome(
         path=plan.config_path,
         written=True,
-        changed_keys=tuple(item.key for item in changes),
+        changed_keys=changed_keys,
         backup_path=backup_path,
         rendered=rendered,
     )

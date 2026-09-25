@@ -12,6 +12,7 @@ from typing import Sequence
 
 from Undefined.deploy import catalog
 from Undefined.deploy.catalog import EXIT_ERROR, EXIT_OK
+from Undefined.deploy.docker_cli import PULL_POLICIES
 
 PROGRAM = "deploy"
 
@@ -58,9 +59,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="只打印将要写入的 config.toml 变更与生成的 compose，不落盘、不启动容器",
     )
     up.add_argument(
-        "--force",
-        action="store_true",
-        help="即使 config.toml 的拓扑键已被手工修改，也按本次选择覆盖",
+        "--pull",
+        choices=PULL_POLICIES,
+        default=None,
+        help=(
+            "镜像拉取策略，默认 missing（本地没有才拉）。"
+            "always=总是检查更新；never=完全不拉（离线）"
+        ),
     )
 
     down = subparsers.add_parser("down", help="停止服务（默认保留数据）")
@@ -76,7 +81,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     subparsers.add_parser("status", help="显示服务状态、入口地址与凭据")
-    subparsers.add_parser("logs", help="跟踪服务日志")
+
+    logs = subparsers.add_parser("logs", help="跟踪服务日志")
+    logs.add_argument(
+        "services",
+        nargs="*",
+        help="只显示这些服务的日志（默认全部），如 napcat undefined-bot",
+    )
+    logs.add_argument(
+        "--tail",
+        type=int,
+        default=None,
+        metavar="N",
+        help="只显示最近 N 行",
+    )
 
     return parser
 
