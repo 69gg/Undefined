@@ -188,6 +188,11 @@ def utc_timestamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def utc_stamp_compact() -> str:
+    """文件名安全的 UTC 时间戳（不含冒号，跨平台可用）。"""
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
 def write_text(path: Path, content: str, *, secret: bool = False) -> None:
     """原子写入文本，可选收紧权限。
 
@@ -247,6 +252,7 @@ __all__ = [
     "read_state",
     "repo_root",
     "save_state",
+    "utc_stamp_compact",
     "utc_timestamp",
     "write_text",
 ]
