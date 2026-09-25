@@ -71,7 +71,7 @@ uv run playwright install
 
 - **Docker**：Code Delivery Agent 需要 `docker` 可执行文件与可用守护进程（镜像由 `[code_delivery].docker_image` 指定，默认 `ubuntu:24.04`，首次运行会拉取）。不使用该 Agent 时可设 `[code_delivery].enabled = false`。
 - **FFmpeg**：必须能从 `PATH` 找到。Bilibili DASH 音视频合并、`messages.send_voice` 与微信侧语音转 SILK 都依赖它；缺失时相关操作会明确报错。
-- **Node.js**：仅在 `config/mcp.json` 中使用 `npx` / `uvx` 这类本地子进程 MCP 服务器时需要。
+- **MCP 服务器的运行时**：仅在 `config/mcp.json` 中配置本地子进程 MCP 服务器时需要——`command` 为 `npx` 等 Node 命令时需要 Node.js；为 `uvx` 时需要 `uv`（`uvx` 是 `uv tool run` 的别名，随 `uv` 一同安装，见上文[安装依赖](#2-安装依赖)）。
 
 ### 4. 需要一并部署的自托管服务（概览）
 
