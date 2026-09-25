@@ -1,3 +1,14 @@
+## v3.16.1 自托管服务部署依赖说明
+
+本版本补齐部署文档中长期缺失的一块：除 Python 运行环境外，Undefined 还需要连接若干由部署方自行搭建的服务，此前这些依赖只散落在配置字段注释里，没有一处说明哪些是必需的、不部署会失去什么。
+
+- 部署文档新增「需要一并部署的自托管服务（概览）」，明确四项服务的必要性与影响面：OneBot V11 协议端（NapCat / Lagrange.Core）为必需项，QQ 消息的收发完全由协议端决定；SearXNG 只影响内置 `web_search`；Firecrawl 默认关闭，可用官方 keyless、官方 + 自己的 API Key 或自部署实例；lxmusic2api 不部署时整组 `music.*` 工具隐藏。每项给出配置位置与官方部署说明链接，不重复上游安装步骤。
+- 同一节补充宿主环境依赖：Docker（Code Delivery Agent，可 `enabled = false` 关闭）、FFmpeg（Bilibili 音视频合并、原生语音与微信侧 SILK 编码）、Node.js（仅 `npx` / `uvx` 型 MCP 服务器需要）。概览放在源码部署的安装步骤之后、配置环境之前，pip/uv tool 部署同样适用。
+- 配置文档在 `[onebot]`、`[search]`、`[lxmusic2api]` 对应小节补充部署前提与可选性说明，`config.toml.example` 同步补注 SearXNG 与 Firecrawl 的自部署提示。
+- 首页 Release 下载速查压缩为一张三列表格（目标 / 文件 / 平台），去掉与正文重复的表述。
+
+---
+
 ## v3.16.0 Bilibili 图文（opus）提取
 
 本版本为 B 站内容自动提取补齐图文（opus / 动态）类型，命中图文链接后发送一次合并转发：第一条是图文元数据、第二条起是正文，文字与图片按原顺序混排，正文超长自动分段；正文里的图文与视频卡片各自成为嵌套转发节点；新增的 `bilibili_opus` 工具还支持按字数区间或关键词读取正文。
