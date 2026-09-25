@@ -1,0 +1,26 @@
+# 部署模板片段：SearXNG（内置 web_search 工具的后端）。
+#
+# 复用官方镜像，但必须自备 settings.yml：镜像在挂载目录为空时会生成只含
+# use_default_settings + secret_key 的极简文件，其余键取包内默认，其中
+# search.formats 默认只有 html —— 对 format=json 的请求会直接 403。
+# 模板见 templates/searxng.settings.yml，部署脚本会写入随机 secret_key。
+#
+# limiter 保持 false（见 settings 模板），因此**不需要**官方 compose 里的 valkey。
+
+services:
+  searxng:
+    image: ${UNDEFINED_DEPLOY_SEARXNG_IMAGE}
+    container_name: searxng
+    restart: unless-stopped
+    networks:
+      - undefined-deploy
+    environment:
+      SEARXNG_BASE_URL: ${UNDEFINED_DEPLOY_SEARXNG_BASE_URL}
+    ports:
+      - "${UNDEFINED_DEPLOY_PORT_SEARXNG_BIND}:${UNDEFINED_DEPLOY_PORT_SEARXNG}:8080"
+    volumes:
+      - ./searxng:/etc/searxng
+      - searxng-cache:/var/cache/searxng
+
+volumes:
+  searxng-cache:

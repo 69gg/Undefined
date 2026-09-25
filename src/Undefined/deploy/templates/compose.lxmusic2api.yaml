@@ -1,0 +1,31 @@
+# 部署模板片段：lxmusic2api（music.* 工具集的后端）。
+#
+# 上游没有任何预构建镜像（仓库无 .github、无 tag、无 release），因此镜像由本
+# 项目在 CI 里 clone 上游固定 commit 后构建，推到 GHCR（见 images.py 的 pin）。
+#
+# 配置落在 ./lxmusic2api/config.toml（由部署脚本生成：host=0.0.0.0 + 随机
+# api_key + legal.accept_lx_music_terms=true，缺任一项服务会拒绝启动）。
+# 自定义音源脚本放 ./lxmusic2api/.private/，宿主机与容器同挂载目录对齐，
+# 因为上游所有相对路径都相对配置文件所在目录解析。
+
+services:
+  lxmusic2api:
+    image: ${UNDEFINED_DEPLOY_LXMUSIC2API_IMAGE}
+    container_name: lxmusic2api
+    restart: unless-stopped
+    networks:
+      - undefined-deploy
+    ports:
+      - "${UNDEFINED_DEPLOY_PORT_LXMUSIC2API_BIND}:${UNDEFINED_DEPLOY_PORT_LXMUSIC2API}:3000"
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    volumes:
+      - ./lxmusic2api/config.toml:/app/config.toml:ro
+      - ./lxmusic2api/.private:/app/.private:ro
+      - ./lxmusic2api/data:/app/data
+      - ./lxmusic2api/downloads:/app/downloads
+
+volumes: {}

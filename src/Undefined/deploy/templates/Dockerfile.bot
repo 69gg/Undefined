@@ -1,0 +1,81 @@
+# Undefined 本体镜像。
+#
+# 构建上下文 = 仓库根；CI 用：
+#   docker build -f src/Undefined/deploy/templates/Dockerfile.bot .
+# 本地构建同一命令即可（deploy/compose.yaml 里注释了 build: 段，需要时取消注释）。
+#
+# 镜像内包含运行时所需但非 pip 依赖的东西：
+#   - ffmpeg         B 站 DASH 合并、语音转 SILK
+#   - docker CLI     DooD：python_interpreter / code_delivery_agent 用宿主 daemon 起兄弟容器
+#   - playwright     render.* 的浏览器内核（含系统依赖）
+
+ARG PYTHON_VERSION=3.12
+ARG UV_VERSION=0.9.7
+
+# --------------------------------------------------------------------------- #
+# 依赖层：只按 pyproject.toml + uv.lock 安装，源码变化不会让这层失效
+# --------------------------------------------------------------------------- #
+FROM python:${PYTHON_VERSION}-slim-bookworm AS deps
+
+ARG UV_VERSION
+
+COPY --from=ghcr.io/astral-sh/uv:${UV_VERSION} /uv /uvx /bin/
+
+ENV UV_LINK_MODE=copy \
+    UV_COMPILE_BYTECODE=1 \
+    UV_PYTHON_DOWNLOADS=never \
+    UV_PROJECT_ENVIRONMENT=/opt/venv
+
+WORKDIR /app
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=bind,source=uv.lock,target=uv.lock \
+    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    --mount=type=bind,source=README.md,target=README.md \
+    uv sync --frozen --no-install-project --no-dev
+
+# --------------------------------------------------------------------------- #
+# 源码层：同步项目本体（NagaAgent 子模块不打进镜像，container 模式按需挂载）
+# --------------------------------------------------------------------------- #
+FROM deps AS app
+
+COPY pyproject.toml uv.lock README.md ./
+COPY src ./src
+COPY res ./res
+COPY img ./img
+COPY config ./config
+COPY config.toml.example ./
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev
+
+# --------------------------------------------------------------------------- #
+# 运行时
+# --------------------------------------------------------------------------- #
+FROM python:${PYTHON_VERSION}-slim-bookworm AS runtime
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PATH="/opt/venv/bin:${PATH}"
+
+COPY --from=docker:27-cli /usr/local/bin/docker /usr/local/bin/docker
+COPY --from=app /opt/venv /opt/venv
+COPY --from=app /app /app
+
+# playwright install --with-deps 需要 root；浏览器装到共享路径，容器以 root 运行
+# （DooD 需要访问宿主 docker.sock，且 NapCat 共享目录要求可写）。
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg curl ca-certificates \
+    && /opt/venv/bin/python -m playwright install --with-deps chromium \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# data/ / logs/ / knowledge/ 由 compose 从宿主挂载覆盖；这里先建好目录，
+# 让原生 docker run 也能跑起来。
+RUN mkdir -p /app/data /app/logs /app/knowledge
+
+# WebUI 是推荐的部署入口（也在容器内启停 Bot 进程）。
+ENTRYPOINT ["Undefined-webui"]

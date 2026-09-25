@@ -1,0 +1,34 @@
+# 部署模板片段：Undefined 本体（仅 container 模式使用；host 模式不合并本文件）。
+#
+# 设计要点：
+#   - WORKDIR 用 /data/Undefined 而非 /app：本体大量磁盘路径（data/、logs/、
+#     knowledge/、config/、res/、img/）都是相对 CWD 解析的相对路径，这样仓库
+#     目录就以 bind mount 挂进容器，宿主机上直接编辑 config.toml 即可生效，
+#     且不会覆盖镜像内的 /app/.venv。
+#   - 挂 docker.sock 采用 DooD：python_interpreter / code_delivery_agent 用
+#     docker CLI 起兄弟容器，不启 DinD。
+#   - file_send_mode=url 时协议端（另一个容器）需要访问 Runtime API，由
+#     extra_hosts 提供 host.docker.internal 别名；host-gateway 由 Docker 解析。
+
+services:
+  undefined-bot:
+    image: ${UNDEFINED_DEPLOY_BOT_IMAGE}
+    container_name: undefined-bot
+    restart: unless-stopped
+    networks:
+      - undefined-deploy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    working_dir: /data/Undefined
+    ports:
+      - "${UNDEFINED_DEPLOY_PORT_BOT_WEBUI_BIND}:${UNDEFINED_DEPLOY_PORT_BOT_WEBUI}:${UNDEFINED_DEPLOY_PORT_BOT_WEBUI}"
+      - "${UNDEFINED_DEPLOY_PORT_BOT_API_BIND}:${UNDEFINED_DEPLOY_PORT_BOT_API}:${UNDEFINED_DEPLOY_PORT_BOT_API}"
+    volumes:
+      - ../config.toml:/data/Undefined/config.toml
+      - ../res:/data/Undefined/res:ro
+      - ../img:/data/Undefined/img:ro
+      - ../config:/data/Undefined/config
+      - ../knowledge:/data/Undefined/knowledge
+      - ./data:/data/Undefined/data
+      - ./logs:/data/Undefined/logs
+      - /var/run/docker.sock:/var/run/docker.sock

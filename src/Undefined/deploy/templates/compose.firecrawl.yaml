@@ -1,0 +1,125 @@
+# 部署模板片段：Firecrawl（firecrawl_search 工具的后端）。
+#
+# 复用上游预构建镜像（上游 compose 默认走本地 build，我们改成 image:），
+# 并补上上游缺失的持久化卷：Postgres 存 NuQ 队列状态，Redis/RabbitMQ 存
+# 限流与消息，丢了会导致重启后任务状态错乱。
+#
+# 变量说明：api 的变量来自 deploy/firecrawl/.env（由部署脚本生成，含随机
+# POSTGRES_PASSWORD / BULL_AUTH_KEY），端口与绑定来自 deploy/.env。
+# USE_DB_AUTHENTICATION=false 时 Firecrawl **不校验任何 key**，属官方行为。
+
+services:
+  firecrawl-api:
+    image: ${UNDEFINED_DEPLOY_FIRECRAWL_IMAGE}
+    container_name: firecrawl-api
+    restart: unless-stopped
+    networks:
+      - undefined-deploy
+    env_file:
+      - ./firecrawl/.env
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "${UNDEFINED_DEPLOY_FIRECRAWL_INTERNAL_PORT}"
+      EXTRACT_WORKER_PORT: "3004"
+      WORKER_PORT: "3005"
+      NUQ_RABBITMQ_URL: amqp://rabbitmq:5672
+      REDIS_URL: redis://firecrawl-redis:6379
+      REDIS_RATE_LIMIT_URL: redis://firecrawl-redis:6379
+      PLAYWRIGHT_MICROSERVICE_URL: http://firecrawl-playwright:3000/scrape
+      POSTGRES_HOST: firecrawl-postgres
+      POSTGRES_PORT: "5432"
+      ENV: local
+    ports:
+      - "${UNDEFINED_DEPLOY_PORT_FIRECRAWL_BIND}:${UNDEFINED_DEPLOY_PORT_FIRECRAWL}:${UNDEFINED_DEPLOY_FIRECRAWL_INTERNAL_PORT}"
+    depends_on:
+      firecrawl-redis:
+        condition: service_started
+      firecrawl-playwright:
+        condition: service_started
+      firecrawl-rabbitmq:
+        condition: service_healthy
+      firecrawl-postgres:
+        condition: service_healthy
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    # 沿用上游 compose 的资源上限（官方声明这不是最低要求，可按机器调整）。
+    cpus: ${UNDEFINED_DEPLOY_FIRECRAWL_API_CPUS}
+    mem_limit: ${UNDEFINED_DEPLOY_FIRECRAWL_API_MEMORY}
+    command: node dist/src/harness.js --start-docker
+    volumes:
+      - firecrawl-fdb:/var/fdb:ro
+
+  firecrawl-playwright:
+    image: ${UNDEFINED_DEPLOY_FIRECRAWL_PLAYWRIGHT_IMAGE}
+    container_name: firecrawl-playwright
+    restart: unless-stopped
+    networks:
+      - undefined-deploy
+    environment:
+      PORT: "3000"
+      MAX_CONCURRENT_PAGES: "10"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cpus: ${UNDEFINED_DEPLOY_FIRECRAWL_PLAYWRIGHT_CPUS}
+    mem_limit: ${UNDEFINED_DEPLOY_FIRECRAWL_PLAYWRIGHT_MEMORY}
+    tmpfs:
+      - /tmp/.cache:noexec,nosuid,size=1g
+
+  firecrawl-redis:
+    image: ${UNDEFINED_DEPLOY_FIRECRAWL_REDIS_IMAGE}
+    container_name: firecrawl-redis
+    restart: unless-stopped
+    networks:
+      - undefined-deploy
+    command: redis-server --bind 0.0.0.0 --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    volumes:
+      - firecrawl-redis:/data
+
+  firecrawl-rabbitmq:
+    image: ${UNDEFINED_DEPLOY_FIRECRAWL_RABBITMQ_IMAGE}
+    container_name: firecrawl-rabbitmq
+    restart: unless-stopped
+    networks:
+      - undefined-deploy
+    command: rabbitmq-server
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    volumes:
+      - firecrawl-rabbitmq:/var/lib/rabbitmq
+
+  firecrawl-postgres:
+    image: ${UNDEFINED_DEPLOY_FIRECRAWL_POSTGRES_IMAGE}
+    container_name: firecrawl-postgres
+    restart: unless-stopped
+    networks:
+      - undefined-deploy
+    env_file:
+      - ./firecrawl/.env
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    volumes:
+      - firecrawl-postgres:/var/lib/postgresql/data
+
+volumes:
+  firecrawl-fdb:
+  firecrawl-redis:
+  firecrawl-rabbitmq:
+  firecrawl-postgres:

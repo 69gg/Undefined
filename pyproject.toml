@@ -58,6 +58,7 @@ Issues = "https://github.com/69gg/Undefined/issues"
 [project.scripts]
 Undefined = "Undefined.main:run"
 Undefined-webui = "Undefined.webui:run"
+deploy = "Undefined.deploy:main"
 
 [[tool.uv.index]]
 url = "https://pypi.org/simple"
