@@ -32,14 +32,16 @@
 
 ## Release 下载速查
 
-**部署 QQ Bot 本身不需要下载 Release**：按下方[快速开始](#-快速开始-源码模式)源码部署，或 `pip install -U Undefined-bot` / `uv tool install Undefined-bot` 使用命令行入口。Release 里都是可选组件：
+**部署 QQ Bot 本身不需要下载 Release**：Release 里都是可选组件。源码部署见下方[快速开始](#-快速开始-源码模式)，安装包用途与平台对应如下：
 
-- **部署 / 运行 Bot**：不需要 Release，源码部署即可，启动 `uv run Undefined-webui`
-- **离线安装 / 镜像缓存**：`undefined_bot-*.whl` 或 `undefined_bot-*.tar.gz`
-- **远程管理已有实例**：`Undefined-Console-*`，连接 Management API 打开远程 WebUI
-- **原生聊天客户端**：`Undefined-Chat-*`，连接 Runtime API 聊天；两者都需先启动 `Undefined-webui` 并完成配置
+| 目标 | 文件 | 平台 |
+| --- | --- | --- |
+| 部署 / 运行 Bot | 不需要下载 Release；源码部署并启动 `uv run Undefined-webui` | 任意 |
+| 离线安装 / 镜像缓存 | `undefined_bot-*.whl` 或 `undefined_bot-*.tar.gz` | 任意 |
+| 远程管理已有实例 | `Undefined-Console-*`（连接 Management API 打开远程 WebUI） | Windows x64 `*-windows-x64-setup.exe`（批量部署可选 `.msi`）／macOS `*-macos-arm64.dmg`、`*-macos-x64.dmg`／Debian、Ubuntu `*.deb`／其他 Linux `*.AppImage` |
+| 原生聊天客户端 | `Undefined-Chat-*`（连接 Runtime API 聊天） | 同上；Android 为 `*-android-arm64-v8a-release.apk`（旧 32 位设备用 `armeabi-v7a`，模拟器按需 `x86_64` / `x86`） |
 
-客户端平台文件：Windows x64 `*-windows-x64-setup.exe`（批量部署可选 `.msi`）、macOS Apple Silicon `*-macos-arm64.dmg`、macOS Intel `*-macos-x64.dmg`、Debian/Ubuntu `*.deb`、其他 Linux `*.AppImage`、Android `*-android-arm64-v8a-release.apk`（旧 32 位设备用 `armeabi-v7a`，模拟器按需 `x86_64` / `x86`）。
+Console 和 Chat 都需要连接已运行的 Undefined 服务：首次部署请先启动 `Undefined-webui`，完成配置和 Bot 启动后再连接。
 
 ## ⚡ 核心特性
 
