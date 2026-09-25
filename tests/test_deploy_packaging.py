@@ -122,6 +122,35 @@ def test_dockerfile_installs_runtime_dependencies() -> None:
     assert "playwright install" in text
 
 
+def test_gitignore_ignores_runtime_dir_without_touching_templates() -> None:
+    """``deploy/`` 必须锚定到仓库根。
+
+    不加前导 ``/`` 时该模式会匹配任意层级的同名目录，把
+    ``src/Undefined/deploy``（模板与代码所在处）一起忽略掉。
+    """
+    text = (REPO_ROOT / ".gitignore").read_text(encoding="utf-8")
+    patterns = [
+        line.strip()
+        for line in text.splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    assert "/deploy/" in patterns, ".gitignore 需要用 /deploy/ 锚定仓库根的运行态目录"
+    assert "deploy/" not in patterns, (
+        "未锚定的 deploy/ 会连 src/Undefined/deploy 一起忽略，请改用 /deploy/"
+    )
+
+
+def test_template_dir_is_not_ignored_by_any_pattern() -> None:
+    """模板目录必须始终可被 git 跟踪（防止上面的坑以别的形式回归）。"""
+    text = (REPO_ROOT / ".gitignore").read_text(encoding="utf-8")
+    offending = [
+        line.strip()
+        for line in text.splitlines()
+        if line.strip().startswith("src/Undefined/deploy")
+    ]
+    assert not offending, f".gitignore 不应忽略模板目录：{offending}"
+
+
 @pytest.mark.skipif(
     os.environ.get("UNDEFINED_DEPLOY_WHEEL_CHECK") != "1",
     reason="需要真实构建 wheel，设置 UNDEFINED_DEPLOY_WHEEL_CHECK=1 后启用",

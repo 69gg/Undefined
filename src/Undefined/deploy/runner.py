@@ -37,6 +37,10 @@ NAPCAT_ONEBOT_CONFIG = "onebot11.json"
 NAPCAT_CONTAINER = "napcat"
 
 
+class PurgeTargetError(RuntimeError):
+    """``--purge`` 的目标路径不安全。"""
+
+
 # --------------------------------------------------------------------------- #
 # .env 读写
 # --------------------------------------------------------------------------- #
@@ -610,13 +614,21 @@ def run_down(options: dict[str, Any]) -> int:
 
     print("服务已停止。")
     if purge:
-        import shutil
-
-        shutil.rmtree(layout.root, ignore_errors=True)
+        _purge_layout(layout)
         print(f"已删除 {layout.root}")
     else:
         print(f"数据与配置保留在 {layout.root}")
     return EXIT_OK
+
+
+def _purge_layout(layout: DeployLayout) -> None:
+    """删除运行态目录；路径异常时拒绝执行，避免误删仓库。"""
+    import shutil
+
+    target = layout.root
+    if target.name != catalog.DEPLOY_DIR_NAME or target.parent == target:
+        raise PurgeTargetError(f"拒绝删除可疑路径：{target}")
+    shutil.rmtree(target, ignore_errors=True)
 
 
 def run_status(options: dict[str, Any]) -> int:
