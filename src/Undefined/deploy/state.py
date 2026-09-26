@@ -129,6 +129,7 @@ class DeployState:
     mode: str = ""
     nagaagent: bool = False
     ports: dict[str, int] = field(default_factory=dict)
+    port_bind: str = ""
     generated_at: str = ""
     image_owner: str = ""
     schema_version: int = STATE_SCHEMA_VERSION
@@ -142,6 +143,7 @@ class DeployState:
             "services": sorted(self.services),
             "nagaagent": self.nagaagent,
             "ports": {key: self.ports[key] for key in sorted(self.ports)},
+            "port_bind": self.port_bind,
             "image_owner": self.image_owner,
             "generated_at": self.generated_at or utc_timestamp(),
         }
@@ -177,6 +179,7 @@ class DeployState:
             mode=_text("mode"),
             nagaagent=bool(data.get("nagaagent")),
             ports=ports,
+            port_bind=_text("port_bind"),
             generated_at=_text("generated_at"),
             image_owner=_text("image_owner"),
             project_name=_text("project_name") or COMPOSE_PROJECT_NAME,

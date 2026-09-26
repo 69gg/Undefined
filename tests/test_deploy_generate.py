@@ -138,6 +138,70 @@ def test_port_override_is_applied(tmp_path: Path) -> None:
     assert env["UNDEFINED_DEPLOY_PORT_BOT_WEBUI"] == "18787"
 
 
+def test_compose_maps_host_port_to_fixed_container_port(tmp_path: Path) -> None:
+    """compose 必须写成 `${BIND}:${HOST_PORT}:<容器端口>`。
+
+    旧实现宿主与容器端口同用一个变量，用户 --port 之后应用仍监听默认端口，
+    映射却指向新端口 —— WebUI 直接打不开、本体也连不上 NapCat。
+    """
+    ctx = _ctx(
+        tmp_path,
+        ports={
+            "bot_webui": 19000,
+            "bot_api": 19001,
+            "napcat_ws": 13001,
+            "napcat_webui": 16099,
+            "searxng": 19090,
+        },
+        services=("searxng",),
+    )
+    services = _compose_services(generate.build(ctx).compose_text)
+
+    def mapping_for(service: str, container_port: int) -> str:
+        matches = [
+            entry
+            for entry in services[service]["ports"]
+            if entry.endswith(f":{container_port}")
+        ]
+        assert len(matches) == 1, (
+            f"{service} 缺少容器端口 {container_port}: {services[service]['ports']}"
+        )
+        return str(matches[0])
+
+    # 宿主端口来自变量，容器端口是字面量
+    assert mapping_for("undefined-bot", 8787).startswith(
+        "${UNDEFINED_DEPLOY_PORT_BOT_WEBUI_BIND}:${UNDEFINED_DEPLOY_PORT_BOT_WEBUI}:"
+    )
+    assert mapping_for("undefined-bot", 8788).startswith(
+        "${UNDEFINED_DEPLOY_PORT_BOT_API_BIND}:${UNDEFINED_DEPLOY_PORT_BOT_API}:"
+    )
+    assert mapping_for("napcat", 3001).startswith(
+        "${UNDEFINED_DEPLOY_PORT_NAPCAT_WS_BIND}:${UNDEFINED_DEPLOY_PORT_NAPCAT_WS}:"
+    )
+    assert mapping_for("searxng", 8080).startswith(
+        "${UNDEFINED_DEPLOY_PORT_SEARXNG_BIND}:${UNDEFINED_DEPLOY_PORT_SEARXNG}:"
+    )
+    # 容器侧不得再引用变量（旧写法 ${PORT}:${PORT} 会让应用与实际映射错位）
+    for service in ("undefined-bot", "napcat", "searxng"):
+        for entry in services[service]["ports"]:
+            container = entry.rsplit(":", 1)[1]
+            assert container.isdigit(), entry
+
+
+def test_config_listen_ports_match_container_ports(tmp_path: Path) -> None:
+    """config.toml 的监听端口必须等于 compose 的容器端口。"""
+    ctx = _ctx(tmp_path, ports={"bot_webui": 19000, "bot_api": 19001})
+    desired = generate.build(ctx).patch_plan.desired
+    assert desired["webui.port"] == catalog.BOT_WEBUI_CONTAINER_PORT
+    assert desired["api.port"] == catalog.BOT_API_CONTAINER_PORT
+
+
+def test_ws_url_uses_overridden_host_port(tmp_path: Path) -> None:
+    """ws_url 指向宿主发布端口（NapCat 容器内仍是固定 3001）。"""
+    ctx = _ctx(tmp_path, ports={"napcat_ws": 13001})
+    assert generate.build(ctx).websocket_url == "ws://napcat:13001"
+
+
 def test_port_bind_override_is_applied(tmp_path: Path) -> None:
     env = generate.build(_ctx(tmp_path, port_bind="0.0.0.0")).env
     assert env["UNDEFINED_DEPLOY_PORT_NAPCAT_WEBUI_BIND"] == "0.0.0.0"
@@ -402,17 +466,35 @@ def test_lxmusic2api_config_has_mandatory_fields(tmp_path: Path) -> None:
 
 
 def test_container_mode_uses_compose_service_names(tmp_path: Path) -> None:
-    urls = generate.compose_service_urls(catalog.MODE_CONTAINER)
+    urls = generate.compose_service_urls(_ctx(tmp_path))
     assert urls["searxng"] == "http://searxng:8080"
     assert urls["firecrawl"] == "http://firecrawl-api:3002"
     assert urls["lxmusic2api"] == "http://lxmusic2api:3000"
 
 
 def test_host_mode_uses_loopback_ports(tmp_path: Path) -> None:
-    urls = generate.compose_service_urls(catalog.MODE_HOST)
+    urls = generate.compose_service_urls(_ctx(tmp_path, mode=catalog.MODE_HOST))
     assert urls["searxng"] == "http://127.0.0.1:8080"
     assert urls["firecrawl"] == "http://127.0.0.1:3002"
     assert urls["lxmusic2api"] == "http://127.0.0.1:3000"
+
+
+def test_host_mode_urls_honour_port_overrides(tmp_path: Path) -> None:
+    """host 模式只能走发布端口，必须用覆盖后的值。
+
+    旧实现取的是 specs[...].default，用户 --port 之后写回 config.toml 的地址永远
+    是默认端口，服务全连不上且没有任何报错。
+    """
+    ctx = _ctx(
+        tmp_path,
+        mode=catalog.MODE_HOST,
+        ports={"searxng": 19090, "firecrawl": 13002, "lxmusic2api": 13000},
+        port_bind="192.168.1.5",
+    )
+    urls = generate.compose_service_urls(ctx)
+    assert urls["searxng"] == "http://192.168.1.5:19090"
+    assert urls["firecrawl"] == "http://192.168.1.5:13002"
+    assert urls["lxmusic2api"] == "http://192.168.1.5:13000"
 
 
 def test_websocket_url_per_mode(tmp_path: Path) -> None:
@@ -480,6 +562,6 @@ def test_unknown_port_key_raises(tmp_path: Path) -> None:
         ctx.port("nope")
 
 
-def test_unknown_mode_raises() -> None:
+def test_unknown_mode_raises(tmp_path: Path) -> None:
     with pytest.raises(generate.GenerateError, match="未知部署模式"):
-        generate.compose_service_urls("kubernetes")
+        generate.compose_service_urls(_ctx(tmp_path, mode="kubernetes"))

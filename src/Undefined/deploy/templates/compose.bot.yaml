@@ -20,8 +20,8 @@ services:
       - undefined-deploy
     working_dir: /data/Undefined
     ports:
-      - "${UNDEFINED_DEPLOY_PORT_BOT_WEBUI_BIND}:${UNDEFINED_DEPLOY_PORT_BOT_WEBUI}:${UNDEFINED_DEPLOY_PORT_BOT_WEBUI}"
-      - "${UNDEFINED_DEPLOY_PORT_BOT_API_BIND}:${UNDEFINED_DEPLOY_PORT_BOT_API}:${UNDEFINED_DEPLOY_PORT_BOT_API}"
+      - "${UNDEFINED_DEPLOY_PORT_BOT_WEBUI_BIND}:${UNDEFINED_DEPLOY_PORT_BOT_WEBUI}:8787"
+      - "${UNDEFINED_DEPLOY_PORT_BOT_API_BIND}:${UNDEFINED_DEPLOY_PORT_BOT_API}:8788"
     volumes:
       - ../config.toml:/data/Undefined/config.toml
       - ../res:/data/Undefined/res:ro

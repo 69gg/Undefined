@@ -30,9 +30,6 @@ from Undefined.deploy.state import (
     write_text,
 )
 
-#: NapCat 由镜像入口按 MODE=ws 生成的 OneBot 配置文件名。
-NAPCAT_ONEBOT_CONFIG = "onebot11.json"
-
 #: NapCat 容器名（与模板一致），用于 ``status`` 提示扫码。
 NAPCAT_CONTAINER = "napcat"
 
@@ -58,6 +55,31 @@ def parse_env_text(text: str) -> dict[str, str]:
         if key:
             result[key] = value.strip()
     return result
+
+
+def _resolve_ports(state: DeployState | None, env: dict[str, str]) -> dict[str, int]:
+    """还原上次使用的端口：STATE.json 优先，其次 ``.env``，最后默认值。"""
+    ports = dict(catalog.port_defaults())
+    if state is not None:
+        for key, value in state.ports.items():
+            if key in ports:
+                ports[key] = value
+    for key, spec in catalog.port_specs().items():
+        raw = env.get(spec.env_var, "")
+        if raw.isdigit():
+            ports[key] = int(raw)
+    return ports
+
+
+def _previous_port_bind(state: DeployState | None, env: dict[str, str]) -> str:
+    """还原上次使用的绑定地址（决定是否曾经开放到 0.0.0.0）。"""
+    if state is not None and state.port_bind:
+        return state.port_bind
+    for spec in catalog.port_specs().values():
+        value = env.get(spec.bind_env_var, "")
+        if value:
+            return value
+    return str(catalog.DEFAULTS["port_bind"])
 
 
 def load_previous_env(layout: DeployLayout) -> dict[str, str]:
@@ -247,7 +269,11 @@ def print_access_summary(
     print(
         f"  NapCat WebUI      http://{host}:{port('napcat_webui')}/webui?token={napcat_token}"
     )
-    print(f"  NapCat 协议端     ws://127.0.0.1:{port('napcat_ws')}（供本体连接）")
+    # 这里给的是**宿主**端口（容器内固定 NAPCAT_WS_CONTAINER_PORT，本体走服务名）
+    print(
+        f"  NapCat 协议端     ws://{host}:{port('napcat_ws')}"
+        "（宿主发布端口；本体在 compose 内用服务名直连）"
+    )
 
     if catalog.SEARXNG.key in services:
         print(f"  SearXNG           http://{host}:{port('searxng')}/")
@@ -301,43 +327,49 @@ def write_generated(
     if config.lxmusic2api_config is not None:
         write_text(layout.lxmusic2api_dir / "config.toml", config.lxmusic2api_config)
         layout.lxmusic2api_private_dir.mkdir(parents=True, exist_ok=True)
+    # NapCat 的正向 WS 配置：挂到镜像的 /app/templates/ws.json，
+    # 入口每次启动都会把它拷成 onebot11.json，token 因此不会被重启抹掉。
+    if config.napcat_ws_config:
+        write_text(
+            layout.napcat_dir / generate.NAPCAT_WS_ARTIFACT,
+            config.napcat_ws_config,
+            secret=True,
+        )
 
 
-def patch_napcat_ws_token(layout: DeployLayout, token: str) -> str:
-    """把 WS token 写进 NapCat 生成的 ``onebot11.json``。
+def verify_napcat_ws_config(layout: DeployLayout, token: str) -> str:
+    """校验写出的 ws.json：端口与 token 必须是目标值。
 
-    NapCat 容器启动后才生成该文件；模板里 token 为空，不补的话协议端会以
-    「无 token」监听，而本体侧带着 token 去连会被拒。返回处理结果供日志展示。
+    这里不再「启动后补写宿主 onebot11.json」——那是无效的：NapCat 入口每次启动
+    都无条件 `cp /app/templates/$MODE.json` 覆盖该文件，补写会在下一次重启后失效，
+    而且空 token 时 NapCat 根本不校验客户端。现在改为生成带 token 的模板文件并
+    只读挂载覆盖镜像模板，由入口自己写出正确配置。
     """
-    if not token:
-        return "跳过：token 为空"
-    path = layout.napcat_config_dir / NAPCAT_ONEBOT_CONFIG
+    path = layout.napcat_dir / generate.NAPCAT_WS_ARTIFACT
     if not path.is_file():
-        return f"跳过：{path} 尚未生成（等 NapCat 首次启动后再跑 up 即可）"
+        return f"缺失：{path}"
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        return f"跳过：{path} 无法解析（{exc}）"
-    if not isinstance(data, dict):
-        return f"跳过：{path} 结构不是对象"
+        return f"无法解析：{path}（{exc}）"
 
-    network = data.get("network")
-    if not isinstance(network, dict):
-        return f"跳过：{path} 缺少 network 段"
-    servers = network.get("websocketServers")
+    servers: object = None
+    if isinstance(data, dict):
+        network = data.get("network")
+        if isinstance(network, dict):
+            servers = network.get("websocketServers")
     if not isinstance(servers, list) or not servers:
-        return f"跳过：{path} 未启用正向 WebSocket 服务端"
+        return f"结构异常：{path} 未启用正向 WebSocket 服务端"
 
-    changed = False
+    expected_port = catalog.container_port("napcat_ws")
     for server in servers:
-        if isinstance(server, dict) and server.get("token") != token:
-            server["token"] = token
-            changed = True
-    if not changed:
-        return f"已是目标 token：{path}"
-
-    write_text(path, json.dumps(data, indent=2, ensure_ascii=False) + "\n", secret=True)
-    return f"已对齐 WS token：{path}"
+        if not isinstance(server, dict):
+            continue
+        if server.get("token") != token:
+            return f"token 不符：{path}"
+        if int(server.get("port") or 0) != expected_port:
+            return f"端口不符：{path}（应为 {expected_port}）"
+    return f"已就绪（端口 {expected_port}，token 已写入）：{path}"
 
 
 def build_invocation(
@@ -387,9 +419,15 @@ def run_up(options: dict[str, Any]) -> int:
     else:
         nagaagent_enabled = bool(options["nagaagent"])
 
-    port_bind = options.get("port_bind") or wizard.choose_port_bind(
-        str(catalog.DEFAULTS["port_bind"])
-    )
+    # 注意不要用 `or` 链：向导在非交互下返回空串（falsy），会被默认值短路，
+    # 导致上次的 0.0.0.0 被静默回退成回环。
+    port_bind_override = options.get("port_bind")
+    if port_bind_override:
+        port_bind = str(port_bind_override)
+    else:
+        port_bind = wizard.choose_port_bind(
+            _previous_port_bind(previous_state, previous_env)
+        ) or _previous_port_bind(previous_state, previous_env)
 
     # 子模块必须先就绪：能力开关与目标代码由同一问决定
     if nagaagent_enabled and not dry_run:
@@ -403,7 +441,9 @@ def run_up(options: dict[str, Any]) -> int:
             + ("已就绪" if result == "already-ready" else "拉取完成")
         )
 
-    ports = dict(catalog.port_defaults())
+    # 端口与绑定地址必须像凭据一样跨次复用：否则重跑 up 会静默把 --port /
+    # --port-bind 退回默认值（远程访问会无声中断）。
+    ports = _resolve_ports(previous_state, previous_env)
     ports.update(options.get("port_overrides") or {})
 
     # 全新部署时必须先落一份完整配置：否则只渲染被 patch 的几个键，
@@ -530,8 +570,7 @@ def run_up(options: dict[str, Any]) -> int:
         print(up_result.combined_output())
         return EXIT_ERROR
 
-    token_note = patch_napcat_ws_token(layout, config.napcat_ws_token)
-    print(f"NapCat 配置：{token_note}")
+    print(f"NapCat 配置：{verify_napcat_ws_config(layout, config.napcat_ws_token)}")
 
     save_state(
         layout,
@@ -542,6 +581,7 @@ def run_up(options: dict[str, Any]) -> int:
             ports={
                 spec.key: ctx.port(spec.key) for spec in catalog.port_specs().values()
             },
+            port_bind=port_bind,
             image_owner=ctx.image_owner,
             project_name=project_name,
         ),
@@ -740,13 +780,12 @@ def run_logs(options: dict[str, Any]) -> int:
 
 __all__ = [
     "NAPCAT_CONTAINER",
-    "NAPCAT_ONEBOT_CONFIG",
     "Wizard",
     "build_invocation",
     "describe_patch_plan",
     "load_previous_env",
     "parse_env_text",
-    "patch_napcat_ws_token",
+    "verify_napcat_ws_config",
     "print_access_summary",
     "run_down",
     "run_logs",

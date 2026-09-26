@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 import secrets
 import string
 from dataclasses import dataclass, field
@@ -21,6 +22,8 @@ from Undefined.deploy.state import DeployLayout
 
 #: 本体在 compose 里的服务名（与 compose.bot.yaml 一致）。
 BOT_SERVICE_NAME: Final[str] = "undefined-bot"
+#: NapCat 在 compose 里的服务名（与 compose.napcat.yaml 一致）。
+NAPCAT_SERVICE_NAME: Final[str] = "napcat"
 #: 本体容器内的工作目录（与 compose.bot.yaml 的 working_dir 一致）。
 CONTAINER_REPO_PATH: Final[str] = "/data/Undefined"
 
@@ -30,6 +33,15 @@ TEMPLATE_PACKAGE = "Undefined.deploy.templates"
 SEARXNG_SECRET_PLACEHOLDER = "__UNDEFINED_DEPLOY_SEARXNG_SECRET__"
 SEARXNG_BASE_URL_PLACEHOLDER = "__UNDEFINED_DEPLOY_SEARXNG_BASE_URL__"
 LXMUSIC2API_KEY_PLACEHOLDER = "__UNDEFINED_DEPLOY_LXMUSIC2API_KEY__"
+NAPCAT_WS_PORT_PLACEHOLDER = "__UNDEFINED_DEPLOY_NAPCAT_WS_PORT__"
+NAPCAT_WS_TOKEN_PLACEHOLDER = "__UNDEFINED_DEPLOY_NAPCAT_WS_TOKEN__"
+
+#: NapCat 生成物：镜像入口每次启动都会 `cp /app/templates/$MODE.json <配置>`，
+#: 所以我们用自己的 ws.json 覆盖镜像模板目录，让端口与 token 每次自动生效。
+NAPCAT_WS_TEMPLATE = "napcat.ws.json"
+#: 落盘到 deploy/napcat/ 的文件名；必须与 compose 的挂载源一致。
+NAPCAT_WS_ARTIFACT = "ws.json"
+NAPCAT_TEMPLATE_DIR = "/app/templates"
 
 #: 生成 compose 时允许出现的顶层键；模板里写了别的键会直接报错。
 ALLOWED_COMPOSE_TOP_KEYS = frozenset({"services", "volumes", "networks", "secrets"})
@@ -91,6 +103,7 @@ class GeneratedConfiguration:
     patch_plan: PatchPlan
     searxng_settings: str | None = None
     firecrawl_env: str | None = None
+    napcat_ws_config: str = ""
     lxmusic2api_config: str | None = None
     napcat_ws_token: str = ""
     websocket_url: str = ""
@@ -143,12 +156,13 @@ def reuse_or_generate(
 # --------------------------------------------------------------------------- #
 
 
-def compose_service_urls(mode: str) -> dict[str, str]:
+def compose_service_urls(ctx: GenerateContext) -> dict[str, str]:
     """按模式给出各服务的 base_url 映射。
 
     容器模式下用 compose 服务名直连，避免绕宿主机网关多一跳；
     host 模式下本体在宿主机上，只能走发布的回环端口。
     """
+    mode = ctx.mode
     if mode == catalog.MODE_CONTAINER:
         return {
             "searxng": "http://searxng:8080",
@@ -156,15 +170,13 @@ def compose_service_urls(mode: str) -> dict[str, str]:
             "lxmusic2api": "http://lxmusic2api:3000",
         }
     if mode == catalog.MODE_HOST:
-        specs = catalog.port_specs()
+        # 本体在宿主机上，只能走发布端口——必须用**覆盖后**的端口，
+        # 否则用户 --port 之后就再也连不上（旧实现取的是默认值）。
+        host = ctx.port_bind
         return {
-            "searxng": f"http://{catalog.DEFAULT_PORT_BIND}:{specs['searxng'].default}",
-            "firecrawl": (
-                f"http://{catalog.DEFAULT_PORT_BIND}:{specs['firecrawl'].default}"
-            ),
-            "lxmusic2api": (
-                f"http://{catalog.DEFAULT_PORT_BIND}:{specs['lxmusic2api'].default}"
-            ),
+            "searxng": f"http://{host}:{ctx.port('searxng')}",
+            "firecrawl": f"http://{host}:{ctx.port('firecrawl')}",
+            "lxmusic2api": f"http://{host}:{ctx.port('lxmusic2api')}",
         }
     raise GenerateError(f"未知部署模式 {mode!r}")
 
@@ -387,6 +399,24 @@ def render_searxng_settings(ctx: GenerateContext, env: dict[str, str]) -> str:
     ).replace(SEARXNG_BASE_URL_PLACEHOLDER, env["UNDEFINED_DEPLOY_SEARXNG_BASE_URL"])
 
 
+def render_napcat_ws_config(ctx: GenerateContext, env: dict[str, str]) -> str:
+    """生成 NapCat 的正向 WS 配置（含端口与 token）。
+
+    容器内固定监听 ``NAPCAT_WS_CONTAINER_PORT``；挂到 ``/app/templates/ws.json``
+    后，镜像入口每次启动都会把它拷成 ``onebot11.json``，因此 token 不会像
+    「启动后补写宿主文件」那样被下一次重启抹掉。
+    """
+    text = read_template(NAPCAT_WS_TEMPLATE)
+    rendered = text.replace(
+        NAPCAT_WS_PORT_PLACEHOLDER, str(catalog.container_port("napcat_ws"))
+    ).replace(NAPCAT_WS_TOKEN_PLACEHOLDER, env["UNDEFINED_DEPLOY_NAPCAT_WS_TOKEN"])
+    try:
+        json.loads(rendered)
+    except json.JSONDecodeError as exc:  # pragma: no cover - 模板写坏时立即暴露
+        raise GenerateError(f"近生成的 NapCat WS 配置不是合法 JSON：{exc}") from exc
+    return rendered
+
+
 def render_firecrawl_env(env: dict[str, str]) -> str:
     """Firecrawl api/postgres 的 env_file 内容。
 
@@ -433,7 +463,7 @@ def build_patch_plan(ctx: GenerateContext, env: dict[str, str]) -> PatchPlan:
 
     只写「服务拓扑」相关键；模型、提示词、访问控制等一律不碰。
     """
-    urls = compose_service_urls(ctx.mode)
+    urls = compose_service_urls(ctx)
     ws_url = _websocket_url(ctx)
     desired: dict[str, Any] = {
         "onebot.ws_url": ws_url,
@@ -447,6 +477,13 @@ def build_patch_plan(ctx: GenerateContext, env: dict[str, str]) -> PatchPlan:
         "api.auth_key": "Runtime API 鉴权密钥（自动生成）",
         "webui.password": "WebUI 登录密码（自动生成）",
     }
+
+    # 应用实际监听的端口 = 容器内固定端口，必须与 compose 的映射目标一致。
+    # 宿主端口只影响 `${BIND}:${HOST_PORT}:<容器端口>` 的左侧，可以随意覆盖。
+    desired["webui.port"] = catalog.container_port("bot_webui")
+    desired["api.port"] = catalog.container_port("bot_api")
+    about["webui.port"] = "容器内监听端口（与 compose 映射目标一致）"
+    about["api.port"] = "容器内监听端口（与 compose 映射目标一致）"
 
     if ctx.mode == catalog.MODE_CONTAINER:
         desired["webui.url"] = "0.0.0.0"
@@ -498,6 +535,8 @@ def apply_context_overrides(ctx: GenerateContext, fragments: dict[str, Any]) -> 
     ``/data/Undefined``，不挂载的话该 Agent 在容器模式下没有可用目标
     （无参调用 ``list_directory`` 会直接在 ``iterdir()`` 上抛 FileNotFoundError）。
     """
+    _mount_napcat_ws_template(ctx, fragments)
+
     if not (ctx.mode == catalog.MODE_CONTAINER and ctx.nagaagent):
         return
     services = fragments.get("services")
@@ -510,6 +549,26 @@ def apply_context_overrides(ctx: GenerateContext, fragments: dict[str, Any]) -> 
     if not isinstance(volumes, list):
         return
     mount = f"../{nagaagent.SUBMODULE_PATH}:{CONTAINER_REPO_PATH}/{nagaagent.SUBMODULE_PATH}:ro"
+    if mount not in volumes:
+        volumes.append(mount)
+
+
+def _mount_napcat_ws_template(ctx: GenerateContext, fragments: dict[str, Any]) -> None:
+    """把生成的 ws.json 以只读方式覆盖镜像的模板文件。
+
+    只挂单个文件（不是整个目录），既避免遮蔽镜像里其它模板，也让入口脚本的
+    ``cp /app/templates/ws.json ...`` 用的是带 token 的那份。
+    """
+    services = fragments.get("services")
+    if not isinstance(services, dict):
+        return
+    napcat = services.get(NAPCAT_SERVICE_NAME)
+    if not isinstance(napcat, dict):
+        return
+    volumes = napcat.setdefault("volumes", [])
+    if not isinstance(volumes, list):
+        return
+    mount = f"./napcat/{NAPCAT_WS_ARTIFACT}:{NAPCAT_TEMPLATE_DIR}/ws.json:ro"
     if mount not in volumes:
         volumes.append(mount)
 
@@ -539,6 +598,7 @@ def build(ctx: GenerateContext) -> GeneratedConfiguration:
             if catalog.LXMUSIC2API.key in ctx.services
             else None
         ),
+        napcat_ws_config=render_napcat_ws_config(ctx, env),
         napcat_ws_token=env["UNDEFINED_DEPLOY_NAPCAT_WS_TOKEN"],
         websocket_url=str(patch_plan.desired["onebot.ws_url"]),
     )
@@ -555,6 +615,12 @@ __all__ = [
     "GeneratedConfiguration",
     "IMAGE_ENV_PREFIX",
     "LXMUSIC2API_KEY_PLACEHOLDER",
+    "NAPCAT_SERVICE_NAME",
+    "NAPCAT_TEMPLATE_DIR",
+    "NAPCAT_WS_ARTIFACT",
+    "NAPCAT_WS_TEMPLATE",
+    "NAPCAT_WS_PORT_PLACEHOLDER",
+    "NAPCAT_WS_TOKEN_PLACEHOLDER",
     "PLACEHOLDER_SECRETS",
     "SEARXNG_BASE_URL_PLACEHOLDER",
     "SEARXNG_SECRET_PLACEHOLDER",
@@ -571,6 +637,7 @@ __all__ = [
     "render_env",
     "render_firecrawl_env",
     "render_lxmusic2api_config",
+    "render_napcat_ws_config",
     "render_searxng_settings",
     "reuse_or_generate",
 ]

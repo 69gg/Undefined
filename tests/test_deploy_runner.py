@@ -13,10 +13,11 @@ from pathlib import Path
 from typing import Any, Sequence
 
 import pytest
+import yaml
 
-from Undefined.deploy import catalog, docker_cli, nagaagent, runner
+from Undefined.deploy import catalog, docker_cli, generate, nagaagent, runner
 from Undefined.deploy.docker_cli import CommandResult, DockerAvailability
-from Undefined.deploy.state import DeployLayout
+from Undefined.deploy.state import DeployLayout, read_state
 
 CONFIG_TOML = """\
 [onebot]
@@ -65,7 +66,9 @@ def _yes_options(**overrides: Any) -> dict[str, Any]:
         "services": (),
         "nagaagent": False,
         "port_overrides": {},
-        "port_bind": catalog.DEFAULT_PORT_BIND,
+        # 与真实 CLI 一致：未显式传 --port-bind 时为 None，
+        # 这样 run_up 才会回退到「上次的选择」（显式传值应当覆盖）。
+        "port_bind": None,
         "yes": True,
         "dry_run": True,
     }
@@ -175,18 +178,11 @@ def test_wizard_enabled_requires_up_and_tty() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# NapCat WS token 对齐
+# NapCat WS 配置（生成的模板文件，而非启动后补写）
 # --------------------------------------------------------------------------- #
 
 
-def _write_onebot(layout: DeployLayout, payload: dict[str, Any]) -> Path:
-    layout.ensure()
-    path = layout.napcat_config_dir / runner.NAPCAT_ONEBOT_CONFIG
-    path.write_text(json.dumps(payload), encoding="utf-8")
-    return path
-
-
-def _onebot_payload(token: str = "") -> dict[str, Any]:
+def _ws_payload(token: str = "t" * 24, port: int = 3001) -> dict[str, Any]:
     return {
         "network": {
             "websocketServers": [
@@ -194,7 +190,7 @@ def _onebot_payload(token: str = "") -> dict[str, Any]:
                     "enable": True,
                     "name": "ws",
                     "host": "0.0.0.0",
-                    "port": 3001,
+                    "port": port,
                     "token": token,
                 }
             ]
@@ -202,66 +198,70 @@ def _onebot_payload(token: str = "") -> dict[str, Any]:
     }
 
 
-def test_patch_napcat_token_writes_token(tmp_path: Path) -> None:
+def _write_ws(layout: DeployLayout, payload: dict[str, Any]) -> Path:
+    layout.ensure()
+    path = layout.napcat_dir / generate.NAPCAT_WS_ARTIFACT
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
+def test_verify_napcat_ws_config_accepts_matching_artifact(tmp_path: Path) -> None:
     layout = DeployLayout.under(tmp_path)
-    path = _write_onebot(layout, _onebot_payload())
-    note = runner.patch_napcat_ws_token(layout, "secret-token")
-
-    assert "已对齐" in note
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    assert payload["network"]["websocketServers"][0]["token"] == "secret-token"
+    _write_ws(layout, _ws_payload())
+    note = runner.verify_napcat_ws_config(layout, "t" * 24)
+    assert "已就绪" in note
+    assert "3001" in note
 
 
-def test_patch_napcat_token_is_idempotent(tmp_path: Path) -> None:
-    layout = DeployLayout.under(tmp_path)
-    _write_onebot(layout, _onebot_payload())
-    runner.patch_napcat_ws_token(layout, "secret-token")
-    assert "已是目标 token" in runner.patch_napcat_ws_token(layout, "secret-token")
+def test_verify_napcat_ws_config_reports_missing_file(tmp_path: Path) -> None:
+    note = runner.verify_napcat_ws_config(DeployLayout.under(tmp_path), "t" * 24)
+    assert "缺失" in note
 
 
-def test_patch_napcat_token_preserves_other_fields(tmp_path: Path) -> None:
-    layout = DeployLayout.under(tmp_path)
-    payload = _onebot_payload()
-    payload["musicSignUrl"] = "https://example.com"
-    payload["network"]["httpServers"] = [{"enable": False, "port": 3000}]
-    path = _write_onebot(layout, payload)
-
-    runner.patch_napcat_ws_token(layout, "t")
-    written = json.loads(path.read_text(encoding="utf-8"))
-    assert written["musicSignUrl"] == "https://example.com"
-    assert written["network"]["httpServers"] == [{"enable": False, "port": 3000}]
-
-
-def test_patch_napcat_token_reports_missing_file(tmp_path: Path) -> None:
-    note = runner.patch_napcat_ws_token(DeployLayout.under(tmp_path), "t")
-    assert "尚未生成" in note
-
-
-def test_patch_napcat_token_reports_broken_json(tmp_path: Path) -> None:
+def test_verify_napcat_ws_config_reports_broken_json(tmp_path: Path) -> None:
     layout = DeployLayout.under(tmp_path)
     layout.ensure()
-    (layout.napcat_config_dir / runner.NAPCAT_ONEBOT_CONFIG).write_text(
+    (layout.napcat_dir / generate.NAPCAT_WS_ARTIFACT).write_text(
         "{not json", encoding="utf-8"
     )
-    assert "无法解析" in runner.patch_napcat_ws_token(layout, "t")
+    assert "无法解析" in runner.verify_napcat_ws_config(layout, "t" * 24)
 
 
-def test_patch_napcat_token_reports_missing_network(tmp_path: Path) -> None:
+def test_verify_napcat_ws_config_reports_missing_ws_server(tmp_path: Path) -> None:
     layout = DeployLayout.under(tmp_path)
-    _write_onebot(layout, {"musicSignUrl": ""})
-    assert "缺少 network" in runner.patch_napcat_ws_token(layout, "t")
+    _write_ws(layout, {"network": {"websocketServers": []}})
+    assert "结构异常" in runner.verify_napcat_ws_config(layout, "t" * 24)
 
 
-def test_patch_napcat_token_reports_missing_ws_server(tmp_path: Path) -> None:
+def test_verify_napcat_ws_config_reports_token_mismatch(tmp_path: Path) -> None:
     layout = DeployLayout.under(tmp_path)
-    _write_onebot(layout, {"network": {"websocketServers": []}})
-    assert "未启用正向 WebSocket" in runner.patch_napcat_ws_token(layout, "t")
+    _write_ws(layout, _ws_payload(token="other-token"))
+    assert "token 不符" in runner.verify_napcat_ws_config(layout, "t" * 24)
 
 
-def test_patch_napcat_token_skips_empty_token(tmp_path: Path) -> None:
+def test_verify_napcat_ws_config_reports_port_mismatch(tmp_path: Path) -> None:
     layout = DeployLayout.under(tmp_path)
-    _write_onebot(layout, _onebot_payload())
-    assert "token 为空" in runner.patch_napcat_ws_token(layout, "")
+    _write_ws(layout, _ws_payload(port=9999))
+    assert "端口不符" in runner.verify_napcat_ws_config(layout, "t" * 24)
+
+
+def test_ws_artifact_is_mounted_over_the_image_template(tmp_path: Path) -> None:
+    """挂载必须指向镜像的 /app/templates/ws.json，入口才会拷到配置。
+
+    只挂单个文件而不是整个目录，避免遮蔽镜像里其它 MODE 模板。
+    """
+    ctx = generate.GenerateContext(
+        repo=tmp_path,
+        layout=DeployLayout.under(tmp_path),
+        mode=catalog.MODE_CONTAINER,
+    )
+    services = yaml.safe_load(generate.build(ctx).compose_text)["services"]
+    volumes = services["napcat"]["volumes"]
+    assert (
+        f"./napcat/{generate.NAPCAT_WS_ARTIFACT}:/app/templates/ws.json:ro" in volumes
+    )
+    # 不能整个目录覆盖
+    assert not [v for v in volumes if v.endswith(":/app/templates:ro")]
 
 
 # --------------------------------------------------------------------------- #
@@ -409,7 +409,7 @@ def test_up_dry_run_does_not_touch_submodule(
     assert runner.run_up(_yes_options(nagaagent=True)) == 0
 
 
-def _stub_docker(monkeypatch: pytest.MonkeyPatch) -> None:
+def _stub_docker(monkeypatch: pytest.MonkeyPatch, *, stub_verify: bool = True) -> None:
     """桩掉真实 docker 调用，让 run_up 能走到写盘之后。"""
     monkeypatch.setattr(
         docker_cli,
@@ -426,7 +426,10 @@ def _stub_docker(monkeypatch: pytest.MonkeyPatch) -> None:
         "compose_up",
         lambda run, invocation, pull="missing": CommandResult(("docker",), 0, "", ""),
     )
-    monkeypatch.setattr(runner, "patch_napcat_ws_token", lambda layout, token: "跳过")
+    if stub_verify:
+        monkeypatch.setattr(
+            runner, "verify_napcat_ws_config", lambda layout, token: "已就绪"
+        )
 
 
 def test_up_creates_full_config_from_example_on_fresh_clone(
@@ -473,6 +476,72 @@ def test_up_keeps_existing_config_untouched_on_dry_run(
     original = (fake_repo / "config.toml").read_text(encoding="utf-8")
     assert runner.run_up(_yes_options()) == 0
     assert (fake_repo / "config.toml").read_text(encoding="utf-8") == original
+
+
+def test_ports_and_bind_survive_rerun(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """重跑 up 必须沿用上次的端口与绑定地址。
+
+    旧实现只把 ports 写进 STATE.json 却从不读回，第二次不带参数运行会把
+    --port 与 --port-bind 静默退回默认值（0.0.0.0 退回回环 = 远程访问无声中断）。
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "config.toml.example").write_text(CONFIG_TOML, encoding="utf-8")
+    monkeypatch.setattr(runner, "repo_root", lambda: repo)
+    _stub_docker(monkeypatch)
+
+    first = _yes_options(
+        dry_run=False,
+        port_overrides={"bot_webui": 19000, "napcat_ws": 13001},
+        port_bind="0.0.0.0",
+    )
+    assert runner.run_up(first) == 0
+    layout = DeployLayout.under(repo)
+    env_after_first = runner.load_previous_env(layout)
+    state = read_state(layout)
+    assert state is not None
+    assert state.port_bind == "0.0.0.0", (
+        f"第一次 up 未持久化 port_bind：{state.port_bind!r}"
+    )
+
+    # 第二次完全不带端口参数
+    capsys.readouterr()
+    assert runner.run_up(_yes_options(dry_run=False)) == 0
+    env_after_second = runner.load_previous_env(layout)
+
+    for key in (
+        "UNDEFINED_DEPLOY_PORT_BOT_WEBUI",
+        "UNDEFINED_DEPLOY_PORT_NAPCAT_WS",
+        "UNDEFINED_DEPLOY_PORT_BOT_WEBUI_BIND",
+    ):
+        assert env_after_first[key] == env_after_second[key], f"{key} 在重跑时被回退"
+    assert env_after_second["UNDEFINED_DEPLOY_PORT_BOT_WEBUI"] == "19000"
+    assert env_after_second["UNDEFINED_DEPLOY_PORT_BOT_WEBUI_BIND"] == "0.0.0.0"
+    assert state.port_bind == "0.0.0.0"
+
+
+def test_ws_artifact_carries_token_and_port_after_up(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """up 结束时应已生成带 token 的 ws.json（不再依赖启动后补写）。"""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "config.toml.example").write_text(CONFIG_TOML, encoding="utf-8")
+    monkeypatch.setattr(runner, "repo_root", lambda: repo)
+    # 注意：本用例要检查真实写出的 ws.json，所以只桩 docker，不桩 verify_napcat_ws_config
+    _stub_docker(monkeypatch, stub_verify=False)
+
+    assert runner.run_up(_yes_options(dry_run=False)) == 0
+    layout = DeployLayout.under(repo)
+    artifact = layout.napcat_dir / generate.NAPCAT_WS_ARTIFACT
+    assert artifact.is_file()
+    payload = json.loads(artifact.read_text(encoding="utf-8"))
+    server = payload["network"]["websocketServers"][0]
+    token = runner.load_previous_env(layout)["UNDEFINED_DEPLOY_NAPCAT_WS_TOKEN"]
+    assert server["token"] == token
+    assert server["port"] == catalog.NAPCAT_WS_CONTAINER_PORT
 
 
 def test_status_without_up_reports_error(

@@ -61,6 +61,47 @@ class PortSpec:
 DEFAULT_PORT_BIND: Final[str] = "127.0.0.1"
 
 # --------------------------------------------------------------------------- #
+# 容器内固定端口
+#
+# ``PortSpec.default`` 是**宿主机发布端口**，可被 ``--port`` 覆盖；容器内真正监听
+# 的端口必须是确定的，所以在这里固定下来，compose 一律写成
+# ``${BIND}:${HOST_PORT}:<容器端口>``。
+#
+# 本体的 WebUI / Runtime API 端口由 ``config.toml`` 决定，因此生成配置时会把
+# ``webui.port`` / ``api.port`` 同步成这里的值，保证「容器听什么」与
+# 「compose 把宿主端口映到哪」一致（旧实现两者同用一个变量，覆盖端口后必然错位）。
+# --------------------------------------------------------------------------- #
+
+BOT_WEBUI_CONTAINER_PORT: Final[int] = 8787
+BOT_API_CONTAINER_PORT: Final[int] = 8788
+NAPCAT_WS_CONTAINER_PORT: Final[int] = 3001
+NAPCAT_WEBUI_CONTAINER_PORT: Final[int] = 6099
+SEARXNG_CONTAINER_PORT: Final[int] = 8080
+FIRECRAWL_CONTAINER_PORT: Final[int] = 3002
+LXMUSIC2API_CONTAINER_PORT: Final[int] = 3000
+
+#: 端口键 -> 容器内端口。
+CONTAINER_PORTS: Final[dict[str, int]] = {
+    "bot_webui": BOT_WEBUI_CONTAINER_PORT,
+    "bot_api": BOT_API_CONTAINER_PORT,
+    "napcat_ws": NAPCAT_WS_CONTAINER_PORT,
+    "napcat_webui": NAPCAT_WEBUI_CONTAINER_PORT,
+    "searxng": SEARXNG_CONTAINER_PORT,
+    "firecrawl": FIRECRAWL_CONTAINER_PORT,
+    "lxmusic2api": LXMUSIC2API_CONTAINER_PORT,
+}
+
+
+def container_port(key: str) -> int:
+    """取容器内固定端口；未登记的键直接报错，避免拼错后静默取错值。"""
+    try:
+        return CONTAINER_PORTS[key]
+    except KeyError as exc:
+        known = ", ".join(sorted(CONTAINER_PORTS))
+        raise KeyError(f"未知端口键 {key!r}；可选：{known}") from exc
+
+
+# --------------------------------------------------------------------------- #
 # config.toml 写入目标
 # --------------------------------------------------------------------------- #
 
@@ -206,7 +247,10 @@ def selected_service(key: str) -> Service:
 
 __all__ = [
     "ALL_SERVICES",
+    "BOT_API_CONTAINER_PORT",
     "BOT_PORTS",
+    "BOT_WEBUI_CONTAINER_PORT",
+    "CONTAINER_PORTS",
     "COMPOSE_FILE_NAME",
     "COMPOSE_PROJECT_NAME",
     "CONTAINER_DOCKER_SOCK",
@@ -219,16 +263,22 @@ __all__ = [
     "FIRECRAWL",
     "LXMUSIC2API",
     "MODE_CONTAINER",
+    "FIRECRAWL_CONTAINER_PORT",
+    "LXMUSIC2API_CONTAINER_PORT",
     "MODE_HOST",
+    "NAPCAT_WEBUI_CONTAINER_PORT",
+    "NAPCAT_WS_CONTAINER_PORT",
     "MODEL_REMINDER",
     "NAPCAT",
     "OPTIONAL_SERVICES",
     "PortSpec",
     "REQUIRED_SERVICES",
     "SEARXNG",
+    "SEARXNG_CONTAINER_PORT",
     "STATE_FILE_NAME",
     "Service",
     "ConfigTarget",
+    "container_port",
     "port_defaults",
     "port_specs",
     "selected_service",

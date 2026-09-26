@@ -49,7 +49,7 @@ uv run deploy up --dry-run --with lxmusic2api            # 只打印计划，不
 | `--mode container\|host` | 本体部署方式，默认 `container` |
 | `--with SVC[,SVC...]` / `--with-<svc>` | 选择额外服务；可选项 `searxng`、`firecrawl`、`lxmusic2api` |
 | `--with-nagaagent` / `--no-nagaagent` | 是否拉取 NagaAgent 子模块并开启其问答能力（默认否） |
-| `--port KEY=PORT` | 覆盖端口，可重复；`KEY` 见 `uv run deploy up --help` |
+| `--port KEY=PORT` | 覆盖**宿主机发布端口**（容器内监听端口固定，无需也无法改），可重复；`KEY` 见 `uv run deploy up --help` |
 | `--port-bind ADDR` | 所有发布端口的绑定地址，默认 `127.0.0.1` |
 | `--pull missing\|always\|never` | 镜像拉取策略，默认 `missing`（本地没有才拉） |
 | `--dry-run` | 只打印将写入的 `config.toml` 差异与生成的 compose/.env（凭据显示为 `<secret>`） |
@@ -103,6 +103,10 @@ deploy/
 
 - 官方镜像 `mlikiowa/napcat-docker`，`MODE=ws`：NapCat 作为**正向 WebSocket 服务端**监听 3001，本体作为客户端连过去。
 - WebUI 默认 6099，token 由脚本生成并通过 `NAPCAT_WEBUI_SECRET_KEY` 预设，**不需要进容器翻 token**；入口形如 `http://127.0.0.1:6099/webui?token=<token>`。
+- 正向 WS 配置由脚本生成 `deploy/napcat/ws.json`（含 WebSocket 端口与访问令牌），
+  以只读方式挂载覆盖镜像内的 `/app/templates/ws.json`。镜像入口每次启动都会把该模板
+  拷成 `onebot11.json`，因此**令牌在每次重启后都自动生效**——不再依赖「启动后补写宿主
+  文件」（那种做法会被下一次重启覆盖，而 token 为空时 NapCat 不校验任何客户端）。
 - 首次使用需要在 WebUI 里扫码登录，或直接看容器日志里的二维码：
 
 ```bash
@@ -229,7 +233,10 @@ uv run deploy down --purge           # 连同 deploy/ 一起删除（不可恢�
 
 **改部署选择**：直接重跑 `uv run deploy up`，向导会以 `STATE.json` 为默认值；或者带参数一次性覆盖。旧的 `deploy/` 目录会被收敛到新选择（未被选中的服务模板不会出现在新 compose 里）。
 
-**改端口**：`uv run deploy up --port napcat_ws=13001 --port bot_webui=18787`，或直接改 `deploy/.env` 后重跑（会被下次 `up` 覆盖，建议用参数）。
+**改端口**：`uv run deploy up --port napcat_ws=13001 --port bot_webui=18787`。这里给的是**宿主机端口**：
+compose 会写成 `${绑定地址}:${你的端口}:<容器内固定端口>`，同时把 `[webui].port` / `[api].port`
+同步成容器内端口，因此应用监听、端口映射、`[onebot].ws_url` 三者始终一致。
+端口与绑定地址会和凭据一样**跨次保留**（记在 `deploy/STATE.json` 与 `.env`），不带参数重跑不会退回默认值。
 
 **远程访问**：默认所有端口只绑 `127.0.0.1`。要远程访问改成 `--port-bind 0.0.0.0` 或改 `.env` 里的 `*_BIND`，但请注意 Undefined WebUI、NapCat WebUI、Firecrawl API 都不是为公网暴露设计的，请自行加防火墙或反向代理。
 
