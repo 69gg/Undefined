@@ -140,14 +140,20 @@ def _add_common_options(parser: argparse.ArgumentParser) -> None:
         dest="nagaagent",
         action="store_true",
         default=None,
-        help="拉取 code/NagaAgent 子模块并开启 NagaAgent 问答能力（不开启外部网关）",
+        help=(
+            "拉取 code/NagaAgent 子模块并开启 NagaAgent 问答能力"
+            "（只改 features.nagaagent_mode_enabled，不动 [naga] 网关配置）"
+        ),
     )
     naga.add_argument(
         "--no-nagaagent",
         dest="nagaagent",
         action="store_false",
         default=None,
-        help="不拉取 NagaAgent 子模块，并关闭全部 Naga 相关配置（默认）",
+        help=(
+            "不拉取 NagaAgent 子模块，并关闭问答能力（默认）。"
+            "只改 features.nagaagent_mode_enabled，[naga] 下你自己填的网关配置原样保留"
+        ),
     )
 
     parser.add_argument(
@@ -248,9 +254,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         # 服务名（undefined-bot / firecrawl-api …），归一化会把它们判成「未知服务」，
         # 而 catalog 键 `firecrawl` 反过来又不是合法的 compose 服务名。
         if args.command == "up":
-            normalized["services"] = normalize_services(
-                getattr(args, "services", None), getattr(args, "service_flags", None)
-            )
+            # 「未指定」与「显式清空」是两种语义，必须原样传出：runner 用 None 表示
+            # 沿用上次（或交给向导）、用空元组表示用户明确不要任何可选服务。
+            # 无条件归一化会把「没给 --with」变成空元组，于是重跑 up 时上次选的服务
+            # 被静默去掉，`--remove-orphans` 顺手删掉它们的容器。
+            raw_services = getattr(args, "services", None)
+            extra_services = getattr(args, "service_flags", None)
+            if raw_services is None and extra_services is None:
+                normalized["services"] = None
+            else:
+                normalized["services"] = normalize_services(
+                    raw_services, extra_services
+                )
         else:
             normalized["services"] = tuple(getattr(args, "services", None) or ())
         normalized["port_overrides"] = parse_ports(

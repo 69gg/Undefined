@@ -7,10 +7,11 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from typing import Any
 
 import pytest
 
-from Undefined.deploy import catalog, cli, docker_cli, runner
+from Undefined.deploy import catalog, cli, commands, docker_cli, runner
 from Undefined.deploy.state import DeployLayout
 
 
@@ -160,6 +161,53 @@ def test_non_integer_port_reports_error(capsys: pytest.CaptureFixture[str]) -> N
 def test_no_subcommand_prints_help(capsys: pytest.CaptureFixture[str]) -> None:
     assert cli.main([]) == 0
     assert "up" in capsys.readouterr().out
+
+
+def _capture_up_options(
+    monkeypatch: pytest.MonkeyPatch, argv: list[str]
+) -> dict[str, Any]:
+    """跑一次 ``cli.main``，返回它交给 ``dispatch`` 的 up 选项。"""
+    captured: list[dict[str, Any]] = []
+
+    def fake_up(options: dict[str, Any]) -> int:
+        captured.append(options)
+        return 0
+
+    # dispatch 用的是 commands 模块里的名字，必须打在它上面
+    monkeypatch.setattr(commands, "run_up", fake_up)
+    assert cli.main(argv) == 0
+    assert captured, "up 没有被分发"
+    return captured[0]
+
+
+def test_up_without_service_option_dispatches_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """没给任何服务选项时必须传 ``None``：那是「未指定」，交给 runner 沿用/提问。
+
+    旧实现无条件归一化，把「没给 --with」变成空元组，而空元组在 runner 里是
+    「显式清空」——重跑 up 会把上次选的服务悄悄去掉，``--remove-orphans``
+    顺势删掉它们的容器；交互向导里也不再沿用上次的选择。
+    """
+    options = _capture_up_options(monkeypatch, ["up", "--yes"])
+    assert options["services"] is None
+
+
+def test_up_with_empty_service_option_dispatches_empty_tuple(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """显式给空选择（``--with ""``）必须传空元组：那是「清空」，不是「未指定」。"""
+    options = _capture_up_options(monkeypatch, ["up", "--yes", "--with", ""])
+    assert options["services"] == ()
+
+
+def test_up_with_services_dispatches_normalized_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    options = _capture_up_options(
+        monkeypatch, ["up", "--yes", "--with", "firecrawl,searxng", "--with-searxng"]
+    )
+    assert options["services"] == ("firecrawl", "searxng")
 
 
 def test_logs_positional_is_passed_through_not_normalized(
