@@ -24,11 +24,12 @@ cd Undefined
 uv run deploy up
 ```
 
-向导只会问三件事：
+向导只会问四件事：
 
 1. **本体部署方式** —— `container`（本体也在 compose 里，默认）或 `host`（本体跑宿主机，只用 Docker 跑依赖服务）
-2. **额外部署哪些自托管服务** —— 输入编号多选，直接回车表示全不部署
-3. **是否拉取 NagaAgent 子模块** —— 默认否
+2. **额外部署哪些自托管服务** —— 输入编号多选，直接回车表示全不部署（重跑时回车表示沿用上次的选择）
+3. **发布端口的绑定地址** —— 默认 `127.0.0.1`（仅本机可访问）
+4. **是否拉取 NagaAgent 子模块** —— 默认否
 
 确认后脚本会：生成 `deploy/` 下的 compose 与各服务配置 → 按差异修改 `config.toml`（改前自动备份）→ 校验 compose → 启动容器 → 输出全部入口与凭据。
 
@@ -72,14 +73,20 @@ deploy/
 ├── compose.yaml    # 由模板片段合并生成
 ├── searxng/settings.yml
 ├── firecrawl/.env
-├── lxmusic2api/{config.toml,.private/}
-├── napcat/config/  # NapCat 自己的 onebot11.json / webui.json
+├── lxmusic2api/{config.toml,.private/,data/,downloads/}
+├── napcat/ws.json  # 覆盖镜像模板的正向 WS 配置（含端口与令牌）
+├── napcat/config/  # NapCat 自己的 onebot11.json / onebot11_<QQ>.json / webui.json
 ├── napcat/qq/      # QQ 登录态
 ├── backup/config_<时间戳>.toml
-└── data/           # 仅 container 模式：挂给本体的 /data/Undefined/data
+├── data/           # 挂给本体的 /data/Undefined/data
+└── logs/           # 挂给本体的 /data/Undefined/logs
 ```
 
 **幂等与凭据**：`up` 每次都会重新渲染 compose 与配置，但凭据按「`deploy/.env` 已有 → `config.toml` 已生效 → 随机生成」的顺序取值，因此重跑不会把已经生效的 WebUI 密码、Runtime `auth_key`、NapCat token、SearXNG `secret_key`、lxmusic2api key 换掉。`changeme` 一类占位值会被替换。
+
+> 只有 `[webui].password` 与 `[api].auth_key` 会从 `config.toml` 回落（它们是本体自己读的键）；NapCat token、SearXNG `secret_key`、Firecrawl 与 lxmusic2api 的凭据只认 `deploy/.env`，因为它给出的就是那些容器实际拿到的值——一旦被换掉，容器里的配置也得跟着换。
+>
+> 同理，**不要手工编辑 `deploy/.env` 里的端口与绑定地址**：端口和 `*_BIND` 优先从 `STATE.json` 读回，手改会在下一次 `up` 被覆盖。要改就用 `--port` / `--port-bind`。
 
 > `host` 模式下本体的运行态仍在仓库根 `data/`（`utils/paths.py` 里的路径是相对工作目录解析的），只有 `container` 模式才落到 `deploy/data/`。
 
@@ -106,9 +113,9 @@ deploy/
 - 官方镜像 `mlikiowa/napcat-docker`，`MODE=ws`：NapCat 作为**正向 WebSocket 服务端**监听 3001，本体作为客户端连过去。
 - WebUI 默认 6099，token 由脚本生成并通过 `NAPCAT_WEBUI_SECRET_KEY` 预设，**不需要进容器翻 token**；入口形如 `http://127.0.0.1:6099/webui?token=<token>`。
 - 正向 WS 配置由脚本生成 `deploy/napcat/ws.json`（含 WebSocket 端口与访问令牌），
-  以只读方式挂载覆盖镜像内的 `/app/templates/ws.json`。镜像入口每次启动都会把该模板
-  拷成 `onebot11.json`，因此**令牌在每次重启后都自动生效**——不再依赖「启动后补写宿主
-  文件」（那种做法会被下一次重启覆盖，而 token 为空时 NapCat 不校验任何客户端）。
+  以只读方式挂载覆盖镜像内的 `/app/templates/ws.json`。镜像入口每次**容器启动**都会把
+  该模板拷成 `onebot11.json`，所以令牌不会像「启动后补写宿主文件」那样被下一次启动抹掉
+  （那种做法同时也不安全：token 为空时 NapCat 不校验任何客户端）。
 - 首次使用需要在 WebUI 里扫码登录，或直接看容器日志里的二维码：
 
 ```bash
@@ -116,7 +123,12 @@ docker logs -f napcat
 ```
 
 - **未登录时协议端不会监听 3001**，此时本体连不上是正常现象。
-- 容器启动后脚本会把 `[onebot].token` 对应的值补写进 `deploy/napcat/config/onebot11.json`（模板里该字段为空）。如果首次 `up` 时该文件还没生成，脚本会提示；等 NapCat 启动后再跑一次 `up` 即可对齐。
+- **登录之后 `onebot11.json` 就不再是生效文件**：NapCat core 优先读账号级的
+  `deploy/napcat/config/onebot11_<QQ>.json`，而且它没有 fs.watch（热重载只走 WebUI
+  通道）。此时模板里的 token/端口对该账号无效，`up` 的输出会点名这个文件。要让它
+  重新对齐就删掉账号级文件并重启 napcat（`uv run deploy down && uv run deploy up`），
+  或者直接在 NapCat WebUI 里核对网络配置。
+- 模板只在容器启动时被读取一次：改端口或轮换 token 后需要重启 napcat 容器才会生效。
 
 ### SearXNG（`--with searxng`）
 
@@ -136,6 +148,8 @@ server:
 
 入口：`http://127.0.0.1:8080/`。
 
+> `deploy/searxng` 是 bind mount，而镜像入口默认会 `chown -R searxng:searxng /etc/searxng`；一旦被 chown 成 `977:977`，非 root 的调用者就再也写不进去，第二次 `up` 重写 `settings.yml` 会直接 EACCES。因此 compose 里显式设了 `FORCE_OWNERSHIP=false`——容器本身以 root 运行、`settings.yml` 也只有 0644，不需要那次 chown。代价是容器日志里会有一行关于属主的 WARNING，可以忽略。
+
 ### Firecrawl（`--with firecrawl`）
 
 `firecrawl_search` 工具的后端。复用上游 GHCR 预构建镜像，会拉起 **5 个容器**：`firecrawl-api`、`firecrawl-playwright`、`firecrawl-redis`、`firecrawl-rabbitmq`、`firecrawl-postgres`。
@@ -143,6 +157,7 @@ server:
 - 上游 compose 默认走本地 `build:`，我们改用官方预构建镜像；同时补上上游缺失的持久化卷（Postgres 存 NuQ 队列状态，Redis/RabbitMQ 存限流与消息）。
 - `USE_DB_AUTHENTICATION=false` 时 Firecrawl **完全不校验 API Key**，因此 `[search.firecrawl].api_key` 随便填即可。这是官方行为，适用于可信网络，**不要把无鉴权的 API 暴露到不可信网络**。
 - 资源占用较高（上游给 api 设 4 CPU / 8G、playwright 设 2 CPU / 4G，官方声明这不是最低要求），可按机器情况调整 `deploy/compose.yaml` 里 `firecrawl-api` 的 `cpus` / `mem_limit`（改完重跑 `up` 会按模板重新生成，长期调整请改模板）。
+- 生成的 `firecrawl/.env` **不设置** `NUQ_BACKEND`：上游把它声明成 `z.enum(["pg","fdb"])` 并在启动时校验，写 `postgres` 会让 api 容器直接抛 Zod 错误起不来；留空即默认 pg 后端。
 - **自托管 Firecrawl 没有 dashboard / playground**，唯一的管理界面是 Bull Board 队列页：`http://127.0.0.1:3002/admin/<BULL_AUTH_KEY>/queues`（`BULL_AUTH_KEY` 见 `deploy/firecrawl/.env`）。
 
 ### lxmusic2api（`--with lxmusic2api`）
@@ -150,6 +165,7 @@ server:
 `music.*` 工具集的后端。**上游没有任何预构建镜像**（仓库无 `.github`、无 tag、无 release），因此镜像由本项目在 CI 里 clone 上游固定 commit 后构建，推送到 `ghcr.io/<owner>/undefined-lxmusic2api:<短sha>`。
 
 - 脚本生成的 `deploy/lxmusic2api/config.toml` 含三项必需配置：`server.host = "0.0.0.0"`、`legal.accept_lx_music_terms = true`、随机且长度 ≥32 的 `auth.api_key`。缺任一项上游会拒绝启动。
+- `deploy/lxmusic2api/{data,downloads}` 由脚本预先创建：这两个目录是 bind mount 源，交给 dockerd 建会变成 root:root，而服务以调用者 uid 运行，连 sqlite 都写不了。
 - **取音频直链需要自备 LX 自定义音源脚本**：把兼容「LX 自定义源 API v2」的 `.js` 放到 `deploy/lxmusic2api/.private/custom-source.js`（或改用目录模式），然后重启该容器。没有音源时服务仍会启动，搜索/歌单/歌词可用，但取音频直链会返回 503，`up` 的输出里也会明确提示。
 - 唯一浏览器界面是只读的 Swagger 文档：`http://127.0.0.1:3000/docs`。
 - 上游许可证为 Apache-2.0 附加 LX Music 补充协议（仅技术学习/非商业、版权数据 24 小时内清除、须自行确认音源合法性），使用前请阅读上游 `LICENSE` 与 `LICENSES/`。
@@ -186,6 +202,8 @@ NagaAgent 是仓库的 git submodule（`code/NagaAgent`），不是独立服务�
 | `[onebot].file_send_mode` / `file_send_host` | `container` 模式写入 `url` / `undefined-bot`（协议端按 compose 服务名访问本体 Runtime） |
 | `[webui].url` / `[webui].password` | 监听地址按模式；密码为空或 `changeme` 时生成随机值 |
 | `[api].host` / `[api].auth_key` | 同上 |
+| `[webui].port` / `[api].port` | 容器内监听端口（与 compose 映射的目标端一致，宿主端口由 `--port` 决定） |
+| `[webui].autostart_bot` | `container` 模式写入 `true`：镜像入口是 WebUI，Bot 进程由它托管 |
 | `[features].nagaagent_mode_enabled` | 见上一节 |
 | `[search].searxng_url` | 选了 SearXNG 时写入 |
 | `[search].firecrawl_search_enabled` / `[search.firecrawl].base_url` | 选了 Firecrawl 时写入 |
@@ -202,21 +220,21 @@ NagaAgent 是仓库的 git submodule（`code/NagaAgent`），不是独立服务�
 
 ## 6. 镜像与 CI
 
-发布镜像在 `v*` tag 推送时由 `.github/workflows/release.yml` 的 `build-docker` job 构建，位置在 `verify-python` 之后、`publish-release` 之前：
+发布镜像在 `v*` tag 推送时由 `.github/workflows/release.yml` 构建：`build-docker`（按架构分别推送 digest）→ `merge-docker`（合并 manifest）→ `publish-release` → `publish-pypi`。该 workflow **只有 tag 推送触发**，没有 `workflow_dispatch`；已经打过 tag 的旧版本不会补建镜像，`v3.16.1` 及更早的版本需要本地构建（见下方）。
 
 | 镜像 | 内容 |
 |---|---|
 | `ghcr.io/<owner>/undefined-bot:<tag>` | 本体：Python 3.12 + 依赖 + ffmpeg + docker CLI + Playwright Chromium |
 | `ghcr.io/<owner>/undefined-lxmusic2api:<短sha>` | lxmusic2api，clone 上游 pin 的 commit 后构建 |
 
-两者都构建 `linux/amd64` 与 `linux/arm64`。推送使用内置 `GITHUB_TOKEN`（workflow 已声明 `packages: write`），**不需要额外配置 secret**。
+两者都构建 `linux/amd64` 与 `linux/arm64`：两个架构分别在原生 runner（`ubuntu-24.04` / `ubuntu-24.04-arm`）上按 digest 推送，再由 `merge-docker` 合并成 manifest list。arm64 runner 对公共仓库免费，私有仓库需要相应套餐。推送使用内置 `GITHUB_TOKEN`（workflow 已声明 `packages: write`），**不需要额外配置 secret**。
 
 > **GHCR 包首次推送默认为 private。** 拉取前需要 `docker login ghcr.io`，或者到 GitHub 的包设置里把可见性改成 public，否则 `up` 拉镜像会 401。
 >
 > 从源码部署时也可以完全不用预构建镜像，改为本地构建：
 > `docker build -f src/Undefined/deploy/templates/Dockerfile.bot -t ghcr.io/<owner>/undefined-bot:v<版本> .`
 
-**升级 lxmusic2api 上游**：改 `src/Undefined/deploy/images.py` 里的 `LXMUSIC2API_UPSTREAM_SHA`，再跑一次 release（或手动触发 workflow）。CI 会检查该值仍是占位符时跳过该镜像构建，不会产出不可复现的 `main` HEAD 镜像。
+**升级 lxmusic2api 上游**：改 `src/Undefined/deploy/images.py` 里的 `LXMUSIC2API_UPSTREAM_SHA`，然后打下一个 tag。CI 在该值仍是占位符时跳过该镜像构建（而不是构建不可复现的 `main` HEAD），但 `uv run deploy` 选中 lxmusic2api 时会直接报错——两边语义一致：没 pin 就没有可用镜像。
 
 **升级第三方镜像 pin**：NapCat / SearXNG / Firecrawl 及其依赖的 tag 同样集中在 `images.py`，`pin` 常量带 `PIN_VERIFIED_ON` 记录核对日期。`playwright-service` 与 `nuq-postgres` 上游不发布版本 tag，只能跟随 `latest`。
 
@@ -240,7 +258,7 @@ compose 会写成 `${绑定地址}:${你的端口}:<容器内固定端口>`，�
 同步成容器内端口，因此应用监听、端口映射、`[onebot].ws_url` 三者始终一致。
 端口与绑定地址会和凭据一样**跨次保留**（记在 `deploy/STATE.json` 与 `.env`），不带参数重跑不会退回默认值。
 
-**远程访问**：默认所有端口只绑 `127.0.0.1`。要远程访问改成 `--port-bind 0.0.0.0` 或改 `.env` 里的 `*_BIND`，但请注意 Undefined WebUI、NapCat WebUI、Firecrawl API 都不是为公网暴露设计的，请自行加防火墙或反向代理。
+**远程访问**：默认所有端口只绑 `127.0.0.1`。要远程访问用 `--port-bind 0.0.0.0`（**不要**手改 `.env` 里的 `*_BIND`，那个值会被 `STATE.json` 覆盖掉），但请注意 Undefined WebUI、NapCat WebUI、Firecrawl API 都不是为公网暴露设计的，请自行加防火墙或反向代理。
 
 **更新镜像**：`uv run deploy up --pull always`（会检查每个 tag 的更新；pin 的 tag 内容不变时不会产生变化）。
 
@@ -252,7 +270,8 @@ compose 会写成 `${绑定地址}:${你的端口}:<容器内固定端口>`，�
 
 - 优点：资源开销几乎为零，不需要 `privileged`，`python_interpreter` 的 `--network none` 隔离照常生效。
 - 代价：能看到并能操作宿主机上的**全部容器**，权限等级等同于宿主机 root。这两个工具本身的设计就是「让模型在沙箱容器里执行代码」，但 `--network none` 只隔离网络，不是权限隔离；只应部署在你自己可控的机器上。
-- 若不想给这个能力，去掉 `deploy/compose.yaml` 里本体服务的 docker.sock 挂载行即可，代价是 `python_interpreter` / `code_delivery_agent` 会以「找不到 docker 命令」失败（属预期行为）。
+- 若不想给这个能力：`deploy/compose.yaml` 每次 `up` 都会重写，所以手改那一行不会保留。可行做法是改用 `host` 模式部署本体，或自己基于生成的 compose 起容器并维护它。代价是 `python_interpreter` / `code_delivery_agent` 会以「找不到 docker 命令」失败（属预期行为）。
+- 加固程度是不对称的：`lxmusic2api` 有 `no-new-privileges` + `cap_drop: ALL`，而挂了 docker.sock、以 root 运行的本体容器**没有**额外加固——`no-new-privileges` 可能影响容器内 Chromium 的沙箱行为，在没有真机验证前没有默认打开，请按自己的风险偏好决定是否在生成的 compose 上追加。
 - 这两个工具使用的基础镜像（`python:3.11-slim`、`ubuntu:24.04`）会在首次调用时按需拉取。
 
 ---
@@ -268,6 +287,9 @@ compose 会写成 `${绑定地址}:${你的端口}:<容器内固定端口>`，�
 | Firecrawl 启动慢或 OOM | 该 stack 资源占用高；可减少 `NUM_WORKERS_PER_QUEUE`，或在 `deploy/compose.yaml` 里调低 `firecrawl-api` 的 `mem_limit` |
 | `music.get_audio` 返回 503 | 没有自定义音源脚本：把 `.js` 放进 `deploy/lxmusic2api/.private/` 后重启该容器 |
 | WebUI 打不开 | 密码在 `deploy/.env` 的 `UNDEFINED_DEPLOY_WEBUI_PASSWORD`；默认密码 `changeme` 不允许登录，部署脚本已生成随机值 |
+| `up` 之后容器在跑但机器人没反应 | `container` 模式下 Bot 由容器内 WebUI 托管、部署脚本会写 `[webui].autostart_bot = true`；若被改回 `false`，去 WebUI 点「启动机器人」或改回该键 |
+| `up` 失败后 `down`/`status` 能跑但信息不全 | `STATE.json` 缺失只降级为提示（按默认项目名继续）；重跑一次 `up` 就会补齐 |
+| 日志 / 数据目录属主是 root | 本体容器以 root 运行，`deploy/{data,logs}` 里的文件属 root；`--purge` 因此可能删不掉，需要 `sudo rm -rf`（脚本会列出残留项） |
 | `config.toml` 被改错 | 从 `deploy/backup/` 取最近一份备份覆盖回去 |
 
 ---

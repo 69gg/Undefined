@@ -706,6 +706,26 @@ def test_patch_plan_never_touches_model_config(tmp_path: Path) -> None:
     assert not [key for key in plan.desired if key.startswith("models")]
 
 
+def test_host_mode_bot_ports_follow_the_port_override(tmp_path: Path) -> None:
+    """host 模式没有映射层：本体自己监听，端口必须跟随 --port。
+
+    旧实现无论哪种模式都写容器内端口，于是 host 模式下
+    `--port bot_webui=9000` 被静默忽略，还会把手改过的 [webui].port 改回 8787。
+    """
+    ctx = _ctx(
+        tmp_path, mode=catalog.MODE_HOST, ports={"bot_webui": 9000, "bot_api": 9001}
+    )
+    desired = generate.build(ctx).patch_plan.desired
+    assert desired["webui.port"] == 9000
+    assert desired["api.port"] == 9001
+
+
+def test_host_mode_bot_ports_default_without_override(tmp_path: Path) -> None:
+    desired = generate.build(_ctx(tmp_path, mode=catalog.MODE_HOST)).patch_plan.desired
+    assert desired["webui.port"] == catalog.BOT_WEBUI_CONTAINER_PORT
+    assert desired["api.port"] == catalog.BOT_API_CONTAINER_PORT
+
+
 def test_patch_plan_config_path_is_repo_root(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     assert generate.build(ctx).patch_plan.config_path == ctx.repo / "config.toml"

@@ -501,12 +501,19 @@ def build_patch_plan(ctx: GenerateContext, env: dict[str, str]) -> PatchPlan:
         "webui.password": "WebUI 登录密码（自动生成）",
     }
 
-    # 应用实际监听的端口 = 容器内固定端口，必须与 compose 的映射目标一致。
-    # 宿主端口只影响 `${BIND}:${HOST_PORT}:<容器端口>` 的左侧，可以随意覆盖。
-    desired["webui.port"] = catalog.container_port("bot_webui")
-    desired["api.port"] = catalog.container_port("bot_api")
-    about["webui.port"] = "容器内监听端口（与 compose 映射目标一致）"
-    about["api.port"] = "容器内监听端口（与 compose 映射目标一致）"
+    # 应用实际监听的端口：容器内固定端口，必须与 compose 的映射目标一致；
+    # host 模式没有映射层，本体自己就是监听方，端口应当跟随 --port（否则
+    # `--port bot_webui=9000` 会被静默忽略，还把手改过的 [webui].port 改回 8787）。
+    if ctx.mode == catalog.MODE_CONTAINER:
+        desired["webui.port"] = catalog.container_port("bot_webui")
+        desired["api.port"] = catalog.container_port("bot_api")
+        about["webui.port"] = "容器内监听端口（与 compose 映射目标一致）"
+        about["api.port"] = "容器内监听端口（与 compose 映射目标一致）"
+    else:
+        desired["webui.port"] = ctx.port("bot_webui")
+        desired["api.port"] = ctx.port("bot_api")
+        about["webui.port"] = "本体监听端口（host 模式下即 --port 给定的端口）"
+        about["api.port"] = "本体监听端口（host 模式下即 --port 给定的端口）"
 
     if ctx.mode == catalog.MODE_CONTAINER:
         desired["webui.url"] = "0.0.0.0"

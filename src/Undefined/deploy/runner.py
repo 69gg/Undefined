@@ -265,6 +265,9 @@ def print_access_summary(
         print("  本体跑在宿主机，请另开终端执行： uv run Undefined-webui")
         print(f"  Undefined WebUI   http://{host}:{port('bot_webui')}")
         print(f"    密码            {env.get('UNDEFINED_DEPLOY_WEBUI_PASSWORD', '')}")
+        # host 模式下 Runtime API 也由本体自己起，同样要给出 auth_key
+        print(f"  Runtime API       http://{host}:{port('bot_api')}")
+        print(f"    auth_key        {env.get('UNDEFINED_DEPLOY_API_AUTH_KEY', '')}")
 
     napcat_token = env.get("UNDEFINED_DEPLOY_NAPCAT_WEBUI_TOKEN", "")
     print(
