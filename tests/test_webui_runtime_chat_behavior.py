@@ -759,7 +759,7 @@ def test_active_job_lookup_is_scoped_to_conversation() -> None:
 def test_streaming_does_not_fight_the_user_reading_history() -> None:
     """作业还在流式输出时，用户往上翻历史不能被抢滚动条、也不能翻不上去。
 
-    覆盖两个独立缺陷（各自有能单独打红它的变异）：
+    覆盖三个独立缺陷（各自有能单独打红它的变异）：
 
     - 自动滚动只看 ``chatAutoScroll`` 偏好、不看用户当前位置：流式内容每 500ms
       追加一次就抢一次滚动位置。去掉「钉住底部」的闸后，本用例的
@@ -768,6 +768,9 @@ def test_streaming_does_not_fight_the_user_reading_history() -> None:
       全文件只有 scroll 监听这一个调用点、没有可点的兜底入口，于是用户**无声地
       翻不上去**。去掉「用户上翻即解除抑制」后，
       ``olderHistoryRequestsWhileStreaming`` 会从 1 变成 0。
+    - 位置判定必须优先于位移方向：内容变短（重渲染 / 切换会话 / 删消息）时
+      ``scrollTop`` 会被夹小，而日志仍在底部。把方向判定放在前面会取消自动跟随，
+      ``followScrollsAfterBottomReset`` 会从 ≥1 变成 0。
     """
     result = run_scenario("scroll_while_streaming")
 
@@ -779,3 +782,5 @@ def test_streaming_does_not_fight_the_user_reading_history() -> None:
     assert result["scrollCallsAfterUserScroll"] == 0, result
     # 并且必须真的发出更早历史的请求
     assert result["olderHistoryRequestsWhileStreaming"] >= 1, result
+    # 贴底状态下的 scrollTop 回缩不得被误判成「用户上翻」：新内容仍要滚进视野
+    assert result["followScrollsAfterBottomReset"] >= 1, result

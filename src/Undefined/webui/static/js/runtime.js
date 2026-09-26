@@ -6017,11 +6017,18 @@
         }
         if (chatLog) {
             chatLog.addEventListener("scroll", () => {
-                // 判定用户意图：位置比上次更靠上 = 用户在主动往上翻。程序自己的
+                // 先看位置：只要还贴底就一定是「在跟最新」，不管这一帧的位移方向。
+                // 内容变短、重渲染、切换会话都会让 scrollTop 变小（浏览器把
+                // scrollTop 夹回可滚动范围），而日志其实还在底部；把这种位移当成
+                // 「用户往上翻」会永久关掉自动跟随，连新消息都不再滚进视野。
+                //
+                // 位置不贴底时再看方向：比上次更靠上 = 用户在主动往上翻。程序自己的
                 // 「滚到底」只会让 scrollTop 变大，因此不会误判（平滑滚动的中间帧
                 // 同样是变大）。
                 const scrollTop = chatLog.scrollTop;
-                if (
+                if (isChatLogAtBottom(chatLog)) {
+                    runtimeState.chatPinnedToBottom = true;
+                } else if (
                     scrollTop <
                     runtimeState.chatLastScrollTop -
                         CHAT_SCROLL_DIRECTION_EPSILON_PX
@@ -6030,8 +6037,6 @@
                     // 用户既然主动翻页，抑制窗口就没有存在意义了（它只用来忽略
                     // 「程序刚滚到底」那一次位移），立刻解除，别让翻页白等 900ms。
                     runtimeState.chatTopLoadSuppressedUntil = 0;
-                } else if (isChatLogAtBottom(chatLog)) {
-                    runtimeState.chatPinnedToBottom = true;
                 }
                 runtimeState.chatLastScrollTop = scrollTop;
 

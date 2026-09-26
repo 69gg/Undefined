@@ -2545,14 +2545,39 @@ SCENARIOS.scroll_while_streaming = async (env) => {
     await tick(4);
     await settle(500);
 
+    // 「翻历史」阶段的观测量先固化：后面的新阶段不应再影响它们。
+    const afterUserScroll = {
+        olderHistoryRequests: env.requests
+            .slice(requestsBeforeScroll)
+            .filter((url) => url.includes("before=cursor-1")).length,
+        scrollCalls: env.scrollActivity.calls,
+        scrollTopWrites: env.scrollTopWrites.count,
+    };
+
+    // --- 回到最新：内容变短导致 scrollTop 被夹向底部 ---
+    // 先滚到底重新钉住（此时确实贴底）。
+    log.scrollTop = 3000;
+    log.dispatchEvent(new window.Event("scroll", { bubbles: false }));
+    await tick(2);
+    // 再模拟「内容变短」：scrollHeight 收缩，浏览器把 scrollTop 夹回可滚动范围。
+    // 这是真实会发生的（重渲染 / 切换会话 / 删除消息），此时日志仍在底部，
+    // 但 scrollTop 比上一帧小。旧实现把这种位移一律当成「用户往上翻」而取消
+    // 自动跟随，于是新消息再也不滚进视野。
+    meter.set(800);
+    log.scrollTop = 800;
+    log.dispatchEvent(new window.Event("scroll", { bubbles: false }));
+    await tick(2);
+    const scrollCallsBeforeBottomReset = env.scrollActivity.calls;
+    await settle(1200); // 作业仍在流式：至少两个轮询周期
+
     return {
         eventsRequests,
         jobStillStreaming: eventsRequests >= 3,
-        olderHistoryRequestsWhileStreaming: env.requests
-            .slice(requestsBeforeScroll)
-            .filter((url) => url.includes("before=cursor-1")).length,
-        scrollCallsAfterUserScroll: env.scrollActivity.calls,
-        scrollTopWritesAfterUserScroll: env.scrollTopWrites.count,
+        olderHistoryRequestsWhileStreaming: afterUserScroll.olderHistoryRequests,
+        scrollCallsAfterUserScroll: afterUserScroll.scrollCalls,
+        scrollTopWritesAfterUserScroll: afterUserScroll.scrollTopWrites,
+        followScrollsAfterBottomReset:
+            env.scrollActivity.calls - scrollCallsBeforeBottomReset,
     };
 };
 
