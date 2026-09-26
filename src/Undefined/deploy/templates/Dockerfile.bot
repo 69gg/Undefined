@@ -44,7 +44,12 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # --------------------------------------------------------------------------- #
 FROM deps AS app
 
-COPY pyproject.toml uv.lock README.md ./
+# CHANGELOG.md 不是「顺手带的文档」：它在 [tool.hatch.build.targets.wheel.force-include]
+# 里，editable 构建（下面的 uv sync）找不到它会直接报
+# "FileNotFoundError: Forced include not found: /app/CHANGELOG.md" 并中断整个镜像
+# 构建——v3.17.0 的 release 就是这么红的（deps 阶段有 --no-install-project，所以那里
+# 不需要它，只有这一层需要）。同时运行时的 /changelog 命令也从包里读这个文件。
+COPY pyproject.toml uv.lock README.md CHANGELOG.md ./
 COPY src ./src
 COPY res ./res
 COPY img ./img

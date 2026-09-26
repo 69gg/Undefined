@@ -38,8 +38,9 @@ docs
 .claude
 .codex
 *.md
-# Dockerfile 会显式 COPY README.md，必须放行
+# Dockerfile 会显式 COPY README.md 与 CHANGELOG.md，必须逐条放行
 !README.md
+!CHANGELOG.md
 
 # 子模块（NagaAgent 体积大且不在镜像内使用）
 code
