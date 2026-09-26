@@ -433,6 +433,105 @@ def _stub_docker(monkeypatch: pytest.MonkeyPatch, *, stub_verify: bool = True) -
         )
 
 
+def test_up_writes_state_before_starting_containers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """STATE.json 必须在 compose up **之前**落盘。
+
+    旧顺序（up 成功后才写）会在任何失败路径上留下半成品：down/status/logs 因
+    读不到 STATE 而拒绝执行，重跑 up 又会丢失上次的服务选择。
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "config.toml.example").write_text(CONFIG_TOML, encoding="utf-8")
+    monkeypatch.setattr(runner, "repo_root", lambda: repo)
+    _stub_docker(monkeypatch)
+
+    state_at_up: list[bool] = []
+
+    def failing_up(
+        run: object, invocation: object, pull: str = "missing"
+    ) -> CommandResult:
+        state_at_up.append((repo / "deploy" / "STATE.json").is_file())
+        return CommandResult(("docker",), 1, "", "boom")
+
+    monkeypatch.setattr(docker_cli, "compose_up", failing_up)
+
+    assert runner.run_up(_yes_options(services=("searxng",), dry_run=False)) != 0
+    assert state_at_up == [True], "compose up 执行时 STATE.json 还不存在"
+
+    # 失败之后仍然能收拾残局：STATE 已存在，且保留了这次选择
+    state = read_state(DeployLayout.under(repo))
+    assert state is not None
+    assert state.services == ("searxng",)
+
+
+def test_down_and_status_work_without_state_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """缺少 STATE.json 时 down/status 仍须可用（历史半成品目录）。"""
+    repo = tmp_path / "repo"
+    layout = DeployLayout.under(repo)
+    layout.ensure()
+    layout.compose_file.write_text("name: undefined-deploy\n", encoding="utf-8")
+    monkeypatch.setattr(runner, "repo_root", lambda: repo)
+
+    calls: list[tuple[str, ...]] = []
+
+    class _Runner:
+        def run(
+            self, argv: tuple[str, ...], *, timeout: float | None = None
+        ) -> CommandResult:
+            calls.append(tuple(argv))
+            return CommandResult(tuple(argv), 0, "[]", "")
+
+    monkeypatch.setattr(docker_cli, "CommandRunner", _Runner)
+
+    assert runner.run_down({}) == 0, capsys.readouterr().out
+    assert calls, "down 没有执行 compose down"
+    assert "缺失" in capsys.readouterr().out
+
+
+def test_compose_up_timeout_covers_pull_paths(tmp_path: Path) -> None:
+    """首次部署（--pull missing）必须用长超时，只有 never 才用短超时。
+
+    超时会杀掉 compose 进程，正好落在「compose.yaml 在、容器没起全」的半成品上。
+    """
+
+    class _TimeoutSpy(docker_cli.CommandRunner):
+        """只记录超时，不真的执行命令。"""
+
+        def __init__(self) -> None:
+            super().__init__(_echo_commands=False)
+            self.timeouts: list[float | None] = []
+
+        def run(
+            self,
+            argv: Sequence[str],
+            *,
+            timeout: float | None = docker_cli.COMPOSE_TIMEOUT_SECONDS,
+            stream: bool = False,
+        ) -> CommandResult:
+            del stream
+            self.timeouts.append(timeout)
+            return CommandResult(tuple(argv), 0, "", "")
+
+    invocation = docker_cli.ComposeInvocation(
+        compose_file=tmp_path / "compose.yaml", env_file=tmp_path / ".env"
+    )
+    spy = _TimeoutSpy()
+    for policy in (
+        docker_cli.PULL_MISSING,
+        docker_cli.PULL_ALWAYS,
+        docker_cli.PULL_NEVER,
+    ):
+        docker_cli.compose_up(spy, invocation, pull=policy)
+
+    assert spy.timeouts[0] == docker_cli.PULL_TIMEOUT_SECONDS
+    assert spy.timeouts[1] == docker_cli.PULL_TIMEOUT_SECONDS
+    assert spy.timeouts[2] == docker_cli.COMPOSE_TIMEOUT_SECONDS
+
+
 def test_up_creates_full_config_from_example_on_fresh_clone(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

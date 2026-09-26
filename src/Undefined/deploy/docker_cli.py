@@ -246,9 +246,10 @@ def compose_up(
         "--pull",
         pull,
     ]
-    # 首次部署可能同时拉本体与 Firecrawl 五个镜像，用默认 900s 很容易超时；
-    # 需要长期拉取时用 PULL_TIMEOUT_SECONDS。
-    timeout = PULL_TIMEOUT_SECONDS if pull == PULL_ALWAYS else COMPOSE_TIMEOUT_SECONDS
+    # 首次部署（--pull missing）要同时拉本体与 Firecrawl 五个镜像，用默认的
+    # COMPOSE_TIMEOUT_SECONDS 很容易超时；只有明确不拉（--pull never）才用短超时。
+    # 超时会杀掉 compose 进程，正好落在「compose.yaml 在、容器没起全」的半成品上。
+    timeout = COMPOSE_TIMEOUT_SECONDS if pull == PULL_NEVER else PULL_TIMEOUT_SECONDS
     return runner.run(argv, timeout=timeout)
 
 

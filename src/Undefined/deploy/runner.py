@@ -561,6 +561,25 @@ def run_up(options: dict[str, Any]) -> int:
 
     write_generated(layout, config)
 
+    # STATE 必须在 compose up **之前**落盘：它是 down/status/logs 的入口凭据，
+    # 也是下次 up 复用服务选择与端口的唯一来源。旧顺序（up 成功后才写）会在
+    # 任何失败路径上留下半成品——用户既不能 down 收拾，重跑 up 还会因为读不到
+    # 上次的 services 而把它们从 compose 里去掉，--remove-orphans 顺势删容器。
+    save_state(
+        layout,
+        DeployState(
+            services=services,
+            mode=mode,
+            nagaagent=nagaagent_enabled,
+            ports={
+                spec.key: ctx.port(spec.key) for spec in catalog.port_specs().values()
+            },
+            port_bind=port_bind,
+            image_owner=ctx.image_owner,
+            project_name=project_name,
+        ),
+    )
+
     invocation = build_invocation(layout, project_name)
     availability = docker_cli.check_availability()
     if not availability.ok:
@@ -581,21 +600,6 @@ def run_up(options: dict[str, Any]) -> int:
         return EXIT_ERROR
 
     print(f"NapCat 配置：{verify_napcat_ws_config(layout, config.napcat_ws_token)}")
-
-    save_state(
-        layout,
-        DeployState(
-            services=services,
-            mode=mode,
-            nagaagent=nagaagent_enabled,
-            ports={
-                spec.key: ctx.port(spec.key) for spec in catalog.port_specs().values()
-            },
-            port_bind=port_bind,
-            image_owner=ctx.image_owner,
-            project_name=project_name,
-        ),
-    )
 
     print_access_summary(
         layout,
@@ -641,9 +645,15 @@ def dry_run_runner_commands(runner: Runner) -> str:
 # --------------------------------------------------------------------------- #
 
 
-def _require_layout(
-    require_state: bool = True,
-) -> tuple[DeployLayout, DeployState] | None:
+def _require_layout() -> tuple[DeployLayout, DeployState] | None:
+    """定位运行态目录；compose 文件缺失才算硬错误。
+
+    STATE.json 缺失只降级为提示：旧版本曾经在 ``compose up`` **成功之后**才写
+    STATE，任何失败（拉镜像 401、端口占用、Ctrl-C）都会留下「compose.yaml 在、
+    STATE 不在」的半成品，而此时如果直接拒绝执行，用户连 ``down`` 收拾残局都
+    做不到。缺 STATE 时按默认项目名继续——compose 文件里的 ``name:`` 本就是
+    同一个值。
+    """
     repo = repo_root()
     layout = DeployLayout.under(repo)
     if not layout.compose_file.is_file():
@@ -651,9 +661,7 @@ def _require_layout(
         return None
     state = read_state(layout)
     if state is None:
-        if require_state:
-            print(f"错误：{layout.state_file} 缺失或不可识别，请重新执行 up")
-            return None
+        print(f"提示：{layout.state_file} 缺失，按默认设置继续（重跑 up 可补齐）")
         state = DeployState()
     return layout, state
 
