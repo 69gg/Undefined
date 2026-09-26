@@ -270,6 +270,54 @@ def test_default_credentials_are_regenerated(tmp_path: Path) -> None:
     assert env["UNDEFINED_DEPLOY_API_AUTH_KEY"]
 
 
+@pytest.mark.parametrize("placeholder", sorted(generate.PLACEHOLDER_SECRETS - {""}))
+def test_config_credentials_win_over_placeholder_env(
+    tmp_path: Path, placeholder: str
+) -> None:
+    """``.env`` 里的占位值不得挡掉 config.toml 里真正生效的密码。
+
+    ``prev(...) or _config_str(...)`` 只判真假，而 ``changeme`` 这类占位值是**真值**：
+    它会顶掉第二个来源，然后被 ``reuse_or_generate`` 丢掉换成随机值——重跑一次 up
+    就把用户正在用的 WebUI 密码与 Runtime API key 无声换掉了。
+    """
+    ctx = _ctx(
+        tmp_path,
+        previous_env={
+            "UNDEFINED_DEPLOY_WEBUI_PASSWORD": placeholder,
+            "UNDEFINED_DEPLOY_API_AUTH_KEY": placeholder,
+        },
+        existing_config={
+            "webui": {"password": "user-password"},
+            "api": {"auth_key": "user-api-key"},
+        },
+    )
+    env = generate.build(ctx).env
+    assert env["UNDEFINED_DEPLOY_WEBUI_PASSWORD"] == "user-password"
+    assert env["UNDEFINED_DEPLOY_API_AUTH_KEY"] == "user-api-key"
+
+
+def test_config_credentials_win_over_stale_env(tmp_path: Path) -> None:
+    """两个来源都可用时以 config.toml 为准。
+
+    这两个键只在 config.toml 里生效（``.env`` 只是留档供下次复用），所以重跑 up
+    应当向「实际生效的值」收敛，而不是把手改过的密码改回旧的 .env 值。
+    """
+    ctx = _ctx(
+        tmp_path,
+        previous_env={
+            "UNDEFINED_DEPLOY_WEBUI_PASSWORD": "stale-env-password",
+            "UNDEFINED_DEPLOY_API_AUTH_KEY": "stale-env-key",
+        },
+        existing_config={
+            "webui": {"password": "current-password"},
+            "api": {"auth_key": "current-key"},
+        },
+    )
+    env = generate.build(ctx).env
+    assert env["UNDEFINED_DEPLOY_WEBUI_PASSWORD"] == "current-password"
+    assert env["UNDEFINED_DEPLOY_API_AUTH_KEY"] == "current-key"
+
+
 def test_render_env_is_sorted_and_commented(tmp_path: Path) -> None:
     env = generate.build(_ctx(tmp_path)).env
     text = generate.render_env(env)
@@ -387,7 +435,8 @@ def test_searxng_does_not_chown_the_mounted_config_dir(tmp_path: Path) -> None:
     """入口的 chown 会把宿主 deploy/searxng 改成 977:977，之后再也写不进去。
 
     下一次 up 要重写 settings.yml，于是直接 EACCES——部署脚本「幂等、重跑即可改
-    选择」的承诺就破了。容器以 root 运行、settings.yml 也只有 0644，不需要 chown。
+    选择」的承诺就破了。容器以 root 运行、settings.yml 是脚本原子写入的 0600，
+    不需要 chown。
     """
     services = _compose_services(
         generate.build(_ctx(tmp_path, services=("searxng",))).compose_text
@@ -418,7 +467,13 @@ def test_bot_container_mounts_repo_and_docker_socket(tmp_path: Path) -> None:
     volumes = bot["volumes"]
     # socket 路径走变量，容器内固定挂在同一路径（DooD）
     assert "${UNDEFINED_DEPLOY_DOCKER_SOCKET}:/var/run/docker.sock" in volumes
-    assert "../config.toml:/data/Undefined/config.toml" in volumes
+    # 必须是**目录**挂载（且可写）：`up` 用 os.replace 原子替换 config.toml，单文件
+    # bind mount 绑的是替换前的 inode，容器会一直读旧配置；而挂成 :ro 会让 WebUI 的
+    # 配置保存（CONFIG_PATH.write_text，原地写）直接失败。
+    assert "..:/data/Undefined" in volumes, volumes
+    assert not [v for v in volumes if v.startswith("../config.toml:")], volumes
+    # 静态资源仍只读；运行态 data/logs 走 deploy/ 下的目录
+    assert "../res:/data/Undefined/res:ro" in volumes, volumes
     assert any(volume.endswith(":/data/Undefined/data") for volume in volumes)
 
 

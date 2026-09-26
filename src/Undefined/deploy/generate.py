@@ -149,11 +149,23 @@ def reuse_or_generate(
 
     ``up`` 幂等性的关键：重复部署不会把已生效的 token/密码换掉。
     """
-    if previous is not None:
-        candidate = previous.strip()
-        if candidate and candidate not in PLACEHOLDER_SECRETS:
-            return candidate
-    return random_secret(length, alphabet=alphabet)
+    usable = _usable_credential(previous)
+    return usable if usable is not None else random_secret(length, alphabet=alphabet)
+
+
+def _usable_credential(value: str | None) -> str | None:
+    """可直接复用的凭据；空值与占位值一律返回 ``None``（等于「这个来源没有」）。
+
+    存在的意义是**多来源按优先级取值**：``a or b`` 只判真假，而 ``changeme``
+    这类占位值是**真值**，会把下一来源里真正生效的密码挡掉，随后被
+    :func:`reuse_or_generate` 丢掉并换成新随机值——用户手改的密码就被无声换掉了。
+    """
+    if value is None:
+        return None
+    candidate = value.strip()
+    if not candidate or candidate in PLACEHOLDER_SECRETS:
+        return None
+    return candidate
 
 
 # --------------------------------------------------------------------------- #
@@ -267,20 +279,23 @@ def build_env(ctx: GenerateContext) -> dict[str, str]:
             ctx.image_owner, images.LXMUSIC2API_UPSTREAM_SHA
         ).reference
 
-    # 凭据：优先复用 .env，其次复用 config.toml 里已生效的值，最后生成随机值
+    # 凭据：优先复用 config.toml 里**真正生效**的值，其次 .env，最后生成随机值
     env["UNDEFINED_DEPLOY_NAPCAT_WEBUI_TOKEN"] = reuse_or_generate(
         prev("UNDEFINED_DEPLOY_NAPCAT_WEBUI_TOKEN"), length=NAPCAT_TOKEN_BYTES
     )
     env["UNDEFINED_DEPLOY_NAPCAT_WS_TOKEN"] = reuse_or_generate(
         prev("UNDEFINED_DEPLOY_NAPCAT_WS_TOKEN"), length=NAPCAT_TOKEN_BYTES
     )
+    # WebUI 密码与 Runtime API auth_key 只在 config.toml 里生效（.env 只是留档），
+    # 所以 config.toml 的值优先：重跑 up 不会把用户手改过的密码换回旧的 .env 值。
     env["UNDEFINED_DEPLOY_WEBUI_PASSWORD"] = reuse_or_generate(
-        prev("UNDEFINED_DEPLOY_WEBUI_PASSWORD")
-        or _config_str(existing, "webui.password"),
+        _usable_credential(_config_str(existing, "webui.password"))
+        or _usable_credential(prev("UNDEFINED_DEPLOY_WEBUI_PASSWORD")),
         length=WEBUI_PASSWORD_BYTES,
     )
     env["UNDEFINED_DEPLOY_API_AUTH_KEY"] = reuse_or_generate(
-        prev("UNDEFINED_DEPLOY_API_AUTH_KEY") or _config_str(existing, "api.auth_key"),
+        _usable_credential(_config_str(existing, "api.auth_key"))
+        or _usable_credential(prev("UNDEFINED_DEPLOY_API_AUTH_KEY")),
         length=API_AUTH_KEY_BYTES,
     )
     env["UNDEFINED_DEPLOY_SEARXNG_SECRET"] = reuse_or_generate(
