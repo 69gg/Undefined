@@ -15,6 +15,11 @@
 ``_BUDGET``**。新增断言会让测试失败；把断言改成行为测试后，请顺带调低预算，
 让这个数字只减不增。
 
+**计数范围只限产品源码/资源**：读 ``tmp_path``（本次运行产出的文件）或 ``docs/``
+下文档的断言不算——它们断言的对象本来就是产物与文档内容，让它们「迁成行为测试」
+是范畴错误。排除遵循「确认即排除」：认不出来的读取一律按源码计（宁可偏高、可见，
+也不要再回到静默漏数——上一版棘轮实测只数到 72，而真实存量是 117）。
+
 计数规则（刻意写得比“字面量在左、源码变量在右”宽，否则绕过方式太多）：
 
 - 源码变量 = ``_read_source(...)`` / ``Path.read_text(...)`` 的结果（``Assign`` 与
@@ -55,27 +60,24 @@ _SEARCH_FUNCS: Final[frozenset[str]] = frozenset(
 #
 # 计数规则在本轮加固过（识别 AnnAssign、派生变量、count/re.search/f-string/
 # any(...) 等形态，并改成递归扫描 tests/），因此数字比旧的 72 大——旧的 72 是
-# 漏数出来的，不是真的降下来了。
+# 漏数出来的，不是真的降下来了。排除产物/文档断言后又从 117 收到 96。
 #
-# 分布（加固后的实测值，按文件降序）：
-#   40 tests/test_webui_config_form_frontend.py
-#   10 tests/test_prepare_tauri_android_script.py
-#   10 tests/test_webui_schedules_frontend.py
-#    9 tests/test_webui_weixin_frontend.py
-#    8 tests/test_naga_code_analysis_agent.py
-#    7 tests/test_release_notes_script.py
-#    7 tests/test_runtime_api_chat_attachments.py
-#    7 tests/test_webui_logs_frontend.py
-#    7 tests/test_webui_style_contracts.py
-#    4 tests/test_undefined_self_code_agent.py
-#    4 tests/test_webui_management_api.py
-#    2 tests/test_weixin_store.py
-#    1 tests/test_package_layout.py
-#    1 tests/test_weixin_service.py
+# 计数范围是**产品源码/资源**的文本断言：读 tmp_path（本次运行产出的文件）或
+# docs/ 下文档的断言按 _reads_artifact 排除——那些本来就是对着产物内容写的，
+# 让它们「迁成行为测试」是范畴错误，罚它们只会把错误激励换个方向。
 #
-# 只允许下降：预算紧贴真实存量（零余量），新增任何一条源码字符串断言都会失败。
-# 需要调高预算时请显式修改这个常量并说明原因，而不是放宽计数规则。
-_BUDGET: Final[int] = 117
+# 分布（实测值，按文件降序；产物/文档断言已排除，见 _reads_artifact）：
+#    40 tests/test_webui_config_form_frontend.py
+#    10 tests/test_prepare_tauri_android_script.py
+#    10 tests/test_webui_schedules_frontend.py
+#     9 tests/test_webui_weixin_frontend.py
+#     8 tests/test_naga_code_analysis_agent.py
+#     7 tests/test_webui_logs_frontend.py
+#     7 tests/test_webui_style_contracts.py
+#     4 tests/test_undefined_self_code_agent.py
+#     1 tests/test_package_layout.py
+#
+_BUDGET: Final[int] = 96
 
 
 # --------------------------------------------------------------------------- #
@@ -148,6 +150,80 @@ def _reads_source(value: ast.expr) -> bool:
         return False
 
 
+#: 明确不是产品源码的目录名：出现在被读路径里，说明断言对象是**产物/文档**，
+#: 而不是「改个重构就红、却测不出行为回归」的源码子串检测器。
+ARTIFACT_DIR_NAMES: Final[tuple[str, ...]] = ("docs",)
+
+#: 临时目录夹具：读它下面的文件必然是这次运行产出的东西。
+ARTIFACT_FIXTURE_NAMES: Final[tuple[str, ...]] = ("tmp_path",)
+
+
+def _read_path_expr(node: ast.Call) -> ast.expr | None:
+    """取读取调用的路径表达式（``_read_source(P)`` 的 ``P`` / ``X.read_text()`` 的 ``X``）。"""
+    func = node.func
+    if isinstance(func, ast.Name) and func.id == "_read_source":
+        return node.args[0] if node.args else None
+    if isinstance(func, ast.Attribute) and func.attr == "read_text":
+        return func.value
+    return None
+
+
+def _name_bindings(tree: ast.Module) -> dict[str, ast.expr]:
+    """Name -> 绑定表达式（同名多次赋值时取第一次，取不到就当没有）。"""
+    bindings: dict[str, ast.expr] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)) or node.value is None:
+            continue
+        for name in _target_names(node):
+            bindings.setdefault(name, node.value)
+    return bindings
+
+
+def _path_is_artifact(expr: ast.expr | None, bindings: dict[str, ast.expr]) -> bool:
+    """路径能否**被正面确认**指向产物/文档（临时目录夹具或 ``docs/``）。
+
+    只做「确认即排除」：认不出来一律当源码。方向是刻意选的——排除得太宽会让预算
+    偏低（可见、保守），排除得太窄则会让棘轮重新变成静默漏数，而那正是它上一版
+    失效的原因（实测 72 vs 真实 117）。
+    """
+    node = expr
+    for _ in range(2):  # 至多一层 Name 展开
+        if isinstance(node, ast.Name) and node.id in bindings:
+            node = bindings[node.id]
+        else:
+            break
+    if node is None:
+        return False
+    if any(
+        sub.id in ARTIFACT_FIXTURE_NAMES
+        for sub in ast.walk(node)
+        if isinstance(sub, ast.Name)
+    ):
+        return True
+    for sub in ast.walk(node):
+        if not isinstance(sub, ast.Constant) or not isinstance(sub.value, str):
+            continue
+        parts = sub.value.replace("\\", "/").split("/")
+        if any(part in ARTIFACT_DIR_NAMES for part in parts):
+            return True
+    return False
+
+
+def _reads_artifact(value: ast.expr, bindings: dict[str, ast.expr]) -> bool:
+    """表达式是否**全部**来自产物/文档读取。
+
+    只要还夹着一处认不出来的读，就按源码算（保守方向）。
+    """
+    calls = [
+        node
+        for node in ast.walk(value)
+        if isinstance(node, ast.Call) and _read_path_expr(node) is not None
+    ]
+    return bool(calls) and all(
+        _path_is_artifact(_read_path_expr(call), bindings) for call in calls
+    )
+
+
 def _derivation_root(expr: ast.expr | None) -> str | None:
     """沿派生链向下找根变量名（``a.split(x)[0]`` → ``a``）。"""
     node = expr
@@ -182,10 +258,16 @@ def _collect_source_vars(tree: ast.Module) -> set[str]:
         node for node in ast.walk(tree) if isinstance(node, (ast.Assign, ast.AnnAssign))
     ]
     assignments.sort(key=lambda node: (node.lineno, node.col_offset))
+    bindings = _name_bindings(tree)
     source_vars: set[str] = set()
     for node in assignments:
-        if node.value is not None and _reads_source(node.value):
-            source_vars.update(_target_names(node))
+        if node.value is None or not _reads_source(node.value):
+            continue
+        # 读的是产物/文档（tmp_path、docs/…）就不算「源码字符串断言」：
+        # 那些断言本来就该对着产物内容写，让它们去「迁成行为测试」是范畴错误。
+        if _reads_artifact(node.value, bindings):
+            continue
+        source_vars.update(_target_names(node))
     for node in assignments:
         if node.value is None:
             continue
@@ -364,10 +446,14 @@ def _scan() -> tuple[int, dict[str, int]]:
 #:   4 `f"prefix-{MARKER}" in raw`（普通 Assign 读源码 + f-string）
 #:   5 `any(part in src for part in [...])`（推导式循环变量）
 #:   6 `assert re.search("zeta", src)`（检索调用**本身就是断言条件**）
-#: 不计：`tomllib.loads(src)["x"] == "parsed"`（解析后的结构）、
-#:       `"not-source" in unrelated`（不是源码变量）、
-#:       `found = re.search("eta", src)`（提取，不是检测器——这一条同时挡住
-#:       「把检索调用一律计数」的过度计数回归）。
+#: 不计（负向钉子，方向反过来也能红）：
+#:   `tomllib.loads(src)["x"] == "parsed"`（解析后的结构）、
+#:   `"not-source" in unrelated`（不是源码变量）、
+#:   `found = re.search("eta", src)`（提取，不是检测器——挡住「检索调用一律计数」
+#:   的过度计数回归）、
+#:   `assert "artifact" in doc`（读的是 tmp_path/docs 下的产物——挡住「把产物/
+#:   文档断言也算成源码断言」的过度计数；反过来，若排除规则被写得过宽，
+#:   上面 6 条会掉下去，本自检同样变红）。
 _SELF_CHECK_SAMPLE: Final[str] = """
 
 def _read_source(path: str) -> str:
@@ -375,8 +461,8 @@ def _read_source(path: str) -> str:
 
 
 def test_sample(tmp_path) -> None:
-    src: str = _read_source(tmp_path / "a.js")
-    raw = (tmp_path / "b.css").read_text(encoding="utf-8")
+    src: str = _read_source(SRC_DIR / "a.js")
+    raw = (SRC_DIR / "b.css").read_text(encoding="utf-8")
     fn = src.split("function save()", 1)[1]
     unrelated = "普通字符串"
     assert "alpha" in src
@@ -389,6 +475,8 @@ def test_sample(tmp_path) -> None:
     assert found
     assert tomllib.loads(src)["x"] == "parsed"
     assert "not-source" in unrelated
+    doc = (tmp_path / "docs" / "api.md").read_text(encoding="utf-8")
+    assert "artifact" in doc
 """
 _SELF_CHECK_EXPECTED: Final[int] = 6
 
@@ -399,6 +487,8 @@ def test_counter_self_check_on_fixed_sample(tmp_path: Path) -> None:
     没有这条，计数逻辑被静默改坏（例如 AST 分支写错、只认某种写法）时，
     预算测试会「通过」，而棘轮实际上已经失效。
     """
+    # 样本里两处读取刻意**不**用 tmp_path：带 tmp_path 的读按新规则算产物、
+    # 会被排除，样本就失去意义了（产物读另有一条专门的负向钉子）。
     assert _count_in_tree(ast.parse(_SELF_CHECK_SAMPLE)) == _SELF_CHECK_EXPECTED
 
 
