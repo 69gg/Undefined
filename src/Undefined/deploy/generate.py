@@ -24,6 +24,10 @@ from Undefined.deploy.state import DeployLayout
 BOT_SERVICE_NAME: Final[str] = "undefined-bot"
 #: NapCat 在 compose 里的服务名（与 compose.napcat.yaml 一致）。
 NAPCAT_SERVICE_NAME: Final[str] = "napcat"
+#: 自托管服务在 compose 网络里的服务名（与各自模板里的服务名一致）。
+SEARXNG_SERVICE_NAME: Final[str] = "searxng"
+FIRECRAWL_SERVICE_NAME: Final[str] = "firecrawl-api"
+LXMUSIC2API_SERVICE_NAME: Final[str] = "lxmusic2api"
 #: 本体容器内的工作目录（与 compose.bot.yaml 的 working_dir 一致）。
 CONTAINER_REPO_PATH: Final[str] = "/data/Undefined"
 
@@ -160,19 +164,23 @@ def reuse_or_generate(
 def compose_service_urls(ctx: GenerateContext) -> dict[str, str]:
     """按模式给出各服务的 base_url 映射。
 
-    容器模式下用 compose 服务名直连，避免绕宿主机网关多一跳；
-    host 模式下本体在宿主机上，只能走发布的回环端口。
+    容器模式下用 compose 服务名直连，避免绕宿主机网关多一跳；端口一律取
+    ``catalog.container_port()``——容器里监听的是固定端口，宿主发布端口在这张
+    网络里没有任何人在听。host 模式下本体在宿主机上，只能走发布的回环端口，
+    且必须用**覆盖后**的端口，否则用户 ``--port`` 之后就再也连不上。
     """
     mode = ctx.mode
     if mode == catalog.MODE_CONTAINER:
+        hosts = {
+            catalog.SEARXNG.key: SEARXNG_SERVICE_NAME,
+            catalog.FIRECRAWL.key: FIRECRAWL_SERVICE_NAME,
+            catalog.LXMUSIC2API.key: LXMUSIC2API_SERVICE_NAME,
+        }
         return {
-            "searxng": "http://searxng:8080",
-            "firecrawl": "http://firecrawl-api:3002",
-            "lxmusic2api": "http://lxmusic2api:3000",
+            key: f"http://{host}:{catalog.container_port(key)}"
+            for key, host in hosts.items()
         }
     if mode == catalog.MODE_HOST:
-        # 本体在宿主机上，只能走发布端口——必须用**覆盖后**的端口，
-        # 否则用户 --port 之后就再也连不上（旧实现取的是默认值）。
         host = ctx.port_bind
         return {
             "searxng": f"http://{host}:{ctx.port('searxng')}",
@@ -183,11 +191,15 @@ def compose_service_urls(ctx: GenerateContext) -> dict[str, str]:
 
 
 def _websocket_url(ctx: GenerateContext) -> str:
-    """本体连接协议端的地址（NapCat 作正向 WS 服务端）。"""
-    port = ctx.port("napcat_ws")
+    """本体连接协议端的地址（NapCat 作正向 WS 服务端）。
+
+    容器模式走的是 compose 网络，必须用**容器内**监听端口：``--port`` 覆盖的是
+    宿主机那一侧的映射，容器网络里那个端口没有任何人在听（旧实现用它拼出
+    ``ws://napcat:13001``，本体永远连不上，而 status 仍显示一切正常）。
+    """
     if ctx.mode == catalog.MODE_CONTAINER:
-        return f"ws://napcat:{port}"
-    return f"ws://{catalog.DEFAULT_PORT_BIND}:{port}"
+        return f"ws://{NAPCAT_SERVICE_NAME}:{catalog.container_port('napcat_ws')}"
+    return f"ws://{catalog.DEFAULT_PORT_BIND}:{ctx.port('napcat_ws')}"
 
 
 def build_env(ctx: GenerateContext) -> dict[str, str]:

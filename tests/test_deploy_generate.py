@@ -196,10 +196,32 @@ def test_config_listen_ports_match_container_ports(tmp_path: Path) -> None:
     assert desired["api.port"] == catalog.BOT_API_CONTAINER_PORT
 
 
-def test_ws_url_uses_overridden_host_port(tmp_path: Path) -> None:
-    """ws_url 指向宿主发布端口（NapCat 容器内仍是固定 3001）。"""
+def test_container_ws_url_uses_container_port(tmp_path: Path) -> None:
+    """容器模式连的是容器内端口；--port 覆盖只影响宿主机侧的映射。
+
+    旧实现拼的是宿主发布端口（ws://napcat:13001），而容器网络里没有任何人在
+    听那个端口——本体永远连不上协议端，status 却一切正常。
+    """
     ctx = _ctx(tmp_path, ports={"napcat_ws": 13001})
-    assert generate.build(ctx).websocket_url == "ws://napcat:13001"
+    assert (
+        generate.build(ctx).websocket_url
+        == f"ws://{generate.NAPCAT_SERVICE_NAME}:{catalog.NAPCAT_WS_CONTAINER_PORT}"
+    )
+
+
+def test_host_ws_url_uses_overridden_host_port(tmp_path: Path) -> None:
+    """host 模式下本体在宿主机上，走的是被覆盖后的发布端口。"""
+    ctx = _ctx(tmp_path, mode=catalog.MODE_HOST, ports={"napcat_ws": 13001})
+    assert generate.build(ctx).websocket_url == "ws://127.0.0.1:13001"
+
+
+def test_container_service_urls_follow_catalog_ports(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """容器模式地址里的端口必须来自 catalog，不能是写死的字面量。"""
+    monkeypatch.setitem(catalog.CONTAINER_PORTS, "searxng", 18080)
+    urls = generate.compose_service_urls(_ctx(tmp_path))
+    assert urls["searxng"] == f"http://{generate.SEARXNG_SERVICE_NAME}:18080"
 
 
 def test_port_bind_override_is_applied(tmp_path: Path) -> None:
