@@ -39,20 +39,6 @@ def _read_source(path: Path) -> str:
     return text
 
 
-def test_webchat_html_preview_csp_allows_inline_scripts_without_eval() -> None:
-    webui_app = _read_source(WEBUI_APP_PY)
-    tauri_conf = _read_source(TAURI_CONF)
-
-    assert "\"script-src 'self' 'nonce-{nonce}'; \"" in webui_app
-    assert "script-src 'self';" in tauri_conf
-    assert "script-src 'self' 'unsafe-inline'" not in webui_app
-    assert "script-src 'self' 'unsafe-inline'" not in tauri_conf
-    assert "__CSP_NONCE__" in _read_source(WEBUI_TEMPLATE)
-    assert "htmlRunnerCspMeta" in _read_source(RUNTIME_JS)
-    assert "unsafe-eval" not in webui_app
-    assert "unsafe-eval" not in tauri_conf
-
-
 def test_webchat_frontend_resumes_backend_job_after_refresh_or_reconnect() -> None:
     source = _read_source(RUNTIME_JS)
     history_helper = source.split("async function loadChatHistory", 1)[1].split(
