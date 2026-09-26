@@ -290,6 +290,7 @@ compose 会写成 `${绑定地址}:${你的端口}:<容器内固定端口>`，�
 | `up` 之后容器在跑但机器人没反应 | `container` 模式下 Bot 由容器内 WebUI 托管、部署脚本会写 `[webui].autostart_bot = true`；若被改回 `false`，去 WebUI 点「启动机器人」或改回该键 |
 | `up` 失败后 `down`/`status` 能跑但信息不全 | `STATE.json` 缺失只降级为提示（按默认项目名继续）；重跑一次 `up` 就会补齐 |
 | 日志 / 数据目录属主是 root | 本体容器以 root 运行，`deploy/{data,logs}` 里的文件属 root；`--purge` 因此可能删不掉，需要 `sudo rm -rf`（脚本会列出残留项） |
+| 收到的语音等本地文件读不到 | 已知限制：`container` 模式下协议端与本体不在同一文件系统，NapCat 对「没有 URL、只能给本地路径」的文件（典型是 silk 语音）给出的是**它容器内**的路径，本体读不到。`enableLocalFile2Url` 与 NapCat 自带 HTTP 端口的行为尚未在真机验证，因此生成的 `ws.json` 保持 `httpServers: []`、`enableLocalFile2Url: false` 不猜；需要这类能力时请自行在 NapCat WebUI 里开启并实测 |
 | `config.toml` 被改错 | 从 `deploy/backup/` 取最近一份备份覆盖回去 |
 
 ---
