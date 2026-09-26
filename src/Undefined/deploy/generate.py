@@ -495,6 +495,11 @@ def build_patch_plan(ctx: GenerateContext, env: dict[str, str]) -> PatchPlan:
         # 取 URL 去下载文件的是**协议端**（另一个容器），所以要给它一个
         # 它自己解析得到的地址：同网络内的服务名，而不是宿主网关别名。
         desired["onebot.file_send_host"] = BOT_SERVICE_NAME
+        # 镜像入口是 WebUI（Dockerfile.bot 的 ENTRYPOINT），容器里没有人会去点
+        # 「启动机器人」；而 [webui].autostart_bot 默认 false，不写这个键的话
+        # `up` 之后只有 WebUI 在跑，Bot 进程永远不会起来、NapCat 无人连接。
+        desired["webui.autostart_bot"] = True
+        about["webui.autostart_bot"] = "容器内由 WebUI 自动拉起 Bot 进程"
         about["webui.url"] = "容器内需要监听全部地址，端口由 compose 发布"
         about["api.host"] = "容器内需要监听全部地址，端口由 compose 发布"
         about["onebot.file_send_mode"] = "协议端在另一个容器，走 Runtime 临时链接"

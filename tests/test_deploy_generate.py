@@ -529,6 +529,8 @@ def test_patch_plan_container_mode_topology(tmp_path: Path) -> None:
     # 协议端在另一个容器里，本地路径模式不可用
     assert desired["onebot.file_send_mode"] == "url"
     assert desired["onebot.file_send_host"] == generate.BOT_SERVICE_NAME
+    # 镜像入口是 WebUI，容器里没人手点「启动机器人」：不自动拉起就等于没部署
+    assert desired["webui.autostart_bot"] is True
 
 
 def test_patch_plan_host_mode_topology(tmp_path: Path) -> None:
@@ -537,6 +539,8 @@ def test_patch_plan_host_mode_topology(tmp_path: Path) -> None:
     assert desired["webui.url"] == "127.0.0.1"
     assert desired["api.host"] == "127.0.0.1"
     assert desired["onebot.file_send_mode"] == "local"
+    # 宿主机上由用户自己决定怎么起 Bot，部署脚本不该改写这个偏好
+    assert "webui.autostart_bot" not in desired
 
 
 def test_patch_plan_only_touches_selected_services(tmp_path: Path) -> None:

@@ -32,6 +32,8 @@ uv run deploy up
 
 确认后脚本会：生成 `deploy/` 下的 compose 与各服务配置 → 按差异修改 `config.toml`（改前自动备份）→ 校验 compose → 启动容器 → 输出全部入口与凭据。
 
+`container` 模式下还会写入 `[webui].autostart_bot = true`：本体镜像的入口就是 WebUI，Bot 进程由它托管，不自动拉起的话容器虽然 running 但机器人并没有在跑。
+
 全程非交互（CI、无人值守、脚本化）时加 `--yes` 走默认值：
 
 ```bash

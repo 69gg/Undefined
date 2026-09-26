@@ -4,6 +4,7 @@ import logging
 import os
 import signal
 import subprocess
+import sys
 import time
 import secrets
 from typing import Any
@@ -13,7 +14,15 @@ logger = logging.getLogger(__name__)
 SESSION_TTL_SECONDS = 8 * 60 * 60
 ACCESS_TOKEN_TTL_SECONDS = 15 * 60
 REFRESH_TOKEN_TTL_SECONDS = 8 * 60 * 60
-BOT_COMMAND = ("uv", "run", "Undefined")
+#: 拉起 Bot 子进程的命令。
+#:
+#: 用**当前解释器**直接跑模块，而不是 ``uv run``：WebUI 自己就跑在这个解释器里，
+#: 它必然能 import 到本包；``uv run`` 则要求环境里存在 uv，并会按
+#: pyproject/uv.lock 尝试同步环境——本体镜像的 runtime 阶段是从
+#: ``python:3.12-slim-bookworm`` 重新开始的，只带了 ``/opt/venv``（见
+#: ``src/Undefined/deploy/templates/Dockerfile.bot``），里面没有 uv，
+#: 于是容器内点「启动机器人」只会 FileNotFoundError。
+BOT_COMMAND = (sys.executable, "-m", "Undefined")
 
 
 @dataclass
