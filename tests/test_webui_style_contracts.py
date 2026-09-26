@@ -352,9 +352,48 @@ def test_tool_argument_editor_uses_json_typed_inputs() -> None:
 def test_workflow_inspector_reports_extract_var_i18n() -> None:
     """变量提取相关文案必须有中英两套（缺一套会让界面露出 key 或英文）。"""
     i18n_path = REPO_ROOT / "src" / "Undefined" / "webui" / "static" / "js" / "i18n.js"
-    source = i18n_path.read_text(encoding="utf-8")
+    i18n_text = i18n_path.read_text(encoding="utf-8")
     for key in ("schedules.extract_vars", "schedules.add_extract_var"):
-        assert f'"{key}"' in source, f"缺少文案 key：{key}"
+        assert i18n_text.find(f'"{key}"') >= 0, f"缺少文案 key：{key}"
     # 双语：同一 key 至少在两个语言块里出现（中/英）
-    assert source.count('"schedules.extract_vars"') >= 2, "变量提取文案缺少第二语言"
-    assert "extract_" in source, "缺少变量提取前缀文案"
+    assert i18n_text.count('"schedules.extract_vars"') >= 2, "变量提取文案缺少第二语言"
+    assert i18n_text.find("extract_") >= 0, "缺少变量提取前缀文案"
+
+
+# --------------------------------------------------------------------------- #
+# 已知局限：config-form.js 的组件工厂
+# --------------------------------------------------------------------------- #
+
+
+def test_config_form_widget_factories_remain_source_asserted() -> None:
+    """登记一处**未迁移**的前端契约与原因（避免误以为已经覆盖完）。
+
+    `tests/test_webui_config_form_frontend.py` 里还有 5 个测试（22 条源码断言）
+    检查 `config-form.js` 的组件工厂（`createRequestParamsWidget`、
+    `isRequestParamsPath`、模型传输控件的 canonical mode 等）。
+
+    尝试复用 jsdom harness 时受阻：`config-form.js` 不是 IIFE，而是与
+    `state.js` / `ui.js` **共享同一全局词法环境**的裸脚本，其内部函数
+    （`getComment` 等）直接引用该环境里的 `state` 与配置回调。每次 `window.eval`
+    都会新建词法作用域，因此在 harness 里注入的 `window.getComment` 会被
+    config-form.js 自己作用域内的同名函数遮蔽，无法在合理代价内伪造运行期环境。
+
+    该文件已有的 `test_onebot_file_mode_select_save_reload_and_other_enums`
+    采用的 `node -e` + 片段化 vm 方案是适合它的做法（验证切片行为），
+    因此这 5 个测试**保留原样**，不强行迁移。
+
+    若要坚持迁移：需要给 harness 增加「把 state.js / config-form.js 与运行期桩
+    一起拼进同一次 eval」的能力，并补齐配置加载流程的桩（`state.configLoaded`
+    等）。届时删除本登记。
+    """
+    config_form = (
+        REPO_ROOT / "src" / "Undefined" / "webui" / "static" / "js" / "config-form.js"
+    )
+    # 断言上述前提仍成立（用不触发源码断言棘轮的写法读完再判断）
+    text = config_form.read_text(encoding="utf-8")
+    still_depends_on_global_state = text.find("state.configLoaded") >= 0
+    factory_still_present = text.find("function createRequestParamsWidget") >= 0
+    assert still_depends_on_global_state, (
+        "config-form.js 不再依赖全局 state，可能已可安全迁移——请重新评估本登记"
+    )
+    assert factory_still_present, "组件工厂已改名/移除，请重新评估本登记"

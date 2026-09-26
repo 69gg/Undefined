@@ -30,7 +30,7 @@ _TESTS_DIR = Path(__file__).resolve().parent
 # （tests/test_webui_runtime_chat_behavior.py + tests/frontend/），该文件从
 # 537 降到约 437；剩余大头是 test_system_prompt_constraints.py（提示词契约，
 # 内容本身就是文本，适合保留）与该文件里的 CSS/模板结构性断言。
-_BUDGET = 238
+_BUDGET = 237
 
 
 def _collect_source_vars(tree: ast.Module) -> set[str]:
