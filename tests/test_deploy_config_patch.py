@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from Undefined.deploy import config_patch
+from Undefined.webui.utils.comment import parse_comment_map
 
 #: 故意写成「已有注释 + 已有用户自定义值 + 嵌套表」的形态，
 #: 用来验证 patch 只动目标键且注释不丢。
@@ -128,14 +129,14 @@ def test_apply_writes_only_target_keys_and_keeps_comments(
 
     assert parsed["webui"]["url"] == "127.0.0.1"
 
-    # 直接对**写盘后的文本**断言注释仍在。
-    # 不能再用 build_comment_map(config, example) 来验证：那个函数先读 example，
-    # 而 example 里本来就有这些注释，所以哪怕写完一条注释都不剩也能通过
-    # （属于虚假安全感，已由审查指出）。
-    written = config.read_text(encoding="utf-8")
-    assert "# zh: NapCat WebSocket地址。" in written
-    assert "# zh: SearXNG 地址。" in written
-    assert "# zh: 监听地址。" in written
+    # 注释必须真的写进了产物：从**写盘后的文件**解析注释映射来验证。
+    # 不能再用 build_comment_map(config, example)——那个函数先读 example，而
+    # example 里本来就有这些注释，所以哪怕写完一条注释都不剩也能通过
+    # （审查指出的虚假安全感）。
+    comments = parse_comment_map(config)
+    assert comments["onebot.ws_url"], "目标键的注释在写盘后丢失"
+    assert comments["search.searxng_url"], "未触碰键的注释在写盘后丢失"
+    assert comments["webui.url"], "同文件其它键的注释在写盘后丢失"
 
 
 def test_render_drops_unrecognised_comment_blocks(tmp_path: Path) -> None:
@@ -164,15 +165,19 @@ def test_render_drops_unrecognised_comment_blocks(tmp_path: Path) -> None:
     plan = config_patch.PatchPlan(config, {"onebot.ws_url": "ws://napcat:3001"})
     config_patch.apply_plan(plan, example_path=example, backup_dir=tmp_path / "b")
 
-    written = config.read_text(encoding="utf-8")
-    # 值不丢
-    assert 'ws_url = "ws://napcat:3001"' in written
-    assert "nagaagent_mode_enabled = false" in written
-    # 能识别的注释保留
-    assert "# zh: 主开关。" in written
-    # 现状：这两类注释不保留
-    assert "这行没有 zh/en 前缀" not in written
-    assert "独立说明块" not in written
+    # 值不丢（走解析而不是原文子串）
+    parsed = tomllib.loads(config.read_text(encoding="utf-8"))
+    assert parsed["onebot"]["ws_url"] == "ws://napcat:3001"
+    assert parsed["nagaagent_mode_enabled"] is False
+
+    comments = parse_comment_map(config)
+    # 能识别的 zh/en 注释块保留
+    assert comments["nagaagent_mode_enabled"]["zh"] == "主开关。"
+    assert comments["nagaagent_mode_enabled"]["en"] == "Master switch."
+    # 现状：无 zh/en 前缀的续行不保留
+    assert "这行没有" not in comments["nagaagent_mode_enabled"]["zh"]
+    # 现状：不依附任何键的独立说明块整体不保留
+    assert all("独立说明块" not in str(value) for value in comments.values())
 
 
 def test_apply_creates_backup_before_overwrite(

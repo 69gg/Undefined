@@ -173,6 +173,90 @@ def test_stage_event_renders_live_stage() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# 跨会话隔离
+# --------------------------------------------------------------------------- #
+
+
+def test_foreign_conversation_events_are_ignored() -> None:
+    """别的会话的事件不得写进当前会话的聊天区。
+
+    runtime.js 里有两道守卫（applyChatEvent 的 eventForCurrentConversation 过滤与
+    applyChatEventsPayload 的归属判断），这是「刷新后把别会话作业挂到当前会话」的
+    唯一防线；变异掉守卫也应被这条用例抓住。
+    """
+    result = run_scenario("foreign_conversation_events_are_ignored")
+
+    bots = _bot_nodes(result)
+    assert len(bots) == 1, bots
+    # 只出现本会话那条事件的内容；异会话事件的正文不得进入任何节点
+    assert bots[0]["contentTexts"] == ["MINE"], bots[0]
+    rendered = "\n".join(node["text"] for node in (result.get("allNodes") or []))
+    assert "INTRUDER" not in rendered, rendered
+
+
+# --------------------------------------------------------------------------- #
+# done 的最终耗时
+# --------------------------------------------------------------------------- #
+
+
+def test_done_event_writes_final_duration_to_stage() -> None:
+    """done 事件要把最终耗时写进阶段元素并标记为 final。
+
+    旧断言守的是 finalizeActiveChatMessage；迁移后一度只剩工具块自身的耗时有覆盖，
+    done 的收尾逻辑变异掉也不会变红。
+    """
+    result = run_scenario("done_event_keeps_final_duration")
+
+    bots = _bot_nodes(result)
+    assert len(bots) == 1
+    assert bots[0]["contentTexts"] == ["answer"]
+    # payload 直接决定 base 值（稳定），并进入 final 态
+    assert bots[0]["stageBaseMs"] == "3000", bots[0]
+    assert bots[0]["stageIsFinal"] is True, bots[0]
+    assert "3.0s" in bots[0]["stageText"], bots[0]["stageText"]
+
+
+# --------------------------------------------------------------------------- #
+# agent 生命周期
+# --------------------------------------------------------------------------- #
+
+
+def test_agent_lifecycle_renders_agent_block() -> None:
+    """agent_start / agent_end 应渲染成 is-agent 块并带耗时。"""
+    result = run_scenario("agent_lifecycle_renders_agent_block")
+
+    blocks = _bot_nodes(result)[0]["toolBlocks"]
+    assert len(blocks) == 1, blocks
+    assert "is-agent" in blocks[0]["classes"], blocks[0]
+    assert "done" in blocks[0]["classes"], blocks[0]
+    assert "web_agent" in blocks[0]["text"]
+    assert "1.5s" in blocks[0]["text"], blocks[0]["text"]
+
+
+def test_requests_never_use_sse_transport() -> None:
+    """前端通过 JSON 轮询消费作业事件，不得退回 SSE。
+
+    旧断言用 7 条「源码里不得出现 consumeSse / text/event-stream / token_delta」
+    的负向子串来表达这件事；改为直接观察请求：既不请求事件流端点，也不带 SSE 的
+    Accept 头。
+    """
+    result = run_scenario("requests_carry_conversation_id")
+
+    # 事件消费走 JSON 轮询：请求不得带 SSE Accept 头，事件端点也必须显式要求 json。
+    details = result.get("requestDetails") or []
+    assert details, "未捕获到请求明细"
+    for entry in details:
+        assert not entry["accept"].lower().startswith("text/event-stream"), entry
+
+    event_requests = [
+        entry for entry in details if "/jobs/job-9/events" in entry["url"]
+    ]
+    assert event_requests, details
+    for entry in event_requests:
+        assert "format=json" in entry["url"], entry["url"]
+
+
+# --------------------------------------------------------------------------- #
 # 会话隔离
 # --------------------------------------------------------------------------- #
 
@@ -194,6 +278,18 @@ def test_requests_carry_conversation_id() -> None:
     assert all("conversation_id=conv-9" in url for url in events), events
     # 增量轮询：带上 after 游标，避免每轮重放全部事件
     assert all("after=" in url for url in events), events
+
+
+def test_create_job_body_carries_conversation_id() -> None:
+    """POST /chat/jobs 的请求体必须带 conversation_id。
+
+    harness 之前只记录 URL、丢掉 fetch 的 options，所以这条契约一直没被测到。
+    """
+    result = run_scenario("requests_carry_conversation_id")
+    body = result["createJobBody"]
+    assert isinstance(body, dict), f"未捕获到创建作业的请求体：{body}"
+    assert body["conversation_id"] == "conv-9", body
+    assert body["message"], body
 
 
 def test_active_job_lookup_is_scoped_to_conversation() -> None:

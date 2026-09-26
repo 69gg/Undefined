@@ -90,6 +90,21 @@ function chatNodes(window) {
     });
 }
 
+/** 取 POST 到指定路径的请求体（解析为对象；解析失败返回 null）。 */
+function requestBody(env, pathFragment) {
+    for (const entry of env.requestDetails) {
+        if (!entry.url.includes(pathFragment)) continue;
+        const body = entry.options.body;
+        if (typeof body !== "string") continue;
+        try {
+            return JSON.parse(body);
+        } catch (_error) {
+            return null;
+        }
+    }
+    return null;
+}
+
 function parseArgs(argv) {
     const args = { scenario: "", root: "" };
     for (let i = 0; i < argv.length; i += 1) {
@@ -185,9 +200,11 @@ function createEnv(root) {
     window.localStorage.setItem("webui.locale", "zh-CN");
 
     const requests = [];
+    const requestDetails = [];
     let routes = [];
-    let fetchImpl = async (url) => {
+    let fetchImpl = async (url, options) => {
         requests.push(String(url));
+        requestDetails.push({ url: String(url), options: options || {} });
         return response(200, {});
     };
     window.fetch = (url, options) => fetchImpl(String(url), options);
@@ -211,6 +228,7 @@ function createEnv(root) {
         requests.length = 0;
         fetchImpl = async (url, options) => {
             requests.push(String(url));
+            requestDetails.push({ url: String(url), options: options || {} });
             for (const route of routes) {
                 if (url.includes(route.match)) {
                     const reply =
@@ -240,7 +258,7 @@ function createEnv(root) {
     ];
     window.eval(deps.map((file) => fs.readFileSync(file, "utf8")).join("\n;\n"));
 
-    return { dom, window, requests, setRoutes };
+    return { dom, window, requests, requestDetails, setRoutes };
 }
 
 // --------------------------------------------------------------------------- //
@@ -530,7 +548,18 @@ SCENARIOS.requests_carry_conversation_id = async (env) => {
     await tick(4);
     await settle(400);
 
-    return { requests: env.requests.slice() };
+    return {
+        requests: env.requests.slice(),
+        requestDetails: env.requestDetails.map((entry) => ({
+            url: entry.url,
+            accept: String(
+                (entry.options.headers || {}).Accept ||
+                    (entry.options.headers || {}).accept ||
+                    "",
+            ),
+        })),
+        createJobBody: requestBody(env, "/chat/jobs"),
+    };
 };
 
 /**
@@ -606,6 +635,213 @@ SCENARIOS.keeps_duration_after_done = async (env) => {
         allNodes: chatNodes(window),
         requests: env.requests.slice(),
     };
+};
+
+/**
+ * 别的会话的作业事件不得落到当前会话的聊天区。
+ *
+ * 这对应 runtime.js 里唯一的两道跨会话守卫（applyChatEvent 的
+ * eventForCurrentConversation 过滤 + applyChatEventsPayload 的归属判断），
+ * 旧断言守的正是它，但迁移后一直没人覆盖——变异掉守卫也能全绿。
+ */
+SCENARIOS.foreign_conversation_events_are_ignored = async (env) => {
+    const { window, setRoutes } = env;
+    setRoutes([
+        {
+            match: "/chat/conversations",
+            reply: {
+                body: {
+                    conversations: [{ id: "conv-mine", title: "t" }],
+                    default_conversation_id: "webchat",
+                    active_job: null,
+                },
+            },
+        },
+        {
+            match: "/chat/history",
+            reply: { body: { items: [], has_more: false, next_before: null } },
+        },
+        {
+            match: "/chat/jobs",
+            reply: { body: { job_id: "job-mine", conversation_id: "conv-mine" } },
+        },
+        {
+            match: "/jobs/job-mine/events",
+            reply: {
+                body: {
+                    events: [
+                        {
+                            seq: 1,
+                            event: "message",
+                            payload: {
+                                content: "INTRUDER",
+                                conversation_id: "conv-other",
+                            },
+                        },
+                        {
+                            seq: 2,
+                            event: "message",
+                            payload: {
+                                content: "MINE",
+                                conversation_id: "conv-mine",
+                            },
+                        },
+                    ],
+                    job: { job_id: "job-mine", status: "running", last_seq: 2 },
+                },
+            },
+        },
+    ]);
+
+    window.eval("window.RuntimeController.init()");
+    await tick();
+    window.RuntimeController.loadChatHistory(true).catch(() => {});
+    await tick();
+
+    window.document.getElementById("runtimeChatInput").value = "hi";
+    window.document.getElementById("btnRuntimeChatSend").click();
+    await tick(4);
+    await settle(400);
+
+    const log = chatLog(window);
+    return {
+        allNodes: chatNodes(window),
+        logText: log ? (log.innerText || "").trim() : "",
+        requests: env.requests.slice(),
+    };
+};
+
+/**
+ * done 事件应把最终耗时写进阶段元素（final 态），而不是丢掉。
+ *
+ * 旧断言守的是 runtime.js 的 finalizeActiveChatMessage，迁移后一直没覆盖。
+ */
+SCENARIOS.done_event_keeps_final_duration = async (env) => {
+    const { window, setRoutes } = env;
+    setRoutes([
+        {
+            match: "/chat/conversations",
+            reply: {
+                body: {
+                    conversations: [{ id: "conv-1", title: "t" }],
+                    default_conversation_id: "webchat",
+                    active_job: null,
+                },
+            },
+        },
+        {
+            match: "/chat/history",
+            reply: { body: { items: [], has_more: false, next_before: null } },
+        },
+        {
+            match: "/chat/jobs",
+            reply: { body: { job_id: "job-done", conversation_id: "conv-1" } },
+        },
+        {
+            match: "/jobs/job-done/events",
+            reply: {
+                body: {
+                    events: [
+                        {
+                            seq: 1,
+                            event: "stage",
+                            payload: { stage: "waiting_model", elapsed_ms: 100 },
+                        },
+                        {
+                            seq: 2,
+                            event: "message",
+                            payload: { content: "answer" },
+                        },
+                        { seq: 3, event: "done", payload: { duration_ms: 3000 } },
+                    ],
+                    job: {
+                        job_id: "job-done",
+                        status: "done",
+                        last_seq: 3,
+                        duration_ms: 3000,
+                    },
+                },
+            },
+        },
+    ]);
+
+    window.eval("window.RuntimeController.init()");
+    await tick();
+    window.RuntimeController.loadChatHistory(true).catch(() => {});
+    await tick();
+
+    window.document.getElementById("runtimeChatInput").value = "hi";
+    window.document.getElementById("btnRuntimeChatSend").click();
+    await tick(4);
+    await settle(400);
+
+    return { allNodes: chatNodes(window), requests: env.requests.slice() };
+};
+
+/**
+ * agent 生命周期事件应渲染成 agent 块（旧断言里的 agent_start/agent_end 分支）。
+ */
+SCENARIOS.agent_lifecycle_renders_agent_block = async (env) => {
+    const { window, setRoutes } = env;
+    setRoutes([
+        {
+            match: "/chat/conversations",
+            reply: {
+                body: {
+                    conversations: [{ id: "conv-1", title: "t" }],
+                    default_conversation_id: "webchat",
+                    active_job: null,
+                },
+            },
+        },
+        {
+            match: "/chat/history",
+            reply: { body: { items: [], has_more: false, next_before: null } },
+        },
+        {
+            match: "/chat/jobs",
+            reply: { body: { job_id: "job-agent", conversation_id: "conv-1" } },
+        },
+        {
+            match: "/jobs/job-agent/events",
+            reply: {
+                body: {
+                    events: [
+                        {
+                            seq: 1,
+                            event: "agent_start",
+                            payload: { call_id: "agent-1", name: "web_agent" },
+                        },
+                        {
+                            seq: 2,
+                            event: "agent_end",
+                            payload: {
+                                call_id: "agent-1",
+                                name: "web_agent",
+                                ok: true,
+                                status: "done",
+                                duration_ms: 1500,
+                            },
+                        },
+                        { seq: 3, event: "done", payload: { duration_ms: 2000 } },
+                    ],
+                    job: { job_id: "job-agent", status: "done", last_seq: 3 },
+                },
+            },
+        },
+    ]);
+
+    window.eval("window.RuntimeController.init()");
+    await tick();
+    window.RuntimeController.loadChatHistory(true).catch(() => {});
+    await tick();
+
+    window.document.getElementById("runtimeChatInput").value = "search";
+    window.document.getElementById("btnRuntimeChatSend").click();
+    await tick(4);
+    await settle(400);
+
+    return { allNodes: chatNodes(window), requests: env.requests.slice() };
 };
 
 // --------------------------------------------------------------------------- //
