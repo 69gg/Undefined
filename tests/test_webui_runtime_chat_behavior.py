@@ -210,6 +210,33 @@ def test_markdown_and_html_images_are_lazy_and_clickable() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# HTML 运行器（沙箱隔离）
+# --------------------------------------------------------------------------- #
+
+
+def test_html_runner_opens_sandboxed_preview() -> None:
+    """点「运行 HTML」要打开预览面板，并把带 CSP 的文档注入沙箱 iframe。
+
+    安全要点：iframe 的 sandbox **不得**包含 allow-same-origin（与 allow-scripts
+    同时存在会让沙箱形同虚设），且注入的文档必须自带 CSP 与 nonce。
+    """
+    result = run_scenario("html_runner_uses_sandboxed_preview")
+
+    assert result["runButtonExists"] is True, "HTML 代码块应有运行按钮"
+    assert result["hiddenBefore"] is True, "初始应隐藏预览面板"
+    assert result["hiddenAfter"] is False, "点击后应打开预览面板"
+
+    sandbox = result["sandbox"]
+    assert "allow-scripts" in sandbox, sandbox
+    assert "allow-same-origin" not in sandbox, (
+        f"sandbox 含 allow-same-origin 会削弱隔离：{sandbox}"
+    )
+    assert result["srcdocHasCsp"] is True, "注入文档缺少 CSP"
+    assert result["srcdocHasNonce"] is True, "注入文档缺少 nonce"
+    assert result["srcdocHasInlineSource"] is True, "注入文档未包含源内容"
+
+
+# --------------------------------------------------------------------------- #
 # 增量轮询
 # --------------------------------------------------------------------------- #
 

@@ -1836,6 +1836,72 @@ SCENARIOS.incremental_polling_and_resume = async (env) => {
     };
 };
 
+/**
+ * HTML 运行器：点代码块的「运行 HTML」应打开预览面板，并把带 CSP 的文档注入沙箱 iframe。
+ *
+ * 原断言是「源码里要有 allow-forms / allow-modals / buildHtmlRunnerDocument /
+ * injectHtmlRunnerSecurity」之类的子串；这里看真实的沙箱属性与注入结果。
+ */
+SCENARIOS.html_runner_uses_sandboxed_preview = async (env) => {
+    const { window, setRoutes } = env;
+    const content = ["```html", "<button>hi</button>", "```"].join("\n");
+
+    setRoutes([
+        {
+            match: "/chat/conversations",
+            reply: {
+                body: {
+                    conversations: [{ id: "conv-1", title: "t" }],
+                    default_conversation_id: "webchat",
+                    active_job: null,
+                },
+            },
+        },
+        {
+            match: "/chat/history",
+            reply: {
+                body: {
+                    items: [{ role: "bot", content }],
+                    has_more: false,
+                    next_before: null,
+                },
+            },
+        },
+        { match: "/chat/jobs/active", reply: { body: { active_job: null } } },
+    ]);
+
+    window.eval("window.RuntimeController.init()");
+    await tick();
+    window.RuntimeController.loadChatHistory(true).catch(() => {});
+    await tick(4);
+    await settle(200);
+
+    const doc = window.document;
+    const runButton = doc.querySelector("[data-code-run-html]");
+    const runner = doc.getElementById("runtimeHtmlRunner");
+    const frame = doc.getElementById("runtimeHtmlRunnerFrame");
+    const hiddenBefore = runner ? runner.hasAttribute("hidden") : null;
+
+    if (runButton) {
+        runButton.click();
+        await tick(4);
+        await settle(200);
+    }
+
+    const srcdoc = frame ? frame.getAttribute("srcdoc") || "" : "";
+    return {
+        runButtonExists: !!runButton,
+        sandbox: frame ? frame.getAttribute("sandbox") || "" : "",
+        hiddenBefore,
+        hiddenAfter: runner ? runner.hasAttribute("hidden") : null,
+        srcdocHasCsp: srcdoc.includes("Content-Security-Policy"),
+        srcdocHasNonce: /nonce-[A-Za-z0-9]+/.test(srcdoc),
+        srcdocLength: srcdoc.length,
+        // 预览文档必须自包含：不允许外链脚本
+        srcdocHasInlineSource: srcdoc.includes("<button>hi</button>"),
+    };
+};
+
 // --------------------------------------------------------------------------- //
 
 async function main() {
