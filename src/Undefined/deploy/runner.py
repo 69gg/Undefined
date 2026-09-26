@@ -10,7 +10,7 @@ import json
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 from Undefined.deploy import (
     catalog,
@@ -146,9 +146,10 @@ class Wizard:
         if not self.enabled:
             return default
         print(
-            "\n是否拉取 NagaAgent 子模块？\n"
-            "  是：开启 NagaAgent 代码问答能力（外部网关仍保持关闭，不连服务器）\n"
-            "  否：关闭全部 Naga 相关配置（默认）"
+            "\n是否拉取 NagaAgent 子模块（该能力需要 code/NagaAgent 里的目标代码）？\n"
+            "  是：开启代码问答能力（只写 features.nagaagent_mode_enabled，"
+            "[naga] 网关配置保持原样）\n"
+            "  否：关闭代码问答能力（默认；[naga] 网关配置同样保持原样）"
         )
         return self._ask_yes_no("拉取 NagaAgent 子模块吗？", default)
 
@@ -241,11 +242,20 @@ def print_access_summary(
     mode: str,
     services: Sequence[str],
     nagaagent_enabled: bool,
+    ports: Mapping[str, int] | None = None,
 ) -> None:
-    """打印各服务入口与凭据——这是 ``up`` 最有价值的输出。"""
+    """打印各服务入口与凭据——这是 ``up`` 最有价值的输出。
+
+    ``ports`` 是本次解析后的端口（``GenerateContext.port()`` / ``STATE.json``），
+    必须优先于 ``env``：host 模式下本体端口不发布，``.env`` 里根本没有
+    ``UNDEFINED_DEPLOY_PORT_BOT_*``，只看 ``env`` 会把 ``--port bot_webui=9000``
+    的地址印成默认的 8787，用户照着点就是连不上。
+    """
     specs = catalog.port_specs()
 
     def port(key: str) -> int:
+        if ports is not None and key in ports:
+            return int(ports[key])
         raw = env.get(specs[key].env_var)
         return int(raw) if raw and raw.isdigit() else specs[key].default
 
@@ -298,9 +308,9 @@ def print_access_summary(
             print("    ⚠ 未检测到自定义音源脚本：搜索/歌单可用，取音频直链会 503")
             print(f"      把 LX 音源 .js 放到 {source_dir} 后重启该容器")
 
-    print(
-        f"  NagaAgent 问答    {'已开启（外部网关保持关闭）' if nagaagent_enabled else '未开启'}"
-    )
+    naga_state = "已开启" if nagaagent_enabled else "未开启"
+    # 只说写入面：脚本只改 features.nagaagent_mode_enabled，[naga] 是用户自己的网关配置
+    print(f"  NagaAgent 问答    {naga_state}（[naga] 网关配置未改动）")
 
     print("-" * 68)
     print("后续步骤：")
@@ -532,8 +542,13 @@ def run_up(options: dict[str, Any]) -> int:
     )
     print(f"  端口绑定：{port_bind}")
     if nagaagent_enabled:
-        # 明确告知：只开问答能力，外部网关始终关闭，避免误解为已接通 Naga 服务端
-        print("  NagaAgent：开启代码问答能力；外部网关 [naga].enabled 保持关闭")
+        # 明确告知写入面：只有问答能力这一个键；[naga] 是「怎么连用户自己的
+        # Naga 服务端」，脚本不碰，所以不能说成「网关被关掉了」——用户可能自己
+        # 把它开着。
+        print(
+            "  NagaAgent：只写 features.nagaagent_mode_enabled=true（代码问答能力）；"
+            "[naga] 下的网关配置原样保留"
+        )
     describe_patch_plan(plan, existing_config)
 
     if not dry_run and wizard.enabled:
@@ -598,6 +613,12 @@ def run_up(options: dict[str, Any]) -> int:
 
     write_generated(layout, config)
 
+    # 本次解析后的全部端口：STATE 与下面的入口摘要共用同一份取值，
+    # 避免摘要自己再从 .env 推一遍（host 模式那里没有本体端口，会推出默认值）。
+    resolved_ports = {
+        spec.key: ctx.port(spec.key) for spec in catalog.port_specs().values()
+    }
+
     # STATE 必须在 compose up **之前**落盘：它是 down/status/logs 的入口凭据，
     # 也是下次 up 复用服务选择与端口的唯一来源。旧顺序（up 成功后才写）会在
     # 任何失败路径上留下半成品——用户既不能 down 收拾，重跑 up 还会因为读不到
@@ -608,9 +629,7 @@ def run_up(options: dict[str, Any]) -> int:
             services=services,
             mode=mode,
             nagaagent=nagaagent_enabled,
-            ports={
-                spec.key: ctx.port(spec.key) for spec in catalog.port_specs().values()
-            },
+            ports=resolved_ports,
             port_bind=port_bind,
             image_owner=ctx.image_owner,
             project_name=project_name,
@@ -644,6 +663,7 @@ def run_up(options: dict[str, Any]) -> int:
         mode=mode,
         services=services,
         nagaagent_enabled=nagaagent_enabled,
+        ports=resolved_ports,
     )
     if _any_port_exposed(config.env):
         print(
@@ -794,6 +814,7 @@ def run_status(options: dict[str, Any]) -> int:
         mode=state.mode or catalog.MODE_CONTAINER,
         services=state.services,
         nagaagent_enabled=state.nagaagent,
+        ports=state.ports,
     )
     return EXIT_OK
 

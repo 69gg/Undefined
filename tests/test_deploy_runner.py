@@ -690,6 +690,53 @@ def test_ports_and_bind_survive_rerun(
     assert state.port_bind == "0.0.0.0"
 
 
+def test_host_mode_summary_uses_resolved_ports(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """host 模式的入口摘要必须用解析后的端口，不能只从 .env 反推。
+
+    host 模式不发布本体端口，``.env`` 里根本没有 ``UNDEFINED_DEPLOY_PORT_BOT_*``：
+    只看 env 会把 ``--port bot_webui=19000`` 印成默认的 8787，用户照着点就是连不上
+    （``status`` 同理——它读的是 STATE.json 里记下的端口）。
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "config.toml.example").write_text(CONFIG_TOML, encoding="utf-8")
+    monkeypatch.setattr(runner, "repo_root", lambda: repo)
+    _stub_docker(monkeypatch)
+    monkeypatch.setattr(
+        docker_cli,
+        "compose_ps",
+        lambda run, invocation: CommandResult(("docker",), 0, "[]", ""),
+    )
+
+    assert (
+        runner.run_up(
+            _yes_options(
+                dry_run=False,
+                mode=catalog.MODE_HOST,
+                port_overrides={"bot_webui": 19000, "bot_api": 18888},
+            )
+        )
+        == 0
+    )
+
+    # 前提：这份 .env 里确实没有本体端口，摘要无从「从 env 反推」
+    env = runner.load_previous_env(DeployLayout.under(repo))
+    assert "UNDEFINED_DEPLOY_PORT_BOT_WEBUI" not in env, env
+    assert "UNDEFINED_DEPLOY_PORT_BOT_API" not in env, env
+
+    out = capsys.readouterr().out
+    assert "http://127.0.0.1:19000" in out, out
+    assert "http://127.0.0.1:18888" in out, out
+
+    capsys.readouterr()
+    assert runner.run_status({}) == 0
+    status_out = capsys.readouterr().out
+    assert "http://127.0.0.1:19000" in status_out, status_out
+    assert "http://127.0.0.1:18888" in status_out, status_out
+
+
 def test_ws_artifact_carries_token_and_port_after_up(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
