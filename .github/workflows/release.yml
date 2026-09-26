@@ -41,8 +41,18 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
       - name: Install Python dependencies
         run: uv sync --group dev -p ${{ env.PYTHON_VERSION }}
+
+      # WebUI 前端行为测试用 jsdom 驱动真实 DOM；缺这段安装时相关用例会
+      # 在 CI 上直接失败（tests/test_webui_runtime_chat_behavior.py 的 _require_env）。
+      - name: Install frontend test dependencies
+        run: npm ci --prefix tests/frontend
 
       - name: Validate release tag, build versions, and changelog
         env:

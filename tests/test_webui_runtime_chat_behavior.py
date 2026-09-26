@@ -15,6 +15,8 @@
 from __future__ import annotations
 
 import json
+import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -27,22 +29,38 @@ HARNESS: Final[Path] = REPO_ROOT / "tests" / "frontend" / "runtime_chat_harness.
 JSDOM_DIR: Final[Path] = REPO_ROOT / "tests" / "frontend" / "node_modules" / "jsdom"
 HARNESS_TIMEOUT_SECONDS: Final[int] = 120
 
+#: CI 上把「依赖缺失」与「harness 文件缺失」当失败：静默 skip 等于没有测试。
+#: 本批迁移已删除对应的源码子串断言，一旦这里 skip，覆盖就是 0。
+_CI_ENV_VARS: Final[tuple[str, ...]] = ("CI", "GITHUB_ACTIONS")
 
-def _skip_reason() -> str | None:
+
+def _in_ci() -> bool:
+    return any(os.environ.get(name) for name in _CI_ENV_VARS)
+
+
+def _require_env() -> None:
+    """检查 node / harness / jsdom。
+
+    本地缺少依赖时 skip（开发者未必装了 jsdom）；CI 上直接失败，否则
+    ``release.yml`` 那种没装 jsdom 的流水线会绿灯通过而实际零覆盖。
+    """
     if shutil.which("node") is None:
-        return "需要 node"
+        _missing("需要 node（含 node 本身的缺失）")
     if not HARNESS.is_file():
-        return f"缺少 harness：{HARNESS}"
+        _missing(f"缺少 harness：{HARNESS}")
     if not JSDOM_DIR.is_dir():
-        return "需要 jsdom：cd tests/frontend && npm ci"
-    return None
+        _missing("需要 jsdom：cd tests/frontend && npm ci")
+
+
+def _missing(reason: str) -> None:
+    if _in_ci():
+        pytest.fail(f"CI 上不得跳过前端行为测试：{reason}")
+    pytest.skip(reason)
 
 
 def run_scenario(scenario: str) -> dict[str, Any]:
     """跑一个 harness 场景，返回其 ``result`` 快照。"""
-    reason = _skip_reason()
-    if reason is not None:
-        pytest.skip(reason)
+    _require_env()
 
     completed = subprocess.run(
         ["node", str(HARNESS), "--scenario", scenario, "--root", str(REPO_ROOT)],
@@ -114,10 +132,14 @@ def test_tool_lifecycle_renders_tool_block() -> None:
     assert len(blocks) == 1, f"应渲染一个工具块，实际 {blocks}"
     block = blocks[0]
     assert "is-tool" in block["classes"]
-    assert "ok" in block["classes"], f"tool_end 的 status 应反映到工具块：{block}"
-    # 成功的工具默认展开，便于用户直接看到输出
+    # 后端契约是 done/error（不是 "ok"），状态必须反映到工具块上
+    assert "done" in block["classes"], f"tool_end 的 status 应反映到工具块：{block}"
+    assert "error" not in block["classes"]
+    # tool_start 时 autoOpen，成功路径下应保持展开
     assert block["open"] is True
     assert "group.get_member_info" in block["text"]
+    # 结果预览应进入工具块文本（避免断言过松以致丢掉预览也通过）
+    assert "张三" in block["text"]
 
 
 def test_tool_duration_survives_done_event() -> None:
@@ -143,7 +165,10 @@ def test_stage_event_renders_live_stage() -> None:
     assert len(bots) == 1
     stage_text = bots[0]["stageText"]
     assert stage_text, "stage 事件后阶段元素不应为空"
-    assert "500ms" in stage_text, stage_text
+    # 阶段文案含「后端 elapsed + 本地流逝」的实时计数，断言具体毫秒数会 flaky；
+    # 改为断言 payload 直接决定的稳定量（dataset 由 setChatStage 写自 payload）。
+    assert bots[0]["stageBaseMs"] == "500", bots[0]
+    assert re.match(r"^.+ · \d+(ms|s)$", stage_text), stage_text
     assert bots[0]["stageHidden"] is False, "有阶段内容时不应保持隐藏"
 
 

@@ -72,6 +72,12 @@ function chatNodes(window) {
             stageText: stageEl
                 ? (stageEl.innerText || stageEl.textContent || "").trim()
                 : "",
+            // 由 setChatStage 直接写自 payload.elapsed_ms，不含本地流逝时间，
+            // 因此适合做稳定断言（stageText 里的计数会随时间变化）
+            stageBaseMs: stageEl ? stageEl.dataset.stageBaseMs || "" : "",
+            stageIsFinal: stageEl
+                ? stageEl.classList.contains("is-final")
+                : null,
             stageHidden: stageEl
                 ? stageEl.hasAttribute("hidden") ||
                   stageEl.getAttribute("aria-hidden") === "true"
@@ -374,7 +380,10 @@ SCENARIOS.tool_lifecycle_renders_blocks = async (env) => {
                                 name: "group.get_member_info",
                                 duration_ms: 42,
                                 result_preview: "张三",
-                                status: "ok",
+                                // 真实后端只发 done/error（api/routes/chat.py 的
+                                // _normalize_webchat_output），不发 "ok"
+                                ok: true,
+                                status: "done",
                             },
                         },
                         { seq: 3, event: "done", payload: { duration_ms: 900 } },
@@ -567,7 +576,8 @@ SCENARIOS.keeps_duration_after_done = async (env) => {
                                 call_id: "call-1",
                                 name: "render.markdown",
                                 duration_ms: 2500,
-                                status: "ok",
+                                ok: true,
+                                status: "done",
                             },
                         },
                         { seq: 3, event: "done", payload: { duration_ms: 3000 } },
