@@ -12,6 +12,9 @@
 - **一致性**：两个提示词变体的结构必须同步演进
 - **格式契约**：Markdown 提示词里的模板占位符（``{now_local}`` 等）是功能性
   契约，改动会影响渲染
+- **渲染槽位**：``<!-- undefined:prompt-file-include:... -->`` 是渲染器依赖的
+  锚点，删掉之后该插槽静默失效
+- **负向协议**：真实提示词里不得出现文本形式的工具调用协议痕迹
 
 刻意**不**断言：任何一句指导语的具体文字、小节内部的段落结构、标签是否良构
 （已知提示词存在历史遗留的标签不匹配，见 ``KNOWN_TAG_MISMATCHES``）。
@@ -22,6 +25,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 from typing import Final
+
+from Undefined.config.models import PROMPT_FILE_INCLUDE_SLOTS
 
 REPO_ROOT: Final[Path] = Path(__file__).resolve().parent.parent
 PROMPTS: Final[Path] = REPO_ROOT / "res" / "prompts"
@@ -67,6 +72,27 @@ KNOWN_TAG_MISMATCHES: Final[int] = 10
 #: 把闭标签一并当成开标签，导致配对检查恒真——变异测试才暴露出来）。
 _TOP_SECTION = re.compile(r"^  <(?!/)([a-zA-Z_][\w.-]*)(?:\s|>)", re.MULTILINE)
 _TAG = re.compile(r"</?([a-zA-Z_][\w.-]*)(?:\s[^>]*)?/?>")
+
+#: 文件插槽标记，与 ``ai/prompts/file_includes.py`` 的行内锚点正则同构
+#: （这里不锚行首，便于统计出现次数）。
+_SLOT_MARKER = re.compile(
+    r"<!--\s*undefined:prompt-file-include:(?P<slot>[a-z0-9_-]+)\s*-->"
+)
+
+#: 文本工具回退协议的痕迹。系统提示词里一旦出现这些串，模型会照着抄成「文本形式
+#: 的工具调用」，而真实工具调用走的是 function calling 通道——这是功能性契约，
+#: 与措辞无关。原本由已删除的 test_system_prompt_constraints.py 守着。
+FORBIDDEN_TOOL_PROTOCOL_MARKERS: Final[tuple[str, ...]] = (
+    '{"tool"',
+    "<tool name=",
+    "<tool_execution>",
+    "<function_calls>",
+    "<invoke name=",
+    "<function=",
+    "<parameter=",
+    " params=",
+    " parameters=",
+)
 
 
 def _text(path: Path) -> str:
@@ -249,4 +275,61 @@ def test_known_tag_mismatch_count_is_registered() -> None:
         assert actual == KNOWN_TAG_MISMATCHES, (
             f"{name} 的标签不匹配数为 {actual}，与登记的 {KNOWN_TAG_MISMATCHES} 不符；"
             "请确认是修好了（归零登记）还是新引入了缺陷"
+        )
+
+
+# --------------------------------------------------------------------------- #
+# 渲染槽位（功能性，不是措辞）
+# --------------------------------------------------------------------------- #
+
+
+def _slot_markers(text: str) -> list[str]:
+    return [match.group("slot") for match in _SLOT_MARKER.finditer(text)]
+
+
+def test_real_prompts_keep_every_file_include_slot_exactly_once() -> None:
+    """真实提示词里每个文件插槽必须恰好出现一次。
+
+    ``ai/prompts/file_includes.py`` 靠这些 HTML 注释锚点把外部文件插进主提示词；
+    ``tests/test_prompt_file_includes.py`` 全用合成字符串，所以把真实提示词里的
+    槽位删掉（或写重）没有任何用例会红——插槽会静默失效。
+
+    槽位清单取自 ``config.models.PROMPT_FILE_INCLUDE_SLOTS``（唯一事实来源），
+    出现未知槽位（例如手滑写成 ``p4``）同样会失败。
+    """
+    for name, path in (
+        ("undefined.xml", BASE_PROMPT),
+        ("undefined_nagaagent.xml", NAGA_PROMPT),
+    ):
+        slots = _slot_markers(_text(path))
+        assert sorted(slots) == sorted(PROMPT_FILE_INCLUDE_SLOTS), (
+            f"{name} 的文件插槽与契约不符：实际 {sorted(slots)}，"
+            f"契约 {sorted(PROMPT_FILE_INCLUDE_SLOTS)}（缺失或重复都会在这里暴露）"
+        )
+
+
+# --------------------------------------------------------------------------- #
+# 负向协议契约（功能性，不是措辞）
+# --------------------------------------------------------------------------- #
+
+
+def test_system_prompts_have_no_text_tool_protocol_traces() -> None:
+    """真实系统提示词里不得出现文本形式的工具调用协议痕迹。
+
+    模型会在提示词里「找格式」：一旦看到 ``{"tool"`` / ``<tool name=`` /
+    ``<function_calls>`` 这类串，就会把它们当成输出格式照抄，绕过真实的
+    function calling 通道。这是功能性契约，与措辞无关——原本由已删除的
+    ``test_system_prompt_constraints.py`` 覆盖。
+
+    覆盖范围是**参与真实拼装**的全部文本：两个主提示词变体与
+    ``res/IMPORTANT/each.md``（后者同样会被拼进系统提示词，当前是干净的）。
+    """
+    prompt_files = sorted(PROMPTS.glob("*.xml")) + sorted(IMPORTANT.glob("*.md"))
+    assert prompt_files, f"没有找到系统提示词：{PROMPTS} / {IMPORTANT}"
+    for path in prompt_files:
+        text = _text(path)
+        hits = [marker for marker in FORBIDDEN_TOOL_PROTOCOL_MARKERS if marker in text]
+        assert not hits, (
+            f"{path.name} 里出现了文本工具协议的痕迹 {hits}；"
+            "模型会照抄成文本形式的工具调用，请改用真实通道的描述方式"
         )
