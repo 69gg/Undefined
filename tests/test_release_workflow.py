@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -223,3 +224,61 @@ def test_release_waits_for_the_docker_images() -> None:
     assert "build-docker" in workflow["jobs"]["merge-docker"]["needs"], (
         "merge-docker 没有依赖 build-docker，合并的 digest 来源不明"
     )
+
+
+_OUTPUT_REF = re.compile(r"needs\.([A-Za-z0-9_-]+)\.outputs\.([A-Za-z0-9_-]+)")
+_STEP_OUTPUT_REF = re.compile(r"steps\.([A-Za-z0-9_-]+)\.outputs")
+
+
+def _strings(node: Any) -> list[str]:
+    """递归取出节点里的所有字符串（含 list / dict 嵌套）。"""
+    if isinstance(node, str):
+        return [node]
+    if isinstance(node, list):
+        return [text for item in node for text in _strings(item)]
+    if isinstance(node, dict):
+        return [text for value in node.values() for text in _strings(value)]
+    return []
+
+
+def _needs(job: dict[str, Any]) -> set[str]:
+    raw = job.get("needs") or []
+    return {raw} if isinstance(raw, str) else set(raw)
+
+
+def test_workflow_output_references_resolve() -> None:
+    """`needs.<job>.outputs.<name>` 与 `steps.<id>.outputs` 必须真的存在。
+
+    workflow 没法在本地执行，写错引用只会在推 tag 那一刻才炸——正好是发版最不
+    该出错的时刻。这里做一次静态解析：引用链、job 的 needs、声明的 outputs、
+    step id 四者必须自洽。
+    """
+    workflow = _workflow()
+    jobs = workflow["jobs"]
+    checked: list[str] = []
+
+    for job_name, job in jobs.items():
+        step_ids = {
+            step["id"] for step in _steps(job) if isinstance(step.get("id"), str)
+        }
+        needs = _needs(job)
+        for text in _strings(job.get("steps") or []):
+            for ref_job, ref_output in _OUTPUT_REF.findall(text):
+                assert ref_job in needs, (
+                    f"{job_name} 引用了 {ref_job} 的输出，但 needs 里没有它："
+                    f"{sorted(needs)}（跨 job 取输出必须显式声明依赖）"
+                )
+                outputs = jobs[ref_job].get("outputs") or {}
+                assert ref_output in outputs, (
+                    f"{job_name} 引用了 {ref_job}.outputs.{ref_output}，"
+                    f"但该 job 只声明了 {sorted(outputs)}"
+                )
+                checked.append(f"needs.{ref_job}.outputs.{ref_output}")
+            for ref_step in _STEP_OUTPUT_REF.findall(text):
+                assert ref_step in step_ids, (
+                    f"{job_name} 引用了 steps.{ref_step}.outputs，"
+                    f"但该 job 里没有这个 id：{sorted(step_ids)}"
+                )
+                checked.append(f"steps.{ref_step}")
+
+    assert checked, "没有解析到任何 output 引用，该断言已形同虚设"
