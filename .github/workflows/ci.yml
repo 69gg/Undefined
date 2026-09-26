@@ -41,7 +41,8 @@ jobs:
         run: uv sync --group dev -p ${{ env.PYTHON_VERSION }}
 
       # WebUI 前端行为测试（tests/test_webui_runtime_chat_behavior.py）用 jsdom
-      # 驱动真实 DOM；缺这段安装时相关用例会 skip，等于没测。
+      # 驱动真实 DOM；缺这段安装时该文件的 _require_env() 会让用例直接失败
+      # （只有在本地非 CI 环境下才会 skip）。
       - name: Install frontend test dependencies
         run: npm ci --prefix tests/frontend
 
