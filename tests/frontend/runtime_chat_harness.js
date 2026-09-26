@@ -2436,6 +2436,127 @@ SCENARIOS.scroll_behaviors = async (env) => {
 };
 
 /**
+ * 作业**持续运行**时用户往上翻历史。
+ *
+ * 这里针对两个各自独立、并已用变异测试确认的缺陷：
+ *
+ * 1. ``scrollChatToBottom()`` 只看 ``chatAutoScroll`` 偏好，不看用户当前位置：
+ *    只要流式内容还在追加，每 500ms 一次的轮询就会把人从历史里拽回底部。
+ * 2. 顶部加载抑制窗口（900ms）会被持续续期。续期路径是**内容变化**触发的
+ *    ``scrollChatToBottomSoon()``（每轮 message 事件经 ``appendTimelineMessage``；
+ *    ``upsertAgentStageBlock`` 在阶段签名变化时同理），而 ``loadOlderChatHistory``
+ *    全文件只有 scroll 监听这一个调用点、也没有可点的兜底入口——窗口一旦不过期，
+ *    用户就是**无声地翻不上去**。
+ *
+ * 两个断言分别对应这两点，各自都有能单独打红它的变异：去掉「钉住底部」的闸，
+ * 用户上翻后仍会出现自动滚动；去掉「用户上翻即解除抑制」，则完全发不出翻页请求。
+ */
+SCENARIOS.scroll_while_streaming = async (env) => {
+    const { window, setRoutes } = env;
+    const pageOne = [{ role: "bot", content: "最近的回复" }];
+    const pageTwo = [{ role: "bot", content: "更早的回复" }];
+    let eventRound = 0;
+
+    setRoutes([
+        {
+            match: "/chat/conversations",
+            reply: {
+                body: {
+                    conversations: [{ id: "conv-stream", title: "t" }],
+                    default_conversation_id: "webchat",
+                    active_job: null,
+                },
+            },
+        },
+        {
+            match: "/chat/history",
+            reply: (url) =>
+                url.includes("before=cursor-1")
+                    ? { body: { items: pageTwo, has_more: false, next_before: null } }
+                    : {
+                          body: {
+                              items: pageOne,
+                              has_more: true,
+                              next_before: "cursor-1",
+                          },
+                      },
+        },
+        { match: "/chat/jobs/active", reply: { body: { active_job: null } } },
+        { match: "/chat/jobs", reply: { body: { job_id: "job-stream-scroll" } } },
+        {
+            match: "/jobs/job-stream-scroll/events",
+            reply: () => {
+                eventRound += 1;
+                // 每一轮都有新内容：这既是真实的流式输出，也是「自动滚到底」
+                // 真正会触发的路径（appendTimelineMessage -> scrollChatToBottomSoon），
+                // 因此旧实现每 500ms 就会抢一次滚动位置并续期抑制窗口。
+                return {
+                    body: {
+                        events: [
+                            {
+                                seq: eventRound,
+                                event: "message",
+                                payload: { content: `流式片段 ${eventRound}` },
+                            },
+                        ],
+                        job: {
+                            job_id: "job-stream-scroll",
+                            status: "running",
+                            last_seq: eventRound,
+                        },
+                    },
+                };
+            },
+        },
+    ]);
+
+    window.eval("window.RuntimeController.init()");
+    await tick();
+    window.__harness.setAuthenticated(true);
+    window.RuntimeController.onTabActivated("chat");
+    await tick(4);
+    await settle(1000);
+
+    const meter = _stubScrollHeight(env, 3000);
+    const log = meter.element;
+    window.document.getElementById("runtimeChatInput").value = "hi";
+    window.document.getElementById("btnRuntimeChatSend").click();
+    await tick(4);
+    await settle(600);
+
+    // 用户此刻在底部：先用一次位于底部的滚动事件建立「上次位置」，
+    // 这样后面的向上翻才判定得出来。
+    log.scrollTop = 3000;
+    log.dispatchEvent(new window.Event("scroll", { bubbles: false }));
+    await tick(2);
+
+    // 让作业多跑几轮：旧实现每一轮都会把抑制窗口续到 now+900ms。
+    await settle(1200);
+    env.scrollActivity.calls = 0;
+    env.scrollTopWrites.count = 0;
+    const requestsBeforeScroll = env.requests.length;
+    const eventsRequests = env.requests.filter((url) =>
+        url.includes("/jobs/job-stream-scroll/events"),
+    ).length;
+
+    // 作业仍在运行时，用户主动往上翻到顶部。
+    log.scrollTop = 0;
+    log.dispatchEvent(new window.Event("scroll", { bubbles: false }));
+    await tick(4);
+    await settle(500);
+
+    return {
+        eventsRequests,
+        jobStillStreaming: eventsRequests >= 3,
+        olderHistoryRequestsWhileStreaming: env.requests
+            .slice(requestsBeforeScroll)
+            .filter((url) => url.includes("before=cursor-1")).length,
+        scrollCallsAfterUserScroll: env.scrollActivity.calls,
+        scrollTopWritesAfterUserScroll: env.scrollTopWrites.count,
+    };
+};
+
+/**
  * 工作流图的纯逻辑契约（不依赖 DOM 交互）。
  *
  * 原断言是对 workflow-graph.js / workflow-inspector.js 做源码子串匹配

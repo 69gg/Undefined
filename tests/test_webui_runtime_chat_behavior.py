@@ -754,3 +754,28 @@ def test_active_job_lookup_is_scoped_to_conversation() -> None:
     active = [url for url in result["requests"] if "/chat/jobs/active" in url]
     assert active, result["requests"]
     assert all("conversation_id=conv-9" in url for url in active), active
+
+
+def test_streaming_does_not_fight_the_user_reading_history() -> None:
+    """作业还在流式输出时，用户往上翻历史不能被抢滚动条、也不能翻不上去。
+
+    覆盖两个独立缺陷（各自有能单独打红它的变异）：
+
+    - 自动滚动只看 ``chatAutoScroll`` 偏好、不看用户当前位置：流式内容每 500ms
+      追加一次就抢一次滚动位置。去掉「钉住底部」的闸后，本用例的
+      ``scrollCallsAfterUserScroll`` 会从 0 变成 2。
+    - 顶部加载抑制窗口（900ms）会被内容变化持续续期，而 ``loadOlderChatHistory``
+      全文件只有 scroll 监听这一个调用点、没有可点的兜底入口，于是用户**无声地
+      翻不上去**。去掉「用户上翻即解除抑制」后，
+      ``olderHistoryRequestsWhileStreaming`` 会从 1 变成 0。
+    """
+    result = run_scenario("scroll_while_streaming")
+
+    # 前提：作业确实还在轮询，否则测的就不是「流式期间」
+    assert result["jobStillStreaming"], result
+    assert result["eventsRequests"] >= 3, result
+
+    # 用户上翻之后不得再被自动滚动拽回底部
+    assert result["scrollCallsAfterUserScroll"] == 0, result
+    # 并且必须真的发出更早历史的请求
+    assert result["olderHistoryRequestsWhileStreaming"] >= 1, result
