@@ -160,9 +160,6 @@ BOT_PORTS: Final[tuple[PortSpec, ...]] = (
 #: 部署脚本会写入的容器固定路径。
 CONTAINER_REPO_ROOT: Final[str] = "/app"
 CONTAINER_DOCKER_SOCK: Final[str] = "/var/run/docker.sock"
-#: 容器内访问宿主机（host 模式下的 NapCat / Runtime API 等）的固定主机名。
-HOST_GATEWAY_ALIAS: Final[str] = "host.docker.internal"
-
 #: 未显式指定模型时输出给用户的提醒。
 MODEL_REMINDER: Final[str] = (
     "config.toml 的 [models.*] 仍需填写模型端与 API Key，Bot 才能真正收发消息。"
@@ -220,7 +217,6 @@ __all__ = [
     "DEPLOY_MODES",
     "ENV_FILE_NAME",
     "FIRECRAWL",
-    "HOST_GATEWAY_ALIAS",
     "LXMUSIC2API",
     "MODE_CONTAINER",
     "MODE_HOST",

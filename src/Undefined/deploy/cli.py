@@ -219,6 +219,13 @@ def normalize_services(
     return tuple(seen)
 
 
+def _error_text(exc: BaseException) -> str:
+    """``KeyError`` 的 ``str()`` 会给消息再套一层引号，这里去掉。"""
+    if isinstance(exc, KeyError) and exc.args:
+        return str(exc.args[0])
+    return str(exc)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """命令入口；返回进程退出码。"""
     parser = build_parser()
@@ -229,11 +236,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         return EXIT_OK
 
     normalized = dict(vars(args))
-    # 部署选择项只挂在 up 上；其它子命令用 SUPPRESS 默认值，因此这里按需取。
-    normalized["services"] = normalize_services(
-        getattr(args, "services", None), getattr(args, "service_flags", None)
-    )
-    normalized["port_overrides"] = parse_ports(getattr(args, "port_overrides", None))
+    try:
+        # 归一化本身会因用户输入报错（未知服务键/端口键、非法端口值），
+        # 必须放在 try 内，否则会打印 Python 栈而不是项目约定的「错误：...」。
+        # 部署选择项只挂在 up 上；其它子命令用 SUPPRESS 默认值，因此这里按需取。
+        normalized["services"] = normalize_services(
+            getattr(args, "services", None), getattr(args, "service_flags", None)
+        )
+        normalized["port_overrides"] = parse_ports(
+            getattr(args, "port_overrides", None)
+        )
+    except (KeyError, ValueError) as exc:
+        print(f"错误：{_error_text(exc)}")
+        return EXIT_ERROR
 
     try:
         from Undefined.deploy.commands import dispatch

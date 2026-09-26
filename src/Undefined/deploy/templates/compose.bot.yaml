@@ -7,8 +7,9 @@
 #     且不会覆盖镜像内的 /app/.venv。
 #   - 挂 docker.sock 采用 DooD：python_interpreter / code_delivery_agent 用
 #     docker CLI 起兄弟容器，不启 DinD。
-#   - file_send_mode=url 时协议端（另一个容器）需要访问 Runtime API，由
-#     extra_hosts 提供 host.docker.internal 别名；host-gateway 由 Docker 解析。
+#   - file_send_mode=url 时协议端（另一个容器）需要访问 Runtime API；生成配置时
+#     [onebot].file_send_host 写的是本体的 compose 服务名，同一网络内可直连，
+#     因此这里不需要 host-gateway 别名，也不依赖宿主回环端口是否可达。
 
 services:
   undefined-bot:
@@ -17,8 +18,6 @@ services:
     restart: unless-stopped
     networks:
       - undefined-deploy
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     working_dir: /data/Undefined
     ports:
       - "${UNDEFINED_DEPLOY_PORT_BOT_WEBUI_BIND}:${UNDEFINED_DEPLOY_PORT_BOT_WEBUI}:${UNDEFINED_DEPLOY_PORT_BOT_WEBUI}"

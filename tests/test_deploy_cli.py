@@ -126,6 +126,35 @@ def _up_help_text() -> str:
     raise AssertionError("未找到 up 子命令")
 
 
+def test_invalid_service_reports_error_without_traceback(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """用户输入错误必须走项目约定的「错误：...」而不是抛 Python 栈。
+
+    归一化曾在 try 之外，`--with nope` 会打印完整 traceback。
+    """
+    assert cli.main(["up", "--dry-run", "--with", "nope"]) == 1
+    out = capsys.readouterr().out
+    assert out.startswith("错误：")
+    assert "searxng" in out
+    assert "Traceback" not in out
+
+
+def test_invalid_port_reports_error_without_traceback(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert cli.main(["up", "--dry-run", "--port", "nope=1"]) == 1
+    out = capsys.readouterr().out
+    assert out.startswith("错误：")
+    assert "bot_webui" in out
+    assert "Traceback" not in out
+
+
+def test_non_integer_port_reports_error(capsys: pytest.CaptureFixture[str]) -> None:
+    assert cli.main(["up", "--dry-run", "--port", "bot_webui=abc"]) == 1
+    assert "必须是整数" in capsys.readouterr().out
+
+
 def test_no_subcommand_prints_help(capsys: pytest.CaptureFixture[str]) -> None:
     assert cli.main([]) == 0
     assert "up" in capsys.readouterr().out

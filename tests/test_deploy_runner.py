@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import tomllib
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -406,6 +407,72 @@ def test_up_dry_run_does_not_touch_submodule(
 
     monkeypatch.setattr(nagaagent, "ensure_submodule", _boom)
     assert runner.run_up(_yes_options(nagaagent=True)) == 0
+
+
+def _stub_docker(monkeypatch: pytest.MonkeyPatch) -> None:
+    """桩掉真实 docker 调用，让 run_up 能走到写盘之后。"""
+    monkeypatch.setattr(
+        docker_cli,
+        "check_availability",
+        lambda: DockerAvailability("/usr/bin/docker", "2.30.0"),
+    )
+    monkeypatch.setattr(
+        docker_cli,
+        "compose_config",
+        lambda run, invocation: CommandResult(("docker",), 0, "", ""),
+    )
+    monkeypatch.setattr(
+        docker_cli,
+        "compose_up",
+        lambda run, invocation, pull="missing": CommandResult(("docker",), 0, "", ""),
+    )
+    monkeypatch.setattr(runner, "patch_napcat_ws_token", lambda layout, token: "跳过")
+
+
+def test_up_creates_full_config_from_example_on_fresh_clone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """全新 clone（无 config.toml）必须先落一份完整配置再打补丁。
+
+    否则只会渲染被 patch 的少数键，生成出来的文件没有 [models]/[core]，
+    而文档却让用户去填 [models.*]。
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "config.toml.example").write_text(CONFIG_TOML, encoding="utf-8")
+    monkeypatch.setattr(runner, "repo_root", lambda: repo)
+    _stub_docker(monkeypatch)
+
+    assert not (repo / "config.toml").exists()
+    assert runner.run_up(_yes_options(dry_run=False)) == 0
+
+    created = repo / "config.toml"
+    assert created.is_file(), "应已从 config.toml.example 生成 config.toml"
+    parsed = tomllib.loads(created.read_text(encoding="utf-8"))
+    # 示例里的段落都在，而不是只有被 patch 的那几个键
+    for section in ("onebot", "webui", "api", "features", "naga"):
+        assert section in parsed, f"生成的 config.toml 缺少 [{section}]"
+
+
+def test_dry_run_does_not_create_config_on_fresh_clone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """--dry-run 连「从示例复制」都不做。"""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "config.toml.example").write_text(CONFIG_TOML, encoding="utf-8")
+    monkeypatch.setattr(runner, "repo_root", lambda: repo)
+
+    assert runner.run_up(_yes_options()) == 0
+    assert not (repo / "config.toml").exists()
+
+
+def test_up_keeps_existing_config_untouched_on_dry_run(
+    fake_repo: Path,
+) -> None:
+    original = (fake_repo / "config.toml").read_text(encoding="utf-8")
+    assert runner.run_up(_yes_options()) == 0
+    assert (fake_repo / "config.toml").read_text(encoding="utf-8") == original
 
 
 def test_status_without_up_reports_error(

@@ -261,14 +261,57 @@ def test_bot_container_mounts_repo_and_docker_socket(tmp_path: Path) -> None:
     assert any(volume.endswith(":/data/Undefined/data") for volume in volumes)
 
 
-def test_container_mode_uses_service_names_for_internal_calls(tmp_path: Path) -> None:
-    services = _compose_services(
-        generate.build(_ctx(tmp_path, services=("searxng",))).compose_text
-    )
-    # 协议端在另一个容器里，本体要能通过别名访问宿主 Runtime
+def test_container_mode_points_file_send_host_at_the_bot_service(
+    tmp_path: Path,
+) -> None:
+    """协议端要按**自己**能解析的地址去下载文件。
+
+    取 URL 去取文件的是 NapCat（另一个容器），所以 file_send_host 必须是同网络
+    的服务名；写成 host.docker.internal 会加到错误一侧（别名在本体容器上无效），
+    而且 Runtime API 默认只绑回环，协议端经宿主网关也连不上。
+    """
+    config = generate.build(_ctx(tmp_path, services=("searxng",)))
     assert (
-        "host.docker.internal:host-gateway" in services["undefined-bot"]["extra_hosts"]
+        config.patch_plan.desired["onebot.file_send_host"] == generate.BOT_SERVICE_NAME
     )
+
+    services = _compose_services(config.compose_text)
+    # 本体容器不需要宿主网关别名
+    assert "extra_hosts" not in services["undefined-bot"]
+
+
+def test_container_mode_mounts_nagaagent_submodule_when_enabled(
+    tmp_path: Path,
+) -> None:
+    """启用 NagaAgent 时必须把子模块挂进本体容器。
+
+    ``naga_code_analysis_agent`` 的工具把 base_path 固定在
+    ``Path.cwd()/code/NagaAgent``；本体容器的工作目录是 /data/Undefined，
+    不挂载的话该 Agent 在容器模式下没有可用目标（曾只写在文档里而没实现）。
+    """
+    services = _compose_services(
+        generate.build(_ctx(tmp_path, nagaagent=True)).compose_text
+    )
+    volumes = services["undefined-bot"]["volumes"]
+    assert "../code/NagaAgent:/data/Undefined/code/NagaAgent:ro" in volumes, (
+        f"缺少 NagaAgent 只读挂载：{volumes}"
+    )
+
+
+def test_nagaagent_mount_absent_when_disabled(tmp_path: Path) -> None:
+    services = _compose_services(generate.build(_ctx(tmp_path)).compose_text)
+    volumes = services["undefined-bot"]["volumes"]
+    assert not [v for v in volumes if "NagaAgent" in v]
+
+
+def test_nagaagent_mount_absent_in_host_mode(tmp_path: Path) -> None:
+    """host 模式本体不在容器里，无需挂载。"""
+    services = _compose_services(
+        generate.build(
+            _ctx(tmp_path, mode=catalog.MODE_HOST, nagaagent=True)
+        ).compose_text
+    )
+    assert "undefined-bot" not in services
 
 
 def test_duplicate_service_definitions_are_rejected(tmp_path: Path) -> None:
@@ -386,7 +429,7 @@ def test_patch_plan_container_mode_topology(tmp_path: Path) -> None:
     assert desired["api.host"] == "0.0.0.0"
     # 协议端在另一个容器里，本地路径模式不可用
     assert desired["onebot.file_send_mode"] == "url"
-    assert desired["onebot.file_send_host"] == catalog.HOST_GATEWAY_ALIAS
+    assert desired["onebot.file_send_host"] == generate.BOT_SERVICE_NAME
 
 
 def test_patch_plan_host_mode_topology(tmp_path: Path) -> None:

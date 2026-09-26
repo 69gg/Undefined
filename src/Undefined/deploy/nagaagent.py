@@ -42,13 +42,14 @@ ENABLED_VALUES: dict[str, Any] = {
     "naga.api_key": "",
 }
 
-#: 关闭时写入的值；``naga.*`` 全部归零，避免残留配置在下次开启时意外生效。
+#: 关闭时写入的值。
+#:
+#: **只关总闸、不清用户凭据**：``naga.api_url`` / ``naga.api_key`` / ``naga.mode``
+#: 属于用户已对接好的服务端配置，默认部署把它们抹掉是破坏性的（网关总闸已关，
+#: 它们本身不会生效）。确需清空请自行编辑 ``config.toml``。
 DISABLED_VALUES: dict[str, Any] = {
     "features.nagaagent_mode_enabled": False,
     "naga.enabled": False,
-    "naga.mode": "off",
-    "naga.api_url": "",
-    "naga.api_key": "",
 }
 
 ABOUT: dict[str, str] = {
@@ -192,13 +193,48 @@ def ensure_submodule(repo: Path, *, status: SubmoduleStatus | None = None) -> st
 
 
 def build_patch_plan(repo: Path, *, nagaagent: bool) -> PatchPlan:
-    """生成 NagaAgent 相关的 config.toml 写入计划（纯函数，不碰磁盘）。"""
-    values = ENABLED_VALUES if nagaagent else DISABLED_VALUES
+    """生成 NagaAgent 相关的 config.toml 写入计划（纯函数，不碰磁盘）。
+
+    ``existing`` 用于避免无谓覆盖：写 ``""`` 只在该键本来就缺失/为空时才需要，
+    对已有值不构成需要写入的变更（``apply_plan`` 会跳过无差异项）。
+    """
+    values = dict(ENABLED_VALUES if nagaagent else DISABLED_VALUES)
+    current = _lookup_values(repo)
+    # 凭据留空只对「本来就缺失」有意义；用户已填过的值一律不动。
+    for key in ("naga.api_url", "naga.api_key"):
+        if values.get(key) == "" and not current.get(key):
+            values.pop(key, None)
     return PatchPlan(
         config_path=repo / "config.toml",
-        desired=dict(values),
+        desired=values,
         about=dict(ABOUT),
     )
+
+
+def _lookup_values(repo: Path) -> dict[str, Any]:
+    """读取现有 config.toml 的相关键（缺失/损坏时返回空字典，不阻断部署）。"""
+    from Undefined.deploy.config_patch import load_toml
+
+    config_path = repo / "config.toml"
+    if not config_path.is_file():
+        return {}
+    try:
+        data = load_toml(config_path)
+    except Exception:
+        return {}
+
+    def dig(dotted: str) -> Any:
+        node: Any = data
+        for part in dotted.split("."):
+            if not isinstance(node, dict) or part not in node:
+                return None
+            node = node[part]
+        return node
+
+    return {
+        "naga.api_url": dig("naga.api_url") or "",
+        "naga.api_key": dig("naga.api_key") or "",
+    }
 
 
 __all__ = [

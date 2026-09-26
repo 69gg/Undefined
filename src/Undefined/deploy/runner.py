@@ -405,6 +405,20 @@ def run_up(options: dict[str, Any]) -> int:
 
     ports = dict(catalog.port_defaults())
     ports.update(options.get("port_overrides") or {})
+
+    # 全新部署时必须先落一份完整配置：否则只渲染被 patch 的几个键，
+    # 生成出来的 config.toml 没有 [models]/[core]，用户无从填写模型端。
+    # dry-run 不落盘，因此跳过创建，只按现有（可能为空）配置推导。
+    if not dry_run:
+        try:
+            if config_patch.ensure_config_file(
+                repo / "config.toml", repo / "config.toml.example"
+            ):
+                print("config.toml：已从 config.toml.example 生成")
+        except config_patch.ConfigError as exc:
+            print(f"错误：{exc}")
+            return EXIT_ERROR
+
     existing_config = config_patch.load_toml(repo / "config.toml")
 
     ctx = generate.GenerateContext(

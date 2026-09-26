@@ -155,21 +155,29 @@ NagaAgent 是仓库的 git submodule（`code/NagaAgent`），不是独立服务�
 - 脚本检查子模块是否已初始化，未就绪时执行 `git submodule update --init --recursive code/NagaAgent`；失败会中止并给出可手动执行的命令（不会静默继续）。
 - 写入 `[features].nagaagent_mode_enabled = true`，即启用 NagaAgent 专用系统提示词与 `naga_code_analysis_agent`（该 Agent 的四个工具把 `base_path` 固定在 `Path.cwd()/code/NagaAgent`，所以能力开关与子模块存在性绑定）。
 - **`[naga].enabled` 与 `api_url` / `api_key` 始终保持关闭与留空**，即不开启对外回调网关、`/naga` 命令与绑定管理。若日后确实要与 Naga 服务端对接，需要你自己填这些字段。
-- `container` 模式下 `code/NagaAgent` 会以只读方式挂进本体容器同一路径。
+- `container` 模式下 `code/NagaAgent` 会以只读方式挂进本体容器同一路径（`/data/Undefined/code/NagaAgent`），因此 `naga_code_analysis_agent` 的工具在容器里也能定位到目标代码。
 
-不选择时，`[features].nagaagent_mode_enabled` 与 `[naga].enabled` 都写入 `false`，相关提示词、Agent、命令与 API 端点全部隐藏。
+不选择时，只把 `[features].nagaagent_mode_enabled` 与 `[naga].enabled` 写成 `false`，相关提示词、Agent、命令与 API 端点全部隐藏。
+**`[naga].api_url` / `api_key` / `mode` 等你自己填过的网关配置不会被清空**——网关总闸一关它们本就不生效，需要清空请自行编辑。
 
 ---
 
 ## 5. 部署脚本会改哪些配置
 
-`up` 只写**服务拓扑相关**的键，其余内容（包括全部注释与你的自定义项）原样保留：
+`up` 只改**服务拓扑相关**的键，**取值不会被动到**（只替换目标键的当前值）。
+
+> ⚠️ 渲染语义：输出会按 `config.toml.example` 的键序与注释映射**整份重排**。键上方能识别的
+> `# zh:` / `# en:` 注释块会保留，但双语块里没有 `zh:`/`en:` 前缀的续行、以及不依附任何键的
+> 独立说明块会丢失，键之间的空行会被规整（取决于原文件本身，可能少几行注释）。
+> 你自己的键值不会丢，写盘前也会先备份，但首次对已有 `config.toml` 跑 `up` 时请留意 diff。
+
+将要写入的键：
 
 | 键 | 说明 |
 |---|---|
 | `[onebot].ws_url` | 按模式写入 `ws://napcat:3001` 或 `ws://127.0.0.1:3001` |
 | `[onebot].token` | 与 NapCat 正向 WS 服务端一致的访问令牌（自动生成） |
-| `[onebot].file_send_mode` / `file_send_host` | `container` 模式写入 `url` / `host.docker.internal` |
+| `[onebot].file_send_mode` / `file_send_host` | `container` 模式写入 `url` / `undefined-bot`（协议端按 compose 服务名访问本体 Runtime） |
 | `[webui].url` / `[webui].password` | 监听地址按模式；密码为空或 `changeme` 时生成随机值 |
 | `[api].host` / `[api].auth_key` | 同上 |
 | `[features].nagaagent_mode_enabled` | 见上一节 |
@@ -178,6 +186,9 @@ NagaAgent 是仓库的 git submodule（`code/NagaAgent`），不是独立服务�
 | `[lxmusic2api].base_url` / `.api_key` | 选了 lxmusic2api 时写入 |
 
 **不会碰**：`[models.*]`（模型端与 API Key 需要你自己填）、`[access]`、`[prompt]`、`[history]` 等。
+
+`config.toml` 不存在时会先从 `config.toml.example` 复制一份完整配置，再在其上做最小差异修改——
+这样生成出来的文件包含 `[models]` / `[core]` 等所有段落，你照着填即可（而不是只有被改的那几个键）。
 
 写盘前会先把原文件备份到 `deploy/backup/config_<UTC 时间戳>.toml`；解析失败时直接中止且不写任何文件。`--dry-run` 连备份都不写。
 

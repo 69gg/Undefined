@@ -11,13 +11,18 @@ import string
 from dataclasses import dataclass, field
 from importlib import resources
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Final, Iterable
 
 import yaml
 
-from Undefined.deploy import catalog, images
+from Undefined.deploy import catalog, images, nagaagent
 from Undefined.deploy.config_patch import PatchPlan
 from Undefined.deploy.state import DeployLayout
+
+#: 本体在 compose 里的服务名（与 compose.bot.yaml 一致）。
+BOT_SERVICE_NAME: Final[str] = "undefined-bot"
+#: 本体容器内的工作目录（与 compose.bot.yaml 的 working_dir 一致）。
+CONTAINER_REPO_PATH: Final[str] = "/data/Undefined"
 
 TEMPLATE_PACKAGE = "Undefined.deploy.templates"
 
@@ -447,11 +452,13 @@ def build_patch_plan(ctx: GenerateContext, env: dict[str, str]) -> PatchPlan:
         desired["webui.url"] = "0.0.0.0"
         desired["api.host"] = "0.0.0.0"
         desired["onebot.file_send_mode"] = "url"
-        desired["onebot.file_send_host"] = catalog.HOST_GATEWAY_ALIAS
+        # 取 URL 去下载文件的是**协议端**（另一个容器），所以要给它一个
+        # 它自己解析得到的地址：同网络内的服务名，而不是宿主网关别名。
+        desired["onebot.file_send_host"] = BOT_SERVICE_NAME
         about["webui.url"] = "容器内需要监听全部地址，端口由 compose 发布"
         about["api.host"] = "容器内需要监听全部地址，端口由 compose 发布"
         about["onebot.file_send_mode"] = "协议端在另一个容器，走 Runtime 临时链接"
-        about["onebot.file_send_host"] = "协议端访问宿主 Runtime 的别名"
+        about["onebot.file_send_host"] = "协议端通过 compose 服务名访问本体 Runtime"
     else:
         desired["webui.url"] = catalog.DEFAULT_PORT_BIND
         desired["api.host"] = catalog.DEFAULT_PORT_BIND
@@ -482,10 +489,36 @@ def build_patch_plan(ctx: GenerateContext, env: dict[str, str]) -> PatchPlan:
 # --------------------------------------------------------------------------- #
 
 
+def apply_context_overrides(ctx: GenerateContext, fragments: dict[str, Any]) -> None:
+    """按部署上下文微调合并后的片段（模板是静态的，这里只做必需的补充）。
+
+    目前只有一项：container 模式启用 NagaAgent 时，把子模块目录挂进本体容器。
+    ``naga_code_analysis_agent`` 的四个工具把 ``base_path`` 固定在
+    ``Path.cwd()/code/NagaAgent``，而本体容器的工作目录是
+    ``/data/Undefined``，不挂载的话该 Agent 在容器模式下没有可用目标
+    （无参调用 ``list_directory`` 会直接在 ``iterdir()`` 上抛 FileNotFoundError）。
+    """
+    if not (ctx.mode == catalog.MODE_CONTAINER and ctx.nagaagent):
+        return
+    services = fragments.get("services")
+    if not isinstance(services, dict):
+        return
+    bot = services.get(BOT_SERVICE_NAME)
+    if not isinstance(bot, dict):
+        return
+    volumes = bot.setdefault("volumes", [])
+    if not isinstance(volumes, list):
+        return
+    mount = f"../{nagaagent.SUBMODULE_PATH}:{CONTAINER_REPO_PATH}/{nagaagent.SUBMODULE_PATH}:ro"
+    if mount not in volumes:
+        volumes.append(mount)
+
+
 def build(ctx: GenerateContext) -> GeneratedConfiguration:
     """组装一次 ``up`` 的全部生成物。"""
     env = build_env(ctx)
     fragments = load_compose_fragments(compose_fragment_names(ctx))
+    apply_context_overrides(ctx, fragments)
     compose_text = render_compose(fragments, project_name=catalog.COMPOSE_PROJECT_NAME)
     patch_plan = build_patch_plan(ctx, env)
 
@@ -513,6 +546,9 @@ def build(ctx: GenerateContext) -> GeneratedConfiguration:
 
 __all__ = [
     "ALLOWED_COMPOSE_TOP_KEYS",
+    "BOT_SERVICE_NAME",
+    "CONTAINER_REPO_PATH",
+    "apply_context_overrides",
     "DOCKER_SOCKET_ENV",
     "GenerateContext",
     "GenerateError",
