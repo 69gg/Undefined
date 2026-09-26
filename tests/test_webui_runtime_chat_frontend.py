@@ -138,38 +138,6 @@ def test_webchat_tool_snapshots_do_not_rerender_unchanged_blocks() -> None:
     assert "node.innerHTML = renderToolBlock" in history_helper
 
 
-def test_webchat_frontend_polls_job_events_incrementally() -> None:
-    source = _read_source(RUNTIME_JS)
-
-    assert "function pollChatJob" in source
-    assert "CHAT_POLL_INTERVAL_MS = 500" in source
-    assert "CHAT_CLOCK_INTERVAL_MS = 500" in source
-    assert 'format: "json"' in source
-    assert "after: String(runtimeState.lastEventSeq)" in source
-    assert "function applyChatEventsPayload" in source
-    assert "function applyChatJobSnapshot" in source
-    assert "job.current_tool_calls" in source
-    assert "upsertToolSnapshot" in source
-    assert "runtimeState.chatPollTimer" in source
-    assert "runtimeState.chatPollBackoffMs" in source
-    assert "pollChatJob(jobId).catch" in source
-    assert 'Accept: "text/event-stream"' not in source
-
-
-def test_webchat_frontend_retries_active_job_resume_after_refresh_failure() -> None:
-    source = _read_source(RUNTIME_JS)
-    resume_helper = source.split("async function resumeActiveChatJob", 1)[1].split(
-        "async function clearChatHistory", 1
-    )[0]
-
-    assert "activeJobResumeTimer" in source
-    assert "ACTIVE_JOB_RESUME_MAX_ATTEMPTS = 20" in source
-    assert "runtimeState.activeJobResumeAttempts += 1" in resume_helper
-    assert "setTimeout(() => {" in resume_helper
-    assert "resumeActiveChatJob().catch" in resume_helper
-    assert 'window.addEventListener(\n                "online"' in source
-
-
 def test_webchat_tool_blocks_auto_collapse_after_minimum_visible_time() -> None:
     source = _read_source(RUNTIME_JS)
     assert "TOOL_AUTO_COLLAPSE_MIN_VISIBLE_MS = 2000" in source

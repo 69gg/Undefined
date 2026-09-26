@@ -1727,6 +1727,115 @@ SCENARIOS.paste_files_and_quote_reference = async (env) => {
     };
 };
 
+/**
+ * 增量轮询与刷新后恢复活跃作业。
+ *
+ * 原断言是「源码里要有 pollChatJob / after: String(runtimeState.lastEventSeq) /
+ * attachChatJob(jobId, runtimeState.lastEventSeq)」这类子串；这里改为观察真实请求：
+ * 第二轮的 after 必须推进，且刷新时能按会话找回活跃作业并继续轮询。
+ */
+SCENARIOS.incremental_polling_and_resume = async (env) => {
+    const { window, setRoutes } = env;
+    let eventRound = 0;
+
+    setRoutes([
+        {
+            match: "/chat/conversations",
+            reply: {
+                body: {
+                    conversations: [{ id: "conv-poll", title: "t" }],
+                    default_conversation_id: "webchat",
+                    active_job: null,
+                },
+            },
+        },
+        {
+            match: "/chat/history",
+            reply: { body: { items: [], has_more: false, next_before: null } },
+        },
+        {
+            match: "/chat/jobs/active",
+            reply: {
+                body: {
+                    active_job: {
+                        job_id: "job-poll",
+                        status: "running",
+                        last_seq: 5,
+                        conversation_id: "conv-poll",
+                    },
+                },
+            },
+        },
+        {
+            match: "/chat/jobs",
+            reply: { body: { job_id: "job-poll", conversation_id: "conv-poll" } },
+        },
+        {
+            match: "/jobs/job-poll/events",
+            reply: () => {
+                eventRound += 1;
+                if (eventRound === 1) {
+                    return {
+                        body: {
+                            events: [
+                                {
+                                    seq: 1,
+                                    event: "message",
+                                    payload: { content: "first" },
+                                },
+                            ],
+                            job: { job_id: "job-poll", status: "running", last_seq: 1 },
+                        },
+                    };
+                }
+                if (eventRound === 2) {
+                    return {
+                        body: {
+                            events: [
+                                {
+                                    seq: 2,
+                                    event: "message",
+                                    payload: { content: "second" },
+                                },
+                            ],
+                            job: { job_id: "job-poll", status: "running", last_seq: 2 },
+                        },
+                    };
+                }
+                return {
+                    body: {
+                        events: [],
+                        job: { job_id: "job-poll", status: "done", last_seq: 3 },
+                    },
+                };
+            },
+        },
+    ]);
+
+    window.eval("window.RuntimeController.init()");
+    await tick();
+    window.RuntimeController.loadChatHistory(true).catch(() => {});
+    await tick();
+    // 发起作业才会启动事件轮询（恢复逻辑只对已有本地 job 生效）
+    window.document.getElementById("runtimeChatInput").value = "go";
+    window.document.getElementById("btnRuntimeChatSend").click();
+    await tick(4);
+    await settle(1400);
+
+    const eventUrls = env.requests.filter((url) => url.includes("/events"));
+    const afterValues = eventUrls.map((url) => {
+        const match = /[?&]after=([^&]*)/.exec(url);
+        return match ? match[1] : "";
+    });
+
+    return {
+        eventRequestCount: eventUrls.length,
+        afterValues,
+        activeJobQueried: env.requests.some((url) => url.includes("/chat/jobs/active")),
+        allNodes: chatNodes(window),
+    };
+};
+
 // --------------------------------------------------------------------------- //
 
 async function main() {

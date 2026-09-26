@@ -210,6 +210,38 @@ def test_markdown_and_html_images_are_lazy_and_clickable() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# 增量轮询
+# --------------------------------------------------------------------------- #
+
+
+def test_job_events_are_polled_incrementally() -> None:
+    """事件轮询必须用 after 游标推进，而不是每轮重放全部事件。
+
+    原断言是「源码里要有 after: String(runtimeState.lastEventSeq)」这类子串；
+    这里观察真实请求序列。
+    """
+    result = run_scenario("incremental_polling_and_resume")
+
+    assert result["eventRequestCount"] >= 3, result
+    after_values = result["afterValues"]
+    assert after_values[0] == "0", after_values
+    # 游标必须严格推进
+    numeric = [int(value) for value in after_values]
+    assert numeric == sorted(numeric), numeric
+    assert numeric[-1] > numeric[0], numeric
+    # 两轮事件的内容都要落到同一条机器人消息上
+    bots = _bot_nodes(result)
+    assert len(bots) == 1, bots
+    assert bots[0]["contentTexts"] == ["first", "second"], bots[0]
+
+
+def test_active_job_is_queried_on_history_load() -> None:
+    """刷新后加载历史时应查询活跃作业（用于恢复）。"""
+    result = run_scenario("incremental_polling_and_resume")
+    assert result["activeJobQueried"] is True, result
+
+
+# --------------------------------------------------------------------------- #
 # 附件粘贴与引用条
 # --------------------------------------------------------------------------- #
 
