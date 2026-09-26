@@ -210,6 +210,17 @@ function createEnv(root) {
     window.ResizeObserver = window.ResizeObserver || NoopObserver;
     window.requestAnimationFrame = (cb) => setTimeout(() => cb(Date.now()), 0);
     window.cancelAnimationFrame = (id) => clearTimeout(id);
+    // jsdom 不实现 Element.innerText（返回 undefined），而 runtime.js 多处依赖它
+    // 读取纯文本（例如引用内容提取会因此拿到空串）。用 textContent 近似替代；
+    // 断言文本时仍优先用 textContent，避免把这个垫片当成被测行为。
+    if (!Object.getOwnPropertyDescriptor(window.HTMLElement.prototype, "innerText")) {
+        Object.defineProperty(window.HTMLElement.prototype, "innerText", {
+            get() {
+                return this.textContent;
+            },
+            configurable: true,
+        });
+    }
     // jsdom 没有 CSS.escape；runtime.js 用它拼属性选择器
     if (!window.CSS) window.CSS = {};
     if (!window.CSS.escape) {
@@ -1618,6 +1629,101 @@ SCENARIOS.ui_controls = async (env) => {
         viewerHiddenAfter,
         viewerImageSrc,
         viewerHiddenClosed,
+    };
+};
+
+/**
+ * 附件粘贴与引用条：把文件粘贴进输入框要挂成待发附件；点机器人消息的「引用」
+ * 要把该消息作为引用前置到输入内容。
+ *
+ * 原断言是「源码里要有 addEventListener("paste" / chatReferences.push /
+ * data-quote-message」之类的子串匹配。
+ */
+SCENARIOS.paste_files_and_quote_reference = async (env) => {
+    const { window, setRoutes } = env;
+    setRoutes([
+        {
+            match: "/chat/conversations",
+            reply: {
+                body: {
+                    conversations: [{ id: "conv-1", title: "t" }],
+                    default_conversation_id: "webchat",
+                    active_job: null,
+                },
+            },
+        },
+        {
+            match: "/chat/history",
+            reply: {
+                body: {
+                    items: [{ role: "bot", content: "机器人历史消息" }],
+                    has_more: false,
+                    next_before: null,
+                },
+            },
+        },
+        { match: "/chat/jobs/active", reply: { body: { active_job: null } } },
+        {
+            match: "/chat/files",
+            reply: { body: { uid: "file_pasted", name: "pasted.txt" } },
+        },
+    ]);
+
+    window.eval("window.RuntimeController.init()");
+    await tick();
+    window.RuntimeController.loadChatHistory(true).catch(() => {});
+    await tick(4);
+    await settle(200);
+
+    const doc = window.document;
+    const input = doc.getElementById("runtimeChatInput");
+
+    // 1) 粘贴一个文件
+    const file = new window.File(["pasted content"], "pasted.txt", {
+        type: "text/plain",
+    });
+    const pasteEvent = new window.Event("paste", { bubbles: true, cancelable: true });
+    pasteEvent.clipboardData = {
+        files: [file],
+        items: [{ kind: "file", type: "text/plain", getAsFile: () => file }],
+        types: ["Files"],
+    };
+    input.dispatchEvent(pasteEvent);
+    await tick(4);
+    await settle(200);
+
+    const attachmentsContainer = doc.getElementById("runtimeChatAttachments");
+    const pendingAttachments = attachmentsContainer
+        ? attachmentsContainer.querySelectorAll("*").length
+        : -1;
+    const attachmentsText = attachmentsContainer
+        ? (attachmentsContainer.innerText || attachmentsContainer.textContent || "").trim()
+        : "";
+
+    // 2) 引用一条机器人消息
+    const quoteButton = doc.querySelector("[data-quote-message]");
+    const quoteExists = !!quoteButton;
+    if (quoteButton) {
+        quoteButton.click();
+        await tick(4);
+    }
+    const referencesContainer = doc.getElementById("runtimeChatReferences");
+    const referencesCount = referencesContainer
+        ? referencesContainer.querySelectorAll("*").length
+        : -1;
+    const referencesText = referencesContainer
+        ? (referencesContainer.innerText || referencesContainer.textContent || "").trim()
+        : "";
+    const inputValueAfterQuote = input.value;
+
+    return {
+        pendingAttachments,
+        attachmentsText,
+        quoteExists,
+        referencesCount,
+        referencesText,
+        inputValueAfterQuote,
+        requests: env.requests.slice(),
     };
 };
 

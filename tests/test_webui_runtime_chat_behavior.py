@@ -210,6 +210,30 @@ def test_markdown_and_html_images_are_lazy_and_clickable() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# 附件粘贴与引用条
+# --------------------------------------------------------------------------- #
+
+
+def test_pasted_file_becomes_pending_attachment() -> None:
+    """把文件粘贴进输入框要挂成待发附件（显示文件名与大小）。"""
+    result = run_scenario("paste_files_and_quote_reference")
+
+    assert result["pendingAttachments"] >= 1, result
+    assert "pasted.txt" in result["attachmentsText"], result["attachmentsText"]
+
+
+def test_quote_button_prepends_reference() -> None:
+    """点机器人消息的「引用」要把该消息作为引用挂上去。"""
+    result = run_scenario("paste_files_and_quote_reference")
+
+    assert result["quoteExists"] is True, "机器人消息上应有引用按钮"
+    assert result["referencesCount"] >= 1, result
+    text = result["referencesText"]
+    assert "引用" in text, text
+    assert "机器人历史消息" in text, text
+
+
+# --------------------------------------------------------------------------- #
 # UI 控件（会话列表 / 命令面板 / 图片查看器）
 # --------------------------------------------------------------------------- #
 
