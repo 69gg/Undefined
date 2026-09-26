@@ -1,0 +1,8 @@
+{
+  "name": "undefined-webui-frontend-tests",
+  "private": true,
+  "description": "WebUI 静态前端的行为测试依赖（jsdom）；Python 侧通过 tests/frontend/runtime_chat_harness.js 驱动。",
+  "devDependencies": {
+    "jsdom": "^26.1.0"
+  }
+}

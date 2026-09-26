@@ -30,6 +30,10 @@
         chatHistoryLoading: false,
         chatTopLoadSuppressedUntil: 0,
         chatAutoScroll: true,
+        // 视图是否仍「钉」在底部。用户主动往上翻时置 false：此时不能再自动滚到底
+        // （会把人拽回去、也读不到历史），回到底部时自动恢复。
+        chatPinnedToBottom: true,
+        chatLastScrollTop: 0,
         streamingMessageId: null,
         activeChatMessageId: null,
         chatPollTimer: null,
@@ -64,6 +68,9 @@
     const CHAT_POLL_INTERVAL_MS = 500;
     const CHAT_CLOCK_INTERVAL_MS = 500;
     const CHAT_TOP_LOAD_SUPPRESS_MS = 900;
+    // 距顶部/底部多少像素内算「贴边」；1px 用于判定滚动方向（向上还是向下）。
+    const CHAT_SCROLL_EDGE_PX = 32;
+    const CHAT_SCROLL_DIRECTION_EPSILON_PX = 1;
     const TOOL_AUTO_COLLAPSE_MIN_VISIBLE_MS = 2000;
     const ACTIVE_JOB_RESUME_MAX_ATTEMPTS = 20;
     const CHAT_INLINE_IMAGE_MAX_BYTES = 12 * 1024 * 1024;
@@ -660,11 +667,21 @@
         if (!runtimeState.chatAutoScroll) return;
         const log = get("runtimeChatLog");
         if (!log) return;
+        // 用户已经往上翻去读历史了，就别再把他拽回底部：否则每 500ms 一次的轮询
+        // 都会抢走滚动位置，同时也一直续期顶部加载抑制窗口，导致历史永远翻不上去。
+        if (!runtimeState.chatPinnedToBottom) return;
         suppressChatTopHistoryLoad();
         log.scrollTo({
             top: log.scrollHeight,
             behavior: chatScrollBehavior(),
         });
+    }
+
+    function isChatLogAtBottom(log) {
+        return (
+            log.scrollHeight - log.scrollTop - log.clientHeight <=
+            CHAT_SCROLL_EDGE_PX
+        );
     }
 
     function forceScrollChatToBottom() {
@@ -689,6 +706,9 @@
     }
 
     function forceScrollChatToBottomSoon() {
+        // 「强制」= 明确的「回到最新」意图（发送、新建作业、加载完历史、恢复作业），
+        // 因此重新钉住底部；否则用户翻过历史之后就再也回不到自动跟随。
+        runtimeState.chatPinnedToBottom = true;
         suppressChatTopHistoryLoad();
         forceScrollChatToBottom();
         if (typeof requestAnimationFrame === "function") {
@@ -5997,8 +6017,31 @@
         }
         if (chatLog) {
             chatLog.addEventListener("scroll", () => {
+                // 先看位置：只要还贴底就一定是「在跟最新」，不管这一帧的位移方向。
+                // 内容变短、重渲染、切换会话都会让 scrollTop 变小（浏览器把
+                // scrollTop 夹回可滚动范围），而日志其实还在底部；把这种位移当成
+                // 「用户往上翻」会永久关掉自动跟随，连新消息都不再滚进视野。
+                //
+                // 位置不贴底时再看方向：比上次更靠上 = 用户在主动往上翻。程序自己的
+                // 「滚到底」只会让 scrollTop 变大，因此不会误判（平滑滚动的中间帧
+                // 同样是变大）。
+                const scrollTop = chatLog.scrollTop;
+                if (isChatLogAtBottom(chatLog)) {
+                    runtimeState.chatPinnedToBottom = true;
+                } else if (
+                    scrollTop <
+                    runtimeState.chatLastScrollTop -
+                        CHAT_SCROLL_DIRECTION_EPSILON_PX
+                ) {
+                    runtimeState.chatPinnedToBottom = false;
+                    // 用户既然主动翻页，抑制窗口就没有存在意义了（它只用来忽略
+                    // 「程序刚滚到底」那一次位移），立刻解除，别让翻页白等 900ms。
+                    runtimeState.chatTopLoadSuppressedUntil = 0;
+                }
+                runtimeState.chatLastScrollTop = scrollTop;
+
                 if (isChatTopHistoryLoadSuppressed()) return;
-                if (chatLog.scrollTop <= 32) {
+                if (scrollTop <= CHAT_SCROLL_EDGE_PX) {
                     loadOlderChatHistory();
                 }
             });

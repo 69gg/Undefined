@@ -1,0 +1,26 @@
+{
+  "network": {
+    "httpServers": [],
+    "httpSseServers": [],
+    "httpClients": [],
+    "websocketServers": [
+      {
+        "enable": true,
+        "name": "ws",
+        "host": "0.0.0.0",
+        "port": __UNDEFINED_DEPLOY_NAPCAT_WS_PORT__,
+        "reportSelfMessage": false,
+        "enableForcePushEvent": true,
+        "messagePostFormat": "array",
+        "token": "__UNDEFINED_DEPLOY_NAPCAT_WS_TOKEN__",
+        "debug": false,
+        "heartInterval": 30000
+      }
+    ],
+    "websocketClients": [],
+    "plugins": []
+  },
+  "musicSignUrl": "",
+  "enableLocalFile2Url": false,
+  "parseMultMsg": false
+}

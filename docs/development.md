@@ -44,6 +44,11 @@ src/Undefined/
 │   ├── queue_manager.py   # 车站-列车队列
 │   └── security.py        # 注入检测与速率限制
 ├── utils/         # 通用支持工具组 (__init__.py 聚合 io/paths/resources；io.py 异步原子读写, history.py, coerce.py 类型强转)
+├── deploy/        # 容器化一键部署（`uv run deploy`，不参与运行时）：
+│   │              #   catalog.py 服务/端口/默认值唯一事实来源, generate.py compose 与配置渲染,
+│   │              #   config_patch.py config.toml 最小差异写入与备份, state.py deploy/ 运行态目录与 STATE.json,
+│   │              #   images.py 上游镜像与 pin, nagaagent.py 子模块与开关, docker_cli.py 唯一进程外调用边界,
+│   │              #   runner.py up/down/status/logs, cli.py 参数与向导, commands.py 子命令分发, templates/ 模板资源
 └── py.typed       # PEP 561 类型标记（wheel 通过 pyproject force-include 打包）
 ```
 

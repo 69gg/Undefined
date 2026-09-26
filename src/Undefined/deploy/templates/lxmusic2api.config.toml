@@ -1,0 +1,29 @@
+# lxmusic2api 配置模板（部署脚本会写入 deploy/lxmusic2api/config.toml，
+# 并把 api_key 替换为随机值）。
+#
+# 三处会直接导致服务拒绝启动，不要删：
+#   1. legal.accept_lx_music_terms 必须为 true（上游用来强制阅读许可证）
+#   2. auth.api_key 必须 >= 32 字符
+#   3. server.host 必须为 0.0.0.0，否则容器端口映射从宿主机不可达
+#
+# 自定义音源：把兼容「LX 自定义源 API v2」的 .js 放到 deploy/lxmusic2api/.private/。
+# 没有音源时服务仍会启动，但取音频直链会返回 503（搜索/歌单/歌词仍可用）。
+
+[legal]
+accept_lx_music_terms = true
+
+[server]
+host = "0.0.0.0"
+port = 3000
+docs_enabled = true
+
+[auth]
+api_key = "__UNDEFINED_DEPLOY_LXMUSIC2API_KEY__"
+
+[custom_source]
+script_path = "./.private/custom-source.js"
+directory_path = ""
+
+[paths]
+database = "./data/lxmusic2api.sqlite"
+downloads = "./downloads"

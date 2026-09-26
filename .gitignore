@@ -42,6 +42,11 @@ __pycache__/
 logs/*
 data/
 
+# 容器化部署的运行态：.env / STATE.json / compose.yaml / 各服务配置与数据
+# 均含凭据或运行时数据，全部不入库（模板在 src/Undefined/deploy/templates/）
+# 必须用前导 / 锚定到仓库根，否则会连 src/Undefined/deploy 一起忽略
+/deploy/
+
 #AGENTS.md
 .DS_Store
 .claude/

@@ -1,0 +1,65 @@
+# Docker 构建上下文瘦身（仓库根）。
+#
+# 供 `docker build -f src/Undefined/deploy/templates/Dockerfile.bot .` 使用；
+# 镜像只需要 pyproject.toml / uv.lock / src / res / img / config / README.md。
+# 部署运行态目录必须排除：`deploy/` 含 .env 凭据、STATE.json 与容器数据，
+# 本地 `docker build` 时不该进构建上下文（模板 Dockerfile 只需要 src/res/img/config）。
+
+.git
+.gitmodules
+.github
+.githooks
+.claude
+.codex
+.vscode
+.idea
+
+# 运行态与产物
+data
+logs
+dist
+deploy
+.cache
+.coverage
+.pytest_cache
+.mypy_cache
+.ruff_cache
+htmlcov
+coverage
+
+# Python 环境
+.venv
+venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.so
+
+# 前端与原生 App
+node_modules
+apps/**/node_modules
+apps/**/dist
+apps/**/src-tauri/target
+apps/**/src-tauri/gen
+apps/**/src-tauri/.cargo
+
+# 文档（镜像不需要；README.md 由 Dockerfile 显式 COPY，靠末尾的 ! 放行）
+docs/
+*.md
+!README.md
+
+# NagaAgent 子模块（体积大，container 模式按需 bind mount）
+code
+
+# 本地私有文件
+config.toml
+config/mcp.json
+config/prompts/*.local.*
+.env
+*.jks
+*.keystore
+keystore.properties
+local.properties
+knowledge/*/chroma/
+knowledge/*/.manifest.json

@@ -1,3 +1,21 @@
+## v3.17.0 容器化一键部署
+
+本版本新增 `uv run deploy`：一条命令把本体、NapCat 与可选自托管服务编排成 Docker Compose，按部署模式自动对齐 `config.toml`、生成并复用凭据，最后输出全部管理入口与凭据；同时补上镜像的 CI 构建与多架构发布。
+
+- 新增部署入口 `uv run deploy`（`up` / `down` / `status` / `logs`）。向导只问四件事：本体部署方式、额外部署哪些自托管服务、发布端口的绑定地址、是否拉取 NagaAgent 子模块；**默认不部署任何可选服务**，回车即「全不部署」（重跑时表示沿用上次选择）。`--yes` 走非交互默认值；`--dry-run` 只打印将写入的 `config.toml` 差异、生成的 compose/.env 与**将执行的命令**，不落盘、不建目录、不写备份。
+- 两种部署模式：`container`（默认）把本体也放进 compose，镜像入口是 WebUI 并由它托管 Bot 进程（写入 `[webui].autostart_bot = true`）；`host` 只用 Docker 跑依赖服务，本体仍在宿主机启动。
+- `container` 模式把**整个仓库目录**以可写方式挂到容器内的 `/data/Undefined`（`res/`、`img/` 只读覆盖同名目录，`deploy/data`、`deploy/logs` 嵌套为 `data/`、`logs/`）。`up` 写 `config.toml` 走「临时文件 + `os.replace`」原子替换，单文件 bind mount 绑的是替换前的 inode，容器会一直读旧配置而 compose 也不会因此重建容器；挂目录同时保证 WebUI 在线改配置（原地写）仍然可用。
+- 地址与端口按模式对齐：容器内走 compose 服务名与固定的容器内端口，`--port` 覆盖的是宿主机发布端口——`[webui].port` / `[api].port` 与映射目标始终一致，`[onebot].ws_url` 不会被宿主端口污染；`host` 模式下本体自己就是监听方，端口跟随 `--port`。`up` / `status` 输出的入口地址取同一份解析后的端口（`host` 模式不发布本体端口，只看 `.env` 会把覆盖过的端口印成默认值）。`--port-bind` 默认只绑 `127.0.0.1`，`0.0.0.0` 只作监听语义、不会被写成连接地址。
+- 凭据自动生成并复用已有值，重跑不会把已生效的 WebUI 密码、Runtime `auth_key`、NapCat token、SearXNG `secret_key`、Firecrawl 与 lxmusic2api 凭据换掉（`changeme` 与空值视为占位符，且占位值不会挡住下一个来源）。`[webui].password` 与 `[api].auth_key` 以 `config.toml` 里已生效的值为准（`.env` 只是留档，否则一份过期的 `.env` 会把用户手改过的密码改回去），其余凭据只认 `deploy/.env`；凭据文件权限 0600，`deploy/` 整体不入库。
+- 写入面严格限定在服务拓扑：模型端、访问控制与提示词一律不碰。NagaAgent 相关**只写** `[features].nagaagent_mode_enabled`，`[naga]` 整节（`enabled` / `api_url` / `api_key` / `mode`）原样保留——既不清空已填的凭据，也不会关掉你自己开着的网关。
+- NapCat 以 `MODE=ws` 作正向 WebSocket 服务端，端口与令牌由生成的 `deploy/napcat/ws.json` 只读覆盖镜像模板，容器每次启动重新写出；登录之后 NapCat 优先读账号级 `onebot11_<QQ>.json` 且没有 fs.watch，`up` 的输出会点名该文件并给出处置办法，不再一律报「已就绪」。
+- 自托管服务：SearXNG 自带 `search.formats: [html, json]`（缺 `json` 时 `web_search` 会收到 403）并关闭入口对挂载目录的 chown；Firecrawl 拉起 api / playwright / redis / rabbitmq / postgres 五个容器，`USE_DB_AUTHENTICATION=false` 时不校验 key，管理界面只有 `/admin/<BULL_AUTH_KEY>/queues`；lxmusic2api 上游没有镜像，由本项目在 CI 里 clone 固定 commit 构建，pin 必须是完整 sha。
+- `container` 模式下 `python_interpreter` / `code_delivery_agent` 通过挂载宿主 `/var/run/docker.sock` 走 DooD（不启 DinD），本体容器额外禁止提权；`down --purge` 会连同 `deploy/` 下的数据与凭据一并删除，不可恢复。
+- 发布流程新增镜像构建：amd64 与 arm64 分别在原生 runner 上构建并按 digest 推送，再由合并任务生成 manifest list，产出 `ghcr.io/<owner>/undefined-bot:<tag>` 与 `undefined-lxmusic2api:<短sha>`，顺序在版本发布之前。GHCR 包首次推送默认为 private，拉取前需要 `docker login ghcr.io` 或把包改为 public。
+- 部署过程本身按「失败可收拾」设计：`STATE.json` 在 `compose up` 之前落盘，任何失败之后 `down` / `status` / `logs` 仍然可用；镜像拉取超时按策略选择（首次部署用长超时）；NapCat WebUI 的容器内端口固定，覆盖宿主端口不会让它失联。
+
+---
+
 ## v3.16.1 自托管服务部署依赖说明
 
 本版本补齐部署文档中长期缺失的一块：除 Python 运行环境外，Undefined 还需要连接若干由部署方自行搭建的服务，此前这些依赖只散落在配置字段注释里，没有一处说明哪些是必需的、不部署会失去什么。

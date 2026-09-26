@@ -94,6 +94,7 @@ uv run playwright install
 补充说明：
 
 - 上表只列“需要自己起一个服务”的项。模型端点（`[models.*]`）不在此列：它既可以是自部署的 OpenAI 兼容服务，也可以是远端 API，按需选择即可。
+- **想省掉手工搭建**：上述服务（NapCat 必需，SearXNG / Firecrawl / lxmusic2api 按需）都可用 `uv run deploy up` 一键容器化部署，镜像与 pin 版本由本项目管理，见[容器化一键部署](docker-deploy.md)。
 - OneBot 协议端除自身部署外，还要按文件发送模式确认文件系统可见性，见下文 [NapCat / Lagrange.Core 部署要求](#napcat--lagrangecore-部署要求)。
 - 若使用 `config/mcp.json` 中基于 `npx` 的 MCP 服务器，宿主机还需具备 Node.js 运行时。
 - Code Delivery Agent 需要宿主机提供 Docker，发送原生语音与 B 站视频合并需要 FFmpeg，详见上文[其它宿主环境依赖](#其它宿主环境依赖)。
@@ -273,6 +274,22 @@ python -c "from Undefined.utils.resources import resolve_resource_path; print(re
 ```bash
 python -c "from Undefined.utils.resources import read_text_resource; print(len(read_text_resource('res/prompts/undefined.xml')))"
 ```
+
+---
+
+## 容器化一键部署（`uv run deploy`）
+
+除上面的手工部署外，仓库还提供一条命令完成「本体 + NapCat + 按需自托管服务」的容器化部署：
+
+```bash
+git clone --recursive https://github.com/69gg/Undefined.git
+cd Undefined
+uv run deploy up          # 交互式向导；默认只部署本体 + NapCat
+```
+
+脚本会：生成 `deploy/` 下的 compose 与各服务配置 → 按最小差异修改 `config.toml`（改前备份）→ 校验并启动容器 → 输出各服务入口与凭据（含带 token 的 NapCat WebUI 链接）。
+
+需要 Linux + Docker Engine（含 `docker compose` v2 插件）+ `git`。完整说明（两种部署模式、可选服务、端口与凭据、Docker 访问方式、升级与排查）见 **[容器化一键部署](docker-deploy.md)**。
 
 ---
 

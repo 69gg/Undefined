@@ -1,0 +1,53 @@
+# 参考副本：Docker 只读取**构建上下文根目录**的 .dockerignore，因此实际生效的
+# 始终是仓库根的 .dockerignore（CI 用 `docker build -f src/.../Dockerfile.bot .`，
+# 上下文就是仓库根）。本文件保持与那份规则一致，仅作为「只复制模板文件时」的参考，
+# 请不要把规则只写在这里——它不会被 Docker 读取。
+
+.git
+.gitmodules
+.github
+
+# 运行态与产物
+data
+logs
+dist
+deploy
+.cache
+.coverage
+.pytest_cache
+.mypy_cache
+.ruff_cache
+
+# Python 环境
+.venv
+venv
+__pycache__
+*.pyc
+
+# 前端与原生 App 构建产物
+node_modules
+apps/**/node_modules
+apps/**/dist
+apps/**/src-tauri/target
+apps/**/src-tauri/gen
+
+# 文档与编辑器
+docs
+.vscode
+.idea
+.claude
+.codex
+*.md
+# Dockerfile 会显式 COPY README.md，必须放行
+!README.md
+
+# 子模块（NagaAgent 体积大且不在镜像内使用）
+code
+
+# 本地私有文件
+config.toml
+config/mcp.json
+config/prompts/*.local.*
+.env
+*.jks
+*.keystore

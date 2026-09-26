@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-`src/Undefined/` contains the main runtime package. Core areas include `ai/`, `services/`, `skills/`, `cognitive/`, `memes/`, `knowledge/`, `api/`, `webui/`, `config/`, `mcp/`, and `automations/` (`AutomationService` runtime plus JSON storage); media-facing integrations live in `arxiv/`, `bilibili/`, `github/`, and `attachments/`. `tests/` holds the pytest suite.
+`src/Undefined/` contains the main runtime package. Core areas include `ai/`, `services/`, `skills/`, `cognitive/`, `memes/`, `knowledge/`, `api/`, `webui/`, `config/`, `mcp/`, and `automations/` (`AutomationService` runtime plus JSON storage); media-facing integrations live in `arxiv/`, `bilibili/`, `github/`, and `attachments/`. `src/Undefined/deploy/` is the containerized one-shot deployment path (`uv run deploy`, templates under `deploy/templates/`) and does not take part in runtime. `tests/` holds the pytest suite.
 
 > Single source of truth for the module-level directory tree: [docs/development.md](docs/development.md). This file, `CLAUDE.md`, and `ARCHITECTURE.md` only keep overviews — update the tree first when the layout changes. `apps/undefined-console/` is the Tauri + Vite management client and `apps/undefined-chat/` is the native-first Tauri + React 19 chat client (both connect to the same Management/Runtime services), while `code/NagaAgent/` remains a git submodule and should be updated deliberately, with upstream syncs kept separate from repo-local changes. Runtime and generated state primarily lives under `data/`, `logs/`, and `dist/`; the root `knowledge/` directory stores knowledge-base data rather than application code. Prefer editing source files and docs over generated outputs unless the task is explicitly about runtime state.
 
@@ -13,6 +13,7 @@ Use `uv` for the root project:
 - `uv run Undefined-webui` starts the recommended Management-first local entrypoint.
 - `uv run Undefined` starts the bot directly.
 - `uv run pytest tests/` runs the backend test suite.
+- `npm ci --prefix tests/frontend` installs the jsdom driver used by `tests/test_webui_runtime_chat_behavior.py`. Without it those cases **skip silently on a local machine** (on CI they fail instead, which is deliberate). Run it once after cloning if you touch WebUI JS.
 - `uv run ruff check .` and `uv run ruff format --check .` enforce Python linting and formatting.
 - `uv run mypy .` runs strict type checks.
 - `uv build --wheel` validates packaging and bundled resources.

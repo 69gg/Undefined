@@ -40,6 +40,12 @@ jobs:
       - name: Install dependencies
         run: uv sync --group dev -p ${{ env.PYTHON_VERSION }}
 
+      # WebUI 前端行为测试（tests/test_webui_runtime_chat_behavior.py）用 jsdom
+      # 驱动真实 DOM；缺这段安装时该文件的 _require_env() 会让用例直接失败
+      # （只有在本地非 CI 环境下才会 skip）。
+      - name: Install frontend test dependencies
+        run: npm ci --prefix tests/frontend
+
       - name: Cache Ruff
         uses: actions/cache@v4
         with:
@@ -66,6 +72,9 @@ jobs:
         run: uv run mypy .
 
       - name: Run Tests (with coverage gate)
+        env:
+          # 让部署模板的「wheel 内容」测试真正构建一次 wheel（本地默认跳过）
+          UNDEFINED_DEPLOY_WHEEL_CHECK: "1"
         run: uv run pytest tests/ --cov --cov-report=term
 
       - name: Build wheel
@@ -73,7 +82,7 @@ jobs:
 
       - name: Verify wheel contains resources
         run: |
-          uv run python -c "import glob, zipfile; whl=glob.glob('dist/*.whl')[0]; z=zipfile.ZipFile(whl); names=set(z.namelist()); required={'config.toml.example','res/prompts/undefined.xml','img/xlwy.jpg'}; missing=sorted([p for p in required if p not in names]); assert not missing, f'missing in wheel: {missing}'"
+          uv run python -c "import glob, zipfile; whl=glob.glob('dist/*.whl')[0]; z=zipfile.ZipFile(whl); names=set(z.namelist()); required={'config.toml.example','res/prompts/undefined.xml','img/xlwy.jpg','Undefined/deploy/cli.py','Undefined/deploy/templates/Dockerfile.bot','Undefined/deploy/templates/compose.base.yaml'}; missing=sorted([p for p in required if p not in names]); assert not missing, f'missing in wheel: {missing}'"
 
   python-compat:
     name: Python compat (${{ matrix.python-version }})
@@ -88,6 +97,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
@@ -96,6 +110,9 @@ jobs:
 
       - name: Install dependencies
         run: uv sync --group dev -p ${{ matrix.python-version }}
+
+      - name: Install frontend test dependencies
+        run: npm ci --prefix tests/frontend
 
       - name: Run Mypy
         run: uv run mypy .

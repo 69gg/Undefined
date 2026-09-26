@@ -1,0 +1,35 @@
+# 部署模板片段：NapCat（OneBot V11 协议端）。
+#
+# MODE=ws 让镜像入口把内置模板写成 config/onebot11.json，即 NapCat 作为正向
+# WebSocket **服务端**监听 3001，Undefined 作为客户端连过来（与
+# [onebot].ws_url 对应）。模板里 WS token 为空，部署脚本会在首次启动后补齐。
+#
+# NAPCAT_WEBUI_SECRET_KEY 用于预设 WebUI token，省掉“进容器翻 token”这一步；
+# 官方 README 未文档化，但镜像源码中它的优先级高于 WEBUI_TOKEN。
+
+services:
+  napcat:
+    image: ${UNDEFINED_DEPLOY_NAPCAT_IMAGE}
+    container_name: napcat
+    restart: unless-stopped
+    # 固化 MAC，减少 QQ 风控概率（沿用上游 compose 模板的做法）。
+    mac_address: 02:42:ac:11:00:02
+    networks:
+      - undefined-deploy
+    environment:
+      MODE: ws
+      NAPCAT_UID: ${UNDEFINED_DEPLOY_NAPCAT_UID}
+      NAPCAT_GID: ${UNDEFINED_DEPLOY_NAPCAT_GID}
+      NAPCAT_WEBUI_SECRET_KEY: ${UNDEFINED_DEPLOY_NAPCAT_WEBUI_TOKEN}
+      WEBUI_TOKEN: ${UNDEFINED_DEPLOY_NAPCAT_WEBUI_TOKEN}
+      # 这是 NapCat core 在**容器内**监听的端口（preferredPort > 0 时优先绑它），
+      # 必须与下面 ports 映射的目标端一致。写成宿主端口变量会在 --port 覆盖后
+      # 让 WebUI 改绑到映射不到的位置，直接打不开。
+      NAPCAT_WEBUI_PREFERRED_PORT: "6099"
+    ports:
+      # 协议端与 WebUI 默认只绑回环；WebUI 暴露到公网等于把 QQ 登录入口暴露出去。
+      - "${UNDEFINED_DEPLOY_PORT_NAPCAT_WS_BIND}:${UNDEFINED_DEPLOY_PORT_NAPCAT_WS}:3001"
+      - "${UNDEFINED_DEPLOY_PORT_NAPCAT_WEBUI_BIND}:${UNDEFINED_DEPLOY_PORT_NAPCAT_WEBUI}:6099"
+    volumes:
+      - ./napcat/config:/app/napcat/config
+      - ./napcat/qq:/app/.config/QQ

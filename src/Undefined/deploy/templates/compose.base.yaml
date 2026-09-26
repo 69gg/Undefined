@@ -1,0 +1,14 @@
+# 部署模板片段：网络与卷声明。
+#
+# 约定：本目录下每个 compose.*.yaml 都是**片段**，由 Undefined.deploy.generate
+# 用 yaml.safe_load 解析后按 services / volumes / networks 三个顶层键合并，
+# 再写出到 deploy/compose.yaml。因此：
+#   - 不要写顶层 name:（合并后的文件统一写）
+#   - 不要跨文件重名（同一服务只能在一个片段里定义）
+#   - 所有取值都用 ${VAR} 引用 deploy/.env；脚本会写全量变量，模板里不写默认值，
+#     这样变量名拼错会直接报错而不是静默取默认值
+
+networks:
+  undefined-deploy:
+    name: undefined-deploy
+    driver: bridge

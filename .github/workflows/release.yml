@@ -8,6 +8,8 @@ on:
 permissions:
   contents: write
   id-token: write
+  # 推送容器镜像到 GHCR 的 packages: write 收窄到 build-docker / merge-docker
+  # 两个 job（job 级 permissions 是覆盖而非合并，所以那边要一并声明 contents）。
 
 concurrency:
   group: release-${{ github.ref }}
@@ -17,6 +19,14 @@ env:
   PYTHON_VERSION: "3.12"
   NODE_VERSION: "22"
   ANDROID_NDK_VERSION: "27.2.12479018"
+  # 部署镜像：本体与 lxmusic2api（后者上游无预构建镜像，需我们 clone 后构建）
+  BOT_IMAGE: ghcr.io/${{ github.repository_owner }}/undefined-bot
+  LXMUSIC2API_IMAGE: ghcr.io/${{ github.repository_owner }}/undefined-lxmusic2api
+  # build-push-action 默认会把构建记录作为 **非 zip** artifact 上传，而
+  # actions/download-artifact 不带 name/pattern 时会下载全部 artifact 并在
+  # 非 zip 上失败（官方 README 明确警告要加 pattern: "!*.dockerbuild"）。
+  # 这里从源头关掉：构建记录对本流程没有用处。
+  DOCKER_BUILD_RECORD_UPLOAD: "false"
 
 jobs:
   verify-python:
@@ -24,6 +34,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: release
+    env:
+      # 打开「真实构建 wheel 并校验模板随包分发」的打包测试
+      # （tests/test_deploy_packaging.py），与 ci.yml 的 quality-check 一致。
+      UNDEFINED_DEPLOY_WHEEL_CHECK: "1"
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -36,8 +50,18 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
       - name: Install Python dependencies
         run: uv sync --group dev -p ${{ env.PYTHON_VERSION }}
+
+      # WebUI 前端行为测试用 jsdom 驱动真实 DOM；缺这段安装时相关用例会
+      # 在 CI 上直接失败（tests/test_webui_runtime_chat_behavior.py 的 _require_env）。
+      - name: Install frontend test dependencies
+        run: npm ci --prefix tests/frontend
 
       - name: Validate release tag, build versions, and changelog
         env:
@@ -74,10 +98,6 @@ jobs:
 
       - name: Build Python distributions
         run: uv build
-
-      - name: Verify wheel contains packaged resources
-        run: |
-          uv run python -c "import glob, zipfile; wheels=glob.glob('dist/*.whl'); assert wheels, 'no wheel built'; z=zipfile.ZipFile(wheels[0]); names=set(z.namelist()); required={'config.toml.example','res/prompts/undefined.xml','img/xlwy.jpg'}; missing=sorted([p for p in required if p not in names]); assert not missing, f'missing in wheel: {missing}'"
 
       - name: Upload Python distributions
         uses: actions/upload-artifact@v4
@@ -647,12 +667,214 @@ jobs:
           path: release-artifacts/*
           if-no-files-found: error
 
+  docker-pins:
+    name: Resolve deployment image tags
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs:
+      - verify-python
+    outputs:
+      tag: ${{ steps.pins.outputs.tag }}
+      lxmusic2api_slug: ${{ steps.pins.outputs.lxmusic2api_slug }}
+      lxmusic2api_sha: ${{ steps.pins.outputs.lxmusic2api_sha }}
+      lxmusic2api_short: ${{ steps.pins.outputs.lxmusic2api_short }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Read pinned lxmusic2api commit
+        id: pins
+        run: |
+          # pin 是**硬要求**：短 sha 用作镜像 tag，且 tests/test_deploy_catalog.py
+          # 会先断言它是完整 sha。所以这里没有「占位就跳过」的分支——那种分支在
+          # 测试先失败的前提下永远不可达，只会让流程看起来宽容。
+          echo "lxmusic2api_sha=$(uv run python -c "from Undefined.deploy.images import LXMUSIC2API_UPSTREAM_SHA; print(LXMUSIC2API_UPSTREAM_SHA)")" >> "$GITHUB_OUTPUT"
+          echo "lxmusic2api_short=$(uv run python -c "from Undefined.deploy.images import short_sha, LXMUSIC2API_UPSTREAM_SHA; print(short_sha(LXMUSIC2API_UPSTREAM_SHA))")" >> "$GITHUB_OUTPUT"
+          echo "lxmusic2api_slug=$(uv run python -c "from Undefined.deploy.images import LXMUSIC2API_UPSTREAM_SLUG; print(LXMUSIC2API_UPSTREAM_SLUG)")" >> "$GITHUB_OUTPUT"
+          echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+
+  build-docker:
+    name: Build ${{ matrix.platform }} images
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    needs:
+      - docker-pins
+    environment: release
+    # job 级 permissions 覆盖 workflow 级，所以 contents 必须一并声明，否则 checkout 失败
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # 每个架构都在自己的原生 runner 上构建：早先的做法是在 amd64 上用 QEMU
+          # 模拟 arm64，而镜像里要跑 `playwright install --with-deps chromium`，
+          # 模拟环境下极易超时，一超时就阻断整个发版。
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Prepare platform pair
+        run: |
+          platform=${{ matrix.platform }}
+          echo "PLATFORM_PAIR=${platform//\//-}" >> "$GITHUB_ENV"
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # 各架构只推 digest，最终 tag 由 merge-docker 用 imagetools 合并成 manifest list
+      - name: Build and push Undefined image by digest
+        id: build_bot
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: src/Undefined/deploy/templates/Dockerfile.bot
+          platforms: ${{ matrix.platform }}
+          build-args: |
+            UV_VERSION=0.9.7
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ needs.docker-pins.outputs.tag }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          outputs: type=image,name=${{ env.BOT_IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=undefined-bot-${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=undefined-bot-${{ matrix.platform }}
+
+      - name: Checkout lxmusic2api upstream
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ needs.docker-pins.outputs.lxmusic2api_slug }}
+          ref: ${{ needs.docker-pins.outputs.lxmusic2api_sha }}
+          path: .lxmusic2api-upstream
+
+      - name: Build and push lxmusic2api image by digest
+        id: build_lxmusic
+        uses: docker/build-push-action@v6
+        with:
+          context: .lxmusic2api-upstream
+          platforms: ${{ matrix.platform }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ needs.docker-pins.outputs.lxmusic2api_sha }}
+          outputs: type=image,name=${{ env.LXMUSIC2API_IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=lxmusic2api-${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=lxmusic2api-${{ matrix.platform }}
+
+      - name: Export digests
+        run: |
+          mkdir -p /tmp/digests/bot /tmp/digests/lxmusic2api
+          bot_digest="${{ steps.build_bot.outputs.digest }}"
+          touch "/tmp/digests/bot/${bot_digest#sha256:}"
+          lx_digest="${{ steps.build_lxmusic.outputs.digest }}"
+          touch "/tmp/digests/lxmusic2api/${lx_digest#sha256:}"
+
+      - name: Upload bot digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-bot-${{ env.PLATFORM_PAIR }}
+          path: /tmp/digests/bot/*
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload lxmusic2api digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-lxmusic2api-${{ env.PLATFORM_PAIR }}
+          path: /tmp/digests/lxmusic2api/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge-docker:
+    name: Publish multi-arch manifests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs:
+      - docker-pins
+      - build-docker
+    environment: release
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Download bot digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests/bot
+          pattern: digests-bot-*
+          merge-multiple: true
+
+      - name: Download lxmusic2api digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests/lxmusic2api
+          pattern: digests-lxmusic2api-*
+          merge-multiple: true
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create Undefined manifest list
+        working-directory: /tmp/digests/bot
+        run: |
+          docker buildx imagetools create \
+            -t "${BOT_IMAGE}:${{ needs.docker-pins.outputs.tag }}" \
+            -t "${BOT_IMAGE}:latest" \
+            $(printf "${BOT_IMAGE}@sha256:%s " *)
+
+      - name: Create lxmusic2api manifest list
+        working-directory: /tmp/digests/lxmusic2api
+        run: |
+          docker buildx imagetools create \
+            -t "${LXMUSIC2API_IMAGE}:${{ needs.docker-pins.outputs.lxmusic2api_short }}" \
+            -t "${LXMUSIC2API_IMAGE}:latest" \
+            $(printf "${LXMUSIC2API_IMAGE}@sha256:%s " *)
+
+      - name: Summarize
+        run: |
+          {
+            echo "### 部署镜像已推送"
+            echo
+            echo "- \`${BOT_IMAGE}:${{ needs.docker-pins.outputs.tag }}\`（linux/amd64 + linux/arm64）"
+            echo "- \`${BOT_IMAGE}:latest\`"
+            echo "- \`${LXMUSIC2API_IMAGE}:${{ needs.docker-pins.outputs.lxmusic2api_short }}\`（linux/amd64 + linux/arm64）"
+            echo
+            echo "> GHCR 包首次推送后默认为 **private**。用户需先"
+            echo "> \`docker login ghcr.io\`，或在包设置里改为 public，"
+            echo "> 否则 \`uv run deploy up\` 拉取镜像会 401。"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   publish-release:
     name: Publish release assets
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs:
       - verify-python
+      - merge-docker
       - build-tauri-desktop
       - build-tauri-android
     environment: release
@@ -667,6 +889,10 @@ jobs:
         with:
           path: release-downloads
           merge-multiple: true
+          # 不带 name 时会下载**全部** artifact；digests-* 是 merge-docker 用的
+          # 内部文件，混进来会被 `gh release create release-downloads/*` 当成
+          # 发行资产一起发出去。
+          pattern: "!digests-*"
 
       - name: Build release notes with detailed changes
         shell: bash

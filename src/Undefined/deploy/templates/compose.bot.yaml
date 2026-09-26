@@ -1,0 +1,52 @@
+# 部署模板片段：Undefined 本体（仅 container 模式使用；host 模式不合并本文件）。
+#
+# 设计要点：
+#   - WORKDIR 用 /data/Undefined 而非 /app：本体大量磁盘路径（data/、logs/、
+#     knowledge/、config/、res/、img/）都是相对 CWD 解析的相对路径，这样仓库
+#     目录就以 bind mount 挂进容器，宿主机上直接编辑 config.toml 即可生效，
+#     且不会覆盖镜像内的 /app/.venv。
+#   - 挂 docker.sock 采用 DooD：python_interpreter / code_delivery_agent 用
+#     docker CLI 起兄弟容器，不启 DinD。
+#   - file_send_mode=url 时协议端（另一个容器）需要访问 Runtime API；生成配置时
+#     [onebot].file_send_host 写的是本体的 compose 服务名，同一网络内可直连，
+#     因此这里不需要 host-gateway 别名，也不依赖宿主回环端口是否可达。
+
+services:
+  undefined-bot:
+    image: ${UNDEFINED_DEPLOY_BOT_IMAGE}
+    container_name: undefined-bot
+    restart: unless-stopped
+    networks:
+      - undefined-deploy
+    working_dir: /data/Undefined
+    ports:
+      - "${UNDEFINED_DEPLOY_PORT_BOT_WEBUI_BIND}:${UNDEFINED_DEPLOY_PORT_BOT_WEBUI}:8787"
+      - "${UNDEFINED_DEPLOY_PORT_BOT_API_BIND}:${UNDEFINED_DEPLOY_PORT_BOT_API}:8788"
+    # 容器以 root 运行又挂着宿主 docker.sock，能做的加固不多，至少禁止提权：
+    # no-new-privileges 会挡掉 setuid/setgid 这条提权路径。它不影响容器内的
+    # Playwright——Chromium 只在显式传 chromiumSandbox: true 时才启用自带沙箱，
+    # 否则 Playwright 自己会加上 --no-sandbox（见其 chromium.js），本项目从未传过
+    # 该选项，所以这里不会把截图能力弄坏。
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      # 挂**仓库目录**而不是单个 `../config.toml`：`up` 写 config.toml 走的是
+      # 「同目录临时文件 + os.replace」原子替换，替换后 inode 变了，而文件级
+      # bind mount 绑的是挂载那一刻的 inode——容器会一直读旧内容，且 compose
+      # 不会因为文件内容变化而重建容器（volume 配置串没变），于是轮换 token 或
+      # 改 ws_url 之后本体仍用旧配置、status 却显示一切正常。
+      # 目录挂载下 `up` 改完立即对容器可见，也兑现本文件开头「宿主机直接编辑
+      # config.toml 即生效」的承诺。
+      # 代价：容器（root）能看到整个仓库，含 deploy/.env。该容器本来就挂着宿主
+      # docker.sock（等价宿主 root），所以这不是新的权限边界。
+      - ..:/data/Undefined
+      # 以下是与仓库内同名目录的嵌套挂载，覆盖上面的父挂载：静态资源只读，
+      # config/ 与 knowledge/ 需要可写，data/ 与 logs/ 指向 deploy/ 下的运行态
+      # 目录（它们在仓库根并不存在，必须显式给出）。
+      - ../res:/data/Undefined/res:ro
+      - ../img:/data/Undefined/img:ro
+      - ../config:/data/Undefined/config
+      - ../knowledge:/data/Undefined/knowledge
+      - ./data:/data/Undefined/data
+      - ./logs:/data/Undefined/logs
+      - ${UNDEFINED_DEPLOY_DOCKER_SOCKET}:/var/run/docker.sock

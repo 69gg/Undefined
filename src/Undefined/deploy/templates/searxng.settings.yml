@@ -1,0 +1,27 @@
+# SearXNG 配置模板（部署脚本会写入 deploy/searxng/settings.yml 并填入随机 secret_key）。
+#
+# 关键点：
+#   - use_default_settings: true —— 其余数千行键取镜像内默认值，我们只覆盖必要的。
+#   - search.formats 默认只有 html，请求 format=json 会返回 403；内置 web_search
+#     走的就是 JSON 格式，所以必须显式加上 json。
+#   - server.limiter 默认已是 false，这里显式写出来防止上游改默认值；保持 false
+#     就不需要官方 compose 里的 valkey。
+
+use_default_settings: true
+
+general:
+  instance_name: "Undefined SearXNG"
+
+search:
+  formats:
+    - html
+    - json
+
+server:
+  # 由部署脚本替换为随机值。
+  secret_key: "__UNDEFINED_DEPLOY_SEARXNG_SECRET__"
+  limiter: false
+  public_instance: false
+  image_proxy: false
+  # 由部署脚本替换为实际访问地址（协议端/浏览器可能从宿主机访问）。
+  base_url: "__UNDEFINED_DEPLOY_SEARXNG_BASE_URL__"

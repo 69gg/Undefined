@@ -6,6 +6,7 @@ based on the autostart_bot configuration and pending_bot_autostart marker.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock
@@ -14,6 +15,7 @@ import pytest
 from aiohttp import web
 
 from Undefined.config.webui_settings import WebUISettings
+from Undefined.webui import core as webui_core
 from Undefined.webui.app import on_startup
 from Undefined.webui.routes._shared import BOT_APP_KEY, SETTINGS_APP_KEY
 
@@ -169,3 +171,15 @@ async def test_on_startup_autostart_failure_does_not_block_webui(
 
     # 验证 bot.start() 被调用（虽然失败了）
     bot.start.assert_awaited_once()
+
+
+def test_bot_command_uses_current_interpreter() -> None:
+    """Bot 必须由当前解释器启动，不能依赖 PATH 里的外部启动器。
+
+    WebUI 自己就跑在这个解释器里，因此它必然 import 得到本包；换成
+    ``uv run`` 之类的外部命令会在缺少该工具的运行环境里静默失败——本体镜像的
+    runtime 阶段只有 ``/opt/venv``、没有 uv，容器内的「启动机器人」会直接
+    FileNotFoundError，而错误只被 logger.error 吞掉。
+    """
+    assert webui_core.BOT_COMMAND[0] == sys.executable
+    assert webui_core.BOT_COMMAND[1:] == ("-m", "Undefined")

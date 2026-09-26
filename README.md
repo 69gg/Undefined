@@ -98,6 +98,7 @@ Console 和 Chat 都需要连接已运行的 Undefined 服务：首次部署请�
 Undefined 的功能极为丰富，为了让本页面不过于臃肿，我们将各个模块的深入解析与高阶玩法整理成了专题游览图。这里是开启探索的钥匙：
 
 - ⚙️ **[安装与部署指南](docs/deployment.md)**：不管你是需要 `pip` 无脑一键安装，还是源码二次开发，这里的排坑指南应有尽有。
+- 🐳 **[容器化一键部署](docs/docker-deploy.md)**：`uv run deploy` 一条命令拉起本体 + NapCat 与按需自托管服务（SearXNG / Firecrawl / lxmusic2api），含端口、凭据、模式选择与排查。
 - 📦 **[Python 库 API 参考](docs/python-api.md)**：根包 lazy re-export、`Config.from_mapping` / `set_config`、公共 API 符号表与嵌入示例。
 - 🖥️ **[WebUI 使用指南](docs/webui-guide.md)**：管理控制台功能一览——配置编辑、日志查看、认知记忆管理、表情包库、AI 对话与系统监控。
 - 🧭 **[Management API 与远程管理](docs/management-api.md)**：WebUI / App 共用的管理接口、认证、配置/日志/Bot 控制与引导探针说明。
@@ -149,6 +150,28 @@ uv run Undefined-webui
 ```
 
 > 浏览器是默认入口；如果你按上方 [Release 下载速查](#release-下载速查)下载了桌面端或 Android 安装包，也可以在完成首轮密码设置后，连接到同一个 Management API 地址进行远程管理。
+
+---
+
+## 🐳 快速开始 (容器模式，Linux)
+
+不想手工装 Python 依赖、也不想自己起 NapCat / SearXNG 等服务？一条命令搞定（需要 Docker Engine，含 `docker compose` v2 插件）：
+
+```bash
+git clone --recursive https://github.com/69gg/Undefined.git
+cd Undefined
+
+# 交互式向导：选“本体是否进容器”，以及要额外部署哪些自托管服务（默认全不选）
+uv run deploy up
+
+# 非交互式：只跑本体 + NapCat
+uv run deploy up --yes
+```
+
+脚本会自动生成 compose 与各服务配置、按最小差异改好 `config.toml`（改前备份）、启动容器，最后把 **Undefined WebUI 密码、带 token 的 NapCat WebUI 链接、各服务入口**一次性打印出来。
+
+后续：`uv run deploy status` 看状态与凭据、`uv run deploy logs` 看日志、`uv run deploy down` 停止（数据保留）。完整说明见 [容器化一键部署](docs/docker-deploy.md)。
+
 
 ---
 
