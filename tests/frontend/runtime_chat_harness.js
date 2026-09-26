@@ -1402,6 +1402,103 @@ SCENARIOS.rich_content_rendering = async (env) => {
     };
 };
 
+/**
+ * 取消与重试控件：运行中显示取消按钮并真的发出取消请求；重试按钮复用上一条用户消息。
+ *
+ * 原断言全是「源码里要有 cancelActiveChatJob / data-cancel-job / showToast(...)」
+ * 之类的子串匹配；这里改为点按钮、看请求与 DOM。
+ */
+SCENARIOS.cancel_and_retry_controls = async (env) => {
+    const { window, setRoutes } = env;
+    setRoutes([
+        {
+            match: "/chat/conversations",
+            reply: {
+                body: {
+                    conversations: [{ id: "conv-1", title: "t" }],
+                    default_conversation_id: "webchat",
+                    active_job: null,
+                },
+            },
+        },
+        {
+            match: "/chat/history",
+            reply: { body: { items: [], has_more: false, next_before: null } },
+        },
+        { match: "/chat/jobs", reply: { body: { job_id: "job-cancel" } } },
+        { match: "/cancel", reply: { body: { ok: true } } },
+        {
+            match: "/jobs/job-cancel/events",
+            reply: {
+                body: {
+                    events: [
+                        {
+                            seq: 1,
+                            event: "message",
+                            payload: { content: "partial" },
+                        },
+                    ],
+                    // 保持 running，让取消按钮处于可见状态
+                    job: { job_id: "job-cancel", status: "running", last_seq: 1 },
+                },
+            },
+        },
+    ]);
+
+    window.eval("window.RuntimeController.init()");
+    await tick();
+    window.RuntimeController.loadChatHistory(true).catch(() => {});
+    await tick();
+
+    window.document.getElementById("runtimeChatInput").value = "please do it";
+    window.document.getElementById("btnRuntimeChatSend").click();
+    await tick(4);
+    await settle(400);
+
+    const log = chatLog(window);
+    const cancelButtons = log
+        ? Array.from(log.querySelectorAll("[data-cancel-job]"))
+        : [];
+    // 可见性用 hidden 属性判断：jsdom 没有布局，offsetParent 恒为 null
+    const visibleCancel = cancelButtons.filter((btn) => !btn.hidden).length;
+    // 先取快照：点击取消后按钮可能被移除
+    const cancelJobId = cancelButtons.length
+        ? cancelButtons[0].getAttribute("data-cancel-job") || ""
+        : "";
+    const cancelDisabledBeforeClick = cancelButtons.length
+        ? cancelButtons[0].disabled
+        : null;
+
+    // 点取消
+    if (cancelButtons.length) {
+        cancelButtons[0].click();
+        await tick(4);
+        await settle(300);
+    }
+
+    const retryButtons = log
+        ? Array.from(log.querySelectorAll("[data-retry-message]"))
+        : [];
+
+    return {
+        cancelButtonCount: cancelButtons.length,
+        visibleCancelCount: visibleCancel,
+        cancelJobId,
+        cancelDisabledBeforeClick,
+        retryButtonCount: retryButtons.length,
+        // 重试内容挂在所属消息节点的 data-retry-content 上
+        retryContent: (() => {
+            const item = log ? log.querySelector("[data-retry-content]") : null;
+            return item ? item.getAttribute("data-retry-content") || "" : "";
+        })(),
+        cancelRequested: env.requestDetails.some((entry) =>
+            entry.url.includes("/cancel"),
+        ),
+        requests: env.requests.slice(),
+        allNodes: chatNodes(window),
+    };
+};
+
 // --------------------------------------------------------------------------- //
 
 async function main() {

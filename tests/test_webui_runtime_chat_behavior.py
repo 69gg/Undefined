@@ -210,6 +210,30 @@ def test_markdown_and_html_images_are_lazy_and_clickable() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# 取消与重试控件
+# --------------------------------------------------------------------------- #
+
+
+def test_cancel_control_targets_the_running_job() -> None:
+    """运行中要出现可用的取消按钮，点击后向该作业发出取消请求。"""
+    result = run_scenario("cancel_and_retry_controls")
+
+    assert result["cancelButtonCount"] == 1, result
+    assert result["visibleCancelCount"] == 1, "运行中取消按钮应可见"
+    assert result["cancelJobId"] == "job-cancel", result
+    assert result["cancelDisabledBeforeClick"] is False
+    assert result["cancelRequested"] is True, result["requests"]
+
+
+def test_retry_control_reuses_the_user_message() -> None:
+    """重试按钮要复用那条用户消息的原文，而不是空内容。"""
+    result = run_scenario("cancel_and_retry_controls")
+
+    assert result["retryButtonCount"] == 1, result
+    assert result["retryContent"] == "please do it", result["retryContent"]
+
+
+# --------------------------------------------------------------------------- #
 # 富内容渲染（引用块 / 代码高亮 / 独立 HTML / 工具预览 / 附件去重）
 # --------------------------------------------------------------------------- #
 
