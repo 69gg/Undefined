@@ -219,6 +219,11 @@ def write_text(path: Path, content: str, *, secret: bool = False) -> None:
 
     与运行时共用同一套写入语义（``utils/io.py`` 的原子替换 + ``utils/file_lock``
     的跨平台文件锁），避免部署脚本自己造一份 IO 实现。
+
+    权限：文件由 ``_atomic_replace`` 里的 ``tempfile.mkstemp`` 建成，因此
+    **不分敏感与否都是 0600**（``secret=True`` 只是再显式 chmod 一次兜底，
+    免得 umask/平台差异让临时文件更宽）。别把生成物当成 0644——
+    ``searxng/settings.yml`` 这类文件里也含凭据，0600 是刻意的。
     """
     from Undefined.utils.file_lock import FileLock
 

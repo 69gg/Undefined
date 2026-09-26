@@ -19,8 +19,9 @@ services:
       # 入口默认会 `chown -R searxng:searxng /etc/searxng`（FORCE_OWNERSHIP 默认
       # true），而 /etc/searxng 是宿主目录的 bind mount——chown 之后宿主
       # deploy/searxng 变成 977:977，非 root 的调用者**再也写不进去**，第二次
-      # `up` 重写 settings.yml 就会 EACCES。容器本身以 root 运行、settings.yml 也
-      # 只有 0644，不需要这次 chown，因此关掉它（代价是入口打印一行 WARNING）。
+      # `up` 重写 settings.yml 就会 EACCES。容器本身以 root 运行（镜像没有 USER
+      # 指令），settings.yml 是脚本原子写入的 0600、属主为调用者，root 读它没有
+      # 问题，不需要这次 chown，因此关掉它（代价是入口打印一行 WARNING）。
       FORCE_OWNERSHIP: "false"
     ports:
       - "${UNDEFINED_DEPLOY_PORT_SEARXNG_BIND}:${UNDEFINED_DEPLOY_PORT_SEARXNG}:8080"

@@ -82,9 +82,11 @@ deploy/
 └── logs/           # 挂给本体的 /data/Undefined/logs
 ```
 
-**幂等与凭据**：`up` 每次都会重新渲染 compose 与配置，但凭据按「`deploy/.env` 已有 → `config.toml` 已生效 → 随机生成」的顺序取值，因此重跑不会把已经生效的 WebUI 密码、Runtime `auth_key`、NapCat token、SearXNG `secret_key`、lxmusic2api key 换掉。`changeme` 一类占位值会被替换。
+**幂等与凭据**：`up` 每次都会重新渲染 compose 与配置，但凭据一律优先复用已生效的值、最后才随机生成，因此重跑不会把 NapCat token、SearXNG `secret_key`、lxmusic2api key、WebUI 密码、Runtime `auth_key` 换掉。`changeme` 一类占位值会被替换，**且占位值不会挡住下一个来源**。
 
-> 只有 `[webui].password` 与 `[api].auth_key` 会从 `config.toml` 回落（它们是本体自己读的键）；NapCat token、SearXNG `secret_key`、Firecrawl 与 lxmusic2api 的凭据只认 `deploy/.env`，因为它给出的就是那些容器实际拿到的值——一旦被换掉，容器里的配置也得跟着换。
+> 取值顺序分两类：
+> - `[webui].password` 与 `[api].auth_key`：**`config.toml` 已生效的值 → `deploy/.env` → 随机生成**。这两个键是本体自己读的，`.env` 只是留档；以 config.toml 为准才不会因为一份过期的 `.env` 把用户手改过的密码改回去。
+> - NapCat token、SearXNG `secret_key`、Firecrawl 与 lxmusic2api 的凭据：只认 `deploy/.env`——它给出的就是那些容器实际拿到的值，一旦被换掉，容器里的配置也得跟着换。
 >
 > 同理，**不要手工编辑 `deploy/.env` 里的端口与绑定地址**：端口和 `*_BIND` 优先从 `STATE.json` 读回，手改会在下一次 `up` 被覆盖。要改就用 `--port` / `--port-bind`。
 
@@ -102,7 +104,9 @@ deploy/
 | `[webui].url` / `[api].host` | `0.0.0.0`（容器内监听，端口由 compose 发布） | `127.0.0.1` |
 | 自托管服务地址 | compose 服务名直连（`http://searxng:8080` 等） | 发布端口（`http://127.0.0.1:8080` 等） |
 
-`container` 模式下本体容器以 `/data/Undefined` 为工作目录，把仓库的 `config.toml`、`res/`、`img/`、`config/`、`knowledge/` 以及 `deploy/data`、`deploy/logs` 挂进去，所以在宿主机上直接编辑 `config.toml` 就生效，也不会覆盖镜像内的 Python 环境。
+`container` 模式下本体容器以 `/data/Undefined` 为工作目录，**整个仓库目录**都挂进这个路径，`deploy/data` 与 `deploy/logs` 再分别嵌套挂到 `data/`、`logs/`，`res/`、`img/` 以只读方式覆盖同名目录。所以在宿主机上直接编辑 `config.toml` 就生效，也不会覆盖镜像内的 Python 环境。
+
+> 挂目录而不是单挂 `config.toml` 是有意的：`up` 写配置走「临时文件 + `os.replace`」原子替换，替换后 inode 变了，而单文件 bind mount 绑的是挂载那一刻的 inode——容器会一直读旧内容（compose 也不会因为文件内容变化而重建容器），于是轮换 token 或改 `ws_url` 之后本体仍用旧配置。也不要把父目录挂成只读：WebUI 的配置保存是原地写 `config.toml`，只读会直接失败。
 
 ---
 
@@ -148,7 +152,7 @@ server:
 
 入口：`http://127.0.0.1:8080/`。
 
-> `deploy/searxng` 是 bind mount，而镜像入口默认会 `chown -R searxng:searxng /etc/searxng`；一旦被 chown 成 `977:977`，非 root 的调用者就再也写不进去，第二次 `up` 重写 `settings.yml` 会直接 EACCES。因此 compose 里显式设了 `FORCE_OWNERSHIP=false`——容器本身以 root 运行、`settings.yml` 也只有 0644，不需要那次 chown。代价是容器日志里会有一行关于属主的 WARNING，可以忽略。
+> `deploy/searxng` 是 bind mount，而镜像入口默认会 `chown -R searxng:searxng /etc/searxng`；一旦被 chown 成 `977:977`，非 root 的调用者就再也写不进去，第二次 `up` 重写 `settings.yml` 会直接 EACCES。因此 compose 里显式设了 `FORCE_OWNERSHIP=false`——容器本身以 root 运行（镜像没有 `USER` 指令），脚本原子写入的 `settings.yml` 是 `0600`（`tempfile.mkstemp` 的权限，`write_text` 只会在 `secret=True` 时额外 chmod，非敏感文件同样是 `0600`）、属主是调用者，root 读它没有问题，不需要那次 chown。代价是容器日志里会有一行关于属主的 WARNING，可以忽略。
 
 ### Firecrawl（`--with firecrawl`）
 
