@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from Undefined.deploy import nagaagent
+from Undefined.deploy import config_patch, nagaagent
 
 GITMODULES = """\
 [submodule "code/NagaAgent"]
@@ -189,48 +189,60 @@ def test_ensure_submodule_reports_still_empty(
 # --------------------------------------------------------------------------- #
 
 
-def test_enabled_plan_opens_qa_but_keeps_gateway_closed(repo: Path) -> None:
+def test_enabled_plan_only_opens_the_capability_switch(repo: Path) -> None:
+    """开启分支只写能力总闸，一个 [naga] 键都不产出。
+
+    用精确相等而不是 ``desired.get(key, "") == ""``：后者在键存在与不存在时
+    都通过，正是它让「凭据被写成空串」这种破坏性行为一路绿灯。
+    """
     plan = nagaagent.build_patch_plan(repo, nagaagent=True)
-    assert plan.desired["features.nagaagent_mode_enabled"] is True
-    # 关键约束：能力开启，但外部网关总闸不打开
-    assert plan.desired["naga.enabled"] is False
-    # 凭据留空只对「本来就缺失」有意义；此处 config.toml 不存在，
-    # 因此空值不会成为差异项（apply_plan 会跳过无差异的键）
-    assert plan.desired.get("naga.api_url", "") == ""
-    assert plan.desired.get("naga.api_key", "") == ""
+    assert plan.desired == {"features.nagaagent_mode_enabled": True}
 
 
-def test_enabled_plan_clears_placeholder_credentials(tmp_path: Path) -> None:
-    """配置里存在空串占位时，开启分支应把它们归一为空（而不是留下占位）。"""
+def test_disabled_plan_only_closes_the_capability_switch(repo: Path) -> None:
+    plan = nagaagent.build_patch_plan(repo, nagaagent=False)
+    assert plan.desired == {"features.nagaagent_mode_enabled": False}
+
+
+def test_enabled_plan_preserves_user_gateway_config(tmp_path: Path) -> None:
+    """回归：用户已填非空凭据时，开启分支曾把它们覆写成空串并关掉网关。
+
+    这条必须走真实的 apply_plan + 重新读取，才能证明「写盘后用户的 [naga]
+    配置原样保留」——只断言 plan.desired 的形状不足以覆盖这条路径。
+    """
     repo = tmp_path / "repo"
     repo.mkdir()
-    (repo / "config.toml").write_text(
-        '[naga]\napi_url = ""\napi_key = "REPLACE_ME"\n', encoding="utf-8"
+    config = repo / "config.toml"
+    config.write_text(
+        "[features]\nnagaagent_mode_enabled = false\n\n"
+        "[naga]\nenabled = true\n"
+        'api_url = "https://naga.example.com"\n'
+        'api_key = "gateway-key"\n'
+        'mode = "allowlist"\n',
+        encoding="utf-8",
     )
+
     plan = nagaagent.build_patch_plan(repo, nagaagent=True)
-    assert plan.desired["naga.enabled"] is False
-    # api_url 已是空串 -> 无差异，不写入
-    assert plan.desired.get("naga.api_url", "") == ""
+    config_patch.apply_plan(
+        plan,
+        example_path=repo / "config.toml.example",
+        backup_dir=tmp_path / "backup",
+    )
 
-
-def test_disabled_plan_only_closes_the_master_switches(repo: Path) -> None:
-    """关闭分支只关两个总闸，不得清空用户的 Naga 服务端凭据。
-
-    ``naga.api_url`` / ``api_key`` / ``mode`` 是用户已对接好的配置；网关总闸一关
-    它们本就不生效，默认部署没有理由抹掉（曾因无条件清空而被审查判为破坏性行为）。
-    """
-    plan = nagaagent.build_patch_plan(repo, nagaagent=False)
-    assert plan.desired["features.nagaagent_mode_enabled"] is False
-    assert plan.desired["naga.enabled"] is False
-    for key in ("naga.api_url", "naga.api_key", "naga.mode"):
-        assert key not in plan.desired, f"{key} 不应出现在关闭分支"
+    data = config_patch.load_toml(config)
+    assert data["features"]["nagaagent_mode_enabled"] is True
+    assert data["naga"]["enabled"] is True
+    assert data["naga"]["api_url"] == "https://naga.example.com"
+    assert data["naga"]["api_key"] == "gateway-key"
+    assert data["naga"]["mode"] == "allowlist"
 
 
 def test_disabled_plan_preserves_existing_gateway_credentials(tmp_path: Path) -> None:
-    """已配置过 Naga 网关的仓库，默认部署后凭据与模式必须原样保留。"""
+    """已配置过 Naga 网关的仓库，默认部署后凭据、模式与总闸都必须原样保留。"""
     repo = tmp_path / "repo"
     repo.mkdir()
-    (repo / "config.toml").write_text(
+    config = repo / "config.toml"
+    config.write_text(
         "[features]\nnagaagent_mode_enabled = true\n\n"
         "[naga]\nenabled = true\n"
         'api_url = "https://naga.example.com"\n'
@@ -240,15 +252,18 @@ def test_disabled_plan_preserves_existing_gateway_credentials(tmp_path: Path) ->
     )
 
     plan = nagaagent.build_patch_plan(repo, nagaagent=False)
-    assert "naga.api_url" not in plan.desired
-    assert "naga.api_key" not in plan.desired
-    assert "naga.mode" not in plan.desired
+    config_patch.apply_plan(
+        plan,
+        example_path=repo / "config.toml.example",
+        backup_dir=tmp_path / "backup",
+    )
 
-
-def test_gateway_is_closed_in_both_branches(repo: Path) -> None:
-    for flag in (True, False):
-        plan = nagaagent.build_patch_plan(repo, nagaagent=flag)
-        assert plan.desired["naga.enabled"] is False
+    data = config_patch.load_toml(config)
+    assert data["features"]["nagaagent_mode_enabled"] is False
+    # 用户自己开着的网关不能被默认部署关掉
+    assert data["naga"]["enabled"] is True
+    assert data["naga"]["api_url"] == "https://naga.example.com"
+    assert data["naga"]["mode"] == "allowlist"
 
 
 def test_plan_targets_repo_config(repo: Path) -> None:
@@ -261,10 +276,3 @@ def test_plan_provides_about_for_every_key(repo: Path) -> None:
         plan = nagaagent.build_patch_plan(repo, nagaagent=flag)
         for key in plan.desired:
             assert plan.about.get(key), f"{key} 缺少说明"
-
-
-def test_disabled_plan_does_not_define_gateway_only_keys(repo: Path) -> None:
-    """关闭分支不该写入 use_proxy / moderation_enabled 这类网关专属项。"""
-    plan = nagaagent.build_patch_plan(repo, nagaagent=False)
-    assert "naga.use_proxy" not in plan.desired
-    assert "naga.moderation_enabled" not in plan.desired

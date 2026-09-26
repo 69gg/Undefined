@@ -7,8 +7,11 @@
 - ``[naga].enabled`` —— 外部网关总闸（回调 API、``/naga`` 命令、绑定管理），
   还需 ``[api].enabled`` 同时成立。
 
-本模块只负责「AI 能力」这一层：拉子模块时开能力、**始终关闭外部网关**，
-避免用户在没准备 Naga 服务端的情况下把对外回调通道打开。
+本模块只写 ``[features].nagaagent_mode_enabled`` 这一个键：``[naga]`` 下的
+``enabled`` / ``api_url`` / ``api_key`` / ``mode`` / ``use_proxy`` /
+``moderation_enabled`` 描述的都是「怎么连用户自己的 NagaAgent 服务端」，而默认
+部署既不部署那个服务端、也无从得知用户的地址与密钥。写 ``""`` 会抹掉已对接好的
+凭据，写 ``false`` 会关掉用户自己开着的网关——两者都是破坏性的，所以一律不碰。
 
 ``naga_code_analysis_agent`` 的四个工具把 ``base_path`` 固定在
 ``Path.cwd()/"code"/"NagaAgent"``，所以能力开关与子模块存在性是绑定的——
@@ -34,32 +37,17 @@ SUBMODULE_TIMEOUT_SECONDS = 600
 #: 开启能力时写入的值。
 ENABLED_VALUES: dict[str, Any] = {
     "features.nagaagent_mode_enabled": True,
-    "naga.enabled": False,
-    "naga.use_proxy": False,
-    "naga.moderation_enabled": True,
-    "naga.mode": "off",
-    "naga.api_url": "",
-    "naga.api_key": "",
 }
 
 #: 关闭时写入的值。
 #:
-#: **只关总闸、不清用户凭据**：``naga.api_url`` / ``naga.api_key`` / ``naga.mode``
-#: 属于用户已对接好的服务端配置，默认部署把它们抹掉是破坏性的（网关总闸已关，
-#: 它们本身不会生效）。确需清空请自行编辑 ``config.toml``。
+#: 与开启分支对称：只关能力总闸，不碰 ``[naga]`` 下任何用户配置。
 DISABLED_VALUES: dict[str, Any] = {
     "features.nagaagent_mode_enabled": False,
-    "naga.enabled": False,
 }
 
 ABOUT: dict[str, str] = {
     "features.nagaagent_mode_enabled": "NagaAgent 问答能力总闸",
-    "naga.enabled": "Naga 外部网关总闸（部署脚本始终关闭）",
-    "naga.use_proxy": "Naga 网关是否走代理（网关关闭时无影响）",
-    "naga.moderation_enabled": "Naga 外发消息审核（网关关闭时无影响）",
-    "naga.mode": "Naga 会话级策略（off/blacklist/allowlist）",
-    "naga.api_url": "Naga 服务端地址（不部署服务端时留空）",
-    "naga.api_key": "Naga 共享密钥（不部署服务端时留空）",
 }
 
 
@@ -195,46 +183,14 @@ def ensure_submodule(repo: Path, *, status: SubmoduleStatus | None = None) -> st
 def build_patch_plan(repo: Path, *, nagaagent: bool) -> PatchPlan:
     """生成 NagaAgent 相关的 config.toml 写入计划（纯函数，不碰磁盘）。
 
-    ``existing`` 用于避免无谓覆盖：写 ``""`` 只在该键本来就缺失/为空时才需要，
-    对已有值不构成需要写入的变更（``apply_plan`` 会跳过无差异项）。
+    计划里只有 ``features.nagaagent_mode_enabled`` 一个键，所以 ``apply_plan``
+    在结构上就不可能改动用户的 ``[naga]`` 配置——不需要再去读现有值判断。
     """
-    values = dict(ENABLED_VALUES if nagaagent else DISABLED_VALUES)
-    current = _lookup_values(repo)
-    # 凭据留空只对「本来就缺失」有意义；用户已填过的值一律不动。
-    for key in ("naga.api_url", "naga.api_key"):
-        if values.get(key) == "" and not current.get(key):
-            values.pop(key, None)
     return PatchPlan(
         config_path=repo / "config.toml",
-        desired=values,
+        desired=dict(ENABLED_VALUES if nagaagent else DISABLED_VALUES),
         about=dict(ABOUT),
     )
-
-
-def _lookup_values(repo: Path) -> dict[str, Any]:
-    """读取现有 config.toml 的相关键（缺失/损坏时返回空字典，不阻断部署）。"""
-    from Undefined.deploy.config_patch import load_toml
-
-    config_path = repo / "config.toml"
-    if not config_path.is_file():
-        return {}
-    try:
-        data = load_toml(config_path)
-    except Exception:
-        return {}
-
-    def dig(dotted: str) -> Any:
-        node: Any = data
-        for part in dotted.split("."):
-            if not isinstance(node, dict) or part not in node:
-                return None
-            node = node[part]
-        return node
-
-    return {
-        "naga.api_url": dig("naga.api_url") or "",
-        "naga.api_key": dig("naga.api_key") or "",
-    }
 
 
 __all__ = [

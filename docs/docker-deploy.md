@@ -160,11 +160,11 @@ NagaAgent 是仓库的 git submodule（`code/NagaAgent`），不是独立服务�
 
 - 脚本检查子模块是否已初始化，未就绪时执行 `git submodule update --init --recursive code/NagaAgent`；失败会中止并给出可手动执行的命令（不会静默继续）。
 - 写入 `[features].nagaagent_mode_enabled = true`，即启用 NagaAgent 专用系统提示词与 `naga_code_analysis_agent`（该 Agent 的四个工具把 `base_path` 固定在 `Path.cwd()/code/NagaAgent`，所以能力开关与子模块存在性绑定）。
-- **`[naga].enabled` 与 `api_url` / `api_key` 始终保持关闭与留空**，即不开启对外回调网关、`/naga` 命令与绑定管理。若日后确实要与 Naga 服务端对接，需要你自己填这些字段。
+- **`[naga]` 整节都不碰**：`enabled` / `api_url` / `api_key` / `mode` / `use_proxy` / `moderation_enabled` 描述的是「怎么连你自己的 Naga 服务端」，脚本既没有部署它也无从得知地址与密钥，所以既不打开、也不清空。要对接 Naga 服务端请自己填这些字段。
 - `container` 模式下 `code/NagaAgent` 会以只读方式挂进本体容器同一路径（`/data/Undefined/code/NagaAgent`），因此 `naga_code_analysis_agent` 的工具在容器里也能定位到目标代码。
 
-不选择时，只把 `[features].nagaagent_mode_enabled` 与 `[naga].enabled` 写成 `false`，相关提示词、Agent、命令与 API 端点全部隐藏。
-**`[naga].api_url` / `api_key` / `mode` 等你自己填过的网关配置不会被清空**——网关总闸一关它们本就不生效，需要清空请自行编辑。
+不选择时只把 `[features].nagaagent_mode_enabled` 写成 `false`，相关提示词、Agent、命令与 API 端点全部隐藏。
+**`[naga]` 下你自己填过的网关配置一律原样保留**——包括 `enabled = true`：默认部署不替你把已经接好的网关关掉。
 
 ---
 
