@@ -808,3 +808,14 @@ def test_host_mode_connect_urls_never_use_wildcard_bind(tmp_path: Path) -> None:
         assert "0.0.0.0" not in url, url
     assert "0.0.0.0" not in config.websocket_url
     assert "0.0.0.0" not in config.env["UNDEFINED_DEPLOY_SEARXNG_BASE_URL"]
+
+
+def test_bot_container_forbids_privilege_escalation(tmp_path: Path) -> None:
+    """本体容器以 root 运行且挂着宿主 docker.sock，至少要禁止提权。
+
+    这条不会影响容器内的 Playwright：Chromium 只在显式传 chromiumSandbox: true
+    时才启用自带沙箱，否则 Playwright 会自己加 --no-sandbox。
+    """
+    services = _compose_services(generate.build(_ctx(tmp_path)).compose_text)
+    security_opt = services["undefined-bot"].get("security_opt") or []
+    assert "no-new-privileges:true" in security_opt, security_opt

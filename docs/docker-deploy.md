@@ -271,7 +271,7 @@ compose 会写成 `${绑定地址}:${你的端口}:<容器内固定端口>`，�
 - 优点：资源开销几乎为零，不需要 `privileged`，`python_interpreter` 的 `--network none` 隔离照常生效。
 - 代价：能看到并能操作宿主机上的**全部容器**，权限等级等同于宿主机 root。这两个工具本身的设计就是「让模型在沙箱容器里执行代码」，但 `--network none` 只隔离网络，不是权限隔离；只应部署在你自己可控的机器上。
 - 若不想给这个能力：`deploy/compose.yaml` 每次 `up` 都会重写，所以手改那一行不会保留。可行做法是改用 `host` 模式部署本体，或自己基于生成的 compose 起容器并维护它。代价是 `python_interpreter` / `code_delivery_agent` 会以「找不到 docker 命令」失败（属预期行为）。
-- 加固程度是不对称的：`lxmusic2api` 有 `no-new-privileges` + `cap_drop: ALL`，而挂了 docker.sock、以 root 运行的本体容器**没有**额外加固——`no-new-privileges` 可能影响容器内 Chromium 的沙箱行为，在没有真机验证前没有默认打开，请按自己的风险偏好决定是否在生成的 compose 上追加。
+- 加固：本体容器设了 `security_opt: no-new-privileges:true`（挡掉 setuid/setgid 提权路径）。这不会影响容器内的 Playwright——Chromium 只在显式传 `chromiumSandbox: true` 时才启用自带沙箱，否则 Playwright 自己会加 `--no-sandbox`。除此之外没有更多加固空间：容器以 root 运行且必须能操作宿主 docker daemon。
 - 这两个工具使用的基础镜像（`python:3.11-slim`、`ubuntu:24.04`）会在首次调用时按需拉取。
 
 ---
