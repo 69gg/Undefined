@@ -9,8 +9,10 @@ from typing import Any
 import pytest
 import yaml
 
-from Undefined.deploy import catalog, generate, images
+from Undefined.deploy import catalog, generate, images, nagaagent
 from Undefined.deploy.state import DeployLayout
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 PLACEHOLDER_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
@@ -724,6 +726,45 @@ def test_host_mode_bot_ports_default_without_override(tmp_path: Path) -> None:
     desired = generate.build(_ctx(tmp_path, mode=catalog.MODE_HOST)).patch_plan.desired
     assert desired["webui.port"] == catalog.BOT_WEBUI_CONTAINER_PORT
     assert desired["api.port"] == catalog.BOT_API_CONTAINER_PORT
+
+
+def test_every_written_key_exists_in_the_config_template(tmp_path: Path) -> None:
+    """部署脚本写进 config.toml 的每个键都必须真实存在于配置模板。
+
+    拼错一个键不会报错——`apply_patch` 会兴高采烈地写进去，而配置加载器读的是
+    另一个键，表现为「脚本说写好了，功能就是不生效」。这条断言把写入面钉在
+    `config.toml.example`（配置模型的真实形状）上。
+    """
+    import tomllib
+
+    example = (REPO_ROOT / "config.toml.example").read_text(encoding="utf-8")
+    model = tomllib.loads(example)
+
+    plan = generate.build(
+        _ctx(tmp_path, services=("searxng", "firecrawl", "lxmusic2api"))
+    ).patch_plan
+    assert plan.desired, "patch plan 是空的，这条断言会形同虚设"
+
+    for dotted in plan.desired:
+        node: Any = model
+        for part in dotted.split("."):
+            assert isinstance(node, dict) and part in node, (
+                f"{dotted} 在 config.toml.example 里不存在；（走到 {part!r} 时断了）"
+            )
+            node = node[part]
+
+
+def test_naga_only_writes_the_feature_switch(tmp_path: Path) -> None:
+    """NagaAgent 相关写入同样必须落在真实配置键上（且只有总闸）。"""
+    import tomllib
+
+    model = tomllib.loads(
+        (REPO_ROOT / "config.toml.example").read_text(encoding="utf-8")
+    )
+    for enabled in (True, False):
+        plan = nagaagent.build_patch_plan(tmp_path, nagaagent=enabled)
+        assert list(plan.desired) == ["features.nagaagent_mode_enabled"]
+        assert "nagaagent_mode_enabled" in model["features"]
 
 
 def test_patch_plan_config_path_is_repo_root(tmp_path: Path) -> None:
