@@ -1256,6 +1256,152 @@ SCENARIOS.history_timeline_restores_tool_blocks = async (env) => {
     };
 };
 
+/**
+ * 富内容渲染：Markdown 引用折叠块、代码高亮、独立 HTML、工具结构化预览、
+ * 引用条（markdown 引用前缀）、以及附件图片去重。
+ *
+ * 覆盖原先十几条靠源码子串表达的渲染契约；这里把内容真渲染出来，按 DOM 结构断言。
+ */
+SCENARIOS.rich_content_rendering = async (env) => {
+    const { window, setRoutes } = env;
+    const content = [
+        "> 被引用的历史消息内容",
+        "> 引用第二行",
+        "",
+        "普通段落带 `inline code`。",
+        "",
+        "```js",
+        "const answered = 42;",
+        "```",
+        "",
+        "<div class=\"standalone-html\">独立 HTML 片段</div>",
+        "",
+        "<attachment uid=\"pic_dup\"/>",
+    ].join("\n");
+
+    setRoutes([
+        {
+            match: "/chat/conversations",
+            reply: {
+                body: {
+                    conversations: [{ id: "conv-rich", title: "t" }],
+                    default_conversation_id: "webchat",
+                    active_job: null,
+                },
+            },
+        },
+        {
+            match: "/chat/history",
+            reply: { body: { items: [], has_more: false, next_before: null } },
+        },
+        { match: "/chat/jobs", reply: { body: { job_id: "job-rich" } } },
+        {
+            match: "/jobs/job-rich/events",
+            reply: {
+                body: {
+                    events: [
+                        {
+                            seq: 1,
+                            event: "tool_start",
+                            payload: {
+                                call_id: "call-rich",
+                                name: "render.markdown",
+                                args: {
+                                    markdown: "# title",
+                                    options: { theme: "dark" },
+                                },
+                            },
+                        },
+                        {
+                            seq: 2,
+                            event: "tool_end",
+                            payload: {
+                                call_id: "call-rich",
+                                name: "render.markdown",
+                                ok: true,
+                                status: "done",
+                                duration_ms: 100,
+                                result_preview: "PREVIEW_JSON",
+                            },
+                        },
+                        {
+                            seq: 3,
+                            event: "message",
+                            payload: {
+                                content,
+                                attachments: [
+                                    {
+                                        uid: "pic_dup",
+                                        kind: "image",
+                                        media_type: "image/png",
+                                        display_name: "dup.png",
+                                        url: "https://example.com/dup.png",
+                                    },
+                                ],
+                            },
+                        },
+                        { seq: 4, event: "done", payload: { duration_ms: 200 } },
+                    ],
+                    job: { job_id: "job-rich", status: "done", last_seq: 4 },
+                },
+            },
+        },
+    ]);
+
+    window.eval("window.RuntimeController.init()");
+    await tick();
+    window.RuntimeController.loadChatHistory(true).catch(() => {});
+    await tick();
+
+    // 引用条：点一次「引用」按钮，把消息内容挂成引用
+    window.document.getElementById("runtimeChatInput").value = "hi";
+    window.document.getElementById("btnRuntimeChatSend").click();
+    await tick(4);
+    await settle(400);
+
+    const log = chatLog(window);
+    const blocks = log ? log.querySelectorAll(".runtime-tool-block") : [];
+    return {
+        allNodes: chatNodes(window),
+        // Markdown 引用块
+        blockquotes: log ? log.querySelectorAll("blockquote").length : -1,
+        // 代码高亮：hljs 会给代码块加 class
+        highlighted: log
+            ? log.querySelectorAll("pre code.hljs, pre code[class*='language-']").length
+            : -1,
+        preCount: log ? log.querySelectorAll("pre").length : -1,
+        // 独立 HTML：标记本身被消毒器改写（class 可能被丢），但文本内容必须保留
+        standaloneHtmlText:
+            log &&
+            ((log.innerText || log.textContent || "").includes("独立 HTML 片段"))
+                ? 1
+                : 0,
+        // 工具结构化预览（args/result）
+        toolPreviewBlocks: blocks.length
+            ? blocks[0].querySelectorAll("pre, code").length
+            : -1,
+        toolBlockText: blocks.length
+            ? (blocks[0].innerText || blocks[0].textContent || "").trim()
+            : "",
+        // 附件图片去重：pic_dup 只应出现一次。
+        // 注意渲染层会把 URL 重写成 /api/runtime/chat/attachments/<uid>/preview，
+        // 因此按 uid 匹配而不是原始文件名。
+        attachmentImages: log
+            ? Array.from(log.querySelectorAll("img")).filter(
+                  (img) =>
+                      (img.getAttribute("src") || "").includes("pic_dup") ||
+                      (img.getAttribute("alt") || "").includes("dup.png"),
+              ).length
+            : -1,
+        attachmentPreviewSrcs: log
+            ? Array.from(log.querySelectorAll("img"))
+                  .map((img) => img.getAttribute("src") || "")
+                  .filter((src) => src.includes("pic_dup"))
+            : [],
+        logHtmlLength: log ? (log.innerHTML || "").length : -1,
+    };
+};
+
 // --------------------------------------------------------------------------- //
 
 async function main() {

@@ -210,6 +210,48 @@ def test_markdown_and_html_images_are_lazy_and_clickable() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# 富内容渲染（引用块 / 代码高亮 / 独立 HTML / 工具预览 / 附件去重）
+# --------------------------------------------------------------------------- #
+
+
+def test_markdown_quotes_render_as_blockquotes() -> None:
+    """Markdown 引用要渲染成 blockquote（而非原样文本）。"""
+    result = run_scenario("rich_content_rendering")
+    assert result["blockquotes"] == 1, result["blockquotes"]
+
+
+def test_markdown_code_blocks_are_highlighted() -> None:
+    """代码块要过高亮（产出 pre > code 且带 hljs / language- 标记）。"""
+    result = run_scenario("rich_content_rendering")
+    assert result["preCount"] >= 1, result
+    assert result["highlighted"] >= 1, result
+
+
+def test_standalone_html_is_preserved_as_content() -> None:
+    """独立 HTML 片段的文本内容必须保留（消毒只改结构，不能吞掉内容）。"""
+    result = run_scenario("rich_content_rendering")
+    assert result["standaloneHtmlText"] == 1, result["allNodes"]
+
+
+def test_tool_previews_render_structured_input_and_output() -> None:
+    """工具块要渲染结构化的入参/输出预览，而不是只显示名称。"""
+    result = run_scenario("rich_content_rendering")
+    assert result["toolPreviewBlocks"] >= 1, result
+    assert "PREVIEW_JSON" in result["toolBlockText"], result["toolBlockText"]
+
+
+def test_attachment_image_is_inlined_once() -> None:
+    """`<attachment uid="pic_dup"/>` 要内联成一张预览图，且不重复渲染附件卡片。
+
+    渲染层会把附件 URL 重写成 /api/runtime/chat/attachments/<uid>/preview。
+    """
+    result = run_scenario("rich_content_rendering")
+    assert result["attachmentImages"] == 1, result["attachmentPreviewSrcs"]
+    srcs = result["attachmentPreviewSrcs"]
+    assert srcs and "pic_dup" in srcs[0], srcs
+
+
+# --------------------------------------------------------------------------- #
 # 历史时间线恢复
 # --------------------------------------------------------------------------- #
 
