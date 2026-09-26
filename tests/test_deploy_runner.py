@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 import tomllib
 from pathlib import Path
 from typing import Any, Sequence
@@ -172,10 +173,33 @@ def test_wizard_survives_eof(monkeypatch: pytest.MonkeyPatch) -> None:
     assert wizard.choose_nagaagent(True) is True
 
 
-def test_wizard_enabled_requires_up_and_tty() -> None:
-    assert runner.wizard_enabled({"command": "up", "yes": False}) in (True, False)
+def test_wizard_enabled_requires_up_and_tty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """向导只在「up + 未加 --yes + stdin 是 tty」时启用。
+
+    旧断言写成 `in (True, False)`——两个取值都通过，等于什么都没测。这里把
+    tty 判定显式桩成两种情形，让分支真正被覆盖。
+    """
+
+    class _Tty:
+        @staticmethod
+        def isatty() -> bool:
+            return True
+
+    class _NotTty:
+        @staticmethod
+        def isatty() -> bool:
+            return False
+
+    monkeypatch.setattr(sys, "stdin", _Tty())
+    assert runner.wizard_enabled({"command": "up", "yes": False}) is True
     assert runner.wizard_enabled({"command": "up", "yes": True}) is False
     assert runner.wizard_enabled({"command": "status"}) is False
+
+    # 非交互（管道 / CI）即使没加 --yes 也不进向导
+    monkeypatch.setattr(sys, "stdin", _NotTty())
+    assert runner.wizard_enabled({"command": "up", "yes": False}) is False
 
 
 # --------------------------------------------------------------------------- #

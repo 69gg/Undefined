@@ -82,11 +82,10 @@ def test_dockerignore_does_not_exclude_sources() -> None:
         assert required not in entries, f".dockerignore 不应排除 {required}"
 
 
-def test_dockerfile_copy_sources_survive_dockerignore() -> None:
-    """Dockerfile 里 COPY 的源路径必须不被 .dockerignore 排除。
+def _dockerfile_copy_sources() -> set[str]:
+    """Dockerfile 里从构建上下文 COPY 的源路径。
 
-    这条曾经真踩过：``*.md`` 把 ``COPY README.md`` 挡掉，只有构建时才报错
-    （BuildKit 的 CopyIgnoredFile 警告）。
+    跳过 ``--from=`` 的跨阶段拷贝（那是镜像内路径，不是仓库文件）与含变量的行。
     """
     dockerfile = (TEMPLATE_DIR / "Dockerfile.bot").read_text(encoding="utf-8")
     copied: set[str] = set()
@@ -100,6 +99,16 @@ def test_dockerfile_copy_sources_survive_dockerignore() -> None:
             if "$" in source:
                 continue
             copied.add(source.rstrip("/"))
+    return copied
+
+
+def test_dockerfile_copy_sources_survive_dockerignore() -> None:
+    """Dockerfile 里 COPY 的源路径必须不被 .dockerignore 排除。
+
+    这条曾经真踩过：``*.md`` 把 ``COPY README.md`` 挡掉，只有构建时才报错
+    （BuildKit 的 CopyIgnoredFile 警告）。
+    """
+    copied = _dockerfile_copy_sources()
 
     assert copied, "未从 Dockerfile 解析出任何 COPY 源，测试需要更新"
     entries = _dockerignore_entries(REPO_ROOT / ".dockerignore")
@@ -126,22 +135,22 @@ def test_every_service_fragment_is_declared_in_required_templates() -> None:
 
 
 def test_dockerfile_builds_from_repo_context() -> None:
-    """Dockerfile 依赖的文件必须真的在仓库里（COPY 写错会在 CI 才炸）。"""
-    text = (TEMPLATE_DIR / "Dockerfile.bot").read_text(encoding="utf-8")
-    for source in (
-        "pyproject.toml",
-        "uv.lock",
-        "README.md",
-        "src",
-        "res",
-        "img",
-        "config",
-        "config.toml.example",
-    ):
-        assert f" {source}" in text or f"/{source}" in text, (
-            f"Dockerfile 未引用 {source}"
+    """Dockerfile 依赖的文件必须真的在仓库里（COPY 写错会在 CI 才炸）。
+
+    旧写法是逐个 ``assert f" {source}" in text``：原文子串匹配既会漏（换个写法
+    就匹配不到），也会被注释里的同名字符串骗过。这里直接解析 COPY 指令，断言
+    每个源路径存在，并锁定几个必须在镜像里的关键文件。
+    """
+    sources = _dockerfile_copy_sources()
+    assert sources, "未从 Dockerfile 解析出任何 COPY 源"
+
+    for source in sorted(sources):
+        assert (REPO_ROOT / source).exists(), (
+            f"Dockerfile COPY 了仓库里不存在的路径：{source}"
         )
-        assert (REPO_ROOT / source).exists(), f"仓库缺少 {source}"
+
+    required = {"pyproject.toml", "uv.lock", "src", "res", "config.toml.example"}
+    assert required <= sources, f"镜像缺少关键文件：{sorted(required - sources)}"
 
 
 def _docker_daemon_available() -> bool:
