@@ -23,9 +23,14 @@ from pathlib import Path
 
 _TESTS_DIR = Path(__file__).resolve().parent
 
-# 当前存量约 800（其中 test_webui_runtime_chat_frontend.py 一个文件占 500+）。
+# 当前存量 759（其中 test_webui_runtime_chat_frontend.py 一个文件占约 500）。
 # 只允许下降：新增源码字符串断言会失败。
-_BUDGET = 800
+#
+# 收敛进度：WebUI 运行时聊天前端已迁移到 jsdom 行为测试
+# （tests/test_webui_runtime_chat_behavior.py + tests/frontend/），该文件从
+# 537 降到约 496；剩余大头是 test_system_prompt_constraints.py（提示词契约，
+# 内容本身就是文本，适合保留）与该文件里的 CSS/模板结构性断言。
+_BUDGET = 759
 
 
 def _collect_source_vars(tree: ast.Module) -> set[str]:

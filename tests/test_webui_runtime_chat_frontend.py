@@ -39,19 +39,6 @@ def _read_source(path: Path) -> str:
     return text
 
 
-def test_webchat_frontend_reuses_job_message_for_final_message() -> None:
-    source = _read_source(RUNTIME_JS)
-
-    assert "activeChatMessageId" in source
-    assert 'if (event === "message")' in source
-    message_branch = source.split('if (event === "message")', 1)[1].split(
-        'if (event === "done")', 1
-    )[0]
-
-    assert "ensureStreamingMessage(eventJobId)" in message_branch
-    assert 'appendChatMessage("bot", content)' not in message_branch
-
-
 def test_webchat_html_preview_csp_allows_inline_scripts_without_eval() -> None:
     webui_app = _read_source(WEBUI_APP_PY)
     tauri_conf = _read_source(TAURI_CONF)
@@ -64,48 +51,6 @@ def test_webchat_html_preview_csp_allows_inline_scripts_without_eval() -> None:
     assert "htmlRunnerCspMeta" in _read_source(RUNTIME_JS)
     assert "unsafe-eval" not in webui_app
     assert "unsafe-eval" not in tauri_conf
-
-
-def test_webchat_frontend_handles_tool_lifecycle_and_webchat_hints() -> None:
-    source = _read_source(RUNTIME_JS)
-
-    assert 'event === "token_delta"' not in source
-    assert 'event === "tool_delta"' not in source
-    assert "pendingToolDeltas" not in source
-    assert "appendTokenDelta" not in source
-    assert "consumeSse" not in source
-    assert "attachChatJobSse" not in source
-    assert "text/event-stream" not in source
-    assert 'event === "tool_start"' in source
-    assert 'event === "tool_end"' in source
-    assert 'event === "agent_start"' in source
-    assert 'event === "agent_end"' in source
-    assert 'block.uiHint === "webchat_private_send"' in source
-    assert 'block.uiHint === "webchat_end"' in source
-    assert "payload && payload.result_preview" in source
-    assert 'nextUiHint === "webchat_end"' not in source
-
-
-def test_webchat_frontend_renders_live_stage_after_ai_label() -> None:
-    source = _read_source(RUNTIME_JS)
-    css = _read_source(RUNTIME_CSS)
-    i18n = _read_source(I18N_JS)
-
-    assert 'runtime-chat-role-label">AI' in source
-    assert "runtime-chat-stage" in source
-    assert 'if (event === "stage")' in source
-    assert "setChatStage(item, payload || {})" in source
-    assert "setChatStage(item, null)" in source
-    assert "function updateChatStageDisplay" in source
-    assert "function refreshActiveChatTimers" in source
-    assert "updateToolDurationDisplay(block)" in source
-    assert "formatDurationMs" in source
-    assert "payload && payload.elapsed_ms" in source
-    assert "Date.now() - runtimeState.activeStageStartedAt" not in source
-    assert "runtime.chat_stage_waiting_model" in i18n
-    assert "runtime.chat_stage_searching_cognitive_memory" in i18n
-    assert ".runtime-chat-stage" in css
-    assert "runtime-chat-stage-pulse" not in css
 
 
 def test_webchat_frontend_has_conversation_sidebar() -> None:
@@ -252,22 +197,6 @@ def test_webchat_frontend_has_slash_command_palette() -> None:
     assert "runtime.command_no_subcommands_note" in i18n
 
 
-def test_webchat_frontend_sends_conversation_id_with_history_and_jobs() -> None:
-    source = _read_source(RUNTIME_JS)
-
-    assert "currentChatConversationId" in source
-    assert 'chatUrl("/api/runtime/chat/history"' in source
-    assert 'chatUrl("/api/runtime/chat/jobs/active"' in source
-    assert "runtimeChatJobEventsUrls" in source
-    assert "conversation_id: currentChatConversationId()" in source
-    assert "activeJobConversationId" in source
-    assert (
-        "runtimeState.activeJobConversationId || currentChatConversationId()" in source
-    )
-    assert "eventConversationId === currentChatConversationId()" in source
-    assert "jobConversationId !== currentChatConversationId()" in source
-
-
 def test_webchat_frontend_resumes_backend_job_after_refresh_or_reconnect() -> None:
     source = _read_source(RUNTIME_JS)
     history_helper = source.split("async function loadChatHistory", 1)[1].split(
@@ -324,27 +253,6 @@ def test_webui_logs_fetch_more_tail_lines_by_default() -> None:
     assert "const LOG_TAIL_LINES = 5000;" in source
     assert 'lines: "200"' not in source
     assert "lines: String(LOG_TAIL_LINES)" in source
-
-
-def test_webchat_frontend_keeps_final_duration_after_done() -> None:
-    source = _read_source(RUNTIME_JS)
-
-    done_branch = source.split('if (event === "done")', 1)[1].split(
-        'if (event === "error")', 1
-    )[0]
-    finalize_helper = source.split("function finalizeActiveChatMessage", 1)[1].split(
-        "function chatStageLabel", 1
-    )[0]
-    history_helper = source.split("function appendHistoryChatItem", 1)[1].split(
-        "function clearChatMessages", 1
-    )[0]
-
-    assert "finalizeActiveChatMessage(payload || {})" in done_branch
-    assert "payload && payload.duration_ms" in finalize_helper
-    assert 'stage: "done"' in finalize_helper
-    assert "final: true" in finalize_helper
-    assert "webchat.duration_ms" in history_helper
-    assert "setChatStage(message, {" in history_helper
 
 
 def test_webchat_frontend_restores_history_tool_blocks_without_stream_state() -> None:

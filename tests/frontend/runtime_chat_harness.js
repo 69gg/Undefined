@@ -1,0 +1,631 @@
+#!/usr/bin/env node
+/**
+ * WebUI 运行时聊天前端的行为测试 harness。
+ *
+ * 目的：替代原先「读 runtime.js 源码文本 + assert 子串」的变更检测器写法
+ * （见 tests/test_webui_runtime_chat_frontend.py 的历史说明与
+ * tests/test_source_assertion_budget.py 的预算棘轮）。
+ *
+ * 做法：用 jsdom 载入真实模板 index.html，按模板顺序 eval 真实依赖 JS，
+ * 再 eval runtime.js；然后通过受控的 window.fetch 喂入会话/历史/作业事件载荷，
+ * 用真实 DOM 事件驱动交互，最后 dump 出可断言的状态快照。
+ *
+ * 用法（由 Python 侧调用）：
+ *   node tests/frontend/runtime_chat_harness.js --scenario <name> --root <repo>
+ * 输出：单行 JSON 到 stdout（含 ok/error 与快照数据），供 Python 断言。
+ */
+
+"use strict";
+
+const fs = require("node:fs");
+const path = require("node:path");
+
+const SCENARIO_FLAG = "--scenario";
+const ROOT_FLAG = "--root";
+
+// runtime.js 的 appendChatMessage 生成 `div.runtime-chat-item <role>`，
+// 角色取自 class 列表（bot / user）。
+const CHAT_ITEM_SELECTOR = ".runtime-chat-item";
+const CHAT_ITEM_CLASSES = ["bot", "user"];
+
+function parseChatRoles(window) {
+    const roles = [];
+    for (const el of window.document.querySelectorAll(CHAT_ITEM_SELECTOR)) {
+        const classes = String(el.className || "").split(/\s+/);
+        const role = CHAT_ITEM_CLASSES.find((name) => classes.includes(name)) || "";
+        roles.push({ el, role });
+    }
+    return roles;
+}
+
+function chatLog(window) {
+    return window.document.getElementById("runtimeChatLog");
+}
+
+/** 节点内所有正文块（timeline 会替换掉初始的单个 .runtime-chat-content）。 */
+function contentTexts(el) {
+    return Array.from(el.querySelectorAll(".runtime-chat-content")).map((node) =>
+        (node.innerText || node.textContent || "").trim(),
+    );
+}
+
+function toolBlockSnapshots(el) {
+    return Array.from(el.querySelectorAll(".runtime-tool-block")).map((node) => ({
+        classes: node.className || "",
+        text: (node.innerText || node.textContent || "").trim(),
+        open: node.hasAttribute("open"),
+    }));
+}
+
+/** 收集聊天区所有消息节点的可断言快照。 */
+function chatNodes(window) {
+    return parseChatRoles(window).map(({ el, role }) => {
+        const stageEl = el.querySelector(".runtime-chat-stage");
+        const contents = contentTexts(el);
+        const tools = toolBlockSnapshots(el);
+        return {
+            role,
+            // 整节点文本含“AI/You”标签与按钮文案；断言正文请用 contentTexts
+            text: (el.innerText || el.textContent || "").trim(),
+            contentTexts: contents,
+            contentText: contents.join("\n"),
+            stageText: stageEl
+                ? (stageEl.innerText || stageEl.textContent || "").trim()
+                : "",
+            stageHidden: stageEl
+                ? stageEl.hasAttribute("hidden") ||
+                  stageEl.getAttribute("aria-hidden") === "true"
+                : null,
+            classes: el.className || "",
+            messageId: el.dataset ? el.dataset.messageId || "" : "",
+            jobId: el.dataset ? el.dataset.jobId || "" : "",
+            toolBlocks: tools,
+        };
+    });
+}
+
+function parseArgs(argv) {
+    const args = { scenario: "", root: "" };
+    for (let i = 0; i < argv.length; i += 1) {
+        if (argv[i] === SCENARIO_FLAG) args.scenario = argv[i + 1] || "";
+        if (argv[i] === ROOT_FLAG) args.root = argv[i + 1] || "";
+    }
+    return args;
+}
+
+function resolveRoot(explicit) {
+    if (explicit) return path.resolve(explicit);
+    let dir = __dirname;
+    for (let i = 0; i < 6; i += 1) {
+        if (fs.existsSync(path.join(dir, "src/Undefined/webui/static/js/runtime.js"))) {
+            return dir;
+        }
+        dir = path.dirname(dir);
+    }
+    throw new Error("找不到仓库根（缺少 src/Undefined/webui/static/js/runtime.js）");
+}
+
+/** 让出一轮宏任务 + 全部微任务，使 runtime.js 的 promise 链推进。 */
+function tick(times = 8) {
+    return new Promise((resolve) => {
+        let remaining = times;
+        const step = () => {
+            remaining -= 1;
+            if (remaining <= 0) resolve();
+            else setTimeout(step, 0);
+        };
+        setTimeout(step, 0);
+    });
+}
+
+/**
+ * 再等一小段真实时间。
+ *
+ * runtime.js 的作业事件是「解析响应 → 应用事件 → 重排下一次轮询」的链，
+ * 只靠宏任务让位不足以跑完，会给不出可断言的 DOM。
+ */
+function settle(ms = 40) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * 建立运行环境：真实模板 + 真实依赖 JS + 受控 fetch。
+ *
+ * fetch 的路由用「子串匹配 → 响应」表描述，命中第一个匹配项；
+ * 未命中的请求返回 200 + {} 并记录，方便排查。
+ */
+function createEnv(root) {
+    const jsdom = require("jsdom");
+    const { JSDOM } = jsdom;
+
+    const staticDir = path.join(root, "src/Undefined/webui/static/js");
+    const templatePath = path.join(root, "src/Undefined/webui/templates/index.html");
+    const html = fs.readFileSync(templatePath, "utf8");
+    const dom = new JSDOM(html, {
+        url: "http://localhost/",
+        runScripts: "outside-only",
+        pretendToBeVisual: true,
+    });
+    const { window } = dom;
+
+    // jsdom 未实现的浏览器 API：补最小桩，避免加载期直接抛错
+    window.Element.prototype.scrollTo = function scrollTo() {};
+    window.Element.prototype.scrollIntoView = function scrollIntoView() {};
+    window.scrollTo = function scrollTo() {};
+    if (!window.matchMedia) {
+        window.matchMedia = () => ({
+            matches: false,
+            addEventListener() {},
+            removeEventListener() {},
+            addListener() {},
+            removeListener() {},
+        });
+    }
+    class NoopObserver {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+    }
+    window.IntersectionObserver = window.IntersectionObserver || NoopObserver;
+    window.ResizeObserver = window.ResizeObserver || NoopObserver;
+    window.requestAnimationFrame = (cb) => setTimeout(() => cb(Date.now()), 0);
+    window.cancelAnimationFrame = (id) => clearTimeout(id);
+    // jsdom 没有 CSS.escape；runtime.js 用它拼属性选择器
+    if (!window.CSS) window.CSS = {};
+    if (!window.CSS.escape) {
+        window.CSS.escape = (value) =>
+            String(value).replace(/[^a-zA-Z0-9_\u00a0-\uffff-]/g, (ch) => `\\${ch}`);
+    }
+    window.localStorage.setItem("webui.locale", "zh-CN");
+
+    const requests = [];
+    let routes = [];
+    let fetchImpl = async (url) => {
+        requests.push(String(url));
+        return response(200, {});
+    };
+    window.fetch = (url, options) => fetchImpl(String(url), options);
+
+    function response(status, payload) {
+        return {
+            ok: status >= 200 && status < 300,
+            status,
+            json: async () => payload,
+            text: async () => JSON.stringify(payload),
+            headers: { get: () => null },
+        };
+    }
+
+    function setRoutes(next) {
+        // 最长 match 优先：事件 URL（.../chat/jobs/<id>/events）也包含 "/chat/jobs"，
+        // 若按声明顺序匹配会被通用路由抢先命中。
+        routes = (next || [])
+            .slice()
+            .sort((a, b) => String(b.match).length - String(a.match).length);
+        requests.length = 0;
+        fetchImpl = async (url, options) => {
+            requests.push(String(url));
+            for (const route of routes) {
+                if (url.includes(route.match)) {
+                    const reply =
+                        typeof route.reply === "function"
+                            ? route.reply(url, options)
+                            : route.reply;
+                    if (reply === undefined || reply === null) break;
+                    return response(reply.status || 200, reply.body || {});
+                }
+            }
+            return response(200, {});
+        };
+    }
+
+    // 浏览器里多个 <script> 共享同一个全局词法环境（`const state` 对后续脚本可见）。
+    // window.eval 每次调用都会新建词法作用域，因此必须把所有脚本拼成一次 eval。
+    // 顺序与 templates/index.html 的 <script> 顺序一致；vendor 库用仓库内的真实文件，
+    // 否则 Markdown/代码高亮路径会被替换成桩，测不到真实渲染。
+    const vendorDir = path.join(staticDir, "vendor");
+    const deps = [
+        path.join(vendorDir, "marked.min.js"),
+        path.join(vendorDir, "highlight.min.js"),
+        ...["i18n.js", "state.js", "ui.js", "api.js", "auth.js", "bot.js"].map((name) =>
+            path.join(staticDir, name),
+        ),
+        path.join(staticDir, "runtime.js"),
+    ];
+    window.eval(deps.map((file) => fs.readFileSync(file, "utf8")).join("\n;\n"));
+
+    return { dom, window, requests, setRoutes };
+}
+
+// --------------------------------------------------------------------------- //
+// DOM 观测
+// --------------------------------------------------------------------------- //
+
+function botNodes(window) {
+    return chatNodes(window).filter((node) => node.role === "bot");
+}
+
+function textOf(window, id) {
+    const el = window.document.getElementById(id);
+    if (!el) return null;
+    return (el.innerText || el.textContent || "").trim();
+}
+
+// --------------------------------------------------------------------------- //
+// 场景
+// --------------------------------------------------------------------------- //
+
+const SCENARIOS = {};
+
+/**
+ * 发送一条消息 → 喂入 message 事件 → 断言最终消息复用同一个节点。
+ *
+ * 对应原 test_webchat_frontend_reuses_job_message_for_final_message 想守的行为：
+ * 「message」事件必须复用 streaming 占位节点，而不是再 append 一条机器人消息。
+ */
+SCENARIOS.message_reuses_streaming_node = async (env) => {
+    const { window, setRoutes } = env;
+    setRoutes([
+        {
+            match: "/chat/conversations",
+            reply: {
+                body: {
+                    conversations: [{ id: "conv-1", title: "t" }],
+                    default_conversation_id: "webchat",
+                    active_job: null,
+                },
+            },
+        },
+        {
+            match: "/chat/history",
+            reply: { body: { items: [], has_more: false, next_before: null } },
+        },
+        {
+            match: "/chat/jobs",
+            reply: { body: { job_id: "job-1", conversation_id: "conv-1" } },
+        },
+        {
+            match: "/jobs/job-1/events",
+            reply: {
+                body: {
+                    events: [
+                        { seq: 1, event: "message", payload: { content: "你好" } },
+                        { seq: 2, event: "message", payload: { content: "你好世界" } },
+                        {
+                            seq: 3,
+                            event: "done",
+                            payload: { duration_ms: 1200 },
+                        },
+                    ],
+                    job: { job_id: "job-1", status: "done", last_seq: 3 },
+                },
+            },
+        },
+    ]);
+
+    window.eval("window.RuntimeController.init()");
+    await tick();
+    window.RuntimeController.loadChatHistory(true).catch(() => {});
+    await tick();
+
+    const input = window.document.getElementById("runtimeChatInput");
+    input.value = "hi";
+    await window.eval("window.__sendPromise = window.RuntimeController ? null : null");
+    // 通过真实按钮点击驱动，等价于用户操作
+    const button = window.document.getElementById("btnRuntimeChatSend");
+    button.click();
+    await tick(4);
+    await settle(400);
+
+    const bots = botNodes(window);
+    return {
+        botMessageCount: bots.length,
+        botTexts: bots.map((node) => node.text),
+        allNodes: chatNodes(window),
+        requests: env.requests.slice(),
+    };
+};
+
+/**
+ * 工具生命周期事件：tool_start / tool_end 应产生工具块并带上状态与时长。
+ *
+ * 对应原 test_webchat_frontend_handles_tool_lifecycle_and_webchat_hints。
+ */
+SCENARIOS.tool_lifecycle_renders_blocks = async (env) => {
+    const { window, setRoutes } = env;
+    setRoutes([
+        {
+            match: "/chat/conversations",
+            reply: {
+                body: {
+                    conversations: [{ id: "conv-1", title: "t" }],
+                    default_conversation_id: "webchat",
+                    active_job: null,
+                },
+            },
+        },
+        {
+            match: "/chat/history",
+            reply: { body: { items: [], has_more: false, next_before: null } },
+        },
+        {
+            match: "/chat/jobs",
+            reply: { body: { job_id: "job-2", conversation_id: "conv-1" } },
+        },
+        {
+            match: "/jobs/job-2/events",
+            reply: {
+                body: {
+                    events: [
+                        {
+                            seq: 1,
+                            event: "tool_start",
+                            payload: {
+                                call_id: "call-1",
+                                name: "group.get_member_info",
+                                args: { brief: true },
+                            },
+                        },
+                        {
+                            seq: 2,
+                            event: "tool_end",
+                            payload: {
+                                call_id: "call-1",
+                                name: "group.get_member_info",
+                                duration_ms: 42,
+                                result_preview: "张三",
+                                status: "ok",
+                            },
+                        },
+                        { seq: 3, event: "done", payload: { duration_ms: 900 } },
+                    ],
+                    job: { job_id: "job-2", status: "done", last_seq: 3 },
+                },
+            },
+        },
+    ]);
+
+    window.eval("window.RuntimeController.init()");
+    await tick();
+    window.RuntimeController.loadChatHistory(true).catch(() => {});
+    await tick();
+
+    window.document.getElementById("runtimeChatInput").value = "look up";
+    window.document.getElementById("btnRuntimeChatSend").click();
+    await tick(4);
+    await settle(400);
+
+    const log = chatLog(window);
+    const blocks = log ? Array.from(log.querySelectorAll(".runtime-tool-block")) : [];
+    return {
+        toolBlockCount: blocks.length,
+        toolCallIds: blocks.map((el) => el.getAttribute("data-tool-call-id") || ""),
+        toolTexts: blocks.map((el) => (el.innerText || el.textContent || "").trim()),
+        allNodes: chatNodes(window),
+        requests: env.requests.slice(),
+    };
+};
+
+/**
+ * stage 事件应渲染成实时的阶段提示。
+ *
+ * 对应原 test_webchat_frontend_renders_live_stage_after_ai_label。
+ */
+SCENARIOS.stage_event_renders_live_stage = async (env) => {
+    const { window, setRoutes } = env;
+    setRoutes([
+        {
+            match: "/chat/conversations",
+            reply: {
+                body: {
+                    conversations: [{ id: "conv-1", title: "t" }],
+                    default_conversation_id: "webchat",
+                    active_job: null,
+                },
+            },
+        },
+        {
+            match: "/chat/history",
+            reply: { body: { items: [], has_more: false, next_before: null } },
+        },
+        {
+            match: "/chat/jobs",
+            reply: { body: { job_id: "job-3", conversation_id: "conv-1" } },
+        },
+        {
+            match: "/jobs/job-3/events",
+            reply: {
+                body: {
+                    events: [
+                        {
+                            seq: 1,
+                            event: "stage",
+                            payload: {
+                                stage: "waiting_model",
+                                elapsed_ms: 500,
+                            },
+                        },
+                    ],
+                    job: { job_id: "job-3", status: "running", last_seq: 1 },
+                },
+            },
+        },
+    ]);
+
+    window.eval("window.RuntimeController.init()");
+    await tick();
+    window.RuntimeController.loadChatHistory(true).catch(() => {});
+    await tick();
+
+    window.document.getElementById("runtimeChatInput").value = "hello";
+    window.document.getElementById("btnRuntimeChatSend").click();
+    await tick(4);
+    await settle(400);
+
+    const log = chatLog(window);
+    const stages = log
+        ? Array.from(log.querySelectorAll(".runtime-chat-stage"))
+        : [];
+    return {
+        stageNodeCount: stages.length,
+        stageTexts: stages.map((el) => (el.innerText || el.textContent || "").trim()),
+        allNodes: chatNodes(window),
+        requests: env.requests.slice(),
+    };
+};
+
+/**
+ * 发送消息必须把 conversation_id 带进作业请求，并在事件轮询里带上同一会话。
+ *
+ * 对应原 test_webchat_frontend_sends_conversation_id_with_history_and_jobs。
+ */
+SCENARIOS.requests_carry_conversation_id = async (env) => {
+    const { window, setRoutes } = env;
+    setRoutes([
+        {
+            match: "/chat/conversations",
+            reply: {
+                body: {
+                    conversations: [{ id: "conv-9", title: "t" }],
+                    default_conversation_id: "webchat",
+                    active_job: null,
+                },
+            },
+        },
+        {
+            match: "/chat/history",
+            reply: { body: { items: [], has_more: false, next_before: null } },
+        },
+        {
+            match: "/chat/jobs",
+            reply: { body: { job_id: "job-9", conversation_id: "conv-9" } },
+        },
+        {
+            match: "/jobs/job-9/events",
+            reply: {
+                body: {
+                    events: [{ seq: 1, event: "done", payload: { duration_ms: 10 } }],
+                    job: { job_id: "job-9", status: "done", last_seq: 1 },
+                },
+            },
+        },
+    ]);
+
+    window.eval("window.RuntimeController.init()");
+    await tick();
+    window.RuntimeController.loadChatHistory(true).catch(() => {});
+    await tick();
+
+    window.document.getElementById("runtimeChatInput").value = "hi";
+    window.document.getElementById("btnRuntimeChatSend").click();
+    await tick(4);
+    await settle(400);
+
+    return { requests: env.requests.slice() };
+};
+
+/**
+ * done 事件之后，工具块应保留最终时长而不是被清空。
+ *
+ * 对应原 test_webchat_frontend_keeps_final_duration_after_done。
+ */
+SCENARIOS.keeps_duration_after_done = async (env) => {
+    const { window, setRoutes } = env;
+    setRoutes([
+        {
+            match: "/chat/conversations",
+            reply: {
+                body: {
+                    conversations: [{ id: "conv-1", title: "t" }],
+                    default_conversation_id: "webchat",
+                    active_job: null,
+                },
+            },
+        },
+        {
+            match: "/chat/history",
+            reply: { body: { items: [], has_more: false, next_before: null } },
+        },
+        {
+            match: "/chat/jobs",
+            reply: { body: { job_id: "job-4", conversation_id: "conv-1" } },
+        },
+        {
+            match: "/jobs/job-4/events",
+            reply: {
+                body: {
+                    events: [
+                        {
+                            seq: 1,
+                            event: "tool_start",
+                            payload: { call_id: "call-1", name: "render.markdown" },
+                        },
+                        {
+                            seq: 2,
+                            event: "tool_end",
+                            payload: {
+                                call_id: "call-1",
+                                name: "render.markdown",
+                                duration_ms: 2500,
+                                status: "ok",
+                            },
+                        },
+                        { seq: 3, event: "done", payload: { duration_ms: 3000 } },
+                    ],
+                    job: { job_id: "job-4", status: "done", last_seq: 3 },
+                },
+            },
+        },
+    ]);
+
+    window.eval("window.RuntimeController.init()");
+    await tick();
+    window.RuntimeController.loadChatHistory(true).catch(() => {});
+    await tick();
+
+    window.document.getElementById("runtimeChatInput").value = "render";
+    window.document.getElementById("btnRuntimeChatSend").click();
+    await tick(4);
+    await settle(400);
+
+    const log = chatLog(window);
+    const blocks = log ? Array.from(log.querySelectorAll(".runtime-tool-block")) : [];
+    return {
+        toolBlockCount: blocks.length,
+        toolTexts: blocks.map((el) => (el.innerText || el.textContent || "").trim()),
+        allNodes: chatNodes(window),
+        requests: env.requests.slice(),
+    };
+};
+
+// --------------------------------------------------------------------------- //
+
+async function main() {
+    const args = parseArgs(process.argv.slice(2));
+    if (!args.scenario) throw new Error("缺少 --scenario");
+    const scenario = SCENARIOS[args.scenario];
+    if (!scenario) {
+        throw new Error(
+            `未知场景 ${args.scenario}；可用：${Object.keys(SCENARIOS).sort().join(", ")}`,
+        );
+    }
+    const root = resolveRoot(args.root);
+    const env = createEnv(root);
+    const result = await scenario(env);
+    process.stdout.write(
+        `${JSON.stringify({ ok: true, scenario: args.scenario, result })}\n`,
+    );
+    // runtime.js 的聊天轮询会不断重排 setTimeout，事件循环不会自己空下来，
+    // 因此写完成结果后直接退出（结果已经 flush 到 stdout）。
+    process.exit(0);
+}
+
+main().catch((error) => {
+    process.stdout.write(
+        `${JSON.stringify({
+            ok: false,
+            error: String((error && error.stack) || error),
+        })}\n`,
+    );
+    process.exit(1);
+});

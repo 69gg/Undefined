@@ -40,6 +40,11 @@ jobs:
       - name: Install dependencies
         run: uv sync --group dev -p ${{ env.PYTHON_VERSION }}
 
+      # WebUI 前端行为测试（tests/test_webui_runtime_chat_behavior.py）用 jsdom
+      # 驱动真实 DOM；缺这段安装时相关用例会 skip，等于没测。
+      - name: Install frontend test dependencies
+        run: npm ci --prefix tests/frontend
+
       - name: Cache Ruff
         uses: actions/cache@v4
         with:
@@ -91,6 +96,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
@@ -99,6 +109,9 @@ jobs:
 
       - name: Install dependencies
         run: uv sync --group dev -p ${{ matrix.python-version }}
+
+      - name: Install frontend test dependencies
+        run: npm ci --prefix tests/frontend
 
       - name: Run Mypy
         run: uv run mypy .
