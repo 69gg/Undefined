@@ -210,6 +210,41 @@ def test_markdown_and_html_images_are_lazy_and_clickable() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# 工具块摘要的结构与耗时
+# --------------------------------------------------------------------------- #
+
+
+def test_tool_summary_shows_name_duration_status_kind_in_order() -> None:
+    """摘要里应依次出现 名称 → 耗时 → 状态 → 类型，且预览内容可见。
+
+    原断言靠「源码里 runtime-tool-name 的下标小于 runtime-tool-duration …」
+    来表达顺序，渲染顺序回归时测不出来；这里解析真实 DOM。
+    """
+    result = run_scenario("tool_summary_order_and_duration")
+
+    assert result["summaryCount"] == 1, result["summaryParts"]
+    parts = result["summaryParts"][0]
+    assert parts and parts[0] == "runtime-tool-summary-main", parts
+    assert "runtime-tool-status" in parts, parts
+
+    text = result["summaryText"][0]
+    # 结构化顺序：工具名 → 耗时 → 状态文案 → 类型文案
+    name_at = text.index("render.markdown")
+    duration_at = text.index("1.2s")
+    status_at = text.index("完成")
+    kind_at = text.index("工具")
+    assert name_at < duration_at < status_at < kind_at, text
+
+
+def test_tool_result_preview_is_rendered() -> None:
+    """工具的 result_preview 必须出现在工具块里（不是只放在 fixture 里）。"""
+    result = run_scenario("tool_summary_order_and_duration")
+
+    assert "RESULT_PREVIEW_TOKEN" in result["blockText"], result["blockText"]
+    assert result["previewBlocks"] >= 1, result["previewBlocks"]
+
+
+# --------------------------------------------------------------------------- #
 # 自动滚动开关（只断言确定性可达的部分）
 # --------------------------------------------------------------------------- #
 

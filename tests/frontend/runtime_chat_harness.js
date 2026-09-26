@@ -1054,6 +1054,98 @@ SCENARIOS.auto_scroll_toggle_controls_scrolling = async (env) => {
     };
 };
 
+/**
+ * 工具块的摘要结构：名称 → 耗时 → 状态 → 类型，且状态文案与耗时都在。
+ *
+ * 原断言靠「在源码里找 runtime-tool-name / runtime-tool-duration / 比较它们在
+ * 字符串里的下标顺序」来表达这件事——渲染顺序回归时完全测不到。这里改为解析
+ * 真实 DOM 的顺序与文本。
+ */
+SCENARIOS.tool_summary_order_and_duration = async (env) => {
+    const { window, setRoutes } = env;
+    setRoutes([
+        {
+            match: "/chat/conversations",
+            reply: {
+                body: {
+                    conversations: [{ id: "conv-1", title: "t" }],
+                    default_conversation_id: "webchat",
+                    active_job: null,
+                },
+            },
+        },
+        {
+            match: "/chat/history",
+            reply: { body: { items: [], has_more: false, next_before: null } },
+        },
+        { match: "/chat/jobs", reply: { body: { job_id: "job-sum" } } },
+        {
+            match: "/jobs/job-sum/events",
+            reply: {
+                body: {
+                    events: [
+                        {
+                            seq: 1,
+                            event: "tool_start",
+                            payload: {
+                                call_id: "call-1",
+                                name: "render.markdown",
+                                args: { markdown: "# hi" },
+                            },
+                        },
+                        {
+                            seq: 2,
+                            event: "tool_end",
+                            payload: {
+                                call_id: "call-1",
+                                name: "render.markdown",
+                                ok: true,
+                                status: "done",
+                                duration_ms: 1234,
+                                result_preview: "RESULT_PREVIEW_TOKEN",
+                            },
+                        },
+                        { seq: 3, event: "done", payload: { duration_ms: 1500 } },
+                    ],
+                    job: { job_id: "job-sum", status: "done", last_seq: 3 },
+                },
+            },
+        },
+    ]);
+
+    window.eval("window.RuntimeController.init()");
+    await tick();
+    window.RuntimeController.loadChatHistory(true).catch(() => {});
+    await tick();
+
+    window.document.getElementById("runtimeChatInput").value = "render";
+    window.document.getElementById("btnRuntimeChatSend").click();
+    await tick(4);
+    await settle(400);
+
+    const log = chatLog(window);
+    const summaries = log
+        ? Array.from(log.querySelectorAll(".runtime-tool-block summary")).map((el) => ({
+              // 按 DOM 顺序取出摘要内部部件
+              parts: Array.from(el.children).map((child) => child.className || ""),
+              text: (el.innerText || el.textContent || "").trim(),
+          }))
+        : [];
+    const block = log ? log.querySelector(".runtime-tool-block") : null;
+    return {
+        summaryCount: summaries.length,
+        summaryParts: summaries.map((entry) => entry.parts),
+        summaryText: summaries.map((entry) => entry.text),
+        blockText: block ? (block.innerText || block.textContent || "").trim() : "",
+        // 结构化预览（args / result）是否渲染
+        previewBlocks: log
+            ? log.querySelectorAll(".runtime-tool-block pre, .runtime-tool-block code")
+                  .length
+            : -1,
+        allNodes: chatNodes(window),
+    };
+};
+
 // --------------------------------------------------------------------------- //
 
 async function main() {
