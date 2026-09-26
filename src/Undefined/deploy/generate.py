@@ -435,8 +435,10 @@ def render_firecrawl_env(env: dict[str, str]) -> str:
         "POSTGRES_DB=" + env["UNDEFINED_DEPLOY_FIRECRAWL_POSTGRES_DB"],
         "BULL_AUTH_KEY=" + env["UNDEFINED_DEPLOY_FIRECRAWL_BULL_AUTH_KEY"],
         "ALLOW_LOCAL_WEBHOOKS=true",
-        "NUQ_BACKEND=postgres",
     ]
+    # 不要设置 NUQ_BACKEND：上游把它声明成 z.enum(["pg", "fdb"]).optional()，
+    # 并在启动时 parse(process.env)，写 "postgres" 会直接抛 Zod 错误让 api 容器
+    # 起不来；不写即取默认的 pg 后端（官方自托管基线也是留空）。
     return "\n".join(lines) + "\n"
 
 

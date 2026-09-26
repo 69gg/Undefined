@@ -22,7 +22,7 @@ services:
       PORT: "${UNDEFINED_DEPLOY_FIRECRAWL_INTERNAL_PORT}"
       EXTRACT_WORKER_PORT: "3004"
       WORKER_PORT: "3005"
-      NUQ_RABBITMQ_URL: amqp://rabbitmq:5672
+      NUQ_RABBITMQ_URL: amqp://firecrawl-rabbitmq:5672
       REDIS_URL: redis://firecrawl-redis:6379
       REDIS_RATE_LIMIT_URL: redis://firecrawl-redis:6379
       PLAYWRIGHT_MICROSERVICE_URL: http://firecrawl-playwright:3000/scrape

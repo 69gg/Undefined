@@ -445,6 +445,68 @@ def test_searxng_settings_absent_when_not_selected(tmp_path: Path) -> None:
     assert generate.build(_ctx(tmp_path)).searxng_settings is None
 
 
+def test_firecrawl_env_leaves_nuq_backend_unset(tmp_path: Path) -> None:
+    """NUQ_BACKEND 必须留空。
+
+    上游 `apps/api/src/config.ts` 把它声明成 `z.enum(["pg", "fdb"]).optional()`
+    并在启动时 `parse(process.env)`；写 `postgres` 会抛 Zod 错误，api 容器永远
+    起不来且日志里只有一句 zod 报错。不写即取默认的 pg 后端。
+    """
+    config = generate.build(_ctx(tmp_path, services=("firecrawl",)))
+    assert config.firecrawl_env is not None
+    assert not [
+        line
+        for line in config.firecrawl_env.splitlines()
+        if line.startswith("NUQ_BACKEND")
+    ]
+
+
+def _internal_hostname(value: str) -> str | None:
+    """取出需要容器内 DNS 解析的主机名；外部地址与绑定地址返回 None。"""
+    text = value.strip()
+    match = re.match(r"^[a-z][a-z0-9+.-]*://([^/:]+)", text)
+    host = match.group(1) if match else text.split("/", 1)[0]
+    if not host or host in {"localhost", "0.0.0.0", "127.0.0.1"}:
+        return None
+    if "." in host:  # IP 或外部 FQDN，不需要在 compose 网络里解析
+        return None
+    return host
+
+
+def test_compose_internal_hosts_point_at_declared_services(tmp_path: Path) -> None:
+    """compose 里引用的主机名必须是同一份文件声明过的服务或容器名。
+
+    上游 compose 用的是 redis / rabbitmq / postgres 这类默认名，我们统一加了
+    ``firecrawl-`` 前缀；漏改一处就会出现「容器 running、但 worker 连不上
+    broker」这种既没有报错也没有日志的静默故障（NUQ_RABBITMQ_URL 就漏过一次）。
+    """
+    data = yaml.safe_load(
+        generate.build(_ctx(tmp_path, services=("firecrawl",))).compose_text
+    )
+    services: dict[str, Any] = data["services"]
+    declared = set(services) | {
+        spec["container_name"]
+        for spec in services.values()
+        if isinstance(spec.get("container_name"), str)
+    }
+
+    checked: list[str] = []
+    for name, spec in services.items():
+        for key, value in (spec.get("environment") or {}).items():
+            if not key.endswith(("_URL", "_HOST", "_ENDPOINT")):
+                continue
+            host = _internal_hostname(str(value))
+            if host is None:
+                continue
+            checked.append(f"{name}.{key}={host}")
+            assert host in declared, (
+                f"{name} 的 {key} 指向 {host!r}，但同一份 compose 里没有这个"
+                f"服务/容器名；已声明：{sorted(declared)}"
+            )
+    # 防止断言退化：一个内部主机名都没解析到时必须报错，而不是静默通过
+    assert checked, "没有解析到任何内部主机名，该断言已形同虚设"
+
+
 def test_firecrawl_env_disables_db_auth(tmp_path: Path) -> None:
     config = generate.build(_ctx(tmp_path, services=("firecrawl",)))
     assert config.firecrawl_env is not None
