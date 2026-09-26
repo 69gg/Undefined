@@ -1146,6 +1146,116 @@ SCENARIOS.tool_summary_order_and_duration = async (env) => {
     };
 };
 
+/**
+ * 从后端历史恢复时间线：工具块、嵌套结构、agent 摘要与最终耗时。
+ *
+ * 覆盖原先靠源码子串表达的若干契约：历史里的工具块要能重建（不依赖流式状态）、
+ * 聊天区是事件时间线、后端历史时长写入 final 阶段、agent 摘要不产生时间线噪音。
+ */
+SCENARIOS.history_timeline_restores_tool_blocks = async (env) => {
+    const { window, setRoutes } = env;
+    const historyItem = {
+        role: "bot",
+        content: "最终答复正文",
+        webchat: {
+            duration_ms: 4200,
+            events: [
+                {
+                    seq: 1,
+                    event: "tool_start",
+                    payload: {
+                        call_id: "call-outer",
+                        name: "web_agent",
+                        is_agent: true,
+                    },
+                },
+                {
+                    seq: 2,
+                    event: "tool_end",
+                    payload: {
+                        call_id: "call-outer",
+                        name: "web_agent",
+                        ok: true,
+                        status: "done",
+                        duration_ms: 3000,
+                        result_preview: "AGENT_PREVIEW",
+                    },
+                },
+                {
+                    seq: 3,
+                    event: "tool_start",
+                    payload: { call_id: "call-inner", name: "render.markdown" },
+                },
+                {
+                    seq: 4,
+                    event: "tool_end",
+                    payload: {
+                        call_id: "call-inner",
+                        name: "render.markdown",
+                        ok: true,
+                        status: "done",
+                        duration_ms: 800,
+                        result_preview: "INNER_PREVIEW",
+                    },
+                },
+                {
+                    seq: 5,
+                    event: "message",
+                    payload: { content: "时间线内的中间消息" },
+                },
+            ],
+        },
+    };
+
+    setRoutes([
+        {
+            match: "/chat/conversations",
+            reply: {
+                body: {
+                    conversations: [{ id: "conv-hist", title: "t" }],
+                    default_conversation_id: "webchat",
+                    active_job: null,
+                },
+            },
+        },
+        {
+            match: "/chat/history",
+            reply: {
+                body: { items: [historyItem], has_more: false, next_before: null },
+            },
+        },
+        {
+            match: "/chat/jobs/active",
+            reply: { body: { active_job: null } },
+        },
+    ]);
+
+    window.eval("window.RuntimeController.init()");
+    await tick();
+    window.RuntimeController.loadChatHistory(true).catch(() => {});
+    await tick(4);
+    await settle(300);
+
+    const log = chatLog(window);
+    const blocks = log
+        ? Array.from(log.querySelectorAll(".runtime-tool-block")).map((el) => ({
+              classes: el.className || "",
+              text: (el.innerText || el.textContent || "").trim(),
+              // 嵌套：块内部是否还有子块
+              nested: el.querySelectorAll(".runtime-tool-block").length,
+          }))
+        : [];
+    return {
+        allNodes: chatNodes(window),
+        toolBlockCount: blocks.length,
+        toolBlocks: blocks,
+        timelineContainers: log
+            ? log.querySelectorAll(".runtime-chat-timeline").length
+            : -1,
+        logText: log ? (log.innerText || "").trim() : "",
+    };
+};
+
 // --------------------------------------------------------------------------- //
 
 async function main() {

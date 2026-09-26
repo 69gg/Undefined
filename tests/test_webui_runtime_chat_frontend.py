@@ -255,91 +255,6 @@ def test_webui_logs_fetch_more_tail_lines_by_default() -> None:
     assert "lines: String(LOG_TAIL_LINES)" in source
 
 
-def test_webchat_frontend_restores_history_tool_blocks_without_stream_state() -> None:
-    source = _read_source(RUNTIME_JS)
-
-    assert "function appendHistoryChatItem" in source
-    assert "function renderHistoryTimeline" in source
-    assert "function reduceToolBlock" in source
-    assert "function normalizeToolCallNode" in source
-    assert "function normalizeHistoryTimelineNode" in source
-    assert 'entry.event === "message"' in source
-    assert "item.webchat.calls" in source
-    assert "item.webchat.timeline" in source
-    assert 'message.classList.add("tool-only")' in source
-    assert "appendHistoryChatItem(item, { scroll: false })" in source
-    assert "appendHistoryChatItem(items[idx], {" in source
-
-    history_helper = source.split("function appendHistoryChatItem", 1)[1].split(
-        "function clearChatMessages", 1
-    )[0]
-    assert "applyChatEvent(" not in history_helper
-    assert "upsertToolBlock(" not in history_helper
-    assert "ensureStreamingMessage(" not in history_helper
-    assert "data-job-id" not in history_helper
-
-
-def test_webchat_frontend_renders_chat_as_event_timeline() -> None:
-    source = _read_source(RUNTIME_JS)
-    message_branch = source.split('if (event === "message")', 1)[1].split(
-        'if (event === "done")', 1
-    )[0]
-    timeline_helper = source.split("function upsertTimelineToolBlock", 1)[1].split(
-        "function upsertToolBlock", 1
-    )[0]
-
-    assert 'appendTimelineMessage(item, content, "bot", {' in message_branch
-    assert "attachments: payload && payload.attachments" in message_branch
-    assert "appendNestedTimelineMessage(" in message_branch
-    assert 'updateChatMessage(item, content, "bot")' not in message_branch
-    assert "timeline.appendChild(node)" in timeline_helper
-    assert "parent_webchat_call_id" in timeline_helper
-    assert "parent.children" in timeline_helper
-    assert (
-        'appendToolTimelineEntry(parent, { type: "call", call: block })'
-        in timeline_helper
-    )
-    assert "topLevelToolKey(blocks, parentKey)" in timeline_helper
-    assert "runtime-tool-children" in _read_source(RUNTIME_CSS)
-    assert "function renderToolNodeIfChanged" in source
-    assert "node.dataset.renderSignature === nextSignature" in source
-    assert "updateToolMetaDisplay(block)" in source
-    assert "data-tool-status-for" in source
-
-
-def test_webchat_frontend_prefers_backend_history_timeline() -> None:
-    source = _read_source(RUNTIME_JS)
-    history_timeline_branch = source.split("if (timelineItems.length)", 1)[1].split(
-        "if (calls.length)", 1
-    )[0]
-
-    assert 'entry.type === "message"' in history_timeline_branch
-    assert 'entry.type !== "call"' in history_timeline_branch
-    assert "renderToolBlock(entry.call)" in history_timeline_branch
-    assert "reduceToolBlock(" not in history_timeline_branch
-
-
-def test_webchat_frontend_renders_nested_tool_timeline() -> None:
-    source = _read_source(RUNTIME_JS)
-    css = _read_source(RUNTIME_CSS)
-
-    assert "function renderToolTimelineItem" in source
-    assert "function appendNestedTimelineMessage" in source
-    assert "function appendToolTimelineEntry" in source
-    assert "block.timeline" in source
-    assert "renderToolTimelineItem" in source
-    assert "runtime-tool-message" in source
-    nested_message_helper = source.split("function appendNestedTimelineMessage", 1)[
-        1
-    ].split("function upsertToolBlock", 1)[0]
-    assert "payload.parent_webchat_call_id" in nested_message_helper
-    assert 'type: "message"' in nested_message_helper
-    assert "redrawToolTimelineNode(item, blocks, parentKey)" in nested_message_helper
-    assert "runtime-tool-reveal" in css
-    assert ".runtime-tool-block::before" in css
-    assert ".runtime-tool-block summary::before" in css
-
-
 def test_webchat_tool_snapshots_do_not_rerender_unchanged_blocks() -> None:
     source = _read_source(RUNTIME_JS)
     live_update_helper = source.split("function upsertTimelineToolBlock", 1)[1].split(
@@ -365,32 +280,6 @@ def test_webchat_tool_snapshots_do_not_rerender_unchanged_blocks() -> None:
     assert "node.innerHTML = renderToolBlock" not in live_update_helper
     assert "node.innerHTML = renderToolBlock" not in agent_stage_helper
     assert "node.innerHTML = renderToolBlock" in history_helper
-
-
-def test_webchat_frontend_updates_agent_stage_summary_without_timeline_noise() -> None:
-    source = _read_source(RUNTIME_JS)
-    css = _read_source(RUNTIME_CSS)
-
-    assert 'event === "agent_stage"' in source
-    assert "function upsertAgentStageBlock" in source
-    assert "function reduceAgentStageBlock" in source
-    assert "currentStage" in source
-    assert "current_stage_elapsed_ms" in source
-    render_helper = source.split("function renderToolTimelineItem", 1)[1].split(
-        "function toolBlockKey", 1
-    )[0]
-    reduce_helper = source.split("function reduceAgentStageBlock", 1)[1].split(
-        "function agentStageRenderSignature", 1
-    )[0]
-
-    assert 'entry.type === "stage"' in render_helper
-    assert 'return "";' in render_helper
-    assert 'type: "stage"' not in reduce_helper
-    assert "function agentStageRenderSignature" in source
-    assert "previousSignature === agentStageRenderSignature(block)" in source
-    assert "currentStage: stage || previous.currentStage" in source
-    assert "runtime-tool-stage" not in source
-    assert ".runtime-tool-stage" not in css
 
 
 def test_webchat_frontend_polls_job_events_incrementally() -> None:
@@ -425,41 +314,6 @@ def test_webchat_frontend_retries_active_job_resume_after_refresh_failure() -> N
     assert 'window.addEventListener(\n                "online"' in source
 
 
-def test_webchat_tool_summary_uses_compact_single_line_order() -> None:
-    source = _read_source(RUNTIME_JS)
-    css = _read_source(RUNTIME_CSS)
-    render_helper = source.split("function renderToolBlock", 1)[1].split(
-        "function renderToolTimelineItem", 1
-    )[0]
-    summary_css = css.split(".runtime-tool-block summary {", 1)[1].split(
-        ".runtime-tool-block summary::-webkit-details-marker", 1
-    )[0]
-
-    assert "runtime-tool-name" in render_helper
-    assert "runtime-tool-duration" in render_helper
-    assert "runtime-tool-status" in render_helper
-    assert "runtime-tool-kind" in render_helper
-    assert (
-        render_helper.index("runtime-tool-name")
-        < render_helper.index("runtime-tool-duration")
-        < render_helper.index("runtime-tool-status")
-        < render_helper.index("runtime-tool-kind")
-    )
-    assert "grid-template-columns: auto minmax(0, 1fr) auto auto;" in summary_css
-    assert "min-height: 32px;" in summary_css
-    assert "padding: 3px 10px 3px 13px;" in summary_css
-    assert "line-height: 1.2;" in summary_css
-    name_css = css.split(".runtime-tool-block summary .runtime-tool-name", 1)[1].split(
-        ".runtime-tool-block summary .runtime-tool-duration", 1
-    )[0]
-    duration_css = css.split(".runtime-tool-block summary .runtime-tool-duration", 1)[
-        1
-    ].split(".runtime-tool-block summary .runtime-tool-status", 1)[0]
-    assert "font-weight: 650;" in name_css
-    assert "font-family: var(--font-mono);" in duration_css
-    assert "white-space: nowrap;" in duration_css
-
-
 def test_webchat_tool_blocks_auto_collapse_after_minimum_visible_time() -> None:
     source = _read_source(RUNTIME_JS)
     assert "TOOL_AUTO_COLLAPSE_MIN_VISIBLE_MS = 2000" in source
@@ -491,25 +345,6 @@ def test_webchat_tool_blocks_auto_collapse_after_minimum_visible_time() -> None:
     assert "clearTimeout(timer)" in clear_helper
 
 
-def test_webchat_auto_scroll_toggle_controls_stream_scroll() -> None:
-    source = _read_source(RUNTIME_JS)
-    template = _read_source(WEBUI_TEMPLATE)
-    css = _read_source(RUNTIME_CSS)
-
-    assert "runtimeChatAutoScroll" in template
-    assert "runtime.chat_auto_scroll" in template
-    assert "CHAT_AUTO_SCROLL_STORAGE_KEY" in source
-    assert "readChatAutoScrollPreference()" in source
-    assert "setChatAutoScroll(autoScrollToggle.checked)" in source
-    assert "if (!runtimeState.chatAutoScroll) return;" in source
-    assert "forceScrollChatToBottom()" in source
-    assert "prefersReducedMotion()" in source
-    assert "chatScrollBehavior()" in source
-    assert "behavior: chatScrollBehavior()" in source
-    assert ".toggle-input:focus-visible + .toggle-track" in css
-    assert ".toggle-input { display: none;" not in css
-
-
 def test_webchat_tab_activation_forces_bottom_scroll_after_history_load() -> None:
     source = _read_source(RUNTIME_JS)
     load_helper = source.split("async function loadChatHistory", 1)[1].split(
@@ -532,22 +367,6 @@ def test_webchat_tab_activation_forces_bottom_scroll_after_history_load() -> Non
     assert "suppressChatTopHistoryLoad()" in source
     assert "isChatTopHistoryLoadSuppressed()" in source
     assert "chatTopLoadSuppressedUntil" in source
-
-
-def test_webchat_frontend_renders_tool_duration() -> None:
-    source = _read_source(RUNTIME_JS)
-
-    assert "block.durationMs" in source
-    assert "payload.duration_ms" in source
-    assert "runtime-tool-duration" in source
-    assert "formatDurationMs(runningDurationMs(block))" in source
-    assert "function runningDurationMs" in source
-    assert "function backendDurationClock" in source
-    assert "function updateToolDurationDisplay" in source
-    assert "function toolRenderSignature" in source
-    assert "durationBaseMs" in source
-    assert "durationReceivedAtMs" in source
-    assert "statusLabel} · ${durationLabel}" not in source
 
 
 def test_webchat_tool_previews_render_structured_input_output() -> None:
@@ -577,32 +396,6 @@ def test_webchat_tool_previews_render_structured_input_output() -> None:
     assert "runtime.tool_output" in i18n
 
 
-def test_webchat_frontend_sanitizes_markdown_html_and_unsafe_links() -> None:
-    source = _read_source(RUNTIME_JS)
-    render_helper = source.split("function createSafeMarkedRenderer", 1)[1].split(
-        "function renderChatContent", 1
-    )[0]
-    sanitizer_helper = source.split("function sanitizeHtmlSnippet", 1)[0].split(
-        "function isSafeRenderedImageUrl", 1
-    )[1]
-
-    assert "renderer.html" in render_helper
-    assert 'sanitizeHtmlSnippet(text || "")' in render_helper
-    assert "SAFE_HTML_TAGS" in sanitizer_helper
-    assert "DROP_HTML_TAGS" in sanitizer_helper
-    assert 'name.startsWith("on")' in sanitizer_helper
-    assert 'name === "style"' in sanitizer_helper
-    assert "isSafeRenderedUrl(attr.value)" in sanitizer_helper
-    assert "isSafeRenderedImageUrl(attr.value)" in sanitizer_helper
-    assert 'element.setAttribute("rel", "noreferrer")' in sanitizer_helper
-    assert 'element.setAttribute("loading", "lazy")' in sanitizer_helper
-    assert "isSafeRenderedUrl(href)" in render_helper
-    assert 'rel="noreferrer"' in render_helper
-    assert "renderer.image" in render_helper
-    assert "chatImageMarkup(href, label)" in render_helper
-    assert "renderer: createSafeMarkedRenderer()" in source
-
-
 def test_webchat_frontend_has_clickable_image_viewer() -> None:
     source = _read_source(RUNTIME_JS)
     template = _read_source(WEBUI_TEMPLATE)
@@ -629,20 +422,6 @@ def test_webchat_frontend_has_clickable_image_viewer() -> None:
     assert "cursor: zoom-in;" in css
     assert "@keyframes runtime-chat-image-viewer-in" in css
     assert ".runtime-chat-image-viewer" in responsive_css
-
-
-def test_webchat_markdown_images_render_as_clickable_preview_images() -> None:
-    source = _read_source(RUNTIME_JS)
-    renderer_helper = source.split("function createSafeMarkedRenderer", 1)[1].split(
-        "return renderer;",
-        1,
-    )[0]
-
-    assert "renderer.image" in renderer_helper
-    assert "isSafeRenderedImageUrl(href)" in renderer_helper
-    assert "chatImageMarkup(href, label)" in renderer_helper
-    assert "escapeHtml(label)" in renderer_helper
-    assert 'renderer.image = ({ text }) => escapeHtml(text || "")' not in source
 
 
 def test_webchat_markdown_quotes_render_as_collapsible_scroll_blocks() -> None:

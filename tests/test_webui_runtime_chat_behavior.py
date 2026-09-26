@@ -210,6 +210,43 @@ def test_markdown_and_html_images_are_lazy_and_clickable() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# 历史时间线恢复
+# --------------------------------------------------------------------------- #
+
+
+def test_history_restores_tool_blocks_without_stream_state() -> None:
+    """刷新后从后端历史重建工具块（不依赖流式状态）。
+
+    原断言是对 `renderHistoryTimeline` / `historyWebchatEvents` 等函数体的子串匹配，
+    历史渲染坏掉也测不出来。
+    """
+    result = run_scenario("history_timeline_restores_tool_blocks")
+
+    assert result["toolBlockCount"] == 2, result["toolBlocks"]
+    texts = [block["text"] for block in result["toolBlocks"]]
+    assert any("web_agent" in text and "3.0s" in text for text in texts), texts
+    assert any("render.markdown" in text and "800ms" in text for text in texts), texts
+    # 结果预览随历史一起恢复
+    assert any("AGENT_PREVIEW" in text for text in texts), texts
+    assert any("INNER_PREVIEW" in text for text in texts), texts
+
+
+def test_history_renders_as_event_timeline_with_final_duration() -> None:
+    """历史里的 message 事件进入时间线容器，且 webchat.duration_ms 写进 final 阶段。"""
+    result = run_scenario("history_timeline_restores_tool_blocks")
+
+    bots = _bot_nodes(result)
+    assert len(bots) == 1, bots
+    # 时间线容器存在，且历史 message 事件的内容落在里面
+    assert result["timelineContainers"] >= 1, result["timelineContainers"]
+    assert "时间线内的中间消息" in bots[0]["contentText"], bots[0]
+    # 后端给出的时长进入 final 阶段（不依赖流式事件）
+    assert bots[0]["stageBaseMs"] == "4200", bots[0]
+    assert bots[0]["stageIsFinal"] is True, bots[0]
+    assert "4.2s" in bots[0]["stageText"], bots[0]["stageText"]
+
+
+# --------------------------------------------------------------------------- #
 # 工具块摘要的结构与耗时
 # --------------------------------------------------------------------------- #
 
