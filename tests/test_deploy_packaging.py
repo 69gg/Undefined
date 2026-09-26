@@ -10,9 +10,11 @@
 
 from __future__ import annotations
 
+import fnmatch
 import os
 import shutil
 import subprocess
+import tomllib
 import zipfile
 from pathlib import Path
 
@@ -102,22 +104,104 @@ def _dockerfile_copy_sources() -> set[str]:
     return copied
 
 
-def test_dockerfile_copy_sources_survive_dockerignore() -> None:
-    """Dockerfile 里 COPY 的源路径必须不被 .dockerignore 排除。
+def _dockerignore_rules(path: Path) -> list[tuple[str, bool]]:
+    """按出现顺序给出 ``(pattern, is_negation)``（去注释与空行）。"""
+    rules: list[tuple[str, bool]] = []
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("!"):
+            rules.append((line[1:].strip().rstrip("/"), True))
+        else:
+            rules.append((line.rstrip("/"), False))
+    return rules
 
-    这条曾经真踩过：``*.md`` 把 ``COPY README.md`` 挡掉，只有构建时才报错
-    （BuildKit 的 CopyIgnoredFile 警告）。
+
+def _ignore_pattern_matches(pattern: str, source: str) -> bool:
+    """Docker 的 .dockerignore 匹配语义（只覆盖本仓库用到的形态）。
+
+    关键一条：不含 ``/`` 的模式按**任意层级**匹配，所以 ``*.md`` 会连仓库根的
+    ``README.md`` / ``CHANGELOG.md`` 一起排掉，必须靠后面的 ``!`` 逐条放行。
+    """
+    if not pattern:
+        return False
+    parts = Path(source).parts
+    if pattern.startswith("**/"):
+        tail = pattern[3:]
+        return fnmatch.fnmatchcase(source, tail) or any(
+            fnmatch.fnmatchcase(part, tail) for part in parts
+        )
+    if "/" in pattern:
+        return fnmatch.fnmatchcase(source, pattern)
+    return fnmatch.fnmatchcase(Path(source).name, pattern) or any(
+        fnmatch.fnmatchcase(part, pattern) for part in parts
+    )
+
+
+def _dockerignore_keeps(rules: list[tuple[str, bool]], source: str) -> bool:
+    """按「后匹配者胜」判断 ``source`` 是否还留在构建上下文里。"""
+    kept = True
+    for pattern, negation in rules:
+        if _ignore_pattern_matches(pattern, source):
+            kept = negation
+    return kept
+
+
+def test_dockerfile_copy_sources_survive_dockerignore() -> None:
+    """Dockerfile 里 COPY 的源路径必须真的留在构建上下文里。
+
+    ``*.md`` 这类通配会把 ``README.md`` / ``CHANGELOG.md`` 一起排掉，只能靠后面
+    的 ``!`` 放行——而旧断言写的是 ``source not in entries``（只比字面条目），对
+    通配模式**恒真**：先漏了 README.md，2026-09 又漏了 CHANGELOG.md（v3.17.0 的
+    release 因此在 ``uv sync`` 上炸掉）。这里按后匹配者胜真正求值一次。
     """
     copied = _dockerfile_copy_sources()
-
     assert copied, "未从 Dockerfile 解析出任何 COPY 源，测试需要更新"
-    entries = _dockerignore_entries(REPO_ROOT / ".dockerignore")
-    for source in sorted(copied):
-        top = source.split("/", 1)[0]
-        assert top not in entries, (
-            f"Dockerfile COPY 了 {source}，但 .dockerignore 排除了 {top}"
+
+    for ignore_file in (REPO_ROOT / ".dockerignore", TEMPLATE_DIR / ".dockerignore"):
+        rules = _dockerignore_rules(ignore_file)
+        assert rules, f"{ignore_file} 里没有有效规则"
+        blocked = [
+            item for item in sorted(copied) if not _dockerignore_keeps(rules, item)
+        ]
+        assert not blocked, (
+            f"{ignore_file} 会把 Dockerfile COPY 的源挡在构建上下文外：{blocked}"
+            "（通配排除后需要一条 ! 放行）"
         )
-        assert source not in entries, f"Dockerfile COPY 了 {source}，但它已被排除"
+
+
+def _hatch_forced_includes() -> set[str]:
+    """``[tool.hatch.build.targets.wheel.force-include]`` 的源路径（构建必需）。"""
+    data = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    config = data["tool"]["hatch"]["build"]["targets"]["wheel"]
+    return set(config.get("force-include") or {})
+
+
+def test_dockerfile_copies_hatch_forced_includes() -> None:
+    """镜像必须 COPY 上构建后端「强制包含」的源文件。
+
+    force-include 的文件在 editable 构建（镜像里的 ``uv sync``）时**必须存在**，
+    否则 hatchling 直接抛 ``FileNotFoundError: Forced include not found``，整条镜像
+    构建失败。镜像只在 tag 上构建，所以这类缺失 PR 的 CI 完全看不到——v3.17.0 的
+    release 就是死在 ``/app/CHANGELOG.md`` 上，连带动摇了 Release 资产与 PyPI 发布。
+    """
+    forced = _hatch_forced_includes()
+    assert forced, "pyproject 里没有 force-include，本用例需要更新"
+    copied = _dockerfile_copy_sources()
+
+    for source in sorted(forced):
+        assert (REPO_ROOT / source).is_file(), (
+            f"force-include 的源在仓库里不存在：{source}"
+        )
+        covered = [
+            item for item in copied if source == item or source.startswith(item + "/")
+        ]
+        assert covered, (
+            f"Dockerfile.bot 没有 COPY {source}（force-include 的源），"
+            f"镜像里的 uv sync 会因 Forced include not found 失败；"
+            f"当前 COPY 源：{sorted(copied)}"
+        )
 
 
 @pytest.mark.parametrize("name", REQUIRED_TEMPLATES)
