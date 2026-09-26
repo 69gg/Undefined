@@ -381,38 +381,6 @@ def test_extract_required_tool_args_preserves_job_context_in_error() -> None:
     assert "target=user:42" in message
 
 
-def test_historian_profile_merge_prompt_profile_only_constraints() -> None:
-    merge = Path("res/prompts/historian_profile_merge.md").read_text(encoding="utf-8")
-    assert "长期高层画像" in merge
-    assert "skip=true" in merge
-    assert "具体事件" in merge
-    assert "曾/刚/最近" in merge
-    assert "当前时刻" in merge
-    assert "{now_local}" in merge
-    assert "{now_utc}" in merge
-    assert "{profile_updated_at}" in merge
-    assert "最新优先" in merge
-    assert "以当前输入批次为准覆盖" in merge
-    assert "时间只用于判断取舍" in merge
-    assert "克制扩写 / 合并去冗" in merge
-    assert "能并入现有条目就不新增条目" in merge
-    assert "对照当前撰写规范自检" in merge
-    assert "不合规则必须重写" in merge
-    assert "`skip=true` 仅当" in merge
-    assert "只重整旧画像" in merge
-    assert "不得以“没有新事实”为由跳过格式修复" in merge
-    assert "---元数据---评价---正文---锐评" in merge
-    assert "不写入 YAML frontmatter" in merge
-    assert "缺评价段或评价为空" in merge
-    assert "缺锐评段或锐评为空" in merge
-    assert "宁可过锐也不要圆滑" in merge
-    assert "禁止温吞点评" in merge
-    assert "禁止单独成行的 `---`" in merge
-    assert "可直接整体重写" not in merge
-    assert "宁可多写" not in merge
-    assert "信息密度优先于表达精炼" not in merge
-
-
 def test_extract_frontmatter_updated_at() -> None:
     assert (
         _extract_frontmatter_updated_at(
