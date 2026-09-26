@@ -296,6 +296,19 @@ function createEnv(root) {
         setRoutes,
         scrollActivity,
         scrollTopWrites,
+        /**
+         * 按需加载额外的 WebUI 脚本（普通 script 语义，模块自带 window 导出）。
+         *
+         * 基础依赖链在 createEnv 里就已经 eval 过，这里只用于「只有部分场景需要」
+         * 的模块（工作流图/检查器、微信等），避免影响现有场景的加载结果。
+         * 这些模块是 IIFE + `window.X = {...}` 导出，因此可以逐个 eval。
+         */
+        loadScripts(names) {
+            for (const name of names) {
+                const file = path.join(staticDir, name);
+                window.eval(fs.readFileSync(file, "utf8"));
+            }
+        },
     };
 }
 
@@ -2185,6 +2198,181 @@ SCENARIOS.scroll_behaviors = async (env) => {
         lazyLoadHeight: meter3.height,
         olderHistoryRequestCount: olderHistoryRequests.length,
         allNodes: chatNodes(window),
+    };
+};
+
+/**
+ * 工作流图的纯逻辑契约（不依赖 DOM 交互）。
+ *
+ * 原断言是对 workflow-graph.js / workflow-inspector.js 做源码子串匹配
+ * （例如 `emptyTask` 函数体里必须出现 `consume_ai_loop: false`）。这里改为调用
+ * 真实导出，断言**返回值**：新建工作流的默认值、克隆隔离、JSON 美化等。
+ */
+SCENARIOS.workflow_graph_defaults = async (env) => {
+    env.loadScripts(["workflow-graph.js"]);
+    const graph = env.window.WorkflowGraph;
+    if (!graph) throw new Error("workflow-graph.js 未导出 WorkflowGraph");
+
+    const task = graph.emptyTask();
+    // 默认值必须是「不消费 / 不自动发送」，避免新建工作流意外拦截主 AI
+    const defaults = {
+        consumeAiLoop: task.consume_ai_loop,
+        autoSendFinal: task.auto_send_final,
+    };
+
+    // clone 必须是深拷贝（改副本不得影响原对象）
+    const copy = graph.clone(task);
+    copy.consume_ai_loop = true;
+    if (copy.consume_ai_loop === task.consume_ai_loop) {
+        throw new Error("clone 不是深拷贝");
+    }
+
+    // 默认节点的结构
+    const node = graph.defaultNode ? graph.defaultNode("start") : null;
+
+    return {
+        taskKeys: Object.keys(task).sort(),
+        defaults,
+        cloneIsolation: copy.consume_ai_loop !== task.consume_ai_loop,
+        nodeType: node ? String(node.type || "") : "",
+        paletteTypes: Array.isArray(graph.PALETTE_TYPES)
+            ? graph.PALETTE_TYPES.length
+            : -1,
+        eventKinds: Array.isArray(graph.EVENT_KINDS)
+            ? graph.EVENT_KINDS.length
+            : -1,
+        prettyJsonSample: graph.prettyJson({ b: 1, a: [1, 2] }),
+    };
+};
+
+/**
+ * 变量检查器：真实实例化 createInspector，断言它产出的 DOM 带哪些交互属性。
+ *
+ * 原断言是「inspector.js 里必须出现 data-extract-add / patch.extract_vars /
+ * node.type === "llm.main"」这类子串——检查器不再渲染这些控件也测不到。
+ */
+SCENARIOS.workflow_inspector_extract_vars = async (env) => {
+    env.loadScripts(["workflow-graph.js", "workflow-inspector.js"]);
+    const graphApi = env.window.WorkflowGraph;
+    const inspectorApi = env.window.WorkflowInspector;
+    if (!graphApi || !inspectorApi) {
+        throw new Error("工作流模块未导出");
+    }
+
+    // 造一个带 llm.main 节点的工作流并选中它
+    const task = graphApi.emptyTask();
+    const node = graphApi.defaultNode("llm.main");
+    node.id = "llm1";
+    task.nodes.push(node);
+    const graph = graphApi.createGraph(task);
+    // 选中该节点：createGraph 默认选中 start（方法是 selectNode）
+    graph.selectNode("llm1");
+
+    const root = env.window.document.createElement("div");
+    env.window.document.body.appendChild(root);
+    const inspector = inspectorApi.createInspector(
+        root,
+        graph,
+        () => ({ tools: [], agents: [], toolsets: [] }),
+    );
+    if (inspector && typeof inspector.render === "function") {
+        inspector.render();
+    }
+
+    const html = root.innerHTML || "";
+
+    // 再给一个变量：此时应出现「移除」控件
+    graph.updateNode("llm1", { extract_vars: ["foo"] });
+    inspector.render();
+    const htmlWithVar = root.innerHTML || "";
+
+    // 分支节点的 case 编辑器（branch.if 才有 cases）
+    const branchTask = graphApi.emptyTask();
+    const branchNode = graphApi.defaultNode("branch.if");
+    branchNode.id = "branch1";
+    branchTask.nodes.push(branchNode);
+    const branchGraph = graphApi.createGraph(branchTask);
+    branchGraph.selectNode("branch1");
+    const branchRoot = env.window.document.createElement("div");
+    env.window.document.body.appendChild(branchRoot);
+    const branchInspector = inspectorApi.createInspector(
+        branchRoot,
+        branchGraph,
+        () => ({ tools: [], agents: [], toolsets: [] }),
+    );
+    if (branchInspector && typeof branchInspector.render === "function") {
+        branchInspector.render();
+    }
+    const branchHtml = branchRoot.innerHTML || "";
+
+    return {
+        renderedLength: html.length,
+        hasExtractAdd: html.includes("data-extract-add"),
+        hasExtractRemove: html.includes("data-extract-remove"),
+        hasExtractRemoveWithVar: htmlWithVar.includes("data-extract-remove"),
+        hasCaseJson: branchHtml.includes("data-case-json"),
+        selectedNodeRendered: html.includes("llm1"),
+        nodeTypeInState: (() => {
+            const state = graph.getState();
+            const current = state.task.nodes.find((n) => n.id === state.selectedId);
+            return current ? String(current.type || "") : "";
+        })(),
+        // 节点默认应带空的变量提取列表
+        defaultExtractVars: Array.isArray(node.extract_vars)
+            ? node.extract_vars.length
+            : null,
+        htmlExcerpt: html.slice(0, 200),
+    };
+};
+
+/**
+ * 工具参数的类型往返：number / boolean / object / null 必须原样保留。
+ *
+ * 原断言是「inspector.js 里要有 JSON.stringify(value) / JSON.parse(value)」这类
+ * 子串；这里断言真实往返后的**类型**，以及编辑器是否渲染出 JSON 输入框。
+ */
+SCENARIOS.workflow_tool_args_json_round_trip = async (env) => {
+    env.loadScripts(["workflow-graph.js", "workflow-inspector.js"]);
+    const graphApi = env.window.WorkflowGraph;
+    const inspectorApi = env.window.WorkflowInspector;
+
+    const task = graphApi.emptyTask();
+    const node = graphApi.defaultNode("tool");
+    node.id = "tool1";
+    node.args = { n: 1, b: true, s: "x", o: { k: 1 }, arr: [1, 2], z: null };
+    task.nodes.push(node);
+
+    // 经 createGraph 往返一次（load 会 clone）
+    const graph = graphApi.createGraph(task);
+    const roundTripped = graph.getState().task.nodes.find((n) => n.id === "tool1");
+    const args = (roundTripped && roundTripped.args) || {};
+    const typesPreserved =
+        typeof args.n === "number" &&
+        typeof args.b === "boolean" &&
+        typeof args.s === "string" &&
+        Array.isArray(args.arr) &&
+        args.o !== null &&
+        typeof args.o === "object";
+
+    graph.selectNode("tool1");
+    const root = env.window.document.createElement("div");
+    env.window.document.body.appendChild(root);
+    const inspector = inspectorApi.createInspector(root, graph, () => ({
+        tools: [{ name: "demo.tool", description: "d" }],
+        agents: [],
+        toolsets: [],
+    }));
+    if (inspector && typeof inspector.render === "function") inspector.render();
+    const html = root.innerHTML || "";
+
+    return {
+        typesPreserved,
+        nullPreserved: Object.prototype.hasOwnProperty.call(args, "z") && args.z === null,
+        argTypes: Object.fromEntries(
+            Object.entries(args).map(([k, v]) => [k, Array.isArray(v) ? "array" : typeof v]),
+        ),
+        hasJsonPlaceholder: html.includes("JSON value"),
+        renderedLength: html.length,
     };
 };
 

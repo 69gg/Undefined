@@ -280,3 +280,81 @@ def test_scroll_position_contracts_are_blocked_by_jsdom_limitations() -> None:
         "聊天布局仍依赖内部滚动（overflow: hidden + 内层 overflow-y: auto），"
         "若改为整页滚动请重新评估本登记"
     )
+
+
+# --------------------------------------------------------------------------- #
+# 工作流图的纯逻辑契约（复用 jsdom harness 的按需脚本加载）
+# --------------------------------------------------------------------------- #
+
+
+def test_blank_workflow_defaults_do_not_consume_or_auto_send() -> None:
+    """新建工作流的默认值必须是「不拦截主 AI / 不自动发送」。
+
+    原断言是在 workflow-graph.js 的 `emptyTask` 函数体里找
+    `consume_ai_loop: false` 子串；这里改为调用真实导出、断言返回值。
+    """
+    from test_webui_runtime_chat_behavior import run_scenario
+
+    result = run_scenario("workflow_graph_defaults")
+
+    assert result["defaults"] == {"consumeAiLoop": False, "autoSendFinal": False}, (
+        result
+    )
+    assert "consume_ai_loop" in result["taskKeys"], result["taskKeys"]
+    assert "auto_send_final" in result["taskKeys"], result["taskKeys"]
+    # clone 必须深拷贝，否则画布编辑会串改原对象
+    assert result["cloneIsolation"] is True, result
+    assert result["nodeType"] == "start", result
+    assert result["paletteTypes"] > 0, result
+
+
+def test_llm_inspector_supports_extract_vars() -> None:
+    """LLM 节点的变量提取控件：默认空列表，有变量时才出现「移除」。
+
+    原断言是在 workflow-graph.js / workflow-inspector.js 里找
+    `data-extract-add` / `patch.extract_vars` / `node.type === "llm.main"` 之类的
+    子串；这里真实实例化 createInspector 并检查它产出的 DOM。
+    """
+    from test_webui_runtime_chat_behavior import run_scenario
+
+    result = run_scenario("workflow_inspector_extract_vars")
+
+    assert result["nodeTypeInState"] == "llm.main", result
+    assert result["defaultExtractVars"] == 0, "LLM 节点默认不应带变量"
+    assert result["hasExtractAdd"] is True, "缺少「添加变量」控件"
+    assert result["hasExtractRemove"] is False, "没有变量时不应出现「移除」控件"
+    assert result["hasExtractRemoveWithVar"] is True, "有变量时必须能移除"
+
+
+def test_branch_case_editor_renders_case_rows() -> None:
+    """分支节点的每行 case 必须把当前值编码进 data-case-json（供往返编辑）。"""
+    from test_webui_runtime_chat_behavior import run_scenario
+
+    result = run_scenario("workflow_inspector_extract_vars")
+    assert result["hasCaseJson"] is True, "分支节点缺少 case 行标记"
+
+
+def test_tool_argument_editor_uses_json_typed_inputs() -> None:
+    """工具参数编辑器必须以 JSON 形式承载值，才能往返保留类型。
+
+    原断言是「inspector.js 里要有 JSON.stringify(value) /
+    args[key] = JSON.parse(value) / placeholder="JSON value"」这类子串；
+    这里断言「节点里的参数按原类型保存」+「编辑器渲染出 JSON 输入框」。
+    """
+    from test_webui_runtime_chat_behavior import run_scenario
+
+    result = run_scenario("workflow_tool_args_json_round_trip")
+    assert result["typesPreserved"] is True, result
+    assert result["nullPreserved"] is True, "null 参数被丢弃了"
+    assert result["hasJsonPlaceholder"] is True, "缺少 JSON 值的输入框"
+
+
+def test_workflow_inspector_reports_extract_var_i18n() -> None:
+    """变量提取相关文案必须有中英两套（缺一套会让界面露出 key 或英文）。"""
+    i18n_path = REPO_ROOT / "src" / "Undefined" / "webui" / "static" / "js" / "i18n.js"
+    source = i18n_path.read_text(encoding="utf-8")
+    for key in ("schedules.extract_vars", "schedules.add_extract_var"):
+        assert f'"{key}"' in source, f"缺少文案 key：{key}"
+    # 双语：同一 key 至少在两个语言块里出现（中/英）
+    assert source.count('"schedules.extract_vars"') >= 2, "变量提取文案缺少第二语言"
+    assert "extract_" in source, "缺少变量提取前缀文案"
