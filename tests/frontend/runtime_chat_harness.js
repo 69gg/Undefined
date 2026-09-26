@@ -2059,6 +2059,135 @@ SCENARIOS.tool_snapshot_dedup_and_auto_collapse = async (env) => {
 
 // --------------------------------------------------------------------------- //
 
+/**
+ * 滚动行为三则（jsdom 没有布局，因此 scrollHeight 由测试桩控制）：
+ * 1) tab 激活后强制滚到底；
+ * 2) 发送消息后滚到底；
+ * 3) 惰性加载更早历史时保持可视位置（补偿新增高度）。
+ *
+ * 原断言都是「源码里要有 forceScrollChatToBottomSoon / setTimeout(..., 80)」
+ * 这类子串；这里观察真实的滚动调用与 scrollTop 结果。
+ */
+function _stubScrollHeight(env, initial) {
+    const log = env.window.document.getElementById("runtimeChatLog");
+    let height = initial;
+    Object.defineProperty(log, "scrollHeight", {
+        get: () => height,
+        configurable: true,
+    });
+    env.scrollActivity.calls = 0;
+    env.scrollTopWrites.count = 0;
+    return {
+        get height() {
+            return height;
+        },
+        set(next) {
+            height = next;
+        },
+        element: log,
+    };
+}
+
+SCENARIOS.scroll_behaviors = async (env) => {
+    const { window, setRoutes } = env;
+    const pageOne = [{ role: "bot", content: "最近的回复" }];
+    const pageTwo = [{ role: "bot", content: "更早的回复" }];
+    let historyRound = 0;
+
+    setRoutes([
+        {
+            match: "/chat/conversations",
+            reply: {
+                body: {
+                    conversations: [{ id: "conv-scroll", title: "t" }],
+                    default_conversation_id: "webchat",
+                    active_job: null,
+                },
+            },
+        },
+        {
+            match: "/chat/history",
+            reply: () => {
+                historyRound += 1;
+                if (historyRound === 1) {
+                    return {
+                        body: {
+                            items: pageOne,
+                            has_more: true,
+                            next_before: "cursor-1",
+                        },
+                    };
+                }
+                return {
+                    body: { items: pageTwo, has_more: false, next_before: null },
+                };
+            },
+        },
+        { match: "/chat/jobs/active", reply: { body: { active_job: null } } },
+        { match: "/chat/jobs", reply: { body: { job_id: "job-scrollb" } } },
+        {
+            match: "/jobs/job-scrollb/events",
+            reply: {
+                body: {
+                    events: [
+                        { seq: 1, event: "message", payload: { content: "reply" } },
+                    ],
+                    job: { job_id: "job-scrollb", status: "running", last_seq: 1 },
+                },
+            },
+        },
+    ]);
+
+    window.eval("window.RuntimeController.init()");
+    await tick();
+
+    // --- 1) tab 激活 ---
+    const meter1 = _stubScrollHeight(env, 1200);
+    window.eval("window.RuntimeController.onTabActivated('chat')");
+    await tick(4);
+    await settle(250);
+    const tabActivationScrolls = env.scrollActivity.calls;
+
+    // --- 2) 发送消息 ---
+    window.RuntimeController.loadChatHistory(true).catch(() => {});
+    await tick(4);
+    await settle(250);
+    const meter2 = _stubScrollHeight(env, 1500);
+    window.document.getElementById("runtimeChatInput").value = "hi";
+    window.document.getElementById("btnRuntimeChatSend").click();
+    await tick(4);
+    await settle(400);
+    const sendScrolls = env.scrollActivity.calls;
+    const scrollTopAfterSend = meter2.element.scrollTop;
+
+    // --- 3) 惰性加载：滚到顶部触发；高度增长后 scrollTop 应被补偿 ---
+    const meter3 = _stubScrollHeight(env, 2000);
+    const previousTop = 40;
+    meter3.element.scrollTop = previousTop;
+    const growth = 800;
+    meter3.element.addEventListener("scroll", () => {
+        meter3.set(2000 + growth);
+    });
+    meter3.element.dispatchEvent(new window.Event("scroll", { bubbles: false }));
+    await tick(4);
+    await settle(400);
+
+    const olderHistoryRequests = env.requests.filter((url) =>
+        url.includes("before=cursor-1"),
+    );
+
+    return {
+        tabActivationScrolls,
+        sendScrolls,
+        scrollTopAfterSend,
+        lazyLoadScrollTop: meter3.element.scrollTop,
+        lazyLoadExpectedTop: previousTop + growth,
+        lazyLoadHeight: meter3.height,
+        olderHistoryRequestCount: olderHistoryRequests.length,
+        allNodes: chatNodes(window),
+    };
+};
+
 async function main() {
     const args = parseArgs(process.argv.slice(2));
     if (!args.scenario) throw new Error("缺少 --scenario");

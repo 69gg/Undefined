@@ -210,6 +210,25 @@ def test_markdown_and_html_images_are_lazy_and_clickable() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# 滚动行为
+# --------------------------------------------------------------------------- #
+
+
+def test_send_message_scrolls_chat_to_bottom() -> None:
+    """发送消息后必须触发滚动到底（含布局更新后的补滚）。
+
+    原断言是「源码里要有 requestAnimationFrame(forceScrollChatToBottom) /
+    setTimeout(forceScrollChatToBottom, 80)」这类子串；这里观察真实滚动调用次数。
+    """
+    result = run_scenario("scroll_behaviors")
+
+    assert result["sendScrolls"] >= 1, result
+    # 消息也确实渲染出来了（滚动不是空转）
+    bots = _bot_nodes(result)
+    assert bots and bots[-1]["contentTexts"], bots
+
+
+# --------------------------------------------------------------------------- #
 # 工具块：快照去重与自动折叠
 # --------------------------------------------------------------------------- #
 
