@@ -183,10 +183,13 @@ def test_markdown_rendering_sanitizes_unsafe_content() -> None:
     原测试断言的是「源码里必须出现 createSafeMarkedRenderer / SAFE_HTML_TAGS /
     name.startsWith("on")」等子串——重构即红，真正的 XSS 回归却测不出来。
     这里把载荷真渲染出来，直接观察结果。
+
+    刻意**不**断言 ``window.__XSS__``：harness 用 ``runScripts: "outside-only"``
+    载入 jsdom，注入的 ``<script>`` 永远不会执行，这个值恒为 undefined，
+    是一条永远为真的装饰性断言。
     """
     result = run_scenario("markdown_sanitizes_unsafe_content")
 
-    assert result["xssFired"] is None, "XSS 载荷被执行了"
     assert result["scriptTags"] == 0, "渲染结果里出现了 script 标签"
     assert result["inlineHandlerAttrs"] == 0, "渲染结果里残留了内联事件处理器"
 
@@ -228,6 +231,36 @@ def test_send_message_scrolls_chat_to_bottom() -> None:
     assert bots and bots[-1]["contentTexts"], bots
 
 
+def test_tab_activation_scrolls_chat_to_bottom() -> None:
+    """切回聊天 tab 要强制滚到底。
+
+    这条以前没有任何断言，实测恒为 0：``onTabActivated`` 有
+    ``if (!state.authenticated) return`` 前置守卫，harness 里登录态是假的，
+    调用直接空转。现在 harness 在载入产品脚本时摆好 ``state.authenticated``，
+    且第二次激活时历史已加载（``loadChatHistory`` 早退），所以计到的滚动
+    只能来自 ``onTabActivated`` 自己。
+    """
+    result = run_scenario("scroll_behaviors")
+
+    assert result["tabActivationScrolls"] >= 1, result
+
+
+def test_lazy_loading_older_history_keeps_viewport_position() -> None:
+    """滚到顶部要加载更早历史，并用新增高度补偿 scrollTop，保持可视位置。
+
+    这条以前没有任何断言，实测 ``olderHistoryRequestCount == 0``、
+    ``lazyLoadScrollTop`` 停在初始值：harness 把 scrollTop 设成 40，
+    而触发阈值是 ``<= 32``；而且轮询里的「滚到底」会不停续期 900ms 的
+    顶部加载抑制窗口。改法：滚到 0、等作业结束再等过抑制窗口。
+    """
+    result = run_scenario("scroll_behaviors")
+
+    assert result["olderHistoryRequestCount"] >= 1, result
+    # 高度确实增长了，否则「补偿」无从谈起
+    assert result["lazyLoadHeight"] > 2000, result
+    assert result["lazyLoadScrollTop"] == result["lazyLoadExpectedTop"], result
+
+
 # --------------------------------------------------------------------------- #
 # 工具块：快照去重与自动折叠
 # --------------------------------------------------------------------------- #
@@ -236,13 +269,14 @@ def test_send_message_scrolls_chat_to_bottom() -> None:
 def test_unchanged_tool_snapshot_does_not_rerender_node() -> None:
     """内容相同的工具快照不得重建 DOM 节点（避免闪烁与展开态丢失）。
 
-    观测窗口必须落在同一轮轮询内：跨轮会被后续 tool_end 的重绘污染，
-    把「去重生效」误判成「节点被替换」（这一点在场景里已注明）。
+    观测窗必须**恰好跨过一次轮询**：两次读取安排在携带相同快照那一轮的前后，
+    否则轮询间隔（500ms）远大于随手读两次的间隔，读取必然落在同一轮之后，
+    ``sameNodeReused`` 恒真（把 toolRenderSignature 改成随机值也照样绿）。
     """
     result = run_scenario("tool_snapshot_dedup_and_auto_collapse")
 
     assert result["toolBlockCount"] == 1, result
-    assert result["roundAtFirstRead"] == result["roundAtSecondRead"], result
+    assert result["pollsBetweenReads"] == 1, result
     assert result["sameNodeReused"] is True, result
 
 
@@ -279,7 +313,12 @@ def test_html_runner_opens_sandboxed_preview() -> None:
         f"sandbox 含 allow-same-origin 会削弱隔离：{sandbox}"
     )
     assert result["srcdocHasCsp"] is True, "注入文档缺少 CSP"
-    assert result["srcdocHasNonce"] is True, "注入文档缺少 nonce"
+    # nonce 必须挂在真实 <script> 标签上：只搜 /nonce-[A-Za-z0-9]+/ 的话，
+    # CSP meta 自己的 'nonce-…' 就能满足它，脚本标签被整个删掉也测不出来。
+    assert result["srcdocScriptNonce"], "注入文档里没有带 nonce 的 <script> 标签"
+    assert result["srcdocNonceMatchesCsp"] is True, (
+        f"CSP 声明的 nonce 与脚本标签上的不一致，等于没有保护：{result}"
+    )
     assert result["srcdocHasInlineSource"] is True, "注入文档未包含源内容"
 
 
@@ -339,6 +378,25 @@ def test_quote_button_prepends_reference() -> None:
     assert "机器人历史消息" in text, text
 
 
+def test_quote_reference_becomes_markdown_prefix_at_send_time() -> None:
+    """引用在**发送时**被前置成 markdown 引用块，而不是塞进输入框。
+
+    以前只读了 ``input.value``（引用在独立的引用条里，那里恒为空串），
+    等于什么都没验证；真正的契约在 POST /chat/jobs 的 message 上。
+    """
+    result = run_scenario("paste_files_and_quote_reference")
+
+    message = result["outboundMessage"]
+    assert message, result
+    quote_block, _, body = message.partition("\n\n")
+    assert quote_block.startswith("> "), message
+    assert all(line.startswith("> ") for line in quote_block.splitlines()), message
+    assert "机器人历史消息" in quote_block, message
+    # 用户自己写的内容在引用之后，且不带引用前缀
+    assert body.startswith("请继续"), message
+    assert not body.startswith("> "), message
+
+
 # --------------------------------------------------------------------------- #
 # UI 控件（会话列表 / 命令面板 / 图片查看器）
 # --------------------------------------------------------------------------- #
@@ -350,16 +408,34 @@ def test_conversation_list_renders_from_backend() -> None:
     assert result["conversationItems"] == 2, result["conversationItems"]
 
 
-def test_slash_triggers_command_palette() -> None:
-    """输入 `/` 要打开命令面板（面板不再隐藏）。
+def test_conversation_drawer_toggles_on_narrow_viewport() -> None:
+    """窄视口下点抽屉开关要真的展开/收起侧栏。
 
-    注意：本用例**不**断言匹配到的命令条目——jsdom 下 `/chat/commands` 的
-    返回结构未触发匹配，面板会显示「未找到匹配命令」。与其写一条凭猜测的断言，
-    这里只覆盖确定性可达的部分（输入 `/` 后面板打开）。
-    抽屉开关同理未断言：它受视口宽度门控，jsdom 里驱动不到打开态。
+    这条以前没有任何断言，实测恒 False：开关受 ``innerWidth <= 768`` 门控，
+    jsdom 默认 1024，点了等于空转；而且 harness 读的还是面板元素，产品把
+    ``is-open`` 挂在 ``.runtime-chat-sidebar`` 上。
     """
     result = run_scenario("ui_controls")
+
+    assert result["drawerOpenBefore"] is False, "初始应收起"
+    assert result["drawerOpenAfter"] is True, result
+    assert result["drawerAriaExpandedAfter"] == "true", result
+    assert result["drawerOpenAfterSecondToggle"] is False, "再点一次应收起"
+
+
+def test_slash_triggers_command_palette() -> None:
+    """输入 `/` 要打开命令面板，并列出后端返回的命令条目。
+
+    这条以前只断言「面板不隐藏」：fixture 的路由写成 `/chat/commands`，与产品
+    实际请求的 `/api/runtime/commands?scope=webui` 对不上，面板恒为空态，还被
+    当成「jsdom 限制」登记成了豁免。路由修正后可以断言真实条目。
+    """
+    result = run_scenario("ui_controls")
+
     assert result["paletteHidden"] is False, "输入 / 后命令面板应可见"
+    assert result["paletteItems"] == 2, result["paletteText"]
+    assert "help" in result["paletteText"], result["paletteText"]
+    assert "stats" in result["paletteText"], result["paletteText"]
 
 
 def test_image_preview_opens_and_closes_viewer() -> None:
@@ -415,10 +491,25 @@ def test_markdown_code_blocks_are_highlighted() -> None:
     assert result["highlighted"] >= 1, result
 
 
-def test_standalone_html_is_preserved_as_content() -> None:
-    """独立 HTML 片段的文本内容必须保留（消毒只改结构，不能吞掉内容）。"""
+def test_standalone_html_is_preserved_as_element() -> None:
+    """独立 HTML 必须作为**元素**渲染，而不只是「文本里出现过这几个字」。
+
+    原来只断言 ``innerText.includes("独立 HTML 片段")``：消毒器把标签转义成
+    字面量文本后，这串字照样在内层文本里，断言依旧为真。
+    """
     result = run_scenario("rich_content_rendering")
-    assert result["standaloneHtmlText"] == 1, result["allNodes"]
+    inline = result["standaloneInlineElement"]
+    assert inline is not None, result["allNodes"]
+    assert inline["tag"] == "div", inline
+    assert inline["insidePre"] is False, inline
+    assert inline["insideCode"] is False, inline
+
+    document = result["standaloneDocument"]
+    assert document is not None, result["allNodes"]
+    assert document["hasMarkerElement"] is True, document
+    # 整条消息是一份独立 HTML 文档时走 sanitizeHtmlSnippet 分支：
+    # 标签之间的裸文本保持为文本节点，不会被 marked 包成 <p>
+    assert document["paragraphCount"] == 0, document
 
 
 def test_tool_previews_render_structured_input_and_output() -> None:
@@ -517,17 +608,20 @@ def test_tool_result_preview_is_rendered() -> None:
 
 
 def test_auto_scroll_toggle_persists_preference() -> None:
-    """切换自动滚动后偏好必须落到 localStorage。
+    """切换自动滚动后偏好必须落到 localStorage，并在重新载入时被读回。
 
     不断言「关掉后不再滚动」：jsdom 里多条渲染路径都会触发滚动，实测开关前后
     调用次数只差 3 次，信号强度不足以支撑可靠断言（宁可少测也不写会漏报的断言）。
+
+    「读回」必须是真的重建一次环境：对同一个 key 再 ``getItem`` 一次等于复读
+    ``storedPreference``，恒等，证明不了产品会恢复偏好。
     """
     result = run_scenario("auto_scroll_toggle_controls_scrolling")
 
     assert result["toggleExists"], "模板缺少自动滚动开关"
     assert result["toggleCheckedAfterChange"] is False
     assert result["storedPreference"] == "false", result["storedPreference"]
-    assert result["reloadedPreference"] == "false"
+    assert result["reloadedToggleChecked"] is False, result
 
 
 # --------------------------------------------------------------------------- #
@@ -595,23 +689,27 @@ def test_requests_never_use_sse_transport() -> None:
     """前端通过 JSON 轮询消费作业事件，不得退回 SSE。
 
     旧断言用 7 条「源码里不得出现 consumeSse / text/event-stream / token_delta」
-    的负向子串来表达这件事；改为直接观察请求：既不请求事件流端点，也不带 SSE 的
-    Accept 头。
+    的负向子串来表达这件事。迁移后写成「请求的 accept 头不以 text/event-stream
+    开头」——产品从不设置 Accept，实测所有请求都是空串，这条恒真。
+
+    真正的信号是两条：事件端点必须显式要求 ``format=json``（走 fetch + JSON
+    轮询），且产品全程不构造 ``EventSource``（SSE 长连接不经过 window.fetch，
+    只有靠绊线才能观察到）。
     """
     result = run_scenario("requests_carry_conversation_id")
 
-    # 事件消费走 JSON 轮询：请求不得带 SSE Accept 头，事件端点也必须显式要求 json。
     details = result.get("requestDetails") or []
     assert details, "未捕获到请求明细"
-    for entry in details:
-        assert not entry["accept"].lower().startswith("text/event-stream"), entry
-
     event_requests = [
         entry for entry in details if "/jobs/job-9/events" in entry["url"]
     ]
     assert event_requests, details
     for entry in event_requests:
         assert "format=json" in entry["url"], entry["url"]
+    assert result["eventSourceConstructions"] == 0, (
+        f"事件消费退回了 SSE（EventSource 被构造了 "
+        f"{result['eventSourceConstructions']} 次）"
+    )
 
 
 # --------------------------------------------------------------------------- #

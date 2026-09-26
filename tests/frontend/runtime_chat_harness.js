@@ -153,9 +153,17 @@ function settle(ms = 40) {
  * 建立运行环境：真实模板 + 真实依赖 JS + 受控 fetch。
  *
  * fetch 的路由用「子串匹配 → 响应」表描述，命中第一个匹配项；
- * 未命中的请求返回 200 + {} 并记录，方便排查。
+ * 未命中的请求**直接抛错**：静默返回 200 {} 会让 fixture 的路由写错时用例
+ * 「通过」但什么都没测（错误信息里带上已声明的 match，方便定位）。
+ *
+ * @param {string} root 仓库根（`--root`）
+ * @param {object} [options]
+ * @param {Record<string, string>} [options.storage] 载入产品脚本前写入的
+ *     localStorage 条目，用于模拟「刷新后恢复偏好」这类跨会话状态。
+ * @param {boolean} [options.authenticated] 初始登录态。多数场景不需要，
+ *     但 `state.authenticated` 为假时 runtime.js 会直接跳过 tab 激活等逻辑。
  */
-function createEnv(root) {
+function createEnv(root, options = {}) {
     const jsdom = require("jsdom");
     const { JSDOM } = jsdom;
 
@@ -228,6 +236,25 @@ function createEnv(root) {
             String(value).replace(/[^a-zA-Z0-9_\u00a0-\uffff-]/g, (ch) => `\\${ch}`);
     }
     window.localStorage.setItem("webui.locale", "zh-CN");
+    Object.entries(options.storage || {}).forEach(([key, value]) => {
+        window.localStorage.setItem(key, String(value));
+    });
+
+    // 事件流传输的绊线：产品若要退回 SSE，只能通过 EventSource 建立长连接，
+    // 而 EventSource 不经过 window.fetch，因此不会出现在 requests 里。
+    // jsdom 本身不实现 EventSource，这里装一个只计数的替身，让「不得退回 SSE」
+    // 成为可观测的负向断言（而不是断言 accept 头——产品从不设置 Accept，
+    // `assert not accept.startswith("text/event-stream")` 是恒真的）。
+    const eventSourceConstructions = { count: 0 };
+    window.EventSource = class HarnessEventSource {
+        constructor(url) {
+            eventSourceConstructions.count += 1;
+            this.url = String(url);
+        }
+        close() {}
+        addEventListener() {}
+        removeEventListener() {}
+    };
 
     const requests = [];
     const requestDetails = [];
@@ -269,7 +296,13 @@ function createEnv(root) {
                     return response(reply.status || 200, reply.body || {});
                 }
             }
-            return response(200, {});
+            // 未命中即报错：以前这里静默返回 200 {}，于是 fixture 里的 match
+            // 一旦与产品真实 URL 不一致（例如写 "/chat/commands" 而产品请求
+            // "/api/runtime/commands?scope=webui"），用例会「通过」但什么都没测。
+            throw new Error(
+                `harness 未匹配到路由：${url}\n已声明的 match：` +
+                    routes.map((route) => route.match).join(" | "),
+            );
         };
     }
 
@@ -286,16 +319,33 @@ function createEnv(root) {
         ),
         path.join(staticDir, "runtime.js"),
     ];
-    window.eval(deps.map((file) => fs.readFileSync(file, "utf8")).join("\n;\n"));
+    // harness 专用垫片：产品脚本里 `const state = {...}` 属于这次 eval 的词法作用域，
+    // 后续 window.eval 看不到它。只有拼在同一次 eval 里才能改 `state.authenticated`
+    // 这类模块内状态（tab 激活、抽屉等交互的前提条件）。
+    const bootstrap = `
+;(function () {
+    window.__harness = window.__harness || {};
+    window.__harness.setAuthenticated = function (value) {
+        state.authenticated = !!value;
+    };
+})();`;
+    window.eval(
+        deps.map((file) => fs.readFileSync(file, "utf8")).join("\n;\n") +
+            "\n;\n" +
+            bootstrap,
+    );
+    if (options.authenticated) window.__harness.setAuthenticated(true);
 
     return {
         dom,
+        root,
         window,
         requests,
         requestDetails,
         setRoutes,
         scrollActivity,
         scrollTopWrites,
+        eventSourceConstructions,
         /**
          * 按需加载额外的 WebUI 脚本（普通 script 语义，模块自带 window 导出）。
          *
@@ -610,6 +660,9 @@ SCENARIOS.requests_carry_conversation_id = async (env) => {
             ),
         })),
         createJobBody: requestBody(env, "/chat/jobs"),
+        // 事件消费必须走 fetch + JSON 轮询：一旦退回 SSE（EventSource 长连接），
+        // 它不会出现在 requests 里，只能靠这个绊线观察到。
+        eventSourceConstructions: env.eventSourceConstructions.count,
     };
 };
 
@@ -960,7 +1013,9 @@ SCENARIOS.markdown_sanitizes_unsafe_content = async (env) => {
     const anchors = log ? Array.from(log.querySelectorAll("a")) : [];
     const images = log ? Array.from(log.querySelectorAll("img")) : [];
     return {
-        xssFired: window.__XSS__ || null,
+        // 注意：harness 用 runScripts: "outside-only"，注入的 <script> 永远不会执行，
+        // 所以「window.__XSS__ 是否被写入」恒为 undefined——那不是能分辨好坏的信号，
+        // 真正的信号是下面这些 DOM 事实（script 标签数、内联事件属性、javascript: href）。
         scriptTags: log ? log.querySelectorAll("script").length : -1,
         inlineHandlerAttrs: log
             ? Array.from(log.querySelectorAll("*")).reduce((count, el) => {
@@ -1063,14 +1118,25 @@ SCENARIOS.auto_scroll_toggle_controls_scrolling = async (env) => {
         "undefined_webchat_auto_scroll",
     );
 
-    // 重新读取偏好（模拟刷新后初始化）：应恢复为关闭态
-    const reloaded = window.localStorage.getItem("undefined_webchat_auto_scroll");
+    // 模拟刷新：真的重建一次环境（新的 JSDOM + 重新 eval 产品脚本 + init），
+    // 并把上一次运行时写进 localStorage 的值原样带过去。
+    // 只对同一个 key 再 getItem 一次等于复读 storedPreference，证明不了任何事；
+    // 重建后读的是产品自己恢复出来的开关状态（readChatAutoScrollPreference）。
+    const reborn = createEnv(env.root, {
+        storage: { undefined_webchat_auto_scroll: String(storedPreference) },
+    });
+    reborn.window.eval("window.RuntimeController.init()");
+    await tick(2);
+    const rebornToggle = reborn.window.document.getElementById(
+        "runtimeChatAutoScroll",
+    );
 
     return {
         toggleExists,
         toggleCheckedAfterChange: toggle ? toggle.checked : null,
         storedPreference,
-        reloadedPreference: reloaded,
+        // 刷新后应由产品自己从 localStorage 恢复成关闭态
+        reloadedToggleChecked: rebornToggle ? rebornToggle.checked : null,
         // 仅作参考打印，不断言（见场景注释）
         scrollCallsEnabled: enabledScrollTo,
         scrollCallsDisabled: disabledScrollTo,
@@ -1281,8 +1347,8 @@ SCENARIOS.history_timeline_restores_tool_blocks = async (env) => {
 };
 
 /**
- * 富内容渲染：Markdown 引用折叠块、代码高亮、独立 HTML、工具结构化预览、
- * 引用条（markdown 引用前缀）、以及附件图片去重。
+ * 富内容渲染：Markdown 引用折叠块、代码高亮、独立 HTML（内联片段与整篇文档）、
+ * 工具结构化预览、引用条（markdown 引用前缀）、以及附件图片去重。
  *
  * 覆盖原先十几条靠源码子串表达的渲染契约；这里把内容真渲染出来，按 DOM 结构断言。
  */
@@ -1301,6 +1367,17 @@ SCENARIOS.rich_content_rendering = async (env) => {
         "<div class=\"standalone-html\">独立 HTML 片段</div>",
         "",
         "<attachment uid=\"pic_dup\"/>",
+    ].join("\n");
+    // 整条消息就是一份独立 HTML 文档：走 looksLikeStandaloneHtml 的
+    // sanitizeHtmlSnippet 分支（而不是 marked）。两者对纯标签的渲染结果一样，
+    // 只有「标签之间夹着的裸文本」能区分：snippet 分支保留为裸文本节点，
+    // marked 分支会把空行后的文本包成 <p>。
+    const standaloneDocument = [
+        '<div title="standalone-document">',
+        "",
+        "STANDALONE_DOC_BODY",
+        "",
+        "</div>",
     ].join("\n");
 
     setRoutes([
@@ -1364,9 +1441,14 @@ SCENARIOS.rich_content_rendering = async (env) => {
                                 ],
                             },
                         },
-                        { seq: 4, event: "done", payload: { duration_ms: 200 } },
+                        {
+                            seq: 4,
+                            event: "message",
+                            payload: { content: standaloneDocument },
+                        },
+                        { seq: 5, event: "done", payload: { duration_ms: 200 } },
                     ],
-                    job: { job_id: "job-rich", status: "done", last_seq: 4 },
+                    job: { job_id: "job-rich", status: "done", last_seq: 5 },
                 },
             },
         },
@@ -1394,12 +1476,39 @@ SCENARIOS.rich_content_rendering = async (env) => {
             ? log.querySelectorAll("pre code.hljs, pre code[class*='language-']").length
             : -1,
         preCount: log ? log.querySelectorAll("pre").length : -1,
-        // 独立 HTML：标记本身被消毒器改写（class 可能被丢），但文本内容必须保留
-        standaloneHtmlText:
-            log &&
-            ((log.innerText || log.textContent || "").includes("独立 HTML 片段"))
-                ? 1
-                : 0,
+        // 独立 HTML（嵌在 Markdown 里的那段）：必须是**真实元素**，而不是
+        // 「文本里恰好也有这几个字」——消毒只改结构，不能把标签变成字面量文本
+        // （后者用 innerText.includes 断言照样通过，因为转义后的源码里也有这串字）。
+        standaloneInlineElement: (() => {
+            if (!log) return null;
+            const target = Array.from(log.querySelectorAll("*")).find(
+                (el) =>
+                    el.children.length === 0 &&
+                    (el.textContent || "").trim() === "独立 HTML 片段",
+            );
+            if (!target) return null;
+            return {
+                tag: target.tagName.toLowerCase(),
+                insidePre: !!target.closest("pre"),
+                insideCode: !!target.closest("code"),
+            };
+        })(),
+        // 整条消息是一份独立 HTML 文档：必须走 sanitizeHtmlSnippet 分支，
+        // 标签之间的裸文本不能被 marked 包成 <p>。
+        standaloneDocument: (() => {
+            if (!log) return null;
+            const block = Array.from(
+                log.querySelectorAll(".runtime-chat-content"),
+            ).find((el) => (el.textContent || "").includes("STANDALONE_DOC_BODY"));
+            if (!block) return null;
+            return {
+                hasMarkerElement: !!block.querySelector(
+                    '[title="standalone-document"]',
+                ),
+                paragraphCount: block.querySelectorAll("p").length,
+                text: (block.textContent || "").trim(),
+            };
+        })(),
         // 工具结构化预览（args/result）
         toolPreviewBlocks: blocks.length
             ? blocks[0].querySelectorAll("pre, code").length
@@ -1549,7 +1658,10 @@ SCENARIOS.ui_controls = async (env) => {
             },
         },
         {
-            match: "/chat/commands",
+            // 产品请求的是 /api/runtime/commands?scope=webui（runtime.js）；
+            // 以前这里写 "/chat/commands"，永远匹配不上，命令面板因此恒为空态，
+            // 还被误判成「jsdom 限制」登记成了豁免。
+            match: "/commands?scope=webui",
             reply: {
                 body: {
                     commands: [
@@ -1579,14 +1691,42 @@ SCENARIOS.ui_controls = async (env) => {
     await settle(200);
 
     const doc = window.document;
-    const drawer = doc.getElementById("runtimeChatConversationDrawerPanel");
+    // 抽屉的开关状态挂在 `.runtime-chat-sidebar` 上（setChatConversationDrawerOpen），
+    // 不是挂在面板 `#runtimeChatConversationDrawerPanel` 上——早先读错了元素，
+    // 于是无论怎么点都是 false。
+    const drawer = doc.querySelector(".runtime-chat-sidebar");
     const toggle = doc.getElementById("runtimeChatConversationDrawerToggle");
     const drawerOpenBefore = drawer ? drawer.classList.contains("is-open") : null;
+    // 抽屉开关按视口宽度门控（canToggleChatConversationDrawer: innerWidth <= 768），
+    // jsdom 默认 1024，因此以前点开关是空转、drawerOpenAfter 恒 false。
+    // 显式把视口压到窄屏，点完再还原，避免影响后面的命令面板与图片查看器。
+    const viewportDescriptor = Object.getOwnPropertyDescriptor(
+        window,
+        "innerWidth",
+    );
+    Object.defineProperty(window, "innerWidth", {
+        value: 480,
+        writable: true,
+        configurable: true,
+    });
     if (toggle) {
         toggle.click();
         await tick(2);
     }
     const drawerOpenAfter = drawer ? drawer.classList.contains("is-open") : null;
+    const drawerAriaExpandedAfter = toggle
+        ? toggle.getAttribute("aria-expanded")
+        : null;
+    if (toggle) {
+        toggle.click();
+        await tick(2);
+    }
+    const drawerOpenAfterSecondToggle = drawer
+        ? drawer.classList.contains("is-open")
+        : null;
+    if (viewportDescriptor) {
+        Object.defineProperty(window, "innerWidth", viewportDescriptor);
+    }
 
     // 会话列表渲染
     const conversationItems = doc.querySelectorAll(
@@ -1633,6 +1773,8 @@ SCENARIOS.ui_controls = async (env) => {
     return {
         drawerOpenBefore,
         drawerOpenAfter,
+        drawerAriaExpandedAfter,
+        drawerOpenAfterSecondToggle,
         conversationItems,
         paletteHidden,
         paletteItems,
@@ -1647,10 +1789,13 @@ SCENARIOS.ui_controls = async (env) => {
 
 /**
  * 附件粘贴与引用条：把文件粘贴进输入框要挂成待发附件；点机器人消息的「引用」
- * 要把该消息作为引用前置到输入内容。
+ * 要把该消息挂成待发引用，并在**发送时**把它前置成 markdown 引用块。
  *
  * 原断言是「源码里要有 addEventListener("paste" / chatReferences.push /
  * data-quote-message」之类的子串匹配。
+ *
+ * 注意：引用不进输入框（产品把它做成独立的引用条），所以只读 `input.value`
+ * 是读不到任何东西的；真正的契约发生在发送时拼出的 outbound message 上。
  */
 SCENARIOS.paste_files_and_quote_reference = async (env) => {
     const { window, setRoutes } = env;
@@ -1676,9 +1821,19 @@ SCENARIOS.paste_files_and_quote_reference = async (env) => {
             },
         },
         { match: "/chat/jobs/active", reply: { body: { active_job: null } } },
+        { match: "/chat/jobs", reply: { body: { job_id: "job-quote" } } },
+        {
+            match: "/jobs/job-quote/events",
+            reply: {
+                body: {
+                    events: [],
+                    job: { job_id: "job-quote", status: "running", last_seq: 0 },
+                },
+            },
+        },
         {
             match: "/chat/files",
-            reply: { body: { uid: "file_pasted", name: "pasted.txt" } },
+            reply: { body: { id: "file_pasted", uid: "file_pasted", name: "pasted.txt" } },
         },
     ]);
 
@@ -1727,15 +1882,25 @@ SCENARIOS.paste_files_and_quote_reference = async (env) => {
     const referencesText = referencesContainer
         ? (referencesContainer.innerText || referencesContainer.textContent || "").trim()
         : "";
-    const inputValueAfterQuote = input.value;
 
+    // 3) 发送：引用必须在发送时被前置成 markdown 引用块。
+    // （引用不写进输入框——产品把它做成独立的引用条，所以这里没有 input.value 可断言。）
+    input.value = "请继续";
+    doc.getElementById("btnRuntimeChatSend").click();
+    await tick(4);
+    await settle(300);
+
+    const createJobBody = requestBody(env, "/chat/jobs");
     return {
         pendingAttachments,
         attachmentsText,
         quoteExists,
         referencesCount,
         referencesText,
-        inputValueAfterQuote,
+        outboundMessage:
+            createJobBody && typeof createJobBody.message === "string"
+                ? createJobBody.message
+                : "",
         requests: env.requests.slice(),
     };
 };
@@ -1902,13 +2067,25 @@ SCENARIOS.html_runner_uses_sandboxed_preview = async (env) => {
     }
 
     const srcdoc = frame ? frame.getAttribute("srcdoc") || "" : "";
+    // nonce 必须是挂在真实 <script> 标签上的：只搜 /nonce-[A-Za-z0-9]+/ 会被
+    // 注入文档里 CSP meta 自身的 `script-src 'nonce-…'` 满足，脚本标签整个被删掉
+    // 也照样「通过」。这里解析出脚本标签上的 nonce，并校验它与 CSP 里声明的一致
+    // （两者不一致等于没有保护）。
+    const scriptNonce = /<script nonce="([^"]+)">/.exec(srcdoc);
+    const cspNonce = /'nonce-([^']+)'/.exec(srcdoc);
     return {
         runButtonExists: !!runButton,
         sandbox: frame ? frame.getAttribute("sandbox") || "" : "",
         hiddenBefore,
         hiddenAfter: runner ? runner.hasAttribute("hidden") : null,
         srcdocHasCsp: srcdoc.includes("Content-Security-Policy"),
-        srcdocHasNonce: /nonce-[A-Za-z0-9]+/.test(srcdoc),
+        srcdocScriptNonce: scriptNonce ? scriptNonce[1] : "",
+        srcdocCspNonce: cspNonce ? cspNonce[1] : "",
+        srcdocNonceMatchesCsp: !!(
+            scriptNonce &&
+            cspNonce &&
+            scriptNonce[1] === cspNonce[1]
+        ),
         srcdocLength: srcdoc.length,
         // 预览文档必须自包含：不允许外链脚本
         srcdocHasInlineSource: srcdoc.includes("<button>hi</button>"),
@@ -1922,6 +2099,16 @@ SCENARIOS.html_runner_uses_sandboxed_preview = async (env) => {
  *
  * 原断言是「源码里要有 toolRenderSignature / durationBaseMs /
  * TOOL_AUTO_COLLAPSE_MIN_VISIBLE_MS」这类子串；这里直接观察节点身份与 open 状态。
+ *
+ * 去重必须**跨一次轮询**观察：轮询间隔 500ms，而每次轮询都会重绘工具块，
+ * 所以「随手读两次」几乎必然落在同一轮之后，节点身份恒等，断言恒真。
+ * 这里把两次读取安排在「第 2 轮响应到达前 / 第 2 轮响应应用后」——第 2 轮正是
+ * 携带内容完全相同快照的那一轮，两次读取之间只有这一次轮询：
+ *
+ * - 读取点 A：第 2 轮请求进入路由（此时第 1 轮的 DOM 已应用、第 2 轮尚未应用）；
+ * - 读取点 B：第 3 轮请求进入路由（此时第 2 轮已应用、第 3 轮尚未应用）。
+ *
+ * 两个读取点都在路由回调里同步完成，因此不存在「读的时候恰好还在重绘」的竞态。
  */
 SCENARIOS.tool_snapshot_dedup_and_auto_collapse = async (env) => {
     const { window, setRoutes } = env;
@@ -1932,6 +2119,14 @@ SCENARIOS.tool_snapshot_dedup_and_auto_collapse = async (env) => {
         args: { query: "same" },
         status: "running",
     };
+    const log = chatLog(window);
+    const currentToolBlock = () =>
+        log ? log.querySelector(".runtime-tool-block") : null;
+    let toolBlockBeforeDuplicatePoll = null;
+    let toolBlockAfterDuplicatePoll = null;
+    let openAfterSnapshot = null;
+    let roundAtFirstRead = 0;
+    let roundAtSecondRead = 0;
 
     setRoutes([
         {
@@ -1973,7 +2168,13 @@ SCENARIOS.tool_snapshot_dedup_and_auto_collapse = async (env) => {
                     };
                 }
                 if (round === 2) {
-                    // 内容完全相同的快照 -> 不应重绘
+                    // 内容完全相同的快照 -> 不应重绘。
+                    // 读取点 A：第 1 轮的 DOM 已经应用，第 2 轮还没应用。
+                    toolBlockBeforeDuplicatePoll = currentToolBlock();
+                    openAfterSnapshot = toolBlockBeforeDuplicatePoll
+                        ? toolBlockBeforeDuplicatePoll.hasAttribute("open")
+                        : null;
+                    roundAtFirstRead = round;
                     return {
                         body: {
                             events: [],
@@ -1987,6 +2188,10 @@ SCENARIOS.tool_snapshot_dedup_and_auto_collapse = async (env) => {
                     };
                 }
                 if (round === 3) {
+                    // 读取点 B：第 2 轮（内容相同的快照）已经应用，第 3 轮还没应用。
+                    // 两次读取之间只隔着第 2 轮这一次轮询。
+                    toolBlockAfterDuplicatePoll = currentToolBlock();
+                    roundAtSecondRead = round;
                     // 标记为结束 -> 之后再等最小可见时间会折叠
                     return {
                         body: {
@@ -2029,31 +2234,24 @@ SCENARIOS.tool_snapshot_dedup_and_auto_collapse = async (env) => {
 
     window.document.getElementById("runtimeChatInput").value = "go";
     window.document.getElementById("btnRuntimeChatSend").click();
-    await tick(4);
-    // 第一轮：tool_start 建块
-    await settle(700);
 
-    const log = chatLog(window);
-    const firstNode = log ? log.querySelector(".runtime-tool-block") : null;
-    const openAfterSnapshot = firstNode ? firstNode.hasAttribute("open") : null;
-    const roundAtFirstRead = round;
-
-    // 第二轮：内容完全相同的快照。窗口收紧到同一轮内——否则下一次 tool_end
-    // 的重绘会污染判断，把「去重生效」误判成「节点被替换」。
+    // 让第 3 轮请求发出：它一定发生在第 2 轮响应被应用之后。
     // 按对象身份比较（不能用自定义属性做标记：重绘会让标记一起消失，无法区分原因）。
-    await settle(200);
-    const nodeAfterSnapshot = log ? log.querySelector(".runtime-tool-block") : null;
-    const sameNodeReused = !!firstNode && nodeAfterSnapshot === firstNode;
-    const roundAtSecondRead = round;
+    for (let i = 0; i < 60 && round < 3; i += 1) {
+        await settle(100);
+    }
+    const sameNodeReused =
+        !!toolBlockBeforeDuplicatePoll &&
+        toolBlockAfterDuplicatePoll === toolBlockBeforeDuplicatePoll;
 
     // 再等一轮让 tool_end 生效
     await settle(900);
-    const afterEnd = log ? log.querySelector(".runtime-tool-block") : null;
+    const afterEnd = currentToolBlock();
     const openAfterEnd = afterEnd ? afterEnd.hasAttribute("open") : null;
 
     // 自动折叠：再等超过 TOOL_AUTO_COLLAPSE_MIN_VISIBLE_MS(2000)
     await settle(2600);
-    const afterCollapse = log ? log.querySelector(".runtime-tool-block") : null;
+    const afterCollapse = currentToolBlock();
 
     return {
         roundsServiced: round,
@@ -2061,6 +2259,9 @@ SCENARIOS.tool_snapshot_dedup_and_auto_collapse = async (env) => {
         openAfterSnapshot,
         roundAtFirstRead,
         roundAtSecondRead,
+        // 两次读取之间经过的轮询次数：必须恰好 1，否则「节点身份不变」可能
+        // 只是因为观测窗里根本没有轮询。
+        pollsBetweenReads: roundAtSecondRead - roundAtFirstRead,
         sameNodeReused,
         openAfterEnd,
         openAfterCollapse: afterCollapse
@@ -2105,7 +2306,7 @@ SCENARIOS.scroll_behaviors = async (env) => {
     const { window, setRoutes } = env;
     const pageOne = [{ role: "bot", content: "最近的回复" }];
     const pageTwo = [{ role: "bot", content: "更早的回复" }];
-    let historyRound = 0;
+    let eventRound = 0;
 
     setRoutes([
         {
@@ -2119,34 +2320,57 @@ SCENARIOS.scroll_behaviors = async (env) => {
             },
         },
         {
+            // 按游标决定返回哪一页：tab 激活也会触发一次历史加载，
+            // 用「第几次调用」判断页码会被调用顺序带偏。
             match: "/chat/history",
-            reply: () => {
-                historyRound += 1;
-                if (historyRound === 1) {
-                    return {
-                        body: {
-                            items: pageOne,
-                            has_more: true,
-                            next_before: "cursor-1",
-                        },
-                    };
-                }
-                return {
-                    body: { items: pageTwo, has_more: false, next_before: null },
-                };
-            },
+            reply: (url) =>
+                url.includes("before=cursor-1")
+                    ? { body: { items: pageTwo, has_more: false, next_before: null } }
+                    : {
+                          body: {
+                              items: pageOne,
+                              has_more: true,
+                              next_before: "cursor-1",
+                          },
+                      },
         },
         { match: "/chat/jobs/active", reply: { body: { active_job: null } } },
         { match: "/chat/jobs", reply: { body: { job_id: "job-scrollb" } } },
         {
             match: "/jobs/job-scrollb/events",
-            reply: {
-                body: {
-                    events: [
-                        { seq: 1, event: "message", payload: { content: "reply" } },
-                    ],
-                    job: { job_id: "job-scrollb", status: "running", last_seq: 1 },
-                },
+            reply: () => {
+                eventRound += 1;
+                if (eventRound === 1) {
+                    return {
+                        body: {
+                            events: [
+                                {
+                                    seq: 1,
+                                    event: "message",
+                                    payload: { content: "reply" },
+                                },
+                            ],
+                            job: {
+                                job_id: "job-scrollb",
+                                status: "running",
+                                last_seq: 1,
+                            },
+                        },
+                    };
+                }
+                // 尽快让作业结束：只要还在轮询，每一轮里的「滚到底」就会把
+                // 顶部加载抑制窗口（900ms）不断续期，惰性加载永远进不去。
+                return {
+                    body: {
+                        events: [],
+                        job: {
+                            job_id: "job-scrollb",
+                            status: "done",
+                            last_seq: 2,
+                            duration_ms: 120,
+                        },
+                    },
+                };
             },
         },
     ]);
@@ -2155,27 +2379,38 @@ SCENARIOS.scroll_behaviors = async (env) => {
     await tick();
 
     // --- 1) tab 激活 ---
-    const meter1 = _stubScrollHeight(env, 1200);
-    window.eval("window.RuntimeController.onTabActivated('chat')");
+    // onTabActivated 有 `if (!state.authenticated) return` 前置守卫，不摆好登录态
+    // 就点等于什么都没发生（这正是早先 tabActivationScrolls 恒 0 的原因）。
+    window.__harness.setAuthenticated(true);
+    // 先走一遍完整加载，让 chatHistoryLoaded 为真；之后再激活 tab 时
+    // loadChatHistory 会早退回，唯一还会强制滚到底的就是 onTabActivated 自己，
+    // 这样信号才归因明确。这里必须等过 forceScrollChatToBottomSoon 的 700ms 尾巴，
+    // 否则第一次激活遗留的定时器会混进下一次计数。
+    window.RuntimeController.onTabActivated("chat");
     await tick(4);
-    await settle(250);
+    await settle(1000);
+
+    _stubScrollHeight(env, 1200);
+    window.RuntimeController.onTabActivated("chat");
+    await tick(4);
+    await settle(900);
     const tabActivationScrolls = env.scrollActivity.calls;
 
     // --- 2) 发送消息 ---
-    window.RuntimeController.loadChatHistory(true).catch(() => {});
-    await tick(4);
-    await settle(250);
-    const meter2 = _stubScrollHeight(env, 1500);
+    _stubScrollHeight(env, 1500);
     window.document.getElementById("runtimeChatInput").value = "hi";
     window.document.getElementById("btnRuntimeChatSend").click();
     await tick(4);
     await settle(400);
     const sendScrolls = env.scrollActivity.calls;
-    const scrollTopAfterSend = meter2.element.scrollTop;
 
     // --- 3) 惰性加载：滚到顶部触发；高度增长后 scrollTop 应被补偿 ---
+    // 作业结束后轮询停止（否则每轮的滚到底会不断续期顶部加载抑制窗口），
+    // 再等过抑制窗口 CHAT_TOP_LOAD_SUPPRESS_MS = 900ms。
+    await settle(1500);
+
     const meter3 = _stubScrollHeight(env, 2000);
-    const previousTop = 40;
+    const previousTop = 0;
     meter3.element.scrollTop = previousTop;
     const growth = 800;
     meter3.element.addEventListener("scroll", () => {
@@ -2192,7 +2427,6 @@ SCENARIOS.scroll_behaviors = async (env) => {
     return {
         tabActivationScrolls,
         sendScrolls,
-        scrollTopAfterSend,
         lazyLoadScrollTop: meter3.element.scrollTop,
         lazyLoadExpectedTop: previousTop + growth,
         lazyLoadHeight: meter3.height,
