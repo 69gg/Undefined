@@ -675,7 +675,6 @@ jobs:
       - verify-python
     outputs:
       tag: ${{ steps.pins.outputs.tag }}
-      lxmusic2api_pinned: ${{ steps.pins.outputs.lxmusic2api_pinned }}
       lxmusic2api_slug: ${{ steps.pins.outputs.lxmusic2api_slug }}
       lxmusic2api_sha: ${{ steps.pins.outputs.lxmusic2api_sha }}
       lxmusic2api_short: ${{ steps.pins.outputs.lxmusic2api_short }}
@@ -692,24 +691,12 @@ jobs:
       - name: Read pinned lxmusic2api commit
         id: pins
         run: |
-          # 用不抛错的 is_full_sha 判定：占位值走「跳过」分支，而不是构建一个
-          # 不可复现的 main HEAD 镜像。
-          sha=$(uv run python -c "from Undefined.deploy.images import LXMUSIC2API_UPSTREAM_SHA; print(LXMUSIC2API_UPSTREAM_SHA)")
-          slug=$(uv run python -c "from Undefined.deploy.images import LXMUSIC2API_UPSTREAM_SLUG; print(LXMUSIC2API_UPSTREAM_SLUG)")
-          if uv run python -c "
-          import sys
-          from Undefined.deploy.images import LXMUSIC2API_UPSTREAM_SHA, is_full_sha
-          sys.exit(0 if is_full_sha(LXMUSIC2API_UPSTREAM_SHA) else 1)
-          "; then
-            echo "lxmusic2api_pinned=true" >> "$GITHUB_OUTPUT"
-            short=$(uv run python -c "from Undefined.deploy.images import short_sha, LXMUSIC2API_UPSTREAM_SHA; print(short_sha(LXMUSIC2API_UPSTREAM_SHA))")
-          else
-            echo "lxmusic2api_pinned=false" >> "$GITHUB_OUTPUT"
-            short=""
-          fi
-          echo "lxmusic2api_slug=$slug" >> "$GITHUB_OUTPUT"
-          echo "lxmusic2api_sha=$sha" >> "$GITHUB_OUTPUT"
-          echo "lxmusic2api_short=$short" >> "$GITHUB_OUTPUT"
+          # pin 是**硬要求**：短 sha 用作镜像 tag，且 tests/test_deploy_catalog.py
+          # 会先断言它是完整 sha。所以这里没有「占位就跳过」的分支——那种分支在
+          # 测试先失败的前提下永远不可达，只会让流程看起来宽容。
+          echo "lxmusic2api_sha=$(uv run python -c "from Undefined.deploy.images import LXMUSIC2API_UPSTREAM_SHA; print(LXMUSIC2API_UPSTREAM_SHA)")" >> "$GITHUB_OUTPUT"
+          echo "lxmusic2api_short=$(uv run python -c "from Undefined.deploy.images import short_sha, LXMUSIC2API_UPSTREAM_SHA; print(short_sha(LXMUSIC2API_UPSTREAM_SHA))")" >> "$GITHUB_OUTPUT"
+          echo "lxmusic2api_slug=$(uv run python -c "from Undefined.deploy.images import LXMUSIC2API_UPSTREAM_SLUG; print(LXMUSIC2API_UPSTREAM_SLUG)")" >> "$GITHUB_OUTPUT"
           echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
 
   build-docker:
@@ -772,7 +759,6 @@ jobs:
           cache-to: type=gha,mode=max,scope=undefined-bot-${{ matrix.platform }}
 
       - name: Checkout lxmusic2api upstream
-        if: needs.docker-pins.outputs.lxmusic2api_pinned == 'true'
         uses: actions/checkout@v4
         with:
           repository: ${{ needs.docker-pins.outputs.lxmusic2api_slug }}
@@ -781,7 +767,6 @@ jobs:
 
       - name: Build and push lxmusic2api image by digest
         id: build_lxmusic
-        if: needs.docker-pins.outputs.lxmusic2api_pinned == 'true'
         uses: docker/build-push-action@v6
         with:
           context: .lxmusic2api-upstream
@@ -795,14 +780,11 @@ jobs:
 
       - name: Export digests
         run: |
-          mkdir -p /tmp/digests/bot
+          mkdir -p /tmp/digests/bot /tmp/digests/lxmusic2api
           bot_digest="${{ steps.build_bot.outputs.digest }}"
           touch "/tmp/digests/bot/${bot_digest#sha256:}"
-          if [ "${{ needs.docker-pins.outputs.lxmusic2api_pinned }}" = "true" ]; then
-            mkdir -p /tmp/digests/lxmusic2api
-            lx_digest="${{ steps.build_lxmusic.outputs.digest }}"
-            touch "/tmp/digests/lxmusic2api/${lx_digest#sha256:}"
-          fi
+          lx_digest="${{ steps.build_lxmusic.outputs.digest }}"
+          touch "/tmp/digests/lxmusic2api/${lx_digest#sha256:}"
 
       - name: Upload bot digest
         uses: actions/upload-artifact@v4
@@ -813,7 +795,6 @@ jobs:
           retention-days: 1
 
       - name: Upload lxmusic2api digest
-        if: needs.docker-pins.outputs.lxmusic2api_pinned == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: digests-lxmusic2api-${{ env.PLATFORM_PAIR }}
@@ -841,7 +822,6 @@ jobs:
           merge-multiple: true
 
       - name: Download lxmusic2api digests
-        if: needs.docker-pins.outputs.lxmusic2api_pinned == 'true'
         uses: actions/download-artifact@v4
         with:
           path: /tmp/digests/lxmusic2api
@@ -867,7 +847,6 @@ jobs:
             $(printf "${BOT_IMAGE}@sha256:%s " *)
 
       - name: Create lxmusic2api manifest list
-        if: needs.docker-pins.outputs.lxmusic2api_pinned == 'true'
         working-directory: /tmp/digests/lxmusic2api
         run: |
           docker buildx imagetools create \
@@ -882,11 +861,7 @@ jobs:
             echo
             echo "- \`${BOT_IMAGE}:${{ needs.docker-pins.outputs.tag }}\`（linux/amd64 + linux/arm64）"
             echo "- \`${BOT_IMAGE}:latest\`"
-            if [ "${{ needs.docker-pins.outputs.lxmusic2api_pinned }}" = "true" ]; then
-              echo "- \`${LXMUSIC2API_IMAGE}:${{ needs.docker-pins.outputs.lxmusic2api_short }}\`（linux/amd64 + linux/arm64）"
-            else
-              echo "- lxmusic2api 镜像已跳过（上游 commit 未 pin）"
-            fi
+            echo "- \`${LXMUSIC2API_IMAGE}:${{ needs.docker-pins.outputs.lxmusic2api_short }}\`（linux/amd64 + linux/arm64）"
             echo
             echo "> GHCR 包首次推送后默认为 **private**。用户需先"
             echo "> \`docker login ghcr.io\`，或在包设置里改为 public，"

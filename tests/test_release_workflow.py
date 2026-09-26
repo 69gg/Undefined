@@ -180,6 +180,37 @@ def test_arm64_digests_are_merged_into_a_manifest_list() -> None:
         assert "-t " in str(step["run"]), "合并时必须打上最终 tag"
 
 
+def test_lxmusic2api_image_is_built_unconditionally() -> None:
+    """pin 是硬要求，CI 不该再留「占位就跳过」的分支。
+
+    短 sha 会被当作镜像 tag，只有完整 sha 才能复现构建——这一点由
+    `tests/test_deploy_catalog.py::test_lxmusic2api_pin_is_full_sha` 强制，而它在
+    verify-python 里先跑。因此「未 pin 时跳过构建」的分支永远不可达，留着只会
+    让流程看起来宽容（并且让 docker-pins 的输出多一个没人能触发的取值）。
+    """
+    workflow = _workflow()
+    pins = workflow["jobs"]["docker-pins"]["outputs"]
+    assert "lxmusic2api_pinned" not in pins, f"跳过分支又回来了：{sorted(pins)}"
+
+    for job_name in ("build-docker", "merge-docker"):
+        conditional = [
+            step.get("name")
+            for step in _steps(workflow["jobs"][job_name])
+            if "lxmusic2api_pinned" in str(step.get("if", ""))
+        ]
+        assert not conditional, f"{job_name} 仍有依赖跳过分支的步骤：{conditional}"
+
+    # 该镜像的构建步骤必须存在且无条件
+    builds = [
+        step
+        for step in _steps(workflow["jobs"]["build-docker"])
+        if str(step.get("uses", "")).startswith(BUILD_PUSH)
+        and "LXMUSIC2API_IMAGE" in str((step.get("with") or {}).get("outputs", ""))
+    ]
+    assert len(builds) == 1, "build-docker 里应有且只有一个 lxmusic2api 构建步骤"
+    assert "if" not in builds[0]
+
+
 def test_release_waits_for_the_docker_images() -> None:
     """「版本发布前面，程序构建后面」：发版必须等镜像合并完成。"""
     workflow = _workflow()

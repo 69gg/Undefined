@@ -111,7 +111,15 @@ def test_vendor_images_are_pinned() -> None:
 
 
 def test_lxmusic2api_pin_is_full_sha() -> None:
-    # 上游没有 tag/release，只能锚定 commit，且必须是完整 sha 才能复现构建
+    """上游没有 tag/release，只能锚定 commit，且必须是完整 sha 才能复现构建。
+
+    先断言再取短 sha：直接调 ``short_sha`` 在未 pin 时抛的是 ValueError，看不出
+    是哪条契约被违反。
+    """
+    assert images.is_full_sha(images.LXMUSIC2API_UPSTREAM_SHA), (
+        f"LXMUSIC2API_UPSTREAM_SHA 必须是完整 commit sha，当前为 "
+        f"{images.LXMUSIC2API_UPSTREAM_SHA!r}；CI 用它作为镜像 tag 的构建依据"
+    )
     assert images.short_sha(images.LXMUSIC2API_UPSTREAM_SHA) == (
         images.LXMUSIC2API_UPSTREAM_SHA[:7].lower()
     )

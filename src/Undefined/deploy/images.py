@@ -120,9 +120,8 @@ SHA_PATTERN: Final[re.Pattern[str]] = re.compile(r"[0-9a-fA-F]{40}")
 def is_full_sha(value: str) -> bool:
     """是否为完整 commit sha。
 
-    单独提供判定函数是为了让「pin 未填」这种情况**可判断而不抛错**：
-    CI 需要据此跳过 lxmusic2api 镜像构建，若用 ``short_sha`` 抛错会让整个
-    release 作业失败（占位值分支永远走不到）。
+    与 :func:`short_sha` 的区别是**可判断而不抛错**，便于调用方给出清晰提示
+    （例如测试里先断言 pin 已填，再由 ``short_sha`` 取 tag）。
     """
     return bool(SHA_PATTERN.fullmatch(value.strip()))
 

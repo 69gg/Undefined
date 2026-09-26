@@ -234,7 +234,7 @@ NagaAgent 是仓库的 git submodule（`code/NagaAgent`），不是独立服务�
 > 从源码部署时也可以完全不用预构建镜像，改为本地构建：
 > `docker build -f src/Undefined/deploy/templates/Dockerfile.bot -t ghcr.io/<owner>/undefined-bot:v<版本> .`
 
-**升级 lxmusic2api 上游**：改 `src/Undefined/deploy/images.py` 里的 `LXMUSIC2API_UPSTREAM_SHA`，然后打下一个 tag。CI 在该值仍是占位符时跳过该镜像构建（而不是构建不可复现的 `main` HEAD），但 `uv run deploy` 选中 lxmusic2api 时会直接报错——两边语义一致：没 pin 就没有可用镜像。
+**升级 lxmusic2api 上游**：改 `src/Undefined/deploy/images.py` 里的 `LXMUSIC2API_UPSTREAM_SHA`，然后打下一个 tag。pin 必须是完整 commit sha——`tests/test_deploy_catalog.py` 会强制这一点（上游没有 tag/release，短 sha 会被当作镜像 tag，只有完整 sha 才能复现构建）。因此 CI 无条件构建该镜像；`uv run deploy` 也只在真的选中 lxmusic2api 时才解析它。
 
 **升级第三方镜像 pin**：NapCat / SearXNG / Firecrawl 及其依赖的 tag 同样集中在 `images.py`，`pin` 常量带 `PIN_VERIFIED_ON` 记录核对日期。`playwright-service` 与 `nuq-postgres` 上游不发布版本 tag，只能跟随 `latest`。
 
