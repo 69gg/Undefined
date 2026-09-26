@@ -13,6 +13,7 @@ Use `uv` for the root project:
 - `uv run Undefined-webui` starts the recommended Management-first local entrypoint.
 - `uv run Undefined` starts the bot directly.
 - `uv run pytest tests/` runs the backend test suite.
+- `npm ci --prefix tests/frontend` installs the jsdom driver used by `tests/test_webui_runtime_chat_behavior.py`. Without it those cases **skip silently on a local machine** (on CI they fail instead, which is deliberate). Run it once after cloning if you touch WebUI JS.
 - `uv run ruff check .` and `uv run ruff format --check .` enforce Python linting and formatting.
 - `uv run mypy .` runs strict type checks.
 - `uv build --wheel` validates packaging and bundled resources.

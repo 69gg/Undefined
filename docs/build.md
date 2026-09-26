@@ -325,7 +325,7 @@ npm install
 
 拉取请求与 `main` / `develop` 推送会触发 `.github/workflows/ci.yml`，工作流级声明 `permissions: contents: read` 与并发取消（同一 ref 的新推送会取消旧运行），每个 job 都带 `timeout-minutes`：
 
-1. `quality-check`（Python 3.12）：`ruff` + `ruff format --check` + `mypy` + `pytest tests/ --cov`（覆盖率低于 `pyproject.toml` 的 `fail_under` 即失败）+ `uv build --wheel` 并校验 wheel 内含资源。该 job 会 `setup-node`，以便 WebUI 前端的 4 个 node 行为测试真正执行而不是静默 skip。
+1. `quality-check`（Python 3.12）：`ruff` + `ruff format --check` + `mypy` + `pytest tests/ --cov`（覆盖率低于 `pyproject.toml` 的 `fail_under` 即失败）+ `uv build --wheel` 并校验 wheel 内含资源。该 job 会 `setup-node` 并执行 `npm ci --prefix tests/frontend`，以便 WebUI 前端的 node 行为测试（用 jsdom 驱动真实 DOM）真正执行——缺这段安装时该文件的 `_require_env()` 会让用例**直接失败**（只有在本地非 CI 环境下才会 skip）。
 2. `python-compat`（3.11 / 3.13）：`pyproject.toml` 声明 `>=3.11,<3.14`，因此两端边界各跑一次 `mypy` 与 `pytest`。
 3. `native-app-quality-check`（Console / Chat 矩阵）：`npm run check`。
 
