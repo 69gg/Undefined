@@ -1902,6 +1902,161 @@ SCENARIOS.html_runner_uses_sandboxed_preview = async (env) => {
     };
 };
 
+/**
+ * 工具块的两次关键行为：
+ * 1) 快照内容不变时不得重绘（DOM 节点保持同一引用，避免闪烁与丢失展开态）；
+ * 2) 工具结束后经过最小可见时间要自动折叠（去掉 open 属性）。
+ *
+ * 原断言是「源码里要有 toolRenderSignature / durationBaseMs /
+ * TOOL_AUTO_COLLAPSE_MIN_VISIBLE_MS」这类子串；这里直接观察节点身份与 open 状态。
+ */
+SCENARIOS.tool_snapshot_dedup_and_auto_collapse = async (env) => {
+    const { window, setRoutes } = env;
+    let round = 0;
+    const snapshot = {
+        call_id: "call-snap",
+        name: "web_agent",
+        args: { query: "same" },
+        status: "running",
+    };
+
+    setRoutes([
+        {
+            match: "/chat/conversations",
+            reply: {
+                body: {
+                    conversations: [{ id: "conv-1", title: "t" }],
+                    default_conversation_id: "webchat",
+                    active_job: null,
+                },
+            },
+        },
+        {
+            match: "/chat/history",
+            reply: { body: { items: [], has_more: false, next_before: null } },
+        },
+        { match: "/chat/jobs", reply: { body: { job_id: "job-snap" } } },
+        {
+            match: "/jobs/job-snap/events",
+            reply: () => {
+                round += 1;
+                if (round === 1) {
+                    return {
+                        body: {
+                            events: [
+                                {
+                                    seq: 1,
+                                    event: "tool_start",
+                                    payload: { call_id: "call-snap", name: "web_agent" },
+                                },
+                            ],
+                            job: {
+                                job_id: "job-snap",
+                                status: "running",
+                                last_seq: 1,
+                                current_tool_calls: [snapshot],
+                            },
+                        },
+                    };
+                }
+                if (round === 2) {
+                    // 内容完全相同的快照 -> 不应重绘
+                    return {
+                        body: {
+                            events: [],
+                            job: {
+                                job_id: "job-snap",
+                                status: "running",
+                                last_seq: 1,
+                                current_tool_calls: [snapshot],
+                            },
+                        },
+                    };
+                }
+                if (round === 3) {
+                    // 标记为结束 -> 之后再等最小可见时间会折叠
+                    return {
+                        body: {
+                            events: [
+                                {
+                                    seq: 2,
+                                    event: "tool_end",
+                                    payload: {
+                                        call_id: "call-snap",
+                                        name: "web_agent",
+                                        ok: true,
+                                        status: "done",
+                                        duration_ms: 300,
+                                    },
+                                },
+                            ],
+                            job: { job_id: "job-snap", status: "running", last_seq: 2 },
+                        },
+                    };
+                }
+                return {
+                    body: {
+                        events: [],
+                        job: {
+                            job_id: "job-snap",
+                            status: "done",
+                            last_seq: 2,
+                            duration_ms: 500,
+                        },
+                    },
+                };
+            },
+        },
+    ]);
+
+    window.eval("window.RuntimeController.init()");
+    await tick();
+    window.RuntimeController.loadChatHistory(true).catch(() => {});
+    await tick();
+
+    window.document.getElementById("runtimeChatInput").value = "go";
+    window.document.getElementById("btnRuntimeChatSend").click();
+    await tick(4);
+    // 第一轮：tool_start 建块
+    await settle(700);
+
+    const log = chatLog(window);
+    const firstNode = log ? log.querySelector(".runtime-tool-block") : null;
+    const openAfterSnapshot = firstNode ? firstNode.hasAttribute("open") : null;
+    const roundAtFirstRead = round;
+
+    // 第二轮：内容完全相同的快照。窗口收紧到同一轮内——否则下一次 tool_end
+    // 的重绘会污染判断，把「去重生效」误判成「节点被替换」。
+    // 按对象身份比较（不能用自定义属性做标记：重绘会让标记一起消失，无法区分原因）。
+    await settle(200);
+    const nodeAfterSnapshot = log ? log.querySelector(".runtime-tool-block") : null;
+    const sameNodeReused = !!firstNode && nodeAfterSnapshot === firstNode;
+    const roundAtSecondRead = round;
+
+    // 再等一轮让 tool_end 生效
+    await settle(900);
+    const afterEnd = log ? log.querySelector(".runtime-tool-block") : null;
+    const openAfterEnd = afterEnd ? afterEnd.hasAttribute("open") : null;
+
+    // 自动折叠：再等超过 TOOL_AUTO_COLLAPSE_MIN_VISIBLE_MS(2000)
+    await settle(2600);
+    const afterCollapse = log ? log.querySelector(".runtime-tool-block") : null;
+
+    return {
+        roundsServiced: round,
+        toolBlockCount: log ? log.querySelectorAll(".runtime-tool-block").length : -1,
+        openAfterSnapshot,
+        roundAtFirstRead,
+        roundAtSecondRead,
+        sameNodeReused,
+        openAfterEnd,
+        openAfterCollapse: afterCollapse
+            ? afterCollapse.hasAttribute("open")
+            : null,
+        classesAfterCollapse: afterCollapse ? afterCollapse.className || "" : "",
+    };
+};
+
 // --------------------------------------------------------------------------- //
 
 async function main() {

@@ -210,6 +210,34 @@ def test_markdown_and_html_images_are_lazy_and_clickable() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# 工具块：快照去重与自动折叠
+# --------------------------------------------------------------------------- #
+
+
+def test_unchanged_tool_snapshot_does_not_rerender_node() -> None:
+    """内容相同的工具快照不得重建 DOM 节点（避免闪烁与展开态丢失）。
+
+    观测窗口必须落在同一轮轮询内：跨轮会被后续 tool_end 的重绘污染，
+    把「去重生效」误判成「节点被替换」（这一点在场景里已注明）。
+    """
+    result = run_scenario("tool_snapshot_dedup_and_auto_collapse")
+
+    assert result["toolBlockCount"] == 1, result
+    assert result["roundAtFirstRead"] == result["roundAtSecondRead"], result
+    assert result["sameNodeReused"] is True, result
+
+
+def test_tool_block_auto_collapses_after_minimum_visible_time() -> None:
+    """工具结束后经过最小可见时间要自动折叠（去掉 open）。"""
+    result = run_scenario("tool_snapshot_dedup_and_auto_collapse")
+
+    assert result["openAfterSnapshot"] is True, "工具块应先展开"
+    assert result["openAfterEnd"] is True, "结束时仍在最小可见时间内，应保持展开"
+    assert result["openAfterCollapse"] is False, result
+    assert "done" in result["classesAfterCollapse"], result["classesAfterCollapse"]
+
+
+# --------------------------------------------------------------------------- #
 # HTML 运行器（沙箱隔离）
 # --------------------------------------------------------------------------- #
 

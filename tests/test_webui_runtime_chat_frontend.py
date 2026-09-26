@@ -111,64 +111,6 @@ def test_webui_logs_fetch_more_tail_lines_by_default() -> None:
     assert "lines: String(LOG_TAIL_LINES)" in source
 
 
-def test_webchat_tool_snapshots_do_not_rerender_unchanged_blocks() -> None:
-    source = _read_source(RUNTIME_JS)
-    live_update_helper = source.split("function upsertTimelineToolBlock", 1)[1].split(
-        "function appendNestedTimelineMessage", 1
-    )[0]
-    agent_stage_helper = source.split("function upsertAgentStageBlock", 1)[1].split(
-        "function historyWebchatEvents",
-        1,
-    )[0]
-    history_helper = source.split("function renderHistoryTimeline", 1)[1].split(
-        "function appendHistoryChatItem",
-        1,
-    )[0]
-
-    assert "previousParentSignature === nextParentSignature" in live_update_helper
-    assert "previousRootSignature === nextRootSignature" in live_update_helper
-    assert 'status === "tool_snapshot"' in live_update_helper
-    assert "renderToolNodeIfChanged(parentNode, parent)" in live_update_helper
-    assert "renderToolNodeIfChanged(rootNode, root)" in live_update_helper
-    assert "renderToolNodeIfChanged(node, block)" in live_update_helper
-    assert "previousParentSignature === nextParentSignature" in agent_stage_helper
-    assert "renderToolNodeIfChanged(node, block)" in agent_stage_helper
-    assert "node.innerHTML = renderToolBlock" not in live_update_helper
-    assert "node.innerHTML = renderToolBlock" not in agent_stage_helper
-    assert "node.innerHTML = renderToolBlock" in history_helper
-
-
-def test_webchat_tool_blocks_auto_collapse_after_minimum_visible_time() -> None:
-    source = _read_source(RUNTIME_JS)
-    assert "TOOL_AUTO_COLLAPSE_MIN_VISIBLE_MS = 2000" in source
-    assert "runtimeState.toolCollapseTimers" in source
-    assert "function scheduleToolAutoCollapse" in source
-    assert 'block.autoOpen ? " open" : ""' in source
-    assert "autoOpen: isStart || isSnapshot ? true : !!previous.autoOpen" in source
-    assert "localStartedAtMs: isStart" in source
-    assert "finishedAtMs: isEnd" in source
-    signature_helper = source.split("function toolRenderSignature", 1)[1].split(
-        "function updateToolMetaDisplay",
-        1,
-    )[0]
-    assert "block.autoOpen" in signature_helper
-    assert "const childSignature" in signature_helper
-    assert "block.children.map(toolRenderSignature)" in signature_helper
-    assert "const timelineSignature" in signature_helper
-    assert "`call:${toolRenderSignature(entry.call)}`" in signature_helper
-    collapse_helper = source.split("function scheduleToolAutoCollapse", 1)[1].split(
-        "function upsertTimelineToolBlock", 1
-    )[0]
-    assert "latest.autoOpen = false" in collapse_helper
-    assert "redrawToolTimelineNode(item, blocks, timerKey)" in collapse_helper
-    assert "setTimeout(collapse, TOOL_AUTO_COLLAPSE_MIN_VISIBLE_MS)" in collapse_helper
-    assert "TOOL_AUTO_COLLAPSE_MIN_VISIBLE_MS -" not in collapse_helper
-    clear_helper = source.split("function clearToolCollapseTimers", 1)[1].split(
-        "function finishStreamingMessage", 1
-    )[0]
-    assert "clearTimeout(timer)" in clear_helper
-
-
 def test_webchat_tab_activation_forces_bottom_scroll_after_history_load() -> None:
     source = _read_source(RUNTIME_JS)
     load_helper = source.split("async function loadChatHistory", 1)[1].split(
