@@ -31,15 +31,13 @@ SECRET_FILE_MODE: Final[int] = 0o600
 
 
 def repo_root() -> Path:
-    """定位仓库根目录。
+    """定位仓库根目录：从当前工作目录上溯，找到含 ``pyproject.toml`` 的那层。
 
-    优先按包路径上溯（源码/开发安装），失败时从当前工作目录上溯，最后回退 cwd。
-    ``deploy/`` 与 ``config.toml`` 都相对该目录。
+    ``uv run deploy`` 必然从项目内启动（uv 要求如此），从子目录运行也能上溯到
+    根目录；都找不到时退回 cwd。旧实现先按 ``Path(__file__)`` 上溯三级，那是
+    ``<repo>/src``——``src/pyproject.toml`` 从来不存在，该分支是死代码，docstring
+    却声称「优先按包路径上溯」。
     """
-    package_root = Path(__file__).resolve().parent.parent.parent
-    if (package_root / "pyproject.toml").is_file():
-        return package_root
-
     cwd = Path.cwd().resolve()
     for candidate in (cwd, *cwd.parents):
         if (candidate / "pyproject.toml").is_file():

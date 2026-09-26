@@ -49,6 +49,8 @@ services:
     mem_limit: ${UNDEFINED_DEPLOY_FIRECRAWL_API_MEMORY}
     command: node dist/src/harness.js --start-docker
     volumes:
+      # 只有 NUQ_BACKEND=fdb 时才有意义；部署脚本不设置该变量（默认 pg），
+      # 所以这个挂载是惰性的。卷名沿用我们自己的命名，并非上游卷名。
       - firecrawl-fdb:/var/fdb:ro
 
   firecrawl-playwright:

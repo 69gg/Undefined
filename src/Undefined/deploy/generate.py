@@ -225,9 +225,6 @@ def build_env(ctx: GenerateContext) -> dict[str, str]:
         ),
         f"{IMAGE_ENV_PREFIX}FIRECRAWL_REDIS_IMAGE": images.FIRECRAWL_REDIS_IMAGE,
         f"{IMAGE_ENV_PREFIX}FIRECRAWL_RABBITMQ_IMAGE": images.FIRECRAWL_RABBITMQ_IMAGE,
-        f"{IMAGE_ENV_PREFIX}LXMUSIC2API_IMAGE": images.lxmusic2api_image(
-            ctx.image_owner, images.LXMUSIC2API_UPSTREAM_SHA
-        ).reference,
         f"{IMAGE_ENV_PREFIX}FIRECRAWL_API_CPUS": images.FIRECRAWL_API_CPUS,
         f"{IMAGE_ENV_PREFIX}FIRECRAWL_API_MEMORY": images.FIRECRAWL_API_MEMORY,
         f"{IMAGE_ENV_PREFIX}FIRECRAWL_PLAYWRIGHT_CPUS": (
@@ -237,7 +234,9 @@ def build_env(ctx: GenerateContext) -> dict[str, str]:
             images.FIRECRAWL_PLAYWRIGHT_MEMORY
         ),
         f"{IMAGE_ENV_PREFIX}FIRECRAWL_INTERNAL_PORT": "3002",
-        DOCKER_SOCKET_ENV: ctx.docker_socket,
+        # 与端口绑定同理：用户可能手改 .env 指向 rootless / Docker Desktop 的
+        # socket，不复用就会在下次 up 被静默改回默认路径。
+        DOCKER_SOCKET_ENV: prev(DOCKER_SOCKET_ENV) or ctx.docker_socket,
         # NapCat 挂载目录属主，交给容器 entrypoint 做 gosu 降权
         "UNDEFINED_DEPLOY_NAPCAT_UID": str(_current_uid()),
         "UNDEFINED_DEPLOY_NAPCAT_GID": str(_current_gid()),
@@ -251,6 +250,13 @@ def build_env(ctx: GenerateContext) -> dict[str, str]:
             continue
         env[spec.env_var] = str(ctx.port(key))
         env[spec.bind_env_var] = ctx.port_bind
+
+    # lxmusic2api 镜像引用只在该服务真的被选中时解析：short_sha 对占位 pin 会抛错，
+    # 无条件解析会让**任何**一次 uv run deploy 直接失败（哪怕根本没选这个服务）。
+    if catalog.LXMUSIC2API.key in ctx.services:
+        env[f"{IMAGE_ENV_PREFIX}LXMUSIC2API_IMAGE"] = images.lxmusic2api_image(
+            ctx.image_owner, images.LXMUSIC2API_UPSTREAM_SHA
+        ).reference
 
     # 凭据：优先复用 .env，其次复用 config.toml 里已生效的值，最后生成随机值
     env["UNDEFINED_DEPLOY_NAPCAT_WEBUI_TOKEN"] = reuse_or_generate(

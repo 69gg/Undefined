@@ -570,6 +570,14 @@ def run_up(options: dict[str, Any]) -> int:
         print("config.toml：无变更")
 
     if dry_run:
+        # 先走一遍调用层（DryRunRunner 只记录、不执行），让「将执行的命令」是真实
+        # 列表。旧实现在调用任何 compose 命令之前就 return 了，那段输出因此恒为
+        # 「（无）」——一条会骗人的死代码。
+        invocation = build_invocation(layout, project_name)
+        docker_cli.compose_config(runner, invocation)
+        docker_cli.compose_up(
+            runner, invocation, pull=str(options.get("pull") or docker_cli.PULL_MISSING)
+        )
         # dry-run 不落盘，只把将生成的内容打印出来
         print("\n--- compose.yaml（将写入 deploy/compose.yaml）---")
         print(config.compose_text)

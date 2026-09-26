@@ -427,6 +427,23 @@ def test_up_dry_run_prints_plan_and_compose(
     assert "已更新" not in output
 
 
+def test_up_dry_run_lists_the_commands_it_would_run(
+    fake_repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """dry-run 的「将执行的命令」必须是真实列表，不能恒为「（无）」。
+
+    旧实现在调用任何 compose 命令之前就 return，那段输出因此永远是空的。
+    """
+    assert runner.run_up(_yes_options(services=("searxng",))) == 0
+    output = capsys.readouterr().out
+
+    assert "将执行的命令" in output
+    assert "（无）" not in output
+    assert "compose" in output and "up" in output
+    # 校验与启动两条命令都要出现，且 --pull 策略可见
+    assert "--pull missing" in output
+
+
 def test_up_dry_run_does_not_touch_submodule(
     fake_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

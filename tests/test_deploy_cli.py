@@ -6,10 +6,12 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 import pytest
 
-from Undefined.deploy import catalog, cli
+from Undefined.deploy import catalog, cli, docker_cli, runner
+from Undefined.deploy.state import DeployLayout
 
 
 def test_defaults_are_all_off() -> None:
@@ -158,3 +160,38 @@ def test_non_integer_port_reports_error(capsys: pytest.CaptureFixture[str]) -> N
 def test_no_subcommand_prints_help(capsys: pytest.CaptureFixture[str]) -> None:
     assert cli.main([]) == 0
     assert "up" in capsys.readouterr().out
+
+
+def test_logs_positional_is_passed_through_not_normalized(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`deploy logs` 的位置参数是 compose 服务名，不能被当成 catalog 键。
+
+    归一化会把 `undefined-bot`（CLI 自己的 help 举的例子）判成「未知服务」而
+    恒失败；反过来 catalog 键 `firecrawl` 又不是合法的 compose 服务名。
+    """
+    layout = DeployLayout.under(tmp_path)
+    layout.ensure()
+    layout.compose_file.write_text("name: undefined-deploy\n", encoding="utf-8")
+    monkeypatch.setattr(runner, "repo_root", lambda: tmp_path)
+
+    seen: list[tuple[str, ...]] = []
+
+    def fake_logs(
+        run: object, invocation: object, *, services: tuple[str, ...], **kwargs: object
+    ) -> docker_cli.CommandResult:
+        del invocation, kwargs
+        seen.append(tuple(services))
+        return docker_cli.CommandResult(("docker",), 0, "", "")
+
+    monkeypatch.setattr(docker_cli, "compose_logs", fake_logs)
+    monkeypatch.setattr(
+        docker_cli,
+        "compose_ps",
+        lambda run, invocation: docker_cli.CommandResult(("docker",), 0, "[]", ""),
+    )
+
+    assert cli.main(["logs", "undefined-bot", "firecrawl-api"]) == 0, (
+        capsys.readouterr().out
+    )
+    assert seen == [("undefined-bot", "firecrawl-api")]

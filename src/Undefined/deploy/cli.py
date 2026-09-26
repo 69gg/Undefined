@@ -86,7 +86,11 @@ def build_parser() -> argparse.ArgumentParser:
     logs.add_argument(
         "services",
         nargs="*",
-        help="只显示这些服务的日志（默认全部），如 napcat undefined-bot",
+        # 原样传给 `docker compose logs`，所以这里列的是 compose 服务名
+        help=(
+            "只显示这些服务的日志（默认全部），用 compose 服务名，"
+            "如 undefined-bot napcat firecrawl-api"
+        ),
     )
     logs.add_argument(
         "--tail",
@@ -239,10 +243,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         # 归一化本身会因用户输入报错（未知服务键/端口键、非法端口值），
         # 必须放在 try 内，否则会打印 Python 栈而不是项目约定的「错误：...」。
-        # 部署选择项只挂在 up 上；其它子命令用 SUPPRESS 默认值，因此这里按需取。
-        normalized["services"] = normalize_services(
-            getattr(args, "services", None), getattr(args, "service_flags", None)
-        )
+        # `up` 的 services 是「要部署哪些服务」，取值是 catalog 键，必须归一化；
+        # `logs` 的位置参数会原样传给 `docker compose logs`，那里的名字是 compose
+        # 服务名（undefined-bot / firecrawl-api …），归一化会把它们判成「未知服务」，
+        # 而 catalog 键 `firecrawl` 反过来又不是合法的 compose 服务名。
+        if args.command == "up":
+            normalized["services"] = normalize_services(
+                getattr(args, "services", None), getattr(args, "service_flags", None)
+            )
+        else:
+            normalized["services"] = tuple(getattr(args, "services", None) or ())
         normalized["port_overrides"] = parse_ports(
             getattr(args, "port_overrides", None)
         )

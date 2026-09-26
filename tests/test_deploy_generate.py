@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 import yaml
 
-from Undefined.deploy import catalog, generate
+from Undefined.deploy import catalog, generate, images
 from Undefined.deploy.state import DeployLayout
 
 PLACEHOLDER_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
@@ -340,6 +340,24 @@ def test_firecrawl_brings_its_whole_stack(tmp_path: Path) -> None:
         "firecrawl-rabbitmq",
         "firecrawl-postgres",
     } <= set(services)
+
+
+def test_lxmusic2api_image_is_only_resolved_when_selected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """未选 lxmusic2api 时不得解析它的镜像 tag。
+
+    ``short_sha`` 对占位 pin 直接抛 ValueError；无条件解析会让**任何**一次
+    ``uv run deploy`` 失败，哪怕根本没选这个服务（CI 侧特意做成「跳过而不失败」，
+    两边语义必须一致）。
+    """
+    monkeypatch.setattr(images, "LXMUSIC2API_UPSTREAM_SHA", "PLACEHOLDER")
+
+    env = generate.build(_ctx(tmp_path)).env
+    assert f"{generate.IMAGE_ENV_PREFIX}LXMUSIC2API_IMAGE" not in env
+
+    with pytest.raises(ValueError):
+        generate.build(_ctx(tmp_path, services=("lxmusic2api",)))
 
 
 def test_napcat_webui_preferred_port_stays_a_container_port(tmp_path: Path) -> None:

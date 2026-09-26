@@ -31,7 +31,7 @@ DEV_VERSION: Final[str] = "dev"
 # ``playwright-service`` 与 ``nuq-postgres`` 上游不发布版本 tag，只能跟 latest。
 # --------------------------------------------------------------------------- #
 
-PIN_VERIFIED_ON: Final[str] = "2026-02-15"
+PIN_VERIFIED_ON: Final[str] = "2026-09-26"
 
 NAPCAT_IMAGE: Final[str] = "mlikiowa/napcat-docker:v4.18.28"
 SEARXNG_IMAGE: Final[str] = "docker.io/searxng/searxng:2026.9.25-d8ae3abd5"
