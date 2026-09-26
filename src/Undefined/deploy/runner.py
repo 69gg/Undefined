@@ -350,6 +350,10 @@ def verify_napcat_ws_config(layout: DeployLayout, token: str) -> str:
     都无条件 `cp /app/templates/$MODE.json` 覆盖该文件，补写会在下一次重启后失效，
     而且空 token 时 NapCat 根本不校验客户端。现在改为生成带 token 的模板文件并
     只读挂载覆盖镜像模板，由入口自己写出正确配置。
+
+    但模板只在**容器启动时**被读一次，且登录之后 NapCat core 会优先读账号级
+    ``onebot11_<QQ>.json``（见 :func:`_napcat_account_config_caveat`），所以这里
+    必须把「写对了」与「确实生效」区分开，不能一律报「已就绪」。
     """
     path = layout.napcat_dir / generate.NAPCAT_WS_ARTIFACT
     if not path.is_file():
@@ -375,7 +379,29 @@ def verify_napcat_ws_config(layout: DeployLayout, token: str) -> str:
             return f"token 不符：{path}"
         if int(server.get("port") or 0) != expected_port:
             return f"端口不符：{path}（应为 {expected_port}）"
-    return f"已就绪（端口 {expected_port}，token 已写入）：{path}"
+    return (
+        f"已就绪（端口 {expected_port}，token 已写入）：{path}"
+        + _napcat_account_config_caveat(layout)
+    )
+
+
+def _napcat_account_config_caveat(layout: DeployLayout) -> str:
+    """提示账号级配置会盖过模板。
+
+    NapCat core 的 ``ConfigBase.read()`` 优先读 ``onebot11_<QQ>.json``，只有它
+    缺失时才用入口写出的 ``onebot11.json`` 并立刻另存为账号级文件；而且它没有
+    任何 fs.watch（热重载只走 WebUI 通道）。所以扫码登录之后，模板里的 token
+    与端口就不再是生效值——只说「已就绪」是骗人的。
+    """
+    per_account = sorted(layout.napcat_config_dir.glob("onebot11_*.json"))
+    if not per_account:
+        return ""
+    names = "、".join(path.name for path in per_account)
+    return (
+        f"\n  注意：已存在账号级配置 {names}。NapCat 优先读它而不是 onebot11.json，"
+        "上面的 token/端口对它不生效；请删除该文件后重启 napcat 容器"
+        "（uv run deploy down && uv run deploy up），或在 NapCat WebUI 里手动核对。"
+    )
 
 
 def build_invocation(

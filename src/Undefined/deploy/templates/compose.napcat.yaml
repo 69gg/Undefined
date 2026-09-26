@@ -22,7 +22,10 @@ services:
       NAPCAT_GID: ${UNDEFINED_DEPLOY_NAPCAT_GID}
       NAPCAT_WEBUI_SECRET_KEY: ${UNDEFINED_DEPLOY_NAPCAT_WEBUI_TOKEN}
       WEBUI_TOKEN: ${UNDEFINED_DEPLOY_NAPCAT_WEBUI_TOKEN}
-      NAPCAT_WEBUI_PREFERRED_PORT: "${UNDEFINED_DEPLOY_PORT_NAPCAT_WEBUI}"
+      # 这是 NapCat core 在**容器内**监听的端口（preferredPort > 0 时优先绑它），
+      # 必须与下面 ports 映射的目标端一致。写成宿主端口变量会在 --port 覆盖后
+      # 让 WebUI 改绑到映射不到的位置，直接打不开。
+      NAPCAT_WEBUI_PREFERRED_PORT: "6099"
     ports:
       # 协议端与 WebUI 默认只绑回环；WebUI 暴露到公网等于把 QQ 登录入口暴露出去。
       - "${UNDEFINED_DEPLOY_PORT_NAPCAT_WS_BIND}:${UNDEFINED_DEPLOY_PORT_NAPCAT_WS}:3001"

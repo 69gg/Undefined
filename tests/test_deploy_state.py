@@ -12,6 +12,9 @@ import pytest
 from Undefined.deploy import state
 from Undefined.deploy.catalog import COMPOSE_FILE_NAME, ENV_FILE_NAME
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+TEMPLATES = REPO_ROOT / "src" / "Undefined" / "deploy" / "templates"
+
 
 def test_layout_paths_are_under_repo(tmp_path: Path) -> None:
     layout = state.DeployLayout.under(tmp_path)
@@ -46,6 +49,32 @@ def test_layout_ensure_creates_directories(tmp_path: Path) -> None:
         layout.napcat_qq_dir,
     ):
         assert path.is_dir()
+
+
+def test_layout_ensure_covers_bind_mount_sources(tmp_path: Path) -> None:
+    """compose 里目录型 bind mount 的宿主目录必须由我们创建。
+
+    漏掉的那个会由 dockerd 以 root:root 建出来：lxmusic2api 用
+    ``user: ${UID}:${GID}`` 运行，于是连 sqlite 都写不了，而模板注释还声称
+    这些目录「是宿主机按调用者 uid 创建的」。
+    """
+    layout = state.DeployLayout.under(tmp_path)
+    layout.ensure()
+
+    checked: list[str] = []
+    for path in sorted(TEMPLATES.glob("compose.*.yaml")):
+        for line in path.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip().lstrip("- ").strip()
+            if not stripped.startswith("./") or ":" not in stripped:
+                continue
+            source = stripped.split(":", 1)[0]
+            if Path(source).suffix:  # 挂载的是单个文件，写入时自会创建
+                continue
+            # 模板里的相对路径以 deploy/ 为基准
+            target = (layout.root / source[2:]).resolve()
+            assert target.is_dir(), f"{path.name} 挂载了未创建的目录：{source}"
+            checked.append(source)
+    assert checked, "没有解析到任何目录型 bind mount，该断言已形同虚设"
 
 
 def test_read_state_returns_none_when_missing(tmp_path: Path) -> None:

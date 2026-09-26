@@ -246,6 +246,33 @@ def test_verify_napcat_ws_config_reports_port_mismatch(tmp_path: Path) -> None:
     assert "端口不符" in runner.verify_napcat_ws_config(layout, "t" * 24)
 
 
+def test_verify_napcat_ws_config_flags_account_level_override(tmp_path: Path) -> None:
+    """登录后生成的 onebot11_<QQ>.json 会盖过模板，不能只报「已就绪」。
+
+    NapCat core 优先读账号级文件且没有 fs.watch，模板里的 token/端口对它是无效的；
+    此时若仍打印「已就绪」，用户会以为能连上，实际永远连不上。
+    """
+    layout = DeployLayout.under(tmp_path)
+    _write_ws(layout, _ws_payload())
+    (layout.napcat_config_dir / "onebot11_12345678.json").write_text(
+        "{}", encoding="utf-8"
+    )
+
+    note = runner.verify_napcat_ws_config(layout, "t" * 24)
+
+    assert "onebot11_12345678.json" in note
+    assert "不生效" in note
+
+
+def test_verify_napcat_ws_config_stays_quiet_without_account_files(
+    tmp_path: Path,
+) -> None:
+    layout = DeployLayout.under(tmp_path)
+    _write_ws(layout, _ws_payload())
+    note = runner.verify_napcat_ws_config(layout, "t" * 24)
+    assert "账号级配置" not in note
+
+
 def test_ws_artifact_is_mounted_over_the_image_template(tmp_path: Path) -> None:
     """挂载必须指向镜像的 /app/templates/ws.json，入口才会拷到配置。
 

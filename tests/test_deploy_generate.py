@@ -342,6 +342,44 @@ def test_firecrawl_brings_its_whole_stack(tmp_path: Path) -> None:
     } <= set(services)
 
 
+def test_napcat_webui_preferred_port_stays_a_container_port(tmp_path: Path) -> None:
+    """NAPCAT_WEBUI_PREFERRED_PORT 会被 core 当作**容器内**监听端口。
+
+    早先传的是宿主端口变量：默认值恰好也是 6099 所以看不出问题，一旦
+    --port napcat_webui=16099，容器内就改绑 16099，而映射仍是 16099:6099，
+    WebUI 彻底打不开。
+    """
+    services = _compose_services(
+        generate.build(_ctx(tmp_path, ports={"napcat_webui": 16099})).compose_text
+    )
+    napcat = services["napcat"]
+    preferred = str(napcat["environment"].get("NAPCAT_WEBUI_PREFERRED_PORT", ""))
+    assert preferred == str(catalog.NAPCAT_WEBUI_CONTAINER_PORT), (
+        f"NAPCAT_WEBUI_PREFERRED_PORT 必须是容器内端口 "
+        f"{catalog.NAPCAT_WEBUI_CONTAINER_PORT}，当前是 {preferred!r}"
+    )
+
+    webui_mapping = [entry for entry in napcat["ports"] if entry.endswith(":6099")]
+    assert webui_mapping, f"WebUI 端口映射的目标端必须是 6099：{napcat['ports']}"
+
+
+def test_searxng_does_not_chown_the_mounted_config_dir(tmp_path: Path) -> None:
+    """入口的 chown 会把宿主 deploy/searxng 改成 977:977，之后再也写不进去。
+
+    下一次 up 要重写 settings.yml，于是直接 EACCES——部署脚本「幂等、重跑即可改
+    选择」的承诺就破了。容器以 root 运行、settings.yml 也只有 0644，不需要 chown。
+    """
+    services = _compose_services(
+        generate.build(_ctx(tmp_path, services=("searxng",))).compose_text
+    )
+    environment = services["searxng"]["environment"]
+    ownership = environment.get("FORCE_OWNERSHIP")
+    assert str(ownership).lower() == "false", (
+        "searxng 必须显式关闭 FORCE_OWNERSHIP，否则入口会 chown 掉 bind mount 的"
+        f"宿主目录（当前值：{ownership!r}）"
+    )
+
+
 def test_compose_declares_project_name_and_network(tmp_path: Path) -> None:
     data = yaml.safe_load(generate.build(_ctx(tmp_path)).compose_text)
     assert data["name"] == catalog.COMPOSE_PROJECT_NAME

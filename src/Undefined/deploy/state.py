@@ -78,6 +78,10 @@ class DeployLayout:
         return self.root / "data"
 
     @property
+    def logs_dir(self) -> Path:
+        return self.root / "logs"
+
+    @property
     def searxng_dir(self) -> Path:
         return self.root / "searxng"
 
@@ -105,16 +109,32 @@ class DeployLayout:
     def napcat_qq_dir(self) -> Path:
         return self.napcat_dir / "qq"
 
+    @property
+    def lxmusic2api_data_dir(self) -> Path:
+        return self.lxmusic2api_dir / "data"
+
+    @property
+    def lxmusic2api_downloads_dir(self) -> Path:
+        return self.lxmusic2api_dir / "downloads"
+
     def ensure(self) -> None:
-        """创建全部运行态目录。"""
+        """创建全部运行态目录。
+
+        ``lxmusic2api/{data,downloads}`` 是 compose 里的 bind mount 源，必须由
+        **当前用户**先建好：否则 dockerd 会以 root:root 建出来，而该服务用
+        ``user: ${UID}:${GID}`` 运行，连 sqlite 都写不了。
+        """
         for path in (
             self.root,
             self.backup_dir,
             self.data_dir,
+            self.logs_dir,
             self.searxng_dir,
             self.firecrawl_dir,
             self.lxmusic2api_dir,
             self.lxmusic2api_private_dir,
+            self.lxmusic2api_data_dir,
+            self.lxmusic2api_downloads_dir,
             self.napcat_config_dir,
             self.napcat_qq_dir,
         ):
