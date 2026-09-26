@@ -787,3 +787,24 @@ def test_unknown_port_key_raises(tmp_path: Path) -> None:
 def test_unknown_mode_raises(tmp_path: Path) -> None:
     with pytest.raises(generate.GenerateError, match="未知部署模式"):
         generate.compose_service_urls(_ctx(tmp_path, mode="kubernetes"))
+
+
+def test_host_mode_connect_urls_never_use_wildcard_bind(tmp_path: Path) -> None:
+    """0.0.0.0 是监听语义，不能当成连接目标写进配置。
+
+    旧实现直接把 --port-bind 拼进 URL，于是 `--port-bind 0.0.0.0` 会生成
+    `http://0.0.0.0:8080`；而同一份代码里的 SearXNG base_url 却做了
+    0.0.0.0→localhost 的映射，前后不一致。
+    """
+    ctx = _ctx(
+        tmp_path,
+        mode=catalog.MODE_HOST,
+        port_bind="0.0.0.0",
+        services=("searxng", "firecrawl", "lxmusic2api"),
+    )
+    config = generate.build(ctx)
+
+    for url in generate.compose_service_urls(ctx).values():
+        assert "0.0.0.0" not in url, url
+    assert "0.0.0.0" not in config.websocket_url
+    assert "0.0.0.0" not in config.env["UNDEFINED_DEPLOY_SEARXNG_BASE_URL"]

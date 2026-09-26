@@ -161,6 +161,15 @@ def reuse_or_generate(
 # --------------------------------------------------------------------------- #
 
 
+def _connect_host(bind: str) -> str:
+    """把「监听地址」换成「可连接的地址」。
+
+    ``0.0.0.0`` / ``::`` 是监听语义（所有网卡），拿去当连接目标在部分平台上并
+    不可用；本体与依赖服务都在本机时应当连回环。
+    """
+    return "127.0.0.1" if bind in ("0.0.0.0", "::") else bind
+
+
 def compose_service_urls(ctx: GenerateContext) -> dict[str, str]:
     """按模式给出各服务的 base_url 映射。
 
@@ -181,7 +190,7 @@ def compose_service_urls(ctx: GenerateContext) -> dict[str, str]:
             for key, host in hosts.items()
         }
     if mode == catalog.MODE_HOST:
-        host = ctx.port_bind
+        host = _connect_host(ctx.port_bind)
         return {
             "searxng": f"http://{host}:{ctx.port('searxng')}",
             "firecrawl": f"http://{host}:{ctx.port('firecrawl')}",
@@ -199,7 +208,7 @@ def _websocket_url(ctx: GenerateContext) -> str:
     """
     if ctx.mode == catalog.MODE_CONTAINER:
         return f"ws://{NAPCAT_SERVICE_NAME}:{catalog.container_port('napcat_ws')}"
-    return f"ws://{catalog.DEFAULT_PORT_BIND}:{ctx.port('napcat_ws')}"
+    return f"ws://{_connect_host(ctx.port_bind)}:{ctx.port('napcat_ws')}"
 
 
 def build_env(ctx: GenerateContext) -> dict[str, str]:
