@@ -23,8 +23,9 @@
 计数规则（刻意写得比“字面量在左、源码变量在右”宽，否则绕过方式太多）：
 
 - 源码变量 = ``_read_source(...)`` / ``Path.read_text(...)`` 的结果（``Assign`` 与
-  ``AnnAssign`` 都认），以及由它派生出来的变量（``src.split(...)[0]``、
-  ``src[1:20]``、``"a" + src``、f-string …）；
+  ``AnnAssign`` 都认），模块内「返回值就是源码文本」的薄封装 helper 也算
+  （``def _text(p): return p.read_text()``），以及由它们派生出来的变量
+  （``src.split(...)[0]``、``src[1:20]``、``"a" + src``、f-string …）；
 - 断言 = 任何把「源码变量」与「字面量文本」放在一起比较的表达式（``in`` /
   ``==`` / ``!=`` …），以及**本身就是 ``assert`` 条件**的检索调用
   （``assert re.search(pat, src)``）；
@@ -39,18 +40,24 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
-from typing import Final
+from typing import Final, Mapping
 
 _TESTS_DIR: Final[Path] = Path(__file__).resolve().parent
 _SELF_NAME: Final[str] = Path(__file__).name
 _SKIP_DIRS: Final[frozenset[str]] = frozenset({"__pycache__", "node_modules"})
+
+#: 空 helper 表：只需要认「直接读源码」时用（默认参数不可变、可安全共享）。
+_NO_HELPERS: Final[Mapping[str, int | None]] = {}
 
 #: 检索类函数：`re.search("x", src)` 这种「调用本身就是断言」的形态。
 _SEARCH_FUNCS: Final[frozenset[str]] = frozenset(
     {"search", "match", "fullmatch", "findall", "finditer"}
 )
 
-# 当前存量 122。历史上最大的两块已经处理完：
+#: 测试里自带的薄封装读取函数名（按约定它与 ``Path.read_text`` 同义）。
+_READ_SOURCE_NAME: Final[str] = "_read_source"
+
+# 当前存量 97。历史上最大的两块已经处理完：
 # - tests/test_webui_runtime_chat_frontend.py（537 条）已整体迁移到 jsdom 行为测试
 #   （tests/test_webui_runtime_chat_behavior.py）与解析式契约
 #   （tests/test_webui_style_contracts.py / test_webui_html_preview_csp.py）；
@@ -58,9 +65,13 @@ _SEARCH_FUNCS: Final[frozenset[str]] = frozenset(
 #   test_cognitive_historian.py 里的 28 条）经确认后整体删除——那类断言只是
 #   "提示词里必须出现某句指导语"，改写措辞即红，并不代表能力回归。
 #
-# 计数规则在本轮加固过（识别 AnnAssign、派生变量、count/re.search/f-string/
-# any(...) 等形态，并改成递归扫描 tests/），因此数字比旧的 72 大——旧的 72 是
-# 漏数出来的，不是真的降下来了。排除产物/文档断言后又从 117 收到 96。
+# 计数规则加固过两轮，两次都让数字变大，且都来自「计数变准」而不是新增断言：
+#   - 第一轮：识别 AnnAssign、派生变量、count/re.search/f-string/any(...) 等形态，
+#     并改成递归扫描 tests/ → 72 变 117（旧的 72 是漏数出来的，不是真的降下来了）；
+#   - 第二轮：先排除产物/文档断言收到 96，随后发现两处漏数——同名变量只留第一次
+#     绑定（_name_bindings）与「返回值就是源码文本」的薄封装 helper（_text）——
+#     修好计数逻辑（顺带补上命名字面量序列，见 _collect_literal_names）后为 97。
+# 棘轮的价值全在数字可信：宁可偏高、可见，也不要回到静默漏数。
 #
 # 计数范围是**产品源码/资源**的文本断言：读 tmp_path（本次运行产出的文件）或
 # docs/ 下文档的断言按 _reads_artifact 排除——那些本来就是对着产物内容写的，
@@ -76,8 +87,9 @@ _SEARCH_FUNCS: Final[frozenset[str]] = frozenset(
 #     7 tests/test_webui_style_contracts.py
 #     4 tests/test_undefined_self_code_agent.py
 #     1 tests/test_package_layout.py
+#     1 tests/test_prompt_structure.py
 #
-_BUDGET: Final[int] = 96
+_BUDGET: Final[int] = 97
 
 
 # --------------------------------------------------------------------------- #
@@ -112,14 +124,28 @@ def _target_names(node: ast.Assign | ast.AnnAssign) -> set[str]:
     return names
 
 
-def _is_read_call(node: ast.Call) -> bool:
+def _direct_read_path(node: ast.Call) -> ast.expr | None:
+    """**直接**读源码的调用所读的路径（``_read_source(P)`` 的 ``P`` / ``X.read_text()`` 的 ``X``）。"""
     func = node.func
-    if isinstance(func, ast.Name) and func.id == "_read_source":
+    if isinstance(func, ast.Name) and func.id == _READ_SOURCE_NAME:
+        return node.args[0] if node.args else None
+    if isinstance(func, ast.Attribute) and func.attr == "read_text":
+        return func.value
+    return None
+
+
+def _is_read_call(
+    node: ast.Call, helpers: Mapping[str, int | None] = _NO_HELPERS
+) -> bool:
+    if _direct_read_path(node) is not None:
         return True
-    return isinstance(func, ast.Attribute) and func.attr == "read_text"
+    func = node.func
+    return isinstance(func, ast.Name) and func.id in helpers
 
 
-def _reads_source(value: ast.expr) -> bool:
+def _reads_source(
+    value: ast.expr, helpers: Mapping[str, int | None] = _NO_HELPERS
+) -> bool:
     """整个表达式是否就是「读源码」。
 
     只认最外层（以及链式字符串方法）：``json.loads(read_text(...))`` 得到的是
@@ -131,21 +157,24 @@ def _reads_source(value: ast.expr) -> bool:
             node = node.value
             continue
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
-            return _reads_source(node.left) or _reads_source(node.right)
+            return _reads_source(node.left, helpers) or _reads_source(
+                node.right, helpers
+            )
         if isinstance(node, ast.Subscript):
             node = node.value
             continue
         if isinstance(node, ast.JoinedStr):
             return any(
-                isinstance(piece, ast.FormattedValue) and _reads_source(piece.value)
+                isinstance(piece, ast.FormattedValue)
+                and _reads_source(piece.value, helpers)
                 for piece in node.values
             )
         if isinstance(node, ast.Call):
-            if _is_read_call(node):
+            if _is_read_call(node, helpers):
                 return True
             func = node.func
             if isinstance(func, ast.Attribute) and isinstance(func.value, ast.expr):
-                return _reads_source(func.value)
+                return _reads_source(func.value, helpers)
             return False
         return False
 
@@ -158,49 +187,119 @@ ARTIFACT_DIR_NAMES: Final[tuple[str, ...]] = ("docs",)
 ARTIFACT_FIXTURE_NAMES: Final[tuple[str, ...]] = ("tmp_path",)
 
 
-def _read_path_expr(node: ast.Call) -> ast.expr | None:
-    """取读取调用的路径表达式（``_read_source(P)`` 的 ``P`` / ``X.read_text()`` 的 ``X``）。"""
+def _read_path_expr(
+    node: ast.Call, helpers: Mapping[str, int | None] = _NO_HELPERS
+) -> ast.expr | None:
+    """取读取调用的路径表达式（``_read_source(P)`` 的 ``P`` / ``X.read_text()`` 的 ``X``）。
+
+    helper 调用（``_text(P)``）按其返回值里那次读取的位置参数取实参；认不出实参
+    （helper 读的是模块级常量路径）时返回 ``None``，调用方据此按「不是产物」处理——
+    方向刻意保守。
+    """
+    direct = _direct_read_path(node)
+    if direct is not None:
+        return direct
     func = node.func
-    if isinstance(func, ast.Name) and func.id == "_read_source":
-        return node.args[0] if node.args else None
-    if isinstance(func, ast.Attribute) and func.attr == "read_text":
-        return func.value
+    if isinstance(func, ast.Name) and func.id in helpers:
+        index = helpers[func.id]
+        if index is not None and index < len(node.args):
+            return node.args[index]
     return None
 
 
-def _name_bindings(tree: ast.Module) -> dict[str, ast.expr]:
-    """Name -> 绑定表达式（同名多次赋值时取第一次，取不到就当没有）。"""
-    bindings: dict[str, ast.expr] = {}
+def _read_path_in(
+    value: ast.expr, helpers: Mapping[str, int | None]
+) -> ast.expr | None:
+    """任意表达式里那次「读源码」的路径表达式；不是读源码则 ``None``。"""
+    node: ast.expr = value
+    while isinstance(node, ast.Await):
+        node = node.value
+    if isinstance(node, ast.Call):
+        path = _read_path_expr(node, helpers)
+        if path is not None:
+            return path
+        func = node.func
+        if isinstance(func, ast.Attribute) and isinstance(func.value, ast.expr):
+            return _read_path_in(func.value, helpers)
+    return None
+
+
+def _source_text_helpers(tree: ast.Module) -> dict[str, int | None]:
+    """模块内「返回值就是源码文本」的 helper -> 路径实参的位置下标（认不出为 ``None``）。
+
+    ``def _text(path): return path.read_text()`` 这类薄封装读到的就是源码文本，经它
+    得到的变量同样是「源码变量」——不认它，断言就整片漏计（``test_prompt_structure``
+    的 ``_text`` 正是这种写法）。返回**解析结果**的 helper（``Stylesheet.load()``
+    返回解析后的声明、``top_sections()`` 返回小节名列表）不算：断言解析后的结构
+    正是本文件鼓励的写法。
+    """
+    helpers: dict[str, int | None] = {}
+    for _ in range(2):  # 第二轮用于识别「helper 套 helper」
+        frozen = dict(helpers)
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if node.name in helpers:
+                continue
+            params = [arg.arg for arg in (*node.args.posonlyargs, *node.args.args)]
+            for sub in ast.walk(node):
+                if not isinstance(sub, ast.Return) or sub.value is None:
+                    continue
+                path = _read_path_in(sub.value, frozen)
+                if path is None:
+                    continue
+                helpers[node.name] = (
+                    params.index(path.id)
+                    if isinstance(path, ast.Name) and path.id in params
+                    else None
+                )
+                break
+    return helpers
+
+
+def _name_bindings(tree: ast.Module) -> dict[str, list[ast.expr]]:
+    """Name -> **全部**绑定表达式（同名多次赋值时一个都不能丢）。
+
+    旧实现用 ``setdefault`` 只留第一次绑定：同名变量先绑产物、后绑产品源码时，
+    读取会被按产物排除而**静默漏计**——正是本棘轮上一版失效的同一类错误。
+    """
+    bindings: dict[str, list[ast.expr]] = {}
     for node in ast.walk(tree):
         if not isinstance(node, (ast.Assign, ast.AnnAssign)) or node.value is None:
             continue
         for name in _target_names(node):
-            bindings.setdefault(name, node.value)
+            bindings.setdefault(name, []).append(node.value)
     return bindings
 
 
-def _path_is_artifact(expr: ast.expr | None, bindings: dict[str, ast.expr]) -> bool:
+def _path_is_artifact(
+    expr: ast.expr | None,
+    bindings: Mapping[str, list[ast.expr]],
+    depth: int = 0,
+) -> bool:
     """路径能否**被正面确认**指向产物/文档（临时目录夹具或 ``docs/``）。
 
-    只做「确认即排除」：认不出来一律当源码。方向是刻意选的——排除得太宽会让预算
-    偏低（可见、保守），排除得太窄则会让棘轮重新变成静默漏数，而那正是它上一版
-    失效的原因（实测 72 vs 真实 117）。
+    只做「确认即排除」：认不出来一律当源码；同名变量的**每一个**绑定都必须确认是
+    产物才算排除。方向是刻意选的——排除得太宽会让预算偏低（可见、保守），
+    排除得太窄则会让棘轮重新变成静默漏数，而那正是它上一版失效的原因
+    （实测 72 vs 真实 117）。
     """
-    node = expr
-    for _ in range(2):  # 至多一层 Name 展开
-        if isinstance(node, ast.Name) and node.id in bindings:
-            node = bindings[node.id]
-        else:
-            break
-    if node is None:
+    if expr is None:
         return False
+    if isinstance(expr, ast.Name) and depth < 2:  # 至多两层 Name 展开
+        candidates = bindings.get(expr.id)
+        if candidates:
+            return all(
+                _path_is_artifact(candidate, bindings, depth + 1)
+                for candidate in candidates
+            )
     if any(
         sub.id in ARTIFACT_FIXTURE_NAMES
-        for sub in ast.walk(node)
+        for sub in ast.walk(expr)
         if isinstance(sub, ast.Name)
     ):
         return True
-    for sub in ast.walk(node):
+    for sub in ast.walk(expr):
         if not isinstance(sub, ast.Constant) or not isinstance(sub.value, str):
             continue
         parts = sub.value.replace("\\", "/").split("/")
@@ -209,7 +308,11 @@ def _path_is_artifact(expr: ast.expr | None, bindings: dict[str, ast.expr]) -> b
     return False
 
 
-def _reads_artifact(value: ast.expr, bindings: dict[str, ast.expr]) -> bool:
+def _reads_artifact(
+    value: ast.expr,
+    bindings: Mapping[str, list[ast.expr]],
+    helpers: Mapping[str, int | None] = _NO_HELPERS,
+) -> bool:
     """表达式是否**全部**来自产物/文档读取。
 
     只要还夹着一处认不出来的读，就按源码算（保守方向）。
@@ -217,10 +320,10 @@ def _reads_artifact(value: ast.expr, bindings: dict[str, ast.expr]) -> bool:
     calls = [
         node
         for node in ast.walk(value)
-        if isinstance(node, ast.Call) and _read_path_expr(node) is not None
+        if isinstance(node, ast.Call) and _read_path_expr(node, helpers) is not None
     ]
     return bool(calls) and all(
-        _path_is_artifact(_read_path_expr(call), bindings) for call in calls
+        _path_is_artifact(_read_path_expr(call, helpers), bindings) for call in calls
     )
 
 
@@ -253,19 +356,20 @@ def _derivation_root(expr: ast.expr | None) -> str | None:
 
 
 def _collect_source_vars(tree: ast.Module) -> set[str]:
-    """源码变量：直接读源码的，以及由它们派生出来的（一层传递）。"""
+    """源码变量：直接（或经薄封装 helper）读源码的，以及由它们派生出来的。"""
     assignments = [
         node for node in ast.walk(tree) if isinstance(node, (ast.Assign, ast.AnnAssign))
     ]
     assignments.sort(key=lambda node: (node.lineno, node.col_offset))
     bindings = _name_bindings(tree)
+    helpers = _source_text_helpers(tree)
     source_vars: set[str] = set()
     for node in assignments:
-        if node.value is None or not _reads_source(node.value):
+        if node.value is None or not _reads_source(node.value, helpers):
             continue
         # 读的是产物/文档（tmp_path、docs/…）就不算「源码字符串断言」：
         # 那些断言本来就该对着产物内容写，让它们去「迁成行为测试」是范畴错误。
-        if _reads_artifact(node.value, bindings):
+        if _reads_artifact(node.value, bindings, helpers):
             continue
         source_vars.update(_target_names(node))
     for node in assignments:
@@ -321,7 +425,13 @@ def _collect_literal_names(tree: ast.Module) -> set[str]:
                 value = node.value
             else:
                 targets, value = [], None
-            if value is not None and _is_text_operand(value, frozen):
+            if value is not None and (
+                _is_text_operand(value, frozen)
+                # 绑到「字面量序列」的变量同样算字面量来源（``MARKERS = ("a", "b")``
+                # 之后 ``for m in MARKERS``）；只认内联的 ``for m in ["a", "b"]``
+                # 会漏掉命名序列这一整类写法。
+                or _is_literal_string_sequence(value, frozen)
+            ):
                 for target in targets:
                     for sub in ast.walk(target):
                         if isinstance(sub, ast.Name):
@@ -439,13 +549,18 @@ def _scan() -> tuple[int, dict[str, int]]:
 
 #: 固定样本：写死在这里的合成源码，覆盖预算最容易被绕过的一批写法。
 #: 计数逻辑一旦被改坏（正则/AST 匹配失效、忘记派生变量…），这里立刻变红。
-#: 期望值 6：
+#: 期望值 11：
 #:   1 `"alpha" in src`（AnnAssign 读源码）
 #:   2 `src.count("beta") == 1`
 #:   3 `("ga" + "gamma") in fn`（派生变量 + 常量拼接）
 #:   4 `f"prefix-{MARKER}" in raw`（普通 Assign 读源码 + f-string）
 #:   5 `any(part in src for part in [...])`（推导式循环变量）
 #:   6 `assert re.search("zeta", src)`（检索调用**本身就是断言条件**）
+#:   7-10 同名复用：`reused` 与 `target` 都先绑产物路径、后绑源码路径。读取路径是
+#:     变量时，只有**每一个**绑定都确认是产物才排除，因此这四条断言都计数（旧实现
+#:     只留第一次绑定，四条会整片漏掉）
+#:   11 `helper_text = _text(...)`：模块内薄封装 helper 返回的就是源码文本，
+#:     经它得到的变量同样是源码变量
 #: 不计（负向钉子，方向反过来也能红）：
 #:   `tomllib.loads(src)["x"] == "parsed"`（解析后的结构）、
 #:   `"not-source" in unrelated`（不是源码变量）、
@@ -453,11 +568,17 @@ def _scan() -> tuple[int, dict[str, int]]:
 #:   的过度计数回归）、
 #:   `assert "artifact" in doc`（读的是 tmp_path/docs 下的产物——挡住「把产物/
 #:   文档断言也算成源码断言」的过度计数；反过来，若排除规则被写得过宽，
-#:   上面 6 条会掉下去，本自检同样变红）。
+#:   上面 11 条会掉下去，本自检同样变红）、
+#:   `doc_text = _text(tmp_path / "docs" / ...)`（helper 读产物：路径要从 helper 的
+#:   实参里取出来，不能因为「认不出路径」就把产物断言算成源码断言）
 _SELF_CHECK_SAMPLE: Final[str] = """
 
 def _read_source(path: str) -> str:
     return open(path, encoding="utf-8").read()
+
+
+def _text(path) -> str:
+    return path.read_text(encoding="utf-8")
 
 
 def test_sample(tmp_path) -> None:
@@ -477,8 +598,22 @@ def test_sample(tmp_path) -> None:
     assert "not-source" in unrelated
     doc = (tmp_path / "docs" / "api.md").read_text(encoding="utf-8")
     assert "artifact" in doc
+    reused = (tmp_path / "docs" / "api.md").read_text(encoding="utf-8")
+    assert "artifact-reused" in reused
+    reused = (SRC_DIR / "c.js").read_text(encoding="utf-8")
+    assert "reused-source" in reused
+    target = tmp_path / "docs" / "api.md"
+    via_name = target.read_text(encoding="utf-8")
+    assert "artifact-via-name" in via_name
+    target = SRC_DIR / "e.js"
+    via_name = target.read_text(encoding="utf-8")
+    assert "source-via-name" in via_name
+    helper_text = _text(SRC_DIR / "d.js")
+    assert "theta" in helper_text
+    doc_text = _text(tmp_path / "docs" / "api.md")
+    assert "artifact-helper" in doc_text
 """
-_SELF_CHECK_EXPECTED: Final[int] = 6
+_SELF_CHECK_EXPECTED: Final[int] = 11
 
 
 def test_counter_self_check_on_fixed_sample(tmp_path: Path) -> None:

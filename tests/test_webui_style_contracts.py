@@ -132,16 +132,13 @@ def test_content_wraps_long_code_and_markdown_without_horizontal_scroll() -> Non
         "长内容容器缺少收缩约束（min-width: 0 或 max-width: 100%）"
     )
 
-    all_declarations = [
-        declarations
-        for _, declarations in css._rules  # noqa: SLF001 - 需要跨选择器查属性
-    ]
-    wrap_values = {
-        decl.get("overflow-wrap")
-        for decl in all_declarations
-        if decl.get("overflow-wrap")
-    }
-    assert "anywhere" in wrap_values or "break-word" in wrap_values, wrap_values
+    # 换行约束也必须落在这些承载长内容的规则上：早期实现从**全表**收集
+    # overflow-wrap，于是 `.form-section-title` 之类的无关规则就能让断言恒真——
+    # 把代码块与 Markdown 的换行整片删掉也测不出来。
+    assert has("overflow-wrap", "anywhere") or has("overflow-wrap", "break-word"), (
+        "长内容容器缺少换行约束（overflow-wrap: anywhere / break-word），"
+        f"当前候选规则的声明：{candidates}"
+    )
 
 
 # --------------------------------------------------------------------------- #
