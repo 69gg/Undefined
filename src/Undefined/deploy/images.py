@@ -114,10 +114,23 @@ def resolve_project_version(repo_root: Path) -> str:
         return DEV_VERSION
 
 
+SHA_PATTERN: Final[re.Pattern[str]] = re.compile(r"[0-9a-fA-F]{40}")
+
+
+def is_full_sha(value: str) -> bool:
+    """是否为完整 commit sha。
+
+    单独提供判定函数是为了让「pin 未填」这种情况**可判断而不抛错**：
+    CI 需要据此跳过 lxmusic2api 镜像构建，若用 ``short_sha`` 抛错会让整个
+    release 作业失败（占位值分支永远走不到）。
+    """
+    return bool(SHA_PATTERN.fullmatch(value.strip()))
+
+
 def short_sha(sha: str, length: int = 7) -> str:
-    """取短 sha 作为镜像 tag。"""
+    """取短 sha 作为镜像 tag；非完整 sha 直接报错。"""
     cleaned = sha.strip()
-    if not re.fullmatch(r"[0-9a-fA-F]{40}", cleaned):
+    if not is_full_sha(cleaned):
         raise ValueError(f"lxmusic2api pin 必须是完整 commit sha，当前为 {sha!r}")
     return cleaned[:length].lower()
 
@@ -170,6 +183,7 @@ __all__ = [
     "bot_image",
     "lxmusic2api_image",
     "resolve_image_owner",
+    "is_full_sha",
     "resolve_project_version",
     "short_sha",
     "vendor_images",

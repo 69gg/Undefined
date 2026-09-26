@@ -1,5 +1,7 @@
-# 构建上下文瘦身：本体镜像只需要 pyproject/uv.lock/src/res/img/config/README。
-# CI 用 --file 指定模板 Dockerfile 时，本文件即仓库根的 .dockerignore。
+# 参考副本：Docker 只读取**构建上下文根目录**的 .dockerignore，因此实际生效的
+# 始终是仓库根的 .dockerignore（CI 用 `docker build -f src/.../Dockerfile.bot .`，
+# 上下文就是仓库根）。本文件保持与那份规则一致，仅作为「只复制模板文件时」的参考，
+# 请不要把规则只写在这里——它不会被 Docker 读取。
 
 .git
 .gitmodules

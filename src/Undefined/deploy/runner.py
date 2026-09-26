@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Sequence
 
 from Undefined.deploy import (
@@ -325,7 +326,12 @@ def write_generated(
     if config.firecrawl_env is not None:
         write_text(layout.firecrawl_dir / ".env", config.firecrawl_env, secret=True)
     if config.lxmusic2api_config is not None:
-        write_text(layout.lxmusic2api_dir / "config.toml", config.lxmusic2api_config)
+        # 含 auth.api_key：收紧到 0600（容器以调用者 uid 运行，不影响可读性）
+        write_text(
+            layout.lxmusic2api_dir / "config.toml",
+            config.lxmusic2api_config,
+            secret=True,
+        )
         layout.lxmusic2api_private_dir.mkdir(parents=True, exist_ok=True)
     # NapCat 的正向 WS 配置：挂到镜像的 /app/templates/ws.json，
     # 入口每次启动都会把它拷成 onebot11.json，token 因此不会被重启抹掉。
@@ -403,8 +409,12 @@ def run_up(options: dict[str, Any]) -> int:
     )
     mode = wizard.choose_mode(default_mode)
 
-    if options.get("services"):
-        services = tuple(options["services"])
+    # None = 未指定（沿用上次 / 交给向导）；空元组 = 显式清空。
+    # 旧实现用 `if options.get("services")` 判真值，`--with ""` 会被当成「未指定」
+    # 而落回上次的选择，非交互下无法取消已选服务。
+    requested_services = options.get("services")
+    if requested_services is not None:
+        services = tuple(requested_services)
     elif wizard.enabled:
         services = wizard.choose_services(
             previous_state.services if previous_state else ()
@@ -671,21 +681,47 @@ def run_down(options: dict[str, Any]) -> int:
 
     print("服务已停止。")
     if purge:
-        _purge_layout(layout)
-        print(f"已删除 {layout.root}")
+        leftover = _purge_layout(layout)
+        if leftover:
+            print(f"已删除 {layout.root}，但以下内容删除失败（多为容器以 root 写入）：")
+            for path in leftover:
+                print(f"    {path}")
+            print("  可手动清理：sudo rm -rf <上述路径>")
+        else:
+            print(f"已删除 {layout.root}")
     else:
         print(f"数据与配置保留在 {layout.root}")
     return EXIT_OK
 
 
-def _purge_layout(layout: DeployLayout) -> None:
-    """删除运行态目录；路径异常时拒绝执行，避免误删仓库。"""
+def _purge_layout(layout: DeployLayout) -> list[Path]:
+    """删除运行态目录，返回仍然存在的内容。
+
+    路径异常时拒绝执行，避免误删仓库；不用 ``ignore_errors`` 掩盖失败——
+    本体容器以 root 写 ``deploy/{data,logs}``，非 root 用户 purge 后常留残骸，
+    直接报「已删除」是骗人的。
+    """
     import shutil
 
     target = layout.root
     if target.name != catalog.DEPLOY_DIR_NAME or target.parent == target:
         raise PurgeTargetError(f"拒绝删除可疑路径：{target}")
-    shutil.rmtree(target, ignore_errors=True)
+
+    failures: list[Path] = []
+    for entry in sorted(target.iterdir()):
+        try:
+            if entry.is_dir() and not entry.is_symlink():
+                shutil.rmtree(entry)
+            else:
+                entry.unlink()
+        except OSError:
+            failures.append(entry)
+    try:
+        target.rmdir()
+    except OSError:
+        if target.exists():
+            failures.append(target)
+    return failures
 
 
 def run_status(options: dict[str, Any]) -> int:

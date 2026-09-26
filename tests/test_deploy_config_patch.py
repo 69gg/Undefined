@@ -126,11 +126,53 @@ def test_apply_writes_only_target_keys_and_keeps_comments(
     assert parsed["onebot"]["ws_url"] == "ws://napcat:3001"
     assert parsed["search"]["searxng_url"] == "http://searxng:8080"
 
-    # 注释映射仍然覆盖被改动的键——渲染时用它补齐注释，丢了说明用户自定义注释被抹掉
-    comments = config_patch.build_comment_map(config, example)
-    assert comments["onebot.ws_url"]["zh"] == "NapCat WebSocket地址。"
-    assert comments["search.searxng_url"]["zh"] == "SearXNG 地址。"
     assert parsed["webui"]["url"] == "127.0.0.1"
+
+    # 直接对**写盘后的文本**断言注释仍在。
+    # 不能再用 build_comment_map(config, example) 来验证：那个函数先读 example，
+    # 而 example 里本来就有这些注释，所以哪怕写完一条注释都不剩也能通过
+    # （属于虚假安全感，已由审查指出）。
+    written = config.read_text(encoding="utf-8")
+    assert "# zh: NapCat WebSocket地址。" in written
+    assert "# zh: SearXNG 地址。" in written
+    assert "# zh: 监听地址。" in written
+
+
+def test_render_drops_unrecognised_comment_blocks(tmp_path: Path) -> None:
+    """已知渲染语义：不依附键的独立注释块与无 zh/en 前缀的续行会丢。
+
+    这不是期望行为而是现状约束——`apply_plan` 复用的是 WebUI 的 render_toml，
+    只保留 parse_comment_map 能识别的块。把语义固定成测试，避免文档与实现再次
+    脱节（文档已如实说明会整份重排）。
+    """
+    example = tmp_path / "config.toml.example"
+    example.write_text(
+        "# zh: 主开关。\n"
+        "# en: Master switch.\n"
+        "# 这行没有 zh/en 前缀，属于续行\n"
+        "nagaagent_mode_enabled = false\n"
+        "\n"
+        "# 独立说明块，不依附任何键\n"
+        "\n"
+        "[onebot]\n"
+        'ws_url = "ws://127.0.0.1:3001"\n',
+        encoding="utf-8",
+    )
+    config = tmp_path / "config.toml"
+    config.write_text(example.read_text(encoding="utf-8"), encoding="utf-8")
+
+    plan = config_patch.PatchPlan(config, {"onebot.ws_url": "ws://napcat:3001"})
+    config_patch.apply_plan(plan, example_path=example, backup_dir=tmp_path / "b")
+
+    written = config.read_text(encoding="utf-8")
+    # 值不丢
+    assert 'ws_url = "ws://napcat:3001"' in written
+    assert "nagaagent_mode_enabled = false" in written
+    # 能识别的注释保留
+    assert "# zh: 主开关。" in written
+    # 现状：这两类注释不保留
+    assert "这行没有 zh/en 前缀" not in written
+    assert "独立说明块" not in written
 
 
 def test_apply_creates_backup_before_overwrite(

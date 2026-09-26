@@ -15,6 +15,10 @@ services:
     restart: unless-stopped
     networks:
       - undefined-deploy
+    # 上游镜像以 USER node(1000) 运行，而 data/downloads 是宿主机按调用者 uid
+    # 创建的绑定挂载目录；uid 不一致时它连启动都会失败并进入 restart 崩溃循环。
+    # 因此显式以调用者 uid:gid 运行（配置目录仍需可读，故用只读挂载）。
+    user: "${UNDEFINED_DEPLOY_LXMUSIC2API_UID}:${UNDEFINED_DEPLOY_LXMUSIC2API_GID}"
     ports:
       - "${UNDEFINED_DEPLOY_PORT_LXMUSIC2API_BIND}:${UNDEFINED_DEPLOY_PORT_LXMUSIC2API}:3000"
     init: true

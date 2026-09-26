@@ -682,9 +682,21 @@ jobs:
       - name: Read pinned lxmusic2api commit
         id: pins
         run: |
+          # 用不抛错的 is_full_sha 判定：占位值必须走「跳过」分支，
+          # 而不是让整个 release 作业失败（那会让 publish-release 一起不发版）。
           sha=$(uv run python -c "from Undefined.deploy.images import LXMUSIC2API_UPSTREAM_SHA; print(LXMUSIC2API_UPSTREAM_SHA)")
           slug=$(uv run python -c "from Undefined.deploy.images import LXMUSIC2API_UPSTREAM_SLUG; print(LXMUSIC2API_UPSTREAM_SLUG)")
-          short=$(uv run python -c "from Undefined.deploy.images import short_sha, LXMUSIC2API_UPSTREAM_SHA; print(short_sha(LXMUSIC2API_UPSTREAM_SHA))")
+          if uv run python -c "
+          import sys
+          from Undefined.deploy.images import LXMUSIC2API_UPSTREAM_SHA, is_full_sha
+          sys.exit(0 if is_full_sha(LXMUSIC2API_UPSTREAM_SHA) else 1)
+          "; then
+            echo "lxmusic2api_pinned=true" >> "$GITHUB_OUTPUT"
+            short=$(uv run python -c "from Undefined.deploy.images import short_sha, LXMUSIC2API_UPSTREAM_SHA; print(short_sha(LXMUSIC2API_UPSTREAM_SHA))")
+          else
+            echo "lxmusic2api_pinned=false" >> "$GITHUB_OUTPUT"
+            short=""
+          fi
           echo "lxmusic2api_slug=$slug" >> "$GITHUB_OUTPUT"
           echo "lxmusic2api_sha=$sha" >> "$GITHUB_OUTPUT"
           echo "lxmusic2api_short=$short" >> "$GITHUB_OUTPUT"
@@ -725,13 +737,12 @@ jobs:
       - name: Check lxmusic2api pin is set
         id: lxmusic_check
         run: |
-          sha="${{ steps.pins.outputs.lxmusic2api_sha }}"
           # 占位值说明还没 pin；此时跳过而不是构建 main HEAD，避免不可复现的镜像
-          if [ -z "$sha" ] || [ "$sha" = "REPLACE_WITH_PINNED_COMMIT_SHA" ]; then
+          if [ "${{ steps.pins.outputs.lxmusic2api_pinned }}" = "true" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          else
             echo "skip=true" >> "$GITHUB_OUTPUT"
             echo "::warning::lxmusic2api 上游 commit 尚未 pin，跳过该镜像构建"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Checkout lxmusic2api upstream

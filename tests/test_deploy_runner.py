@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import tomllib
 from pathlib import Path
@@ -542,6 +543,50 @@ def test_ws_artifact_carries_token_and_port_after_up(
     token = runner.load_previous_env(layout)["UNDEFINED_DEPLOY_NAPCAT_WS_TOKEN"]
     assert server["token"] == token
     assert server["port"] == catalog.NAPCAT_WS_CONTAINER_PORT
+
+
+def test_empty_with_clears_previous_service_selection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`--with ""` 必须能非交互地取消已选服务（空元组 = 显式清空）。"""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "config.toml.example").write_text(CONFIG_TOML, encoding="utf-8")
+    monkeypatch.setattr(runner, "repo_root", lambda: repo)
+    _stub_docker(monkeypatch)
+
+    assert runner.run_up(_yes_options(services=("searxng",), dry_run=False)) == 0
+    layout = DeployLayout.under(repo)
+    state = read_state(layout)
+    assert state is not None and state.services == ("searxng",)
+
+    # 显式清空：空元组而非 None
+    assert runner.run_up(_yes_options(services=(), dry_run=False)) == 0
+    state = read_state(layout)
+    assert state is not None
+    assert state.services == (), "空元组应清空上次选择，而不是沿用"
+
+
+def test_lxmusic2api_config_is_owner_only(tmp_path: Path) -> None:
+    """桥接服务的 config.toml 含 api_key，应收紧到属主可读。"""
+    import stat
+
+    layout = DeployLayout.under(tmp_path)
+    config = generate.build(
+        generate.GenerateContext(
+            repo=tmp_path,
+            layout=layout,
+            mode=catalog.MODE_CONTAINER,
+            services=(catalog.LXMUSIC2API.key,),
+        )
+    )
+    assert config.lxmusic2api_config is not None
+
+    layout.ensure()
+    runner.write_generated(layout, config)
+    mode = stat.S_IMODE((layout.lxmusic2api_dir / "config.toml").stat().st_mode)
+    if os.name == "posix":
+        assert mode == 0o600, oct(mode)
 
 
 def test_status_without_up_reports_error(

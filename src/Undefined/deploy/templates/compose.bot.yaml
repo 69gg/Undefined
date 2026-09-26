@@ -30,4 +30,4 @@ services:
       - ../knowledge:/data/Undefined/knowledge
       - ./data:/data/Undefined/data
       - ./logs:/data/Undefined/logs
-      - /var/run/docker.sock:/var/run/docker.sock
+      - ${UNDEFINED_DEPLOY_DOCKER_SOCKET}:/var/run/docker.sock

@@ -291,6 +291,22 @@ def test_selected_service_is_added(tmp_path: Path, service: str, expected: str) 
     assert expected in services
 
 
+def test_lxmusic2api_runs_as_invoking_user(tmp_path: Path) -> None:
+    """上游镜像以 USER node(1000) 运行，而挂载目录按调用者 uid 创建。
+
+    uid 不一致时它连启动都会失败并进入 restart 崩溃循环（审查 M7），
+    因此 compose 必须显式指定 user 为调用者 uid:gid。
+    """
+    services = _compose_services(
+        generate.build(_ctx(tmp_path, services=("lxmusic2api",))).compose_text
+    )
+    user = str(services["lxmusic2api"].get("user") or "")
+    assert user, "缺少 user 指令，非 1000 用户部署会崩溃循环"
+    assert user == (
+        "${UNDEFINED_DEPLOY_LXMUSIC2API_UID}:${UNDEFINED_DEPLOY_LXMUSIC2API_GID}"
+    ), user
+
+
 def test_firecrawl_brings_its_whole_stack(tmp_path: Path) -> None:
     services = _compose_services(
         generate.build(_ctx(tmp_path, services=("firecrawl",))).compose_text
@@ -320,7 +336,8 @@ def test_bot_container_mounts_repo_and_docker_socket(tmp_path: Path) -> None:
     services = _compose_services(generate.build(_ctx(tmp_path)).compose_text)
     bot = services["undefined-bot"]
     volumes = bot["volumes"]
-    assert f"{catalog.CONTAINER_DOCKER_SOCK}:{catalog.CONTAINER_DOCKER_SOCK}" in volumes
+    # socket 路径走变量，容器内固定挂在同一路径（DooD）
+    assert "${UNDEFINED_DEPLOY_DOCKER_SOCKET}:/var/run/docker.sock" in volumes
     assert "../config.toml:/data/Undefined/config.toml" in volumes
     assert any(volume.endswith(":/data/Undefined/data") for volume in volumes)
 

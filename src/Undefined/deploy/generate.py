@@ -61,6 +61,7 @@ BULL_AUTH_KEY_BYTES = 24
 #: 需要写入 deploy/.env 的变量名前缀。
 IMAGE_ENV_PREFIX = "UNDEFINED_DEPLOY_"
 
+#: 挂进本体容器的宿主机 Docker socket（DooD）。
 DOCKER_SOCKET_ENV = "UNDEFINED_DEPLOY_DOCKER_SOCKET"
 
 
@@ -198,7 +199,6 @@ def build_env(ctx: GenerateContext) -> dict[str, str]:
         return previous.get(name)
 
     env: dict[str, str] = {
-        DOCKER_SOCKET_ENV: ctx.docker_socket,
         f"{IMAGE_ENV_PREFIX}BOT_IMAGE": images.bot_image(
             ctx.image_owner, ctx.version
         ).reference,
@@ -225,9 +225,12 @@ def build_env(ctx: GenerateContext) -> dict[str, str]:
             images.FIRECRAWL_PLAYWRIGHT_MEMORY
         ),
         f"{IMAGE_ENV_PREFIX}FIRECRAWL_INTERNAL_PORT": "3002",
+        DOCKER_SOCKET_ENV: ctx.docker_socket,
         # NapCat 挂载目录属主，交给容器 entrypoint 做 gosu 降权
         "UNDEFINED_DEPLOY_NAPCAT_UID": str(_current_uid()),
         "UNDEFINED_DEPLOY_NAPCAT_GID": str(_current_gid()),
+        "UNDEFINED_DEPLOY_LXMUSIC2API_UID": str(_current_uid()),
+        "UNDEFINED_DEPLOY_LXMUSIC2API_GID": str(_current_gid()),
     }
 
     # 端口与绑定：默认只绑回环，远程访问需显式改 --port-bind
@@ -608,8 +611,8 @@ __all__ = [
     "ALLOWED_COMPOSE_TOP_KEYS",
     "BOT_SERVICE_NAME",
     "CONTAINER_REPO_PATH",
-    "apply_context_overrides",
     "DOCKER_SOCKET_ENV",
+    "apply_context_overrides",
     "GenerateContext",
     "GenerateError",
     "GeneratedConfiguration",

@@ -246,7 +246,10 @@ def compose_up(
         "--pull",
         pull,
     ]
-    return runner.run(argv)
+    # 首次部署可能同时拉本体与 Firecrawl 五个镜像，用默认 900s 很容易超时；
+    # 需要长期拉取时用 PULL_TIMEOUT_SECONDS。
+    timeout = PULL_TIMEOUT_SECONDS if pull == PULL_ALWAYS else COMPOSE_TIMEOUT_SECONDS
+    return runner.run(argv, timeout=timeout)
 
 
 def compose_down(
