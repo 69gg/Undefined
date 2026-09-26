@@ -210,6 +210,40 @@ def test_markdown_and_html_images_are_lazy_and_clickable() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# UI 控件（会话列表 / 命令面板 / 图片查看器）
+# --------------------------------------------------------------------------- #
+
+
+def test_conversation_list_renders_from_backend() -> None:
+    """后端返回的会话要渲染进侧栏列表。"""
+    result = run_scenario("ui_controls")
+    assert result["conversationItems"] == 2, result["conversationItems"]
+
+
+def test_slash_triggers_command_palette() -> None:
+    """输入 `/` 要打开命令面板（面板不再隐藏）。
+
+    注意：本用例**不**断言匹配到的命令条目——jsdom 下 `/chat/commands` 的
+    返回结构未触发匹配，面板会显示「未找到匹配命令」。与其写一条凭猜测的断言，
+    这里只覆盖确定性可达的部分（输入 `/` 后面板打开）。
+    抽屉开关同理未断言：它受视口宽度门控，jsdom 里驱动不到打开态。
+    """
+    result = run_scenario("ui_controls")
+    assert result["paletteHidden"] is False, "输入 / 后命令面板应可见"
+
+
+def test_image_preview_opens_and_closes_viewer() -> None:
+    """点可点击预览图要打开查看器并载入该图，关闭按钮要能收起。"""
+    result = run_scenario("ui_controls")
+
+    assert result["previewImageCount"] >= 1, result
+    assert result["viewerHiddenBefore"] is True, "初始应隐藏"
+    assert result["viewerHiddenAfter"] is False, "点击预览图后应打开"
+    assert result["viewerImageSrc"] == "https://example.com/pic.png", result
+    assert result["viewerHiddenClosed"] is True, "关闭按钮应能收起查看器"
+
+
+# --------------------------------------------------------------------------- #
 # 取消与重试控件
 # --------------------------------------------------------------------------- #
 

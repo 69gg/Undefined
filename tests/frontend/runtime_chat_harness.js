@@ -1499,6 +1499,128 @@ SCENARIOS.cancel_and_retry_controls = async (env) => {
     };
 };
 
+/**
+ * UI 控件：会话侧栏抽屉、斜杠命令面板、图片查看器。
+ *
+ * 原断言是「模板里要有 runtimeChatConversations / btnRuntimeChatNew /
+ * 源码里要有 openChatCommandPalette / openChatImageViewer」这类子串匹配；
+ * 这里真的点开、真的触发输入，再断言可观测状态。
+ */
+SCENARIOS.ui_controls = async (env) => {
+    const { window, setRoutes } = env;
+    const content = "看图 ![图片](https://example.com/pic.png)";
+
+    setRoutes([
+        {
+            match: "/chat/conversations",
+            reply: {
+                body: {
+                    conversations: [
+                        { id: "conv-a", title: "会话甲" },
+                        { id: "conv-b", title: "会话乙" },
+                    ],
+                    default_conversation_id: "webchat",
+                    active_job: null,
+                },
+            },
+        },
+        {
+            match: "/chat/commands",
+            reply: {
+                body: {
+                    commands: [
+                        { name: "help", description: "显示帮助" },
+                        { name: "stats", description: "统计信息" },
+                    ],
+                },
+            },
+        },
+        {
+            match: "/chat/history",
+            reply: {
+                body: {
+                    items: [{ role: "bot", content }],
+                    has_more: false,
+                    next_before: null,
+                },
+            },
+        },
+        { match: "/chat/jobs/active", reply: { body: { active_job: null } } },
+    ]);
+
+    window.eval("window.RuntimeController.init()");
+    await tick();
+    window.RuntimeController.loadChatHistory(true).catch(() => {});
+    await tick(4);
+    await settle(200);
+
+    const doc = window.document;
+    const drawer = doc.getElementById("runtimeChatConversationDrawerPanel");
+    const toggle = doc.getElementById("runtimeChatConversationDrawerToggle");
+    const drawerOpenBefore = drawer ? drawer.classList.contains("is-open") : null;
+    if (toggle) {
+        toggle.click();
+        await tick(2);
+    }
+    const drawerOpenAfter = drawer ? drawer.classList.contains("is-open") : null;
+
+    // 会话列表渲染
+    const conversationItems = doc.querySelectorAll(
+        "#runtimeChatConversations [data-conversation-id], #runtimeChatConversations .runtime-chat-conversation",
+    ).length;
+
+    // 命令面板：输入 "/" 触发
+    const input = doc.getElementById("runtimeChatInput");
+    input.value = "/";
+    input.dispatchEvent(new window.Event("input", { bubbles: true }));
+    await tick(4);
+    await settle(250);
+    const palette = doc.getElementById("runtimeChatCommandPalette");
+    const paletteHidden = palette ? palette.hasAttribute("hidden") : null;
+    const paletteItems = palette
+        ? palette.querySelectorAll("[data-command-name], li, button").length
+        : -1;
+    const paletteText = palette
+        ? (palette.innerText || palette.textContent || "").trim()
+        : "";
+
+    // 图片查看器：点可点击预览图
+    const previewImg = doc.querySelector("[data-chat-image-preview]");
+    const viewer = doc.getElementById("runtimeChatImageViewer");
+    const viewerHiddenBefore = viewer ? viewer.hasAttribute("hidden") : null;
+    if (previewImg) {
+        previewImg.click();
+        await tick(2);
+    }
+    const viewerHiddenAfter = viewer ? viewer.hasAttribute("hidden") : null;
+    const viewerImageSrc = (() => {
+        const img = doc.getElementById("runtimeChatImageViewerImage");
+        return img ? img.getAttribute("src") || "" : "";
+    })();
+
+    // 关闭查看器
+    const closeBtn = doc.getElementById("btnRuntimeChatImageViewerClose");
+    if (closeBtn) {
+        closeBtn.click();
+        await tick(2);
+    }
+    const viewerHiddenClosed = viewer ? viewer.hasAttribute("hidden") : null;
+
+    return {
+        drawerOpenBefore,
+        drawerOpenAfter,
+        conversationItems,
+        paletteHidden,
+        paletteItems,
+        paletteText,
+        previewImageCount: doc.querySelectorAll("[data-chat-image-preview]").length,
+        viewerHiddenBefore,
+        viewerHiddenAfter,
+        viewerImageSrc,
+        viewerHiddenClosed,
+    };
+};
+
 // --------------------------------------------------------------------------- //
 
 async function main() {
