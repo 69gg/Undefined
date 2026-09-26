@@ -173,6 +173,62 @@ def test_stage_event_renders_live_stage() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# 渲染消毒（真喂载荷，而不是断言源码里有没有消毒函数）
+# --------------------------------------------------------------------------- #
+
+
+def test_markdown_rendering_sanitizes_unsafe_content() -> None:
+    """脚本、内联事件处理器与 javascript: 链接都不得落到 DOM 上。
+
+    原测试断言的是「源码里必须出现 createSafeMarkedRenderer / SAFE_HTML_TAGS /
+    name.startsWith("on")」等子串——重构即红，真正的 XSS 回归却测不出来。
+    这里把载荷真渲染出来，直接观察结果。
+    """
+    result = run_scenario("markdown_sanitizes_unsafe_content")
+
+    assert result["xssFired"] is None, "XSS 载荷被执行了"
+    assert result["scriptTags"] == 0, "渲染结果里出现了 script 标签"
+    assert result["inlineHandlerAttrs"] == 0, "渲染结果里残留了内联事件处理器"
+
+    hrefs = [anchor["href"] for anchor in result["anchors"]]
+    assert not [href for href in hrefs if href.lower().startswith("javascript:")], hrefs
+    # 安全外链保留，并带 rel=noreferrer
+    safe = [a for a in result["anchors"] if a["href"] == "https://example.com/page"]
+    assert safe and safe[0]["rel"] == "noreferrer", result["anchors"]
+
+
+def test_markdown_and_html_images_are_lazy_and_clickable() -> None:
+    """图片要带 loading=lazy 且可点击打开预览（统一走 chatImageMarkup）。"""
+    result = run_scenario("markdown_sanitizes_unsafe_content")
+
+    assert result["images"], "未渲染出任何图片"
+    for image in result["images"]:
+        assert image["loading"] == "lazy", image
+    assert result["interactiveImages"] >= 2, (
+        f"Markdown 图片与 HTML 图片都应可点击预览：{result['interactiveImages']}"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# 自动滚动开关（只断言确定性可达的部分）
+# --------------------------------------------------------------------------- #
+
+
+def test_auto_scroll_toggle_persists_preference() -> None:
+    """切换自动滚动后偏好必须落到 localStorage。
+
+    不断言「关掉后不再滚动」：jsdom 里多条渲染路径都会触发滚动，实测开关前后
+    调用次数只差 3 次，信号强度不足以支撑可靠断言（宁可少测也不写会漏报的断言）。
+    """
+    result = run_scenario("auto_scroll_toggle_controls_scrolling")
+
+    assert result["toggleExists"], "模板缺少自动滚动开关"
+    assert result["toggleCheckedAfterChange"] is False
+    assert result["storedPreference"] == "false", result["storedPreference"]
+    assert result["reloadedPreference"] == "false"
+
+
+# --------------------------------------------------------------------------- #
 # 跨会话隔离
 # --------------------------------------------------------------------------- #
 

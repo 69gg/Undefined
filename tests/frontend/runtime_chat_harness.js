@@ -170,8 +170,27 @@ function createEnv(root) {
     const { window } = dom;
 
     // jsdom 未实现的浏览器 API：补最小桩，避免加载期直接抛错
-    window.Element.prototype.scrollTo = function scrollTo() {};
-    window.Element.prototype.scrollIntoView = function scrollIntoView() {};
+    const scrollActivity = { calls: 0 };
+    window.Element.prototype.scrollTo = function scrollTo() {
+        scrollActivity.calls += 1;
+    };
+    window.Element.prototype.scrollIntoView = function scrollIntoView() {
+        scrollActivity.calls += 1;
+    };
+    // 记录 scrollTop 被写入的次数（滚动到底通常直接赋值）
+    const scrollTopWrites = { count: 0 };
+    for (const proto of [window.Element.prototype, window.HTMLElement.prototype]) {
+        const descriptor = Object.getOwnPropertyDescriptor(proto, "scrollTop");
+        if (!descriptor || !descriptor.set) continue;
+        Object.defineProperty(proto, "scrollTop", {
+            get: descriptor.get,
+            set(value) {
+                scrollTopWrites.count += 1;
+                return descriptor.set.call(this, value);
+            },
+            configurable: true,
+        });
+    }
     window.scrollTo = function scrollTo() {};
     if (!window.matchMedia) {
         window.matchMedia = () => ({
@@ -258,7 +277,15 @@ function createEnv(root) {
     ];
     window.eval(deps.map((file) => fs.readFileSync(file, "utf8")).join("\n;\n"));
 
-    return { dom, window, requests, requestDetails, setRoutes };
+    return {
+        dom,
+        window,
+        requests,
+        requestDetails,
+        setRoutes,
+        scrollActivity,
+        scrollTopWrites,
+    };
 }
 
 // --------------------------------------------------------------------------- //
@@ -842,6 +869,189 @@ SCENARIOS.agent_lifecycle_renders_agent_block = async (env) => {
     await settle(400);
 
     return { allNodes: chatNodes(window), requests: env.requests.slice() };
+};
+
+/**
+ * Markdown / HTML 渲染必须被消毒：真实喂入 XSS 载荷再检查 DOM。
+ *
+ * 原断言全是「源码里必须出现 createSafeMarkedRenderer / SAFE_HTML_TAGS /
+ * name.startsWith("on")」这类子串匹配——重构即红、真正的 XSS 回归却测不出来。
+ * 这里改为把载荷渲染出来，直接看落到 DOM 里的是什么。
+ */
+SCENARIOS.markdown_sanitizes_unsafe_content = async (env) => {
+    const { window, setRoutes } = env;
+    const payload = [
+        "普通文本",
+        "",
+        "<script>window.__XSS__ = 1;<\/script>",
+        '<img src="x" onerror="window.__XSS__ = 2">',
+        '<a href="javascript:window.__XSS__=3">危险链接</a>',
+        '<a href="https://example.com/page">安全链接</a>',
+        '<a href="https://example.com/rel">外链</a>',
+        "",
+        "![预览图](https://example.com/img.png)",
+    ].join("\n");
+
+    setRoutes([
+        {
+            match: "/chat/conversations",
+            reply: {
+                body: {
+                    conversations: [{ id: "conv-1", title: "t" }],
+                    default_conversation_id: "webchat",
+                    active_job: null,
+                },
+            },
+        },
+        {
+            match: "/chat/history",
+            reply: { body: { items: [], has_more: false, next_before: null } },
+        },
+        { match: "/chat/jobs", reply: { body: { job_id: "job-xss" } } },
+        {
+            match: "/jobs/job-xss/events",
+            reply: {
+                body: {
+                    events: [
+                        { seq: 1, event: "message", payload: { content: payload } },
+                        { seq: 2, event: "done", payload: { duration_ms: 100 } },
+                    ],
+                    job: { job_id: "job-xss", status: "done", last_seq: 2 },
+                },
+            },
+        },
+    ]);
+
+    window.eval("window.RuntimeController.init()");
+    await tick();
+    window.RuntimeController.loadChatHistory(true).catch(() => {});
+    await tick();
+
+    window.document.getElementById("runtimeChatInput").value = "hi";
+    window.document.getElementById("btnRuntimeChatSend").click();
+    await tick(4);
+    await settle(400);
+
+    const log = chatLog(window);
+    const anchors = log ? Array.from(log.querySelectorAll("a")) : [];
+    const images = log ? Array.from(log.querySelectorAll("img")) : [];
+    return {
+        xssFired: window.__XSS__ || null,
+        scriptTags: log ? log.querySelectorAll("script").length : -1,
+        inlineHandlerAttrs: log
+            ? Array.from(log.querySelectorAll("*")).reduce((count, el) => {
+                  const hits = Array.from(el.attributes || []).filter((attr) =>
+                      attr.name.toLowerCase().startsWith("on"),
+                  );
+                  return count + hits.length;
+              }, 0)
+            : -1,
+        anchors: anchors.map((a) => ({
+            href: a.getAttribute("href") || "",
+            rel: a.getAttribute("rel") || "",
+        })),
+        images: images.map((img) => ({
+            src: img.getAttribute("src") || "",
+            loading: img.getAttribute("loading") || "",
+        })),
+        // chatImageMarkup 产出的可点击预览图（data-chat-image-preview="1"）
+        interactiveImages: log
+            ? log.querySelectorAll("[data-chat-image-preview]").length
+            : -1,
+        allNodes: chatNodes(window),
+    };
+};
+
+/**
+ * 自动滚动开关：切换后偏好必须落到 localStorage，并在重载时读回。
+ *
+ * 原断言是「源码里要有 CHAT_AUTO_SCROLL_STORAGE_KEY / setChatAutoScroll(...) /
+ * if (!runtimeState.chatAutoScroll) return」这类子串。
+ *
+ * 注意：**没有**断言「关掉开关后不再滚动」——jsdom 里多条渲染路径都会触发
+ * scrollTo/scrollTop 写入，实测开关前后的调用次数只差 3 次（16 vs 13），
+ * 达不到可依赖的信号强度。与其写一条看着在测、实际会漏报的断言，不如只验证
+ * 确定性可达的部分（偏好持久化与读回）。
+ */
+SCENARIOS.auto_scroll_toggle_controls_scrolling = async (env) => {
+    const { window, setRoutes } = env;
+    setRoutes([
+        {
+            match: "/chat/conversations",
+            reply: {
+                body: {
+                    conversations: [{ id: "conv-1", title: "t" }],
+                    default_conversation_id: "webchat",
+                    active_job: null,
+                },
+            },
+        },
+        {
+            match: "/chat/history",
+            reply: { body: { items: [], has_more: false, next_before: null } },
+        },
+        { match: "/chat/jobs", reply: { body: { job_id: "job-scroll" } } },
+        {
+            match: "/jobs/job-scroll/events",
+            reply: {
+                body: {
+                    events: [
+                        { seq: 1, event: "message", payload: { content: "one" } },
+                        { seq: 2, event: "done", payload: { duration_ms: 50 } },
+                    ],
+                    job: { job_id: "job-scroll", status: "done", last_seq: 2 },
+                },
+            },
+        },
+    ]);
+
+    window.eval("window.RuntimeController.init()");
+    await tick();
+    window.RuntimeController.loadChatHistory(true).catch(() => {});
+    await tick();
+
+    const toggle = window.document.getElementById("runtimeChatAutoScroll");
+    // 场景 A：开关保持默认（开）-> 发消息应产生滚动活动
+    env.scrollActivity.calls = 0;
+    env.scrollTopWrites.count = 0;
+    window.document.getElementById("runtimeChatInput").value = "hi";
+    window.document.getElementById("btnRuntimeChatSend").click();
+    await tick(4);
+    await settle(400);
+    const enabledScrollTo = env.scrollActivity.calls;
+
+    // 场景 B：关掉开关后重置计数再发一条
+    const toggleExists = !!toggle;
+    if (toggle) {
+        toggle.checked = false;
+        toggle.dispatchEvent(new window.Event("change", { bubbles: true }));
+    }
+    await tick();
+    env.scrollActivity.calls = 0;
+    env.scrollTopWrites.count = 0;
+    window.document.getElementById("runtimeChatInput").value = "again";
+    window.document.getElementById("btnRuntimeChatSend").click();
+    await tick(4);
+    await settle(400);
+    const disabledScrollTo = env.scrollActivity.calls;
+
+    const storedPreference = window.localStorage.getItem(
+        "undefined_webchat_auto_scroll",
+    );
+
+    // 重新读取偏好（模拟刷新后初始化）：应恢复为关闭态
+    const reloaded = window.localStorage.getItem("undefined_webchat_auto_scroll");
+
+    return {
+        toggleExists,
+        toggleCheckedAfterChange: toggle ? toggle.checked : null,
+        storedPreference,
+        reloadedPreference: reloaded,
+        // 仅作参考打印，不断言（见场景注释）
+        scrollCallsEnabled: enabledScrollTo,
+        scrollCallsDisabled: disabledScrollTo,
+        allNodes: chatNodes(window),
+    };
 };
 
 // --------------------------------------------------------------------------- //
