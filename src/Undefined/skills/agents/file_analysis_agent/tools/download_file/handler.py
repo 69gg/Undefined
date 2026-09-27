@@ -387,3 +387,6 @@ async def _download_from_attachment_record(
             exc,
         )
         return "错误：附件文件读取失败"
+    except Exception:
+        logger.exception("附件 UID 本地化失败 uid=%s", getattr(record, "uid", ""))
+        return "错误：附件 UID 本地化失败"
