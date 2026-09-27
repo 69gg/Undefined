@@ -270,13 +270,15 @@ class BaseRegistry:
         可以正常解析到同目录模块。不随包的目录（测试或外部注入）使用独立前缀，
         避免污染真实包命名空间。
         """
-        try:
-            relative = item_dir.relative_to(self.skills_root)
-        except ValueError:
-            relative = Path(*item_dir.parts[-3:])
-        prefix = (
-            _PACKAGE_PREFIX if _is_under_real_package(item_dir) else _SYNTHETIC_PREFIX
-        )
+        if _is_under_real_package(item_dir):
+            relative = item_dir.resolve().relative_to(_REAL_PACKAGE_ROOT)
+            prefix = _PACKAGE_PREFIX
+        else:
+            try:
+                relative = item_dir.relative_to(self.skills_root)
+            except ValueError:
+                relative = Path(*item_dir.parts[-3:])
+            prefix = _SYNTHETIC_PREFIX
         return ".".join([*prefix.split("."), *relative.parts, "handler"])
 
     def _load_handler_for_item(

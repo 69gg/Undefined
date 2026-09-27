@@ -51,9 +51,16 @@ def test_all_registered_agents_import_handlers() -> None:
         assert item.loaded is True, name
 
 
-def test_agent_relative_import_handler_loads() -> None:
+@pytest.mark.parametrize("relative_base_dir", [False, True])
+def test_agent_relative_import_handler_loads(
+    monkeypatch: pytest.MonkeyPatch, relative_base_dir: bool
+) -> None:
     """handler.py 内的相对导入必须能解析到同目录模块。"""
-    registry = AgentRegistry(PACKAGE_ROOT / "skills" / "agents")
+    monkeypatch.chdir(PACKAGE_ROOT.parent.parent)
+    base_dir = SKILLS_ROOT / "agents"
+    if relative_base_dir:
+        base_dir = base_dir.relative_to(Path.cwd())
+    registry = AgentRegistry(base_dir)
 
     item = registry._items["code_delivery_agent"]
     assert item.module_name == "Undefined.skills.agents.code_delivery_agent.handler"
@@ -86,14 +93,18 @@ def test_toolset_handlers_load_with_canonical_names() -> None:
     AGENT_TOOLS_DIRS,
     ids=[path.parent.name for path in AGENT_TOOLS_DIRS],
 )
+@pytest.mark.parametrize("relative_base_dir", [False, True])
 def test_agent_private_tool_handlers_load_with_real_package_names(
-    tools_dir: Path,
+    monkeypatch: pytest.MonkeyPatch, tools_dir: Path, relative_base_dir: bool
 ) -> None:
     """Agent 私有工具的 base_dir 是 ``<agent>/tools``，模块名仍须是真实包路径。
 
     这是 #97 引入的回归点：按 base_dir 名称上溯一级会把模块算成不存在的
     ``Undefined.skills.tools.<tool>``，导致所有 Agent 私有工具被排除出 schema。
     """
+    monkeypatch.chdir(PACKAGE_ROOT.parent.parent)
+    if relative_base_dir:
+        tools_dir = tools_dir.relative_to(Path.cwd())
     agent_name = tools_dir.parent.name
     registry = AgentToolRegistry(
         tools_dir,
@@ -125,6 +136,8 @@ def test_agent_private_tool_handlers_load_with_real_package_names(
             f"Undefined.skills.agents.{agent_name}.tools."
         ), item.module_name
         assert item.module_name.endswith(".handler")
+        assert item.handler.__module__ == item.module_name
+        assert sys.modules[item.module_name].execute is item.handler
 
 
 def test_file_analysis_multimodal_tool_is_callable() -> None:

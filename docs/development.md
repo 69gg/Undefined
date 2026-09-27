@@ -178,6 +178,8 @@ def get_config(strict: bool = True) -> Config:
 
 ### Skills handler 统一模板
 
+技能注册表的 `base_dir` 支持绝对路径和相对于当前工作目录的路径。随包技能会先解析真实路径，再按 `Undefined.skills.*` 的真实包名加载（包括 Agent 私有工具），保证 handler 的相对导入可用；外部目录仍使用独立的合成模块前缀。
+
 `skills/tools/**/handler.py`、`skills/toolsets/**/handler.py`、`skills/agents/**/handler.py`、`skills/commands/**/handler.py`、`skills/pipelines/**/handler.py` 在注释 Wave 中统一采用：
 
 ```python
