@@ -141,8 +141,9 @@ uv run Undefined-webui
 启动后，按终端显示的地址打开 WebUI，设置管理密码并填写模型与 QQ 配置；校验通过后，在页面中启动 Bot。后续配置、日志查看和 Bot 启停都可以在 WebUI 中完成。
 
 <a id="-docker-一键部署linux"></a>
+<a id="docker-一键部署linux"></a>
 
-### Docker 一键部署（Linux）
+### Docker 一键部署（Linux） · [完整部署指南](docs/docker-deploy.md)
 
 已安装 Docker Engine、`docker compose` 插件、Git 和 uv 后，在 Linux 上执行以下命令；未安装时先看 [开始前的准备](docs/docker-deploy.md#1-开始前的准备)。默认部署 Undefined + NapCat，其他服务按需选择：
 
