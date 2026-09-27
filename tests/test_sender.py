@@ -22,7 +22,7 @@ from weixin_ilink_client import (
 from Undefined.attachments import AttachmentRegistry
 from Undefined.context import RequestContext
 from Undefined.onebot.client import OneBotDeliveryUncertainError
-from Undefined.onebot.file_errors import FileTransferError
+from Undefined.onebot.file_errors import FileTransferError, OneBotAPIError
 from Undefined.utils import io as async_io
 from Undefined.utils.message_reply import ReplyContext
 from Undefined.utils.message_targets import DeliveryAddress
@@ -30,6 +30,9 @@ from Undefined.utils.sender import (
     AddressBoundSender,
     MAX_MESSAGE_LENGTH,
     MessageSender,
+    _FORWARD_INLINE_TEXT_BUDGET,
+    _FORWARD_PREVIEW_TEXT_BUDGET,
+    _bound_forward_preview,
     _file_uri_path_text,
     _get_file_size,
     _local_path_from_segment_source,
@@ -492,6 +495,203 @@ async def test_send_private_forward_message_records_history(
     kwargs = history_mock.await_args.kwargs
     assert kwargs["user_id"] == 54321
     assert kwargs["text_content"] == "[命令输出] 私聊合并转发摘要"
+
+
+def _forward_direct_text(node: dict[str, Any]) -> int:
+    content = node["data"]["content"]
+    if not isinstance(content, list):
+        return 0
+    return sum(
+        len(str(segment["data"]["text"]))
+        for segment in content
+        if segment.get("type") == "text"
+    )
+
+
+def _flatten_forward_text(nodes: list[dict[str, Any]]) -> str:
+    parts: list[str] = []
+    for node in nodes:
+        content = node["data"]["content"]
+        if isinstance(content, str):
+            parts.append(content)
+            continue
+        for segment in content:
+            if segment.get("type") == "node":
+                parts.append(_flatten_forward_text([segment]))
+            elif segment.get("type") == "text":
+                parts.append(str(segment["data"]["text"]))
+    return "".join(parts)
+
+
+@pytest.mark.asyncio
+async def test_send_group_forward_message_demotes_oversized_top_level_text(
+    sender: MessageSender,
+) -> None:
+    onebot = cast(Any, sender.onebot)
+    onebot.send_forward_msg = AsyncMock()
+    body = "A" * 5000
+    nodes: list[dict[str, Any]] = [
+        {
+            "type": "node",
+            "data": {
+                "name": "图文信息",
+                "uin": "10000",
+                "content": [{"type": "text", "data": {"text": "标题"}}],
+            },
+        },
+        {
+            "type": "node",
+            "data": {
+                "name": "正文",
+                "uin": "10000",
+                "content": [
+                    {"type": "text", "data": {"text": body}},
+                    {"type": "image", "data": {"file": "https://i0.hdslb.com/a.jpg"}},
+                ],
+            },
+        },
+    ]
+
+    await sender.send_group_forward_message(12345, nodes, history_message="摘要")
+
+    sent = onebot.send_forward_msg.await_args.args[1]
+    assert sent[0] is nodes[0]
+    assert sent[1] is not nodes[1]
+    assert _forward_direct_text(sent[1]) == 0
+    chunks = sent[1]["data"]["content"]
+    assert {segment["type"] for segment in chunks} == {"node"}
+    for chunk in chunks:
+        for segment in chunk["data"]["content"]:
+            if segment["type"] == "text":
+                assert len(str(segment["data"]["text"])) <= _FORWARD_INLINE_TEXT_BUDGET
+    assert [segment["type"] for segment in chunks[-1]["data"]["content"]] == [
+        "text",
+        "image",
+    ]
+    assert _flatten_forward_text(sent) == "标题" + body
+
+
+@pytest.mark.asyncio
+async def test_send_group_forward_message_keeps_small_forward_unchanged(
+    sender: MessageSender,
+) -> None:
+    onebot = cast(Any, sender.onebot)
+    onebot.send_forward_msg = AsyncMock()
+    nodes: list[dict[str, Any]] = [
+        {
+            "type": "node",
+            "data": {"name": "Bot", "uin": "10000", "content": "短内容"},
+        }
+    ]
+
+    await sender.send_group_forward_message(12345, nodes, history_message="摘要")
+
+    assert onebot.send_forward_msg.await_args.args[1] is nodes
+
+
+@pytest.mark.asyncio
+async def test_send_group_forward_message_keeps_nested_nodes_intact(
+    sender: MessageSender,
+) -> None:
+    onebot = cast(Any, sender.onebot)
+    onebot.send_forward_msg = AsyncMock()
+    nested_card: dict[str, Any] = {
+        "type": "node",
+        "data": {
+            "name": "嵌套图文: x",
+            "uin": "10000",
+            "content": [{"type": "text", "data": {"text": "嵌套正文"}}],
+        },
+    }
+    nodes: list[dict[str, Any]] = [
+        {
+            "type": "node",
+            "data": {
+                "name": "正文",
+                "uin": "10000",
+                "content": [
+                    {"type": "text", "data": {"text": "B" * 3000}},
+                    nested_card,
+                ],
+            },
+        }
+    ]
+
+    await sender.send_group_forward_message(12345, nodes, history_message="摘要")
+
+    chunks = onebot.send_forward_msg.await_args.args[1][0]["data"]["content"]
+    assert {segment["type"] for segment in chunks} == {"node"}
+    inner = [segment for chunk in chunks for segment in chunk["data"]["content"]]
+    assert nested_card in inner
+    assert nested_card["data"]["content"] == [
+        {"type": "text", "data": {"text": "嵌套正文"}}
+    ]
+    assert [chunk["data"]["name"] for chunk in chunks] == [
+        f"正文 {index}/3" for index in range(1, 4)
+    ]
+
+
+def test_bound_forward_preview_demotes_medium_nodes_until_budget() -> None:
+    nodes: list[dict[str, Any]] = [
+        {
+            "type": "node",
+            "data": {
+                "name": f"块{index}",
+                "uin": "10000",
+                "content": [{"type": "text", "data": {"text": "C" * 900}}],
+            },
+        }
+        for index in range(5)
+    ]
+
+    bounded = _bound_forward_preview(nodes)
+
+    assert sum(_forward_direct_text(node) for node in bounded) <= (
+        _FORWARD_PREVIEW_TEXT_BUDGET
+    )
+    assert _flatten_forward_text(bounded) == "C" * 4500
+    assert [node["data"]["content"][0]["type"] for node in bounded] == [
+        "node",
+        "node",
+        "node",
+        "text",
+        "text",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_send_group_forward_message_logs_structure_when_rejected(
+    sender: MessageSender,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    onebot = cast(Any, sender.onebot)
+    onebot.send_forward_msg = AsyncMock(
+        side_effect=OneBotAPIError("发送转发消息（res_id：x 失败", 1200)
+    )
+    nodes: list[dict[str, Any]] = [
+        {
+            "type": "node",
+            "data": {
+                "name": "Bot",
+                "uin": "10000",
+                "content": [
+                    {"type": "text", "data": {"text": "内容"}},
+                    {"type": "image", "data": {"file": "https://i0.hdslb.com/a.jpg"}},
+                ],
+            },
+        }
+    ]
+
+    with caplog.at_level(logging.ERROR, logger="Undefined.utils.sender"):
+        with pytest.raises(OneBotAPIError):
+            await sender.send_group_forward_message(
+                12345, nodes, history_message="摘要"
+            )
+
+    assert "节点=1" in caplog.text
+    assert "顶层文本=2" in caplog.text
+    assert "图片=1" in caplog.text
+    assert "retcode=1200" in caplog.text
 
 
 @pytest.mark.asyncio

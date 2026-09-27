@@ -512,7 +512,27 @@ def test_apply_config_updates_hot_reloads_long_image_defaults() -> None:
     assert ai_client.runtime_updates == [updated]
 
 
-def test_apply_config_updates_hot_reloads_attachment_config() -> None:
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {
+            "attachment_cache_max_total_size_mb": (0, 512),
+            "attachment_cache_max_records": (2000, 300),
+            "attachment_cache_max_age_days": (7, 14),
+            "attachment_url_reference_max_records": (2000, 150),
+            "attachment_url_max_length": (8192, 4096),
+        },
+        {
+            "attachment_remote_download_allow_private_origins": (
+                [],
+                ["http://media.internal:8080"],
+            )
+        },
+    ],
+)
+def test_apply_config_updates_hot_reloads_attachment_config(
+    changes: dict[str, tuple[Any, Any]],
+) -> None:
     updated = cast(
         Any,
         SimpleNamespace(
@@ -566,13 +586,7 @@ def test_apply_config_updates_hot_reloads_attachment_config() -> None:
 
     apply_config_updates(
         updated,
-        {
-            "attachment_cache_max_total_size_mb": (0, 512),
-            "attachment_cache_max_records": (2000, 300),
-            "attachment_cache_max_age_days": (7, 14),
-            "attachment_url_reference_max_records": (2000, 150),
-            "attachment_url_max_length": (8192, 4096),
-        },
+        changes,
         context,
     )
 

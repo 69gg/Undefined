@@ -236,6 +236,8 @@ model_name = "gpt-4o-mini"
 
 这些选项只影响 Bot 本地文件；已有 HTTP/HTTPS URL、Base64 和协议端资源标识保持原样，展示文件名、附件 UID 和历史来源不变。旧配置未包含新字段且未通过环境变量指定模式时继续采用 `local`，保持原有发送行为；`url` 和 `stream` 需要显式启用。不能假定所有 OneBot 实现或 Lagrange.Core 都支持 NapCat 扩展。
 
+`uv run deploy up` 会为配套的 NapCat 显式设置 `file_send_mode = "stream"`，`container` 与 `host` 模式均适用；无需配置 `file_send_host` 或共享发送目录。上表的 `local` 仍是一般配置及旧配置的默认值。
+
 Stream 本地文件投递在同一 Bot 内串行，纯文本不等待上传锁。Stream／URL 文件准备、发送与明确失败后的文件消息段回退共用 8 分钟预算，排队不计时；临时资源保留 16 分钟。URL 副本在源文件删除或切换模式后仍可下载，到期拒绝新请求，已有下载允许完成。文件准备失败不会触发文件消息段回退或标记已发送；投递发出后无法确认结果时禁止自动重发。不会自动切换模式、自动重试上传或启动 Runtime。
 
 传输过程使用分块 IO；现有附件登记与 NapCat 的分块合并仍可能读取完整文件，不保证整个链路固定内存占用。参见 [三模式部署要求](deployment.md#napcat--lagrangecore-部署要求)、[自托管服务概览](deployment.md#需要一并部署的自托管服务概览) 与 [临时文件接口](openapi.md#onebot-临时文件下载)。
@@ -691,6 +693,7 @@ document_instruction = "passage: "
 | 字段 | 默认值 | 说明 |
 |---|---:|---|
 | `remote_download_max_size_mb` | `25` | 远程附件自动下载并缓存的最大大小（MB）。超过上限时只登记 URL 引用；设为 `0` 可完全禁用远程附件下载 |
+| `remote_download_allow_private_origins` | `[]` | 允许访问非公网地址的受信任媒体服务 origin，例如 `["http://media.internal:8080"]`。精确匹配协议、主机与端口，不支持路径、凭据或通配符；支持热重载 |
 | `use_proxy` | `false` | 远程附件下载是否使用 `[proxy]` 中的代理地址 |
 | `cache_max_total_size_mb` | `0` | 附件缓存文件总大小上限（MB）。`0` 表示不按总容量清理；达到上限时优先删除最旧本地缓存副本，有 URL 的记录会保留 UID 与 URL 以便后续回源 |
 | `cache_max_records` | `2000` | 附件登记记录最大数量。`0` 表示不限制数量 |
@@ -699,6 +702,10 @@ document_instruction = "passage: "
 | `url_max_length` | `8192` | 允许登记的远程附件 URL 最大长度。`0` 表示不限制长度 |
 
 外部接收的远程图片或文件默认会先下载到附件缓存再生成 UID，避免后续 URL 失效；大文件超过阈值时，UID 仍会生成，但绑定的是 URL 引用而不是缓存文件，AI 可在上下文中看到原始 `source_ref`。如果本地缓存因总容量或时间清理被删除，但记录仍保留 URL，后续需要文件内容时会优先按 URL 回源下载。
+
+远程附件下载默认只允许公网 HTTP(S) 目标，拒绝 URL 内的凭据、回环、私网、链路本地、组播等非公网目标。域名的全部解析结果都必须符合策略；实际请求固定到已校验的 IP，并保留原始 Host、TLS SNI 和证书校验，避免校验后再次解析造成 DNS 重绑定绕过。每次重定向和后续回源都重新校验目标；DNS、连接、跳转与下载共用 120 秒总时限，最多跟随 20 次跳转。策略拒绝或网络错误不会降级登记成新的 URL 引用。
+
+需要从 NapCat 等内网媒体服务下载时，只将确认可信的精确 origin 加入 `remote_download_allow_private_origins`；该配置允许从对应服务的任意路径下载，不会放行其他端口、协议或跳转目标。修改配置只影响后续下载，不删除现有缓存。仅登记 URL 引用时不会发起 DNS 或 HTTP 请求；真正回源时仍须通过当时的目标策略。`use_proxy` 保持生效，代理会收到已校验的目标 IP，代理地址本身由部署者信任；代理模式也需要 Bot 本机能够解析目标域名。
 
 合并转发会复用同一注册表登记为 `forward_...` UID，并在实时 AI 输入中显示为 `<forward uid="..."/>`。收到合并转发时会在预处理阶段递归保存当前可访问的转发树到 `data/cache/forward_snapshots/`，后续 `messages.get_forward_msg` 读取时优先使用本地快照；缺失时才回源 OneBot 并补写快照。历史记录仍保留递归展开后的文本，但同一轮 prompt 会按 `message_id` 剔除当前消息的历史副本，因此实时上下文只保留 UID；需要查看第一层或内层内容时，AI 会调用工具按层读取，内层合并转发会继续分配新的 `forward_...` UID。如果协议端无法二次读取内层转发，会返回明确诊断和可见原始字段。
 
@@ -839,8 +846,8 @@ summary = ""
 
 搜索服务部署说明（两者都是可选项，不部署时联网检索仍可由其他子工具承担，概览见[需要一并部署的自托管服务](deployment.md#需要一并部署的自托管服务概览)）：
 
-- **SearXNG**：`searxng_url` 需要指向一个可用的 SearXNG 实例，该实例不由本项目提供。请先按 [SearXNG 官方部署说明](https://docs.searxng.org/) 完成自托管再填写地址；留空时内置 `web_search` 工具不可用（调用会返回“搜索功能未启用”），`grok_search`、`firecrawl_search`、`crawl_webpage` 不受影响。
-- **Firecrawl**：`firecrawl_search_enabled = true` 后有三种用法，按需选择其一——① 官方 keyless（`api_key` 留空，受官方配额与限流约束）；② 官方 + 自己的 API Key（填写 `api_key`，指向默认 `base_url`）；③ 自部署实例（把 `base_url` 改为自部署地址，通常可留空 `api_key`，接口契约仍为 `POST /v2/search`）。自部署请参考 [Firecrawl 自托管说明](https://docs.firecrawl.dev/contributing/self-host)，并注意其搜索能力通常需要另行配置搜索后端（例如 SearXNG）。
+- **SearXNG**：`searxng_url` 需要指向一个可用的 SearXNG 实例，可用 `uv run deploy up --with searxng` 一键部署，或按 [SearXNG 官方部署说明](https://docs.searxng.org/) 手工搭建；已有实例时直接填写地址即可。留空时内置 `web_search` 工具不可用（调用会返回“搜索功能未启用”），`grok_search`、`firecrawl_search`、`crawl_webpage` 不受影响。
+- **Firecrawl**：**不自部署 Firecrawl 也能使用 `firecrawl_search`**。开启 `firecrawl_search_enabled = true` 后有三种用法：① 官方 keyless（保留默认 `base_url`，`api_key` 留空，受[官方配额与限流](https://docs.firecrawl.dev/rate-limits#keyless-no-api-key)约束）；② 官方 + 自己的 API Key（填写 `api_key`，保留默认 `base_url`）；③ 自部署实例（把 `base_url` 改为自部署地址，通常可留空 `api_key`，接口契约仍为 `POST /v2/search`）。`uv run deploy up` 未选择 Firecrawl 时会保留已有的工具开关、地址与 Key，不会因此禁用工具。示例见 [Firecrawl 使用方式](docker-deploy.md#firecrawl官方-keyless-或自托管搜索)；自部署请参考 [Firecrawl 自托管说明](https://docs.firecrawl.dev/contributing/self-host)，并注意其搜索后端可能需要另行配置（例如 SearXNG）。
 
 ---
 
@@ -877,7 +884,7 @@ summary = ""
 | `browser_max_concurrency` | `0` | 渲染浏览器最大同时开启数量 | `<=0` 时启用自动值：Linux=`1`，其它平台=`2` |
 | `browser_executable_path` | `""` | 可选 Chrome/Chromium 可执行文件路径 | 留空时优先使用 Playwright 自带浏览器；其缺失时自动查找系统 Chrome/Chromium |
 | `use_proxy` | `false` | 网页抓取链路是否使用 `[proxy]` 中的代理地址 | HTML/Markdown 浏览器渲染始终离线，不使用代理 |
-| `long_image_default_width` | `900` | `layout=long` 未传 `width` 时的最终图片宽度（像素） | 自动钳制到 `320..2048` |
+| `long_image_default_width` | `900` | `layout=long` 未传 `width` 时的图片宽度上限（像素） | 自动钳制到 `320..2048`；页面自身布局更窄时按内容宽度收敛 |
 | `long_image_default_padding` | `28` | `layout=long` 未传 `padding` 时的内边距（像素） | 自动钳制到 `0..160`，且保证小于宽度的一半 |
 
 说明：
@@ -885,7 +892,8 @@ summary = ""
 - 渲染浏览器当前采用单例复用，因此这里限制的是并发页面/上下文数量，而不是浏览器进程数量。
 - 显式修改 `browser_executable_path` 后需重启 Bot；仅当 Playwright 报告自带浏览器缺失时才会自动回退到系统浏览器，其他启动错误仍会原样报出。
 - 配置变更会对后续新的渲染请求生效；已在执行中的渲染任务不受影响。
-- `render.render_html` 和 `render.render_markdown` 默认使用 `layout=default`，视觉效果与旧版一致。显式传 `layout=long` 时，高度按内容自动延伸，使用 CSS 像素截图保证 `width` 对应最终图片宽度，并去掉两侧外部留白。
+- `render.render_html` 和 `render.render_markdown` 默认使用 `layout=default`，视觉效果与旧版一致。显式传 `layout=long` 时，高度按内容自动延伸，使用 CSS 像素截图，并去掉两侧外部留白。
+- 长图宽度会自适应页面自身布局：探测显式设置的 `html` 宽度、`body` 的外边距盒宽和滚动宽度，以及其后代的最大右边界；默认 `width: auto` 的 `html` 不参与宽度下限，固定宽度 `body` 无需同时设置 `html` 宽度。若「页面宽度 + 2 × padding」小于设定宽度，就把渲染视口收缩到该值（下限 `320`）；铺满视口的响应式页面（含 Markdown 模板）保持原宽度。
 - `width` 可选范围为 `320..2048`，`padding` 可选范围为 `0..160`；两者只能与 `layout=long` 一起使用。HTML 长图支持内联 CSS、脚本和 `data:` / `blob:` 资源；BrowserContext 强制离线并终止全部网络请求，外部图片、字体、样式和脚本不会加载。`padding=0` 可用于全幅设计。
 
 #### `[render.cache]` HTML 渲染结果缓存
@@ -1035,8 +1043,9 @@ api_key = "replace-with-your-key"
 - 视频文件下载、清晰度、时长和体积限制仍由本节配置控制；自动提取的转发消息会通过统一发送层写入历史。后续实时 AI 上下文遇到合并转发时只看到 `forward_...` UID，需要内容时按层调用 `messages.get_forward_msg` 读取。
 
 图文（opus）自动提取行为：
-- 命中 `bilibili.com/opus/<id>`、`t.bilibili.com/<id>`、`b23.tv` 短链或 QQ 小程序分享卡片后发送一次外层合并转发：**第一条节点是图文元数据**（封面、标题、UP主、时间、阅读/点赞/评论/转发、原文链接），**第二条起是正文内容节点**（文本与图片按原始顺序混排）。
-- 正文按单节点 4000 字切分，超出部分追加新的内容节点（节点名形如 `正文 1/3`），不做截断、不丢内容；图片始终保留在原文位置。
+- 命中 `bilibili.com/opus/<id>`、`t.bilibili.com/<id>`、`b23.tv` 短链或 QQ 小程序分享卡片后发送一次外层合并转发：**第一条节点是图文元数据**（封面、标题、UP主、时间、阅读/点赞/评论/转发、原文链接），**第二条是正文**（文本与图片按原始顺序混排，超预算时正文节点内再嵌套 `正文 1/N`）。
+- 正文按单节点 1200 字（`NODE_TEXT_BUDGET`）与单节点 9 张图切分，超出部分追加新的内容节点（节点名形如 `正文 1/12`），不做截断、不丢内容；图片始终保留在原文位置。
+- 正文超出单节点预算时，所有内容节点会整体收进顶层 `正文` 节点的嵌套内容：NapCat packet 模式会把**顶层节点**的全部文本写进转发卡片的 `news` 预览，顶层直接塞入整篇正文会让卡片膨胀到几十 KB 并被 QQ 拒收（`发送转发消息（res_id：… 失败`，retcode=1200）；下沉一层后卡片体积与正文长度解耦。正文未超预算时仍是单个顶层 `正文` 节点，结构与旧版一致。
 - 正文里的图文卡片与视频卡片各自成为**独立的嵌套合并转发节点**（`嵌套图文: ...` / `嵌套视频: ...`），按 `opus_nested_depth` 与 `opus_nested_max_cards` 递归展开；超出边界的卡片降级为一行 `标题 — 链接` 文本节点，不再发请求。其余卡片类型（链接、商品、直播、投票等）渲染为单个 `链接卡片` 节点。
 - 嵌套视频会真实下载视频文件，复用 `prefer_quality` / `max_duration` / `max_file_size` / `oversize_strategy` 限制；超限或下载失败时只发视频信息节点，不影响整条转发的发送。
 - 图文详情优先请求 `x/polymer/web-dynamic/v1/opus/detail`，失败（含风控、旧版专栏）时自动回退 `x/polymer/web-dynamic/v1/detail`（带 WBI 签名）；两者返回的 `modules` 结构不同，解析层都会兼容。
@@ -1152,6 +1161,7 @@ api_key = "replace-with-your-key"
 - `webui.url/port/password/autostart_bot` 修改需重启 WebUI 进程（机器人主进程中也属于重启生效类）。
 - `check_updates` 支持热更新；关闭后只停止页面打开时的自动检查，概览页仍可手动检查。
 - `autostart_bot=true` 时，运行 `uv run Undefined-webui` 会自动拉起 bot 进程，无需手动点击启动按钮；与 WebUI 更新重启后的自动恢复机制（`pending_bot_autostart` marker）互不冲突。
+- `uv run deploy up` 在 `container` 与 `host` 模式下都会写入 `autostart_bot = false`；部署后先完成配置与 QQ 登录，再在 WebUI 点击“启动机器人”。
 - 自动检查在 WebUI 鉴权成功后异步执行，失败不会阻塞或打扰页面。GitHub Release 查询在 WebUI 进程内缓存 15 分钟；同一时刻的并发检查会共享一个在途任务，查询失败时也不会逐个重试外部请求。
 - 自动更新仅支持官方 `origin`、本地 `main` 和干净工作区；确认后会精确快进到最新正式 Release 标签，而不是拉取该标签之后尚未发版的 `main` 提交。
 
@@ -1491,6 +1501,7 @@ api_key = "replace-with-your-key"
 | TOML 路径 | 环境变量 |
 |-----------|----------|
 | `attachments.use_proxy` | `ATTACHMENTS_USE_PROXY` |
+| `attachments.remote_download_allow_private_origins` | `ATTACHMENTS_REMOTE_DOWNLOAD_ALLOW_PRIVATE_ORIGINS` |
 
 #### `arxiv`
 

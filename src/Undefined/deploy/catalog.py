@@ -142,7 +142,7 @@ class Service:
 NAPCAT: Final[Service] = Service(
     key="napcat",
     label="NapCat（OneBot V11 协议端）",
-    about="QQ 消息收发的唯一通道，必需；QQ 登录需扫码。",
+    about="连接 QQ 帐号、收发消息与文件，随部署必装；部署后需扫码登录。",
     compose_fragment="compose.napcat.yaml",
     ports=(
         PortSpec("napcat_ws", 3001, "OneBot 正向 WebSocket"),
@@ -153,7 +153,10 @@ NAPCAT: Final[Service] = Service(
 SEARXNG: Final[Service] = Service(
     key="searxng",
     label="SearXNG（web_search）",
-    about="内置 web_search 工具的后端；不部署时该工具不可用。",
+    about=(
+        "聚合多个搜索引擎，为 web_search 提供联网检索；"
+        "不部署时也可连接已有实例，其余搜索工具不受影响。"
+    ),
     compose_fragment="compose.searxng.yaml",
     ports=(PortSpec("searxng", 8080, "SearXNG WebUI / JSON API"),),
 )
@@ -161,7 +164,10 @@ SEARXNG: Final[Service] = Service(
 FIRECRAWL: Final[Service] = Service(
     key="firecrawl",
     label="Firecrawl（firecrawl_search）",
-    about="自带 api/playwright/redis/rabbitmq/postgres 五个容器，资源占用较高。",
+    about=(
+        "为 firecrawl_search 提供自托管搜索，需运行 5 个容器，资源占用较高；"
+        "不部署也可启用该工具并使用官方 keyless（无需 API Key，有配额限制）。"
+    ),
     compose_fragment="compose.firecrawl.yaml",
     ports=(PortSpec("firecrawl", 3002, "Firecrawl API"),),
 )
@@ -169,7 +175,10 @@ FIRECRAWL: Final[Service] = Service(
 LXMUSIC2API: Final[Service] = Service(
     key="lxmusic2api",
     label="lxmusic2api（music.* 工具集）",
-    about="上游无官方镜像，由本项目构建；取音频直链需自备 LX 自定义音源脚本。",
+    about=(
+        "为 music.* 提供歌曲搜索、歌单、歌词与音频获取；"
+        "获取音频需自备 LX 自定义音源脚本，不使用音乐功能可不部署。"
+    ),
     compose_fragment="compose.lxmusic2api.yaml",
     ports=(PortSpec("lxmusic2api", 3000, "lxmusic2api API / Swagger"),),
 )

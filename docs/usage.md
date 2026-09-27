@@ -170,7 +170,7 @@ Undefined 搭载了基于 ChromaDB 向量数据库的后台认知系统，无需
 HTML 和 Markdown 工具都支持显式长图版式：
 
 - `layout=default`：保持原有页面与居中宽版布局，不接受 `width` / `padding`。
-- `layout=long`：输出一张高度随内容延伸的 PNG，去除两侧外部留白。`width` 表示最终图片像素宽度，`padding` 表示内边距。
+- `layout=long`：输出一张高度随内容延伸的 PNG，去除两侧外部留白。`width` 表示图片像素宽度上限，`padding` 表示内边距。页面布局更窄时会收缩到「内容宽度 + 2 × padding」（下限 `320px`）；仅固定 `body` 宽度、保持 `html` 默认自动宽度也可收缩，铺满视口的响应式页面保持原宽度。
 - 未指定宽度和内边距时，默认为 `900px` 和 `28px`，可在 `[render]` 中调整。HTML 全幅设计可显式传 `padding=0`。
 
 **示例：**

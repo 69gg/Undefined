@@ -18,7 +18,7 @@
                 },
                 "width": {
                     "type": "integer",
-                    "description": "长图最终像素宽度，仅 layout=long 时可用；不传则使用 [render].long_image_default_width",
+                    "description": "长图最大像素宽度，仅 layout=long 时可用；不传则使用 [render].long_image_default_width。页面自身布局更窄时按「内容宽度 + 2×padding」收敛，两侧不留空白",
                     "minimum": 320,
                     "maximum": 2048
                 },

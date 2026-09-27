@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import math
 import sys
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -68,6 +69,31 @@ _SYSTEM_CHROMIUM_COMMANDS = (
     "microsoft-edge-stable",
 )
 _RenderResult = TypeVar("_RenderResult")
+
+# 长图宽度探测保留显式 html 宽度；默认 auto 根节点不应阻止固定宽度 body 收缩。
+# 使用 Typed OM 读取 auto，因为 getComputedStyle().width 会将其解析成视口像素宽度。
+# body 的外边距盒宽与后代右边界仍保留响应式页面的完整宽度。
+_CONTENT_WIDTH_SCRIPT = """
+() => {
+  const root = document.documentElement;
+  const body = document.body;
+  const rootWidth = root.computedStyleMap().get('width').toString();
+  let width = !body || rootWidth !== 'auto' ? root.getBoundingClientRect().width : 0;
+  if (body) {
+    const style = getComputedStyle(body);
+    const margins = (parseFloat(style.marginLeft) || 0) + (parseFloat(style.marginRight) || 0);
+    width = Math.max(width, body.getBoundingClientRect().width + margins, body.scrollWidth);
+    for (const element of body.querySelectorAll('*')) {
+      width = Math.max(width, element.getBoundingClientRect().right);
+    }
+  }
+  return width;
+}
+"""
+
+# 收敛后的长图宽度下限，与 Undefined.skills.toolsets.render.layout.MIN_LONG_IMAGE_WIDTH
+# 保持一致（渲染层不反向依赖技能层，因此这里单独声明并注释耦合关系）。
+_MIN_FITTED_WIDTH = 320
 
 
 def _safe_file_size(path: Path) -> int:
@@ -265,6 +291,52 @@ async def render_markdown_to_html(md_text: str) -> str:
     return full_html
 
 
+async def _fit_viewport_to_content(
+    page: Page,
+    viewport_width: int,
+    padding: int,
+) -> int:
+    """按页面自身布局宽度收缩视口，避免长图右侧留白。
+
+    只在页面自己声明的宽度（加上两侧 ``padding``）确实小于 ``viewport_width`` 时
+    收缩，因此铺满视口的响应式页面行为完全不变。探测失败只记录日志并保持原视口，
+    绝不让渲染本身失败。
+    """
+    try:
+        natural_width = float(await page.evaluate(_CONTENT_WIDTH_SCRIPT))
+    except Exception:
+        logger.warning(
+            "[渲染] 长图内容宽度探测失败，保持视口宽度 %s",
+            viewport_width,
+            exc_info=True,
+        )
+        return viewport_width
+
+    if not math.isfinite(natural_width) or natural_width <= 0:
+        return viewport_width
+
+    target_width = min(
+        viewport_width,
+        max(_MIN_FITTED_WIDTH, math.ceil(natural_width) + 2 * padding),
+    )
+    if target_width >= viewport_width:
+        return viewport_width
+
+    current_viewport = page.viewport_size
+    viewport_height = int(current_viewport["height"]) if current_viewport else 800
+    await page.set_viewport_size(
+        {"width": target_width, "height": viewport_height},
+    )
+    logger.info(
+        "[渲染] 长图宽度自适应: 内容 %s + padding %s → %s（视口上限 %s）",
+        math.ceil(natural_width),
+        padding,
+        target_width,
+        viewport_width,
+    )
+    return target_width
+
+
 async def render_html_to_image(
     html_content: str,
     output_path: str,
@@ -273,6 +345,7 @@ async def render_html_to_image(
     screenshot_selector: str | None = None,
     screenshot_scale: Literal["css", "device"] = "device",
     screenshot_style: str | None = None,
+    fit_content_padding: int | None = None,
     timeout_ms: int = 60000,
     proxy: str | None = None,
 ) -> None:
@@ -282,10 +355,13 @@ async def render_html_to_image(
     参数:
         html_content: 完整的 HTML 字符串
         output_path: 输出图片路径 (例如 'result.png')
-        viewport_width: 视口宽度（像素），默认 1280
+        viewport_width: 视口宽度（像素），默认 1280；开启宽度自适应时是宽度上限
         screenshot_selector: 仅截图匹配的元素，默认截整页
         screenshot_scale: 输出像素尺度，device 按 DPR 输出，css 按 CSS 像素输出
         screenshot_style: 仅在截图期间注入的 CSS 样式
+        fit_content_padding: 非 None 时启用长图宽度自适应：页面自身布局宽度比
+            ``viewport_width`` 窄时，把视口收缩到「内容宽度 + 2 × 该值」，使最终
+            图片没有两侧空白（该值即 long 布局的 body 内边距）
         timeout_ms: 截图超时时间（毫秒），默认 60000
         proxy: 保留用于调用兼容和缓存隔离；离线上下文不会发出网络请求
     """
@@ -297,6 +373,7 @@ async def render_html_to_image(
         proxy,
         screenshot_scale,
         screenshot_style,
+        fit_content_padding,
     )
 
     if await cache.copy_to(cache_key, output_path):
@@ -305,6 +382,8 @@ async def render_html_to_image(
     async def _capture(page: Page) -> None:
         await page.wait_for_load_state("networkidle", timeout=timeout_ms)
         await asyncio.sleep(1)
+        if fit_content_padding is not None:
+            await _fit_viewport_to_content(page, viewport_width, fit_content_padding)
         if screenshot_selector:
             await page.locator(screenshot_selector).first.screenshot(
                 path=output_path,

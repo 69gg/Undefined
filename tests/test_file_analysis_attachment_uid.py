@@ -3,10 +3,14 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock
 
+import aiohttp
+import httpx
 import pytest
 
 from Undefined.attachments import AttachmentRegistry, scope_from_context
+from Undefined.attachments.remote import UnsafeAttachmentURL
 from Undefined.skills.agents.file_analysis_agent.tools.download_file import (
     handler as download_file_handler,
 )
@@ -175,6 +179,79 @@ async def test_download_file_redownloads_url_backed_attachment_uid(
     assert downloaded.suffix == ".txt"
     assert downloaded.read_bytes() == b"https://example.com/demo.txt"
     assert captured_url["url"] == "https://example.com/demo.txt"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("failure", "expected_error"),
+    [
+        pytest.param(
+            aiohttp.ClientPayloadError("incomplete response body"),
+            "错误：附件 UID 本地化失败",
+            id="payload",
+        ),
+        pytest.param(
+            UnsafeAttachmentURL("non-public destination"),
+            "错误：附件 UID 本地化失败",
+            id="unsafe-url",
+        ),
+        pytest.param(
+            httpx.RemoteProtocolError("connection closed"),
+            "错误：附件 UID 本地化失败",
+            id="httpx",
+        ),
+        pytest.param(
+            TimeoutError("download timed out"),
+            "错误：附件文件读取失败",
+            id="timeout",
+        ),
+        pytest.param(
+            aiohttp.ServerTimeoutError("read timed out"),
+            "错误：附件文件读取失败",
+            id="aiohttp-timeout",
+        ),
+        pytest.param(
+            OSError("file read failed"),
+            "错误：附件文件读取失败",
+            id="oserror",
+        ),
+        pytest.param(asyncio.CancelledError(), None, id="cancellation"),
+    ],
+)
+async def test_download_file_handles_attachment_localization_failures(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    failure: BaseException,
+    expected_error: str | None,
+) -> None:
+    registry = AttachmentRegistry(
+        registry_path=tmp_path / "attachment_registry.json",
+        cache_dir=tmp_path / "attachments",
+    )
+    record = await registry.register_remote_reference(
+        "private:12345", "https://example.com/demo.txt", kind="file"
+    )
+    localize = AsyncMock(side_effect=failure)
+    fallback = AsyncMock(return_value="unexpected URL fallback")
+    monkeypatch.setattr(registry, "ensure_local_file", localize)
+    monkeypatch.setattr(download_file_handler, "_download_from_url", fallback)
+
+    if expected_error is None:
+        with pytest.raises(asyncio.CancelledError):
+            await download_file_handler.execute(
+                {"file_source": record.uid}, _download_context(tmp_path, registry)
+            )
+    else:
+        result = await download_file_handler.execute(
+            {"file_source": record.uid}, _download_context(tmp_path, registry)
+        )
+        assert result == expected_error
+        assert record.uid in caplog.text
+        assert str(failure) in caplog.text
+
+    localize.assert_awaited_once_with(record)
+    fallback.assert_not_awaited()
 
 
 @pytest.mark.asyncio

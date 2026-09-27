@@ -1,8 +1,12 @@
 # 安装与部署指南
 
-提供源码部署与 pip/uv tool 安装两种方式：**源码部署是推荐的首选方式**，功能完整且经过充分测试；pip/uv tool 安装适合快速体验，但部分功能支持尚不完善。
+本项目提供以下部署方式，按推荐顺序排列：
 
-> **Release 下载提示**：如果目的是部署 QQ Bot，不需要在 GitHub Release 的 Assets 中挑客户端安装包；按本文源码部署或 pip/uv tool 安装即可。Release 中的 `Undefined-Console-*` 和 `Undefined-Chat-*` 是可选客户端，选择说明见 [README — Release 下载速查](../README.md#release-下载速查)。
+1. **[源码部署（首选）](#源码部署推荐)**：直接从仓库安装和运行，便于管理运行环境、修改源码与自定义资源。
+2. **[Docker 一键部署（Linux）](docker-deploy.md)**：希望自动搭建 Undefined + NapCat 及可选搜索、音乐服务时使用，推荐优先于 pip / uv tool 安装。
+3. **[pip / uv tool 安装（快速体验）](#pipuv-tool-部署快速体验)**：适合快速体验，但部分功能支持尚不完善。
+
+> **Release 下载提示**：如果目的是部署 QQ Bot，不需要在 GitHub Release 的 Assets 中挑客户端安装包；选择上述任一种部署方式即可。Release 中的 `Undefined-Console-*` 和 `Undefined-Chat-*` 是可选客户端，选择说明见 [README — Release 下载速查](../README.md#release-下载速查)。
 >
 > **作为 Python 库嵌入**：若你不需要启动 QQ Bot CLI，而是要在自己的应用或测试中复用 Undefined 组件（配置、`AIClient`、Skills、认知记忆等），请参阅 [Python 库 API 参考](python-api.md) 与 [配置详解 — 库嵌入配置](configuration.md#2-库嵌入配置)。CLI 入口（`Undefined` / `Undefined-webui`）行为不受库嵌入 API 影响。
 >
@@ -75,26 +79,26 @@ uv run playwright install
 
 ### 4. 需要一并部署的自托管服务（概览）
 
-除 Python 运行环境外，下列服务由部署方自行搭建；后面的 pip/uv tool 部署方式同样适用。本节只说明**必要性与配置位置**，不重复各上游仓库的安装步骤——请按官方部署说明完成部署后，再在 `config.toml` 中填写地址与凭据。
+下列服务为 QQ 消息、搜索和音乐功能提供支持，后面的 pip/uv tool 部署方式同样适用。OneBot 协议端是使用 QQ 机器人的必需组件，其他服务按需选择；已有实例时可直接填写地址与凭据，Firecrawl 也可使用官方 keyless，无需自行部署。各服务的用途和选择建议见 [Docker 一键部署指南](docker-deploy.md#4-按需添加功能)，手工搭建请参考下表的官方说明。
 
 | 服务 | 必要性 | 配置位置 | 官方部署说明 |
 |---|---|---|---|
 | **OneBot V11 协议端**（NapCat / Lagrange.Core） | **必需**：Undefined 自身不实现 QQ 协议，QQ 消息的收发完全由协议端决定 | `[onebot]`，见[配置说明](configuration.md#43-onebot-协议端连接) | [NapCatQQ](https://github.com/NapNeko/NapCatQQ)、[Lagrange.Core](https://github.com/LagrangeDev/Lagrange.Core)、[OneBot V11 标准](https://github.com/botuniverse/onebot-11) |
 | **SearXNG 搜索服务** | 可选：只影响 `web_agent` 的内置 `web_search` 工具 | `[search].searxng_url`，见[配置说明](configuration.md#412-search-搜索) | [SearXNG（自托管）](https://docs.searxng.org/) |
-| **Firecrawl 搜索服务** | 可选，且默认关闭（`firecrawl_search_enabled = false`）：可用官方 keyless，或官方 + 自己的 API Key，或指向自部署实例 | `[search.firecrawl]`，见[配置说明](configuration.md#412-search-搜索) | [Firecrawl 自托管说明](https://docs.firecrawl.dev/contributing/self-host) |
+| **Firecrawl 搜索服务** | 自托管可选；`firecrawl_search` 工具可使用官方 keyless、官方 API Key 或自部署实例，需开启 `firecrawl_search_enabled`（默认 `false`） | `[search].firecrawl_search_enabled`、`[search.firecrawl]`，见[配置说明](configuration.md#412-search-搜索) | [Firecrawl 自托管说明](https://docs.firecrawl.dev/contributing/self-host) |
 | **lxmusic2api 音乐服务** | 可选：为 `music.*` 工具集提供数据与音频解析能力，不随本项目发布 | `[lxmusic2api]`，见[配置说明](configuration.md#4201-lxmusic2api-音乐服务) | [lxmusic2api](https://github.com/69gg/lxmusic2api) |
 
 各项不部署时的具体影响：
 
 - **不部署 OneBot 协议端**：Bot 无法登录，收发不了任何 QQ 消息；严格模式缺少 `onebot.ws_url` 会直接报错退出。
-- **不部署 SearXNG**：`web_search` 调用时提示未启用；`grok_search`、`firecrawl_search`、`crawl_webpage` 不受影响，联网检索能力不中断。
-- **不启用 Firecrawl**：仅 `firecrawl_search` 工具不可用。
+- **不部署 SearXNG 且未配置可用实例**：`web_search` 不可用；`grok_search`、`firecrawl_search`、`crawl_webpage` 按各自配置使用，不受该部署选项影响。
+- **不自部署 Firecrawl**：仍可使用 `firecrawl_search`。将 `[search].firecrawl_search_enabled` 设为 `true`，保留 `base_url = "https://api.firecrawl.dev"`、`api_key = ""`，即可使用官方 keyless；也可填写自己的 API Key。只有关闭工具开关时，`firecrawl_search` 才会隐藏。完整示例和配额说明见 [Firecrawl 使用方式](docker-deploy.md#firecrawl官方-keyless-或自托管搜索)。
 - **不部署 lxmusic2api**（或 `[lxmusic2api].api_key` 留空）：全部 `music.*` 工具从模型工具列表隐藏，其余功能不受影响。
 
 补充说明：
 
-- 上表只列“需要自己起一个服务”的项。模型端点（`[models.*]`）不在此列：它既可以是自部署的 OpenAI 兼容服务，也可以是远端 API，按需选择即可。
-- **想省掉手工搭建**：上述服务（NapCat 必需，SearXNG / Firecrawl / lxmusic2api 按需）都可用 `uv run deploy up` 一键容器化部署，镜像与 pin 版本由本项目管理，见[容器化一键部署](docker-deploy.md)。
+- 上表只列 QQ、搜索和音乐相关的配套服务。模型端点（`[models.*]`）不在此列：它既可以是自部署的 OpenAI 兼容服务，也可以是远端 API，按需选择即可。
+- **想省掉手工搭建**：上述服务（NapCat 必需，SearXNG / Firecrawl / lxmusic2api 按需）都可用 `uv run deploy up` 一键部署，见 [Docker 一键部署指南](docker-deploy.md)。
 - OneBot 协议端除自身部署外，还要按文件发送模式确认文件系统可见性，见下文 [NapCat / Lagrange.Core 部署要求](#napcat--lagrangecore-部署要求)。
 - 若使用 `config/mcp.json` 中基于 `npx` 的 MCP 服务器，宿主机还需具备 Node.js 运行时。
 - Code Delivery Agent 需要宿主机提供 Docker，发送原生语音与 B 站视频合并需要 FFmpeg，详见上文[其它宿主环境依赖](#其它宿主环境依赖)。
@@ -182,6 +186,20 @@ autostart_bot = true
 6. 若需要远程管理，再使用桌面端或 Android App 连接到这个 Management API
 
 这样可以避免"先手写配置、再反复命令行重启"的冷启动成本，尤其适合首次部署与远程运维。
+
+---
+
+## 容器化一键部署（`uv run deploy`）
+
+在 Linux 上安装 Docker Engine、`docker compose` 插件、Git 和 uv 后，可直接部署 Undefined + NapCat：
+
+```bash
+git clone https://github.com/69gg/Undefined.git
+cd Undefined
+uv run deploy up
+```
+
+部署结束后，按终端显示的地址和密码进入 WebUI，填写模型 API 与 QQ 身份配置，到 NapCat 扫码登录后，再返回 WebUI 点击“启动机器人”。`container` 与 `host` 模式都会将 `[webui].autostart_bot` 设为 `false`、`[onebot].file_send_mode` 设为 `"stream"`。**环境准备、首次配置、远程访问和常见问题请直接看 [Docker 一键部署指南](docker-deploy.md)**。
 
 ---
 
@@ -277,22 +295,6 @@ python -c "from Undefined.utils.resources import read_text_resource; print(len(r
 
 ---
 
-## 容器化一键部署（`uv run deploy`）
-
-除上面的手工部署外，仓库还提供一条命令完成「本体 + NapCat + 按需自托管服务」的容器化部署：
-
-```bash
-git clone --recursive https://github.com/69gg/Undefined.git
-cd Undefined
-uv run deploy up          # 交互式向导；默认只部署本体 + NapCat
-```
-
-脚本会：生成 `deploy/` 下的 compose 与各服务配置 → 按最小差异修改 `config.toml`（改前备份）→ 校验并启动容器 → 输出各服务入口与凭据（含带 token 的 NapCat WebUI 链接）。
-
-需要 Linux + Docker Engine（含 `docker compose` v2 插件）+ `git`。完整说明（两种部署模式、可选服务、端口与凭据、Docker 访问方式、升级与排查）见 **[容器化一键部署](docker-deploy.md)**。
-
----
-
 ## NapCat / Lagrange.Core 部署要求
 
 Bot 本地文件支持三种发送方式，默认 `local`，保持旧部署的发送行为。**是否需要共享文件系统取决于模式**：
@@ -318,6 +320,8 @@ URL 使用单文件独立令牌，有效期 16 分钟，支持 HEAD、Range 和�
 `stream` 通过已有 OneBot WebSocket 按 64 KiB 分块上传，每块单独等待确认，最后独立请求完成并校验路径、大小和 SHA-256，再发 QQ 消息。一个 Bot 的 Stream 文件投递串行，多文件顺序准备，文本消息不受上传锁影响。文件准备、发送和明确失败后的回退共用 8 分钟预算，排队等待不计时；协议端文件显式保留 16 分钟。未完成 Stream 失败时仅尝试重置该 Stream，已完成文件依靠保留期回收，不调用清空临时目录的接口。不支持零字节文件，不自动重试上传或跨重启续传。
 
 **旧配置缺少新增字段且未通过环境变量指定模式时继续使用 `local`。** 需要跨文件系统发送时，可显式设置 `onebot.file_send_mode = "url"` 或 `"stream"`。选择 Stream 后，协议端明确不支持扩展时会提示切换配置，不会静默回退。NapCat 扩展不能视为所有 OneBot 实现的共同能力；使用 Lagrange.Core 等实现时应按其实际能力选 `local`，或核对所用消息与普通文件上传接口的 URL 支持后选择 `url`。
+
+使用 `uv run deploy up` 时，部署工具会为配套的 NapCat 显式写入 `file_send_mode = "stream"`，`container` 与 `host` 模式均适用，无需另行共享发送目录或配置 Runtime 下载地址。
 
 实现参考固定版本的 [NapCat 上传示例](https://github.com/NapNeko/NapCatQQ/blob/109d0c1dff755875f3b79795e99cee6115289fbb/packages/napcat-onebot/action/stream/test_upload_stream.py) 与 [UploadFileStream](https://github.com/NapNeko/NapCatQQ/blob/109d0c1dff755875f3b79795e99cee6115289fbb/packages/napcat-onebot/action/stream/UploadFileStream.ts)。Bot 新传输层使用分块 IO，但该上游在合并磁盘分块时仍构造完整内存缓冲区，现有附件登记也可能读取完整文件；**不承诺整个链路固定内存占用**。
 

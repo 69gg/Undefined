@@ -13,6 +13,14 @@ from datetime import datetime, timedelta, timezone
 # 这里单独定义一份，避免 ``bilibili`` 包反向依赖发送器实现。
 MAX_TEXT_LENGTH = 4000
 
+# 合并转发单个节点直接容纳的正文上限。
+#
+# 一个转发节点 ≈ QQ 里的一条消息，而 QQ/NapCat 对单条消息内文本量存在隐藏限制
+# （NapCat 在「单节点 text 元素过多 / 文本过长」时会以 retcode=1200 拒收，
+# 见 NapCatQQ #568 与 AstrBot 的 ``forward_node_max_length`` 生产默认值
+# 1000/1200）。这里取 1200 作为保守上限，超出的正文由发送层下沉为嵌套节点。
+NODE_TEXT_BUDGET = 1200
+
 # B 站展示时间统一使用北京时间（API 通过 timezone_offset=-480 对齐）
 BEIJING_TIMEZONE = timezone(timedelta(hours=8))
 

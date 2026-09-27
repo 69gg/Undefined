@@ -108,6 +108,7 @@ class Config:
     history_group_analysis_limit: int
     attachment_use_proxy: bool
     attachment_remote_download_max_size_mb: int
+    attachment_remote_download_allow_private_origins: list[str]
     attachment_cache_max_total_size_mb: int
     attachment_cache_max_records: int
     attachment_cache_max_age_days: int

@@ -117,7 +117,16 @@ class BaseRegistry:
         self.skills_root = self._resolve_skills_root(self.base_dir)
 
     def _resolve_skills_root(self, base_dir: Path) -> Path:
-        """解析技能定义的根目录，用于计算模块导入路径"""
+        """解析技能定义的根目录，用于计算模块导入路径。
+
+        随包目录一律以真实包根（``Undefined/skills``）为准：agent 私有工具的
+        base_dir 是 ``skills/agents/<agent>/tools``，若按名称只上溯一级会算成
+        ``Undefined.skills.tools.<name>`` 这个不存在的模块。不随包的目录（测试或
+        外部注入）继续按 ``tools`` / ``agents`` / ``toolsets`` 上溯一级，保证合成
+        前缀下的模块名互不冲突。
+        """
+        if _is_under_real_package(base_dir):
+            return _REAL_PACKAGE_ROOT
         if base_dir.name in {"tools", "agents", "toolsets"} and base_dir.parent.name:
             return base_dir.parent
         return base_dir
@@ -261,13 +270,15 @@ class BaseRegistry:
         可以正常解析到同目录模块。不随包的目录（测试或外部注入）使用独立前缀，
         避免污染真实包命名空间。
         """
-        try:
-            relative = item_dir.relative_to(self.skills_root)
-        except ValueError:
-            relative = Path(*item_dir.parts[-3:])
-        prefix = (
-            _PACKAGE_PREFIX if _is_under_real_package(item_dir) else _SYNTHETIC_PREFIX
-        )
+        if _is_under_real_package(item_dir):
+            relative = item_dir.resolve().relative_to(_REAL_PACKAGE_ROOT)
+            prefix = _PACKAGE_PREFIX
+        else:
+            try:
+                relative = item_dir.relative_to(self.skills_root)
+            except ValueError:
+                relative = Path(*item_dir.parts[-3:])
+            prefix = _SYNTHETIC_PREFIX
         return ".".join([*prefix.split("."), *relative.parts, "handler"])
 
     def _load_handler_for_item(

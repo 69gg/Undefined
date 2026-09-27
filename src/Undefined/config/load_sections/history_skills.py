@@ -122,6 +122,13 @@ def load_history_skills(
     attachment_use_proxy = _coerce_bool(
         _get_value(data, ("attachments", "use_proxy"), "ATTACHMENTS_USE_PROXY"), False
     )
+    attachment_remote_download_allow_private_origins = _coerce_str_list(
+        _get_value(
+            data,
+            ("attachments", "remote_download_allow_private_origins"),
+            "ATTACHMENTS_REMOTE_DOWNLOAD_ALLOW_PRIVATE_ORIGINS",
+        )
+    )
     attachment_remote_download_max_size_mb = max(
         0,
         _coerce_int(
@@ -288,6 +295,7 @@ def load_history_skills(
         "history_group_analysis_limit": history_group_analysis_limit,
         "attachment_use_proxy": attachment_use_proxy,
         "attachment_remote_download_max_size_mb": attachment_remote_download_max_size_mb,
+        "attachment_remote_download_allow_private_origins": attachment_remote_download_allow_private_origins,
         "attachment_cache_max_total_size_mb": attachment_cache_max_total_size_mb,
         "attachment_cache_max_records": attachment_cache_max_records,
         "attachment_cache_max_age_days": attachment_cache_max_age_days,

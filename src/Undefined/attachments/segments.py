@@ -432,6 +432,9 @@ async def register_message_attachments(
             try:
                 if type_ == "image":
                     raw_source = str(data.get("file") or data.get("url") or "").strip()
+                    # NapCat 的图片消息段同时带 file（裸文件名）与 url；后者是
+                    # get_image 解析失败时唯一可用的兜底来源。
+                    segment_url = str(data.get("url") or "").strip()
                     if raw_source.startswith("base64://"):
                         display_name = f"image_{index + 1}.png"
                         payload = raw_source[len("base64://") :].strip()
@@ -483,6 +486,22 @@ async def register_message_attachments(
                                 resolved = None
                             if resolved:
                                 resolved_source = str(resolved)
+
+                        if (
+                            not is_http_url(resolved_source)
+                            and not is_localish_path(resolved_source)
+                            and is_http_url(segment_url)
+                        ):
+                            # get_image 超时（NapCat 下载富媒体失败）时只有裸文件名，
+                            # 既不是 URL 也不是本地路径；此时回落到消息段自带的 url，
+                            # 否则图片会被静默丢弃。
+                            logger.debug(
+                                "[AttachmentRegistry] image resolver 返回不可用来源，"
+                                "回落消息段 url: file=%s url=%s",
+                                raw_source,
+                                segment_url,
+                            )
+                            resolved_source = segment_url
 
                         if is_http_url(resolved_source):
                             record = await registry.register_remote_url(

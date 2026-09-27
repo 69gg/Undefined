@@ -122,6 +122,8 @@ class Wizard:
         if not self.enabled:
             return tuple(default)
         items = list(catalog.OPTIONAL_SERVICES)
+        for service in catalog.REQUIRED_SERVICES:
+            print(f"\n固定部署 {service.label} — {service.about}")
         print("\n额外部署哪些自托管服务？（可多选，回车=全不部署）")
         for position, service in enumerate(items, start=1):
             print(f"  {position}) {service.label} — {service.about}")
@@ -269,14 +271,14 @@ def print_access_summary(
     if mode == catalog.MODE_CONTAINER:
         print(f"  Undefined WebUI   http://{host}:{port('bot_webui')}")
         print(f"    密码            {env.get('UNDEFINED_DEPLOY_WEBUI_PASSWORD', '')}")
-        print(f"  Runtime API       http://{host}:{port('bot_api')}")
+        print(f"  Runtime API       http://{host}:{port('bot_api')}（Bot 启动后可用）")
         print(f"    auth_key        {env.get('UNDEFINED_DEPLOY_API_AUTH_KEY', '')}")
     else:
         print("  本体跑在宿主机，请另开终端执行： uv run Undefined-webui")
         print(f"  Undefined WebUI   http://{host}:{port('bot_webui')}")
         print(f"    密码            {env.get('UNDEFINED_DEPLOY_WEBUI_PASSWORD', '')}")
         # host 模式下 Runtime API 也由本体自己起，同样要给出 auth_key
-        print(f"  Runtime API       http://{host}:{port('bot_api')}")
+        print(f"  Runtime API       http://{host}:{port('bot_api')}（Bot 启动后可用）")
         print(f"    auth_key        {env.get('UNDEFINED_DEPLOY_API_AUTH_KEY', '')}")
 
     napcat_token = env.get("UNDEFINED_DEPLOY_NAPCAT_WEBUI_TOKEN", "")
@@ -314,11 +316,17 @@ def print_access_summary(
 
     print("-" * 68)
     print("后续步骤：")
-    print(f"  1) QQ 登录：docker logs -f {NAPCAT_CONTAINER}  然后扫码")
+    print(
+        "  1) 登录 Undefined WebUI，填写模型 API、机器人与管理员 QQ 号，保存并校验配置"
+    )
+    print(f"     {catalog.MODEL_REMINDER}")
+    print(
+        f"  2) QQ 登录：打开 NapCat WebUI，或 docker logs -f {NAPCAT_CONTAINER} 查看二维码"
+    )
     print("     （未登录时协议端不会监听 3001，本体连不上属正常）")
-    print(f"  {catalog.MODEL_REMINDER}")
-    print("  2) 状态/日志：uv run deploy status | uv run deploy logs")
-    print(f"  3) 停止：uv run deploy down（数据保留在 {layout.root}）")
+    print("  3) 返回 Undefined WebUI，点击“启动机器人”（部署配置已关闭自动启动）")
+    print("  4) 状态/日志：uv run deploy status | uv run deploy logs")
+    print(f"  5) 停止：uv run deploy down（数据保留在 {layout.root}）")
     print("=" * 68)
 
 

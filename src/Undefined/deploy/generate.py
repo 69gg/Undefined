@@ -508,21 +508,25 @@ def _config_str(config: dict[str, Any], dotted_key: str) -> str | None:
 def build_patch_plan(ctx: GenerateContext, env: dict[str, str]) -> PatchPlan:
     """生成 config.toml 的最小差异写入计划。
 
-    只写「服务拓扑」相关键；模型、提示词、访问控制等一律不碰。
+    只写服务连接、启动与文件发送相关键；模型、提示词、访问控制等一律不碰。
     """
     urls = compose_service_urls(ctx)
     ws_url = _websocket_url(ctx)
     desired: dict[str, Any] = {
         "onebot.ws_url": ws_url,
         "onebot.token": env["UNDEFINED_DEPLOY_NAPCAT_WS_TOKEN"],
+        "onebot.file_send_mode": "stream",
         "api.auth_key": env["UNDEFINED_DEPLOY_API_AUTH_KEY"],
         "webui.password": env["UNDEFINED_DEPLOY_WEBUI_PASSWORD"],
+        "webui.autostart_bot": False,
     }
     about: dict[str, str] = {
         "onebot.ws_url": "协议端 OneBot WebSocket 地址（依部署模式自动对齐）",
         "onebot.token": "与 NapCat 正向 WS 服务端一致的访问令牌",
+        "onebot.file_send_mode": "通过 NapCat Stream 上传文件，无需共享目录或 Runtime 下载地址",
         "api.auth_key": "Runtime API 鉴权密钥（自动生成）",
         "webui.password": "WebUI 登录密码（自动生成）",
+        "webui.autostart_bot": "关闭自动启动，完成配置与 QQ 登录后在 WebUI 手动启动 Bot",
     }
 
     # 应用实际监听的端口：容器内固定端口，必须与 compose 的映射目标一致；
@@ -542,26 +546,13 @@ def build_patch_plan(ctx: GenerateContext, env: dict[str, str]) -> PatchPlan:
     if ctx.mode == catalog.MODE_CONTAINER:
         desired["webui.url"] = "0.0.0.0"
         desired["api.host"] = "0.0.0.0"
-        desired["onebot.file_send_mode"] = "url"
-        # 取 URL 去下载文件的是**协议端**（另一个容器），所以要给它一个
-        # 它自己解析得到的地址：同网络内的服务名，而不是宿主网关别名。
-        desired["onebot.file_send_host"] = BOT_SERVICE_NAME
-        # 镜像入口是 WebUI（Dockerfile.bot 的 ENTRYPOINT），容器里没有人会去点
-        # 「启动机器人」；而 [webui].autostart_bot 默认 false，不写这个键的话
-        # `up` 之后只有 WebUI 在跑，Bot 进程永远不会起来、NapCat 无人连接。
-        desired["webui.autostart_bot"] = True
-        about["webui.autostart_bot"] = "容器内由 WebUI 自动拉起 Bot 进程"
         about["webui.url"] = "容器内需要监听全部地址，端口由 compose 发布"
         about["api.host"] = "容器内需要监听全部地址，端口由 compose 发布"
-        about["onebot.file_send_mode"] = "协议端在另一个容器，走 Runtime 临时链接"
-        about["onebot.file_send_host"] = "协议端通过 compose 服务名访问本体 Runtime"
     else:
         desired["webui.url"] = catalog.DEFAULT_PORT_BIND
         desired["api.host"] = catalog.DEFAULT_PORT_BIND
-        desired["onebot.file_send_mode"] = "local"
         about["webui.url"] = "本体在宿主机，仅监听回环"
         about["api.host"] = "本体在宿主机，仅监听回环"
-        about["onebot.file_send_mode"] = "本体与仓库同文件系统，可用共享路径"
 
     if catalog.SEARXNG.key in ctx.services:
         desired["search.searxng_url"] = urls["searxng"]

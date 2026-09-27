@@ -16,7 +16,7 @@ src/Undefined/
 │   ├── llm/       # ModelRequester、streaming、thinking、sanitize
 │   ├── prompts/   # PromptBuilder、system_context、文件插槽与 cognitive 片段
 │   └── multimodal/# 多模态检测、解析与分析
-├── attachments/   # 附件注册、渲染、作用域隔离
+├── attachments/   # 附件注册、渲染、作用域隔离；remote.py 校验出站目标并固定下载 IP
 ├── arxiv/         # arXiv 论文解析、元信息获取、PDF 下载与发送
 ├── bilibili/      # B站视频流解析、分段下载、异步发送；图文（opus）解析与合并转发
 ├── cognitive/     # 认知记忆系统（service/ 门面 + historian/ 史官后台）
@@ -177,6 +177,8 @@ def get_config(strict: bool = True) -> Config:
 - 魔法数字须命名常量或注释来源（配置项名 / 协议字段）。
 
 ### Skills handler 统一模板
+
+技能注册表的 `base_dir` 支持绝对路径和相对于当前工作目录的路径。随包技能会先解析真实路径，再按 `Undefined.skills.*` 的真实包名加载（包括 Agent 私有工具），保证 handler 的相对导入可用；外部目录仍使用独立的合成模块前缀。
 
 `skills/tools/**/handler.py`、`skills/toolsets/**/handler.py`、`skills/agents/**/handler.py`、`skills/commands/**/handler.py`、`skills/pipelines/**/handler.py` 在注释 Wave 中统一采用：
 

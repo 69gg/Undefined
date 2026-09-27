@@ -96,6 +96,7 @@ async def test_render_html_long_layout_uses_explicit_final_width(
     assert calls[0][0] == html
     assert calls[0][1]["viewport_width"] == 1080
     assert calls[0][1]["screenshot_scale"] == "css"
+    assert calls[0][1]["fit_content_padding"] == 0
     style = str(calls[0][1]["screenshot_style"])
     assert "margin: 0 !important" in style
     assert "padding: 0px !important" in style
@@ -143,6 +144,7 @@ async def test_render_markdown_long_layout_uses_configured_defaults(
     assert markdown_seen == "# Title"
     assert calls[0]["viewport_width"] == 960
     assert calls[0]["screenshot_scale"] == "css"
+    assert calls[0]["fit_content_padding"] == 32
     style = str(calls[0]["screenshot_style"])
     assert "max-width: none !important" in style
     assert "padding: 32px !important" in style

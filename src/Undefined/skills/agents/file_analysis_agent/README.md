@@ -13,6 +13,7 @@
 - 由 `AgentRegistry` 自动发现并注册
 - 通过 `prompt` 输入任务描述并调用内部工具
 - 内部附件 UID（`pic_xxx` / `file_xxx`）由工具按当前会话作用域解析；多模态分析可直接传 UID，其他解析工具先用 `download_file` 转成本地路径
+- `download_file` 的附件回源遇到目标策略拒绝、响应读取异常等失败时，会记录日志并返回“附件 UID 本地化失败”，不会继续尝试 URL 下载；`TimeoutError` 及其他 `OSError` 仍返回“附件文件读取失败”，任务取消正常向上传递
 - PDF 文字提取走 `extract_pdf`；扫描版、图表、版式或指定页码范围视觉分析走 `describe_pdf_page`
 
 开发提示：

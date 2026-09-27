@@ -20,13 +20,13 @@ from uuid import uuid4
 import httpx
 
 from Undefined.attachments.models import AttachmentRecord, _RemoteAttachmentTooLarge
+from Undefined.attachments.remote import RemoteURLPolicy, stream_remote_url
 from Undefined.attachments.segments import (
     display_name_from_source,
     is_http_url,
     media_kind_from_value,
     scope_from_context,
 )
-from Undefined.skills.http_config import build_httpx_client_kwargs
 from Undefined.utils import io
 from Undefined.utils.paths import (
     ATTACHMENT_CACHE_DIR,
@@ -129,6 +129,7 @@ class AttachmentRegistry:
         url_reference_max_records: int = _ATTACHMENT_URL_REFERENCE_MAX_RECORDS,
         url_max_length: int = _ATTACHMENT_URL_MAX_LENGTH,
         remote_download_max_bytes: int = _DEFAULT_REMOTE_DOWNLOAD_MAX_BYTES,
+        remote_download_allow_private_origins: list[str] | tuple[str, ...] = (),
         proxy_config: Any | None = None,
     ) -> None:
         self._registry_path = registry_path
@@ -140,6 +141,9 @@ class AttachmentRegistry:
         self._url_reference_max_records = max(0, int(url_reference_max_records))
         self._url_max_length = max(0, int(url_max_length))
         self._remote_download_max_bytes = max(0, int(remote_download_max_bytes))
+        self._remote_url_policy = RemoteURLPolicy.create(
+            remote_download_allow_private_origins, self._url_max_length
+        )
         self._proxy_config = proxy_config
         self._lock = asyncio.Lock()
         self._records: dict[str, AttachmentRecord] = {}
@@ -160,6 +164,9 @@ class AttachmentRegistry:
         self,
         *,
         remote_download_max_bytes: int | None = None,
+        remote_download_allow_private_origins: list[str]
+        | tuple[str, ...]
+        | None = None,
         max_cache_bytes: int | None = None,
         max_records: int | None = None,
         max_age_seconds: int | None = None,
@@ -167,7 +174,7 @@ class AttachmentRegistry:
         url_max_length: int | None = None,
         proxy_config: Any | None = None,
     ) -> None:
-        """批量更新注册表容量与 TTL 限制。"""
+        """批量更新注册表容量、TTL 限制与远程目标策略。"""
         if remote_download_max_bytes is not None:
             self._remote_download_max_bytes = max(0, int(remote_download_max_bytes))
         if max_cache_bytes is not None:
@@ -180,6 +187,14 @@ class AttachmentRegistry:
             self._url_reference_max_records = max(0, int(url_reference_max_records))
         if url_max_length is not None:
             self._url_max_length = max(0, int(url_max_length))
+        if remote_download_allow_private_origins is not None:
+            self._remote_url_policy = RemoteURLPolicy.create(
+                remote_download_allow_private_origins, self._url_max_length
+            )
+        else:
+            self._remote_url_policy = replace(
+                self._remote_url_policy, max_url_length=self._url_max_length
+            )
         if proxy_config is not None:
             self._proxy_config = proxy_config
 
@@ -767,6 +782,7 @@ class AttachmentRegistry:
         await self.load()
         if not self._normalized_url_ref(url):
             raise ValueError("远程附件 URL 为空或超过长度上限")
+        self._remote_url_policy.validate(url)
         normalized_kind = media_kind_from_value(kind)
         normalized_media_type = (
             "image" if normalized_kind == "image" else normalized_kind
@@ -901,9 +917,13 @@ class AttachmentRegistry:
                 description="远程附件未下载：remote_download_max_size_mb=0",
             )
 
-        async def _stream(client: httpx.AsyncClient) -> tuple[bytes, str]:
-            async with client.stream(
-                "GET", url, timeout=timeout, follow_redirects=True
+        async def _stream() -> tuple[bytes, str]:
+            async with stream_remote_url(
+                url,
+                policy=self._remote_url_policy,
+                timeout=timeout,
+                client=self._http_client,
+                proxy_config=self._proxy_config,
             ) as response:
                 response.raise_for_status()
                 mime_type = (
@@ -924,18 +944,9 @@ class AttachmentRegistry:
                 return b"".join(chunks), mime_type
 
         try:
-            if self._http_client is not None:
-                content, mime_type = await _stream(self._http_client)
-            else:
-                client_kwargs = build_httpx_client_kwargs(
-                    url,
-                    proxy_scope="attachments",
-                    timeout=timeout,
-                    follow_redirects=True,
-                    config=self._proxy_config,
-                )
-                async with httpx.AsyncClient(**client_kwargs) as client:
-                    content, mime_type = await _stream(client)
+            # DNS、连接、重定向与读取共用总时限，避免逐跳重置超时。
+            async with asyncio.timeout(_DEFAULT_REMOTE_TIMEOUT_SECONDS):
+                content, mime_type = await _stream()
         except _RemoteAttachmentTooLarge as exc:
             return await self.register_remote_reference(
                 scope_key,

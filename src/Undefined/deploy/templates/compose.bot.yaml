@@ -7,9 +7,9 @@
 #     且不会覆盖镜像内的 /app/.venv。
 #   - 挂 docker.sock 采用 DooD：python_interpreter / code_delivery_agent 用
 #     docker CLI 起兄弟容器，不启 DinD。
-#   - file_send_mode=url 时协议端（另一个容器）需要访问 Runtime API；生成配置时
-#     [onebot].file_send_host 写的是本体的 compose 服务名，同一网络内可直连，
-#     因此这里不需要 host-gateway 别名，也不依赖宿主回环端口是否可达。
+#   - 生成配置使用 file_send_mode=stream，通过 OneBot WebSocket 上传给 NapCat，
+#     无需共享发送目录或 Runtime 下载地址，也不需要 host-gateway 别名。
+#   - WebUI 启动后等待用户完成配置与 QQ 登录，再手动启动 Bot。
 
 services:
   undefined-bot:

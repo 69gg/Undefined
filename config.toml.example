@@ -1146,6 +1146,9 @@ use_proxy = false
 # zh: 远程附件自动下载并缓存的最大大小（MB）。超过上限或设为 0 时只保留 URL 引用，不下载文件内容。
 # en: Max remote attachment size (MB) to download into cache. Above the limit, or 0, keeps only a URL reference.
 remote_download_max_size_mb = 25
+# zh: 默认拒绝远程附件访问非公网地址。仅为信任的内网媒体服务添加精确 origin（协议、主机、端口），例如 ["http://media.internal:8080"]；不支持路径、凭据或通配符。支持热重载。
+# en: Remote attachments reject non-public destinations by default. Allow only trusted private media origins (scheme, host, port), e.g. ["http://media.internal:8080"]. Paths, credentials and wildcards are not supported. Hot-reloadable.
+remote_download_allow_private_origins = []
 # zh: 附件缓存文件总大小上限（MB）。0 表示不按总容量清理；达到上限时优先删除最旧的本地缓存副本，若记录有 URL 则保留 UID 与 URL 以便后续回源。
 # en: Total attachment cache file size limit (MB). 0 disables total-size pruning; when exceeded, oldest local cache copies are removed while URL-backed UIDs keep their URL for later re-download.
 cache_max_total_size_mb = 0
@@ -1270,15 +1273,15 @@ use_proxy = false
 # en: Search tool priority for web_agent. Disabled tools are hidden; enabled tools are preferred in this order by prompt guidance, not hard routing.
 priority = ["grok_search", "firecrawl_search", "web_search"]
 # zh: SearxNG 搜索服务地址，例如 http://127.0.0.1:8849。
-# zh: 该服务需自行部署（官方说明：https://docs.searxng.org/），本项目不提供；留空时内置 web_search 工具不可用，grok_search / firecrawl_search / crawl_webpage 不受影响。
+# zh: 可用 uv run deploy up --with searxng 一键部署，或连接已有实例（官方说明：https://docs.searxng.org/）；留空时内置 web_search 工具不可用，grok_search / firecrawl_search / crawl_webpage 不受影响。
 # en: SearxNG service URL, e.g. http://127.0.0.1:8849.
-# en: This service must be self-deployed (official guide: https://docs.searxng.org/); when empty the built-in web_search tool is unavailable while grok_search / firecrawl_search / crawl_webpage keep working.
+# en: Deploy with uv run deploy up --with searxng or connect to an existing instance (official guide: https://docs.searxng.org/); when empty the built-in web_search tool is unavailable while grok_search / firecrawl_search / crawl_webpage keep working.
 searxng_url = ""
 # zh: 是否在 web_agent 中启用 grok_search。关闭时该工具会从 web_agent 工具列表中隐藏。
 # en: Enable grok_search in web_agent. When disabled, this tool is hidden from the web_agent tool list.
 grok_search_enabled = false
-# zh: 是否在 web_agent 中启用 firecrawl_search。默认关闭；关闭时该工具会隐藏。
-# en: Enable firecrawl_search in web_agent. Disabled by default; when disabled, this tool is hidden.
+# zh: 是否在 web_agent 中启用 firecrawl_search。默认关闭；关闭时该工具会隐藏。无需自部署 Firecrawl，启用后可使用官方 keyless。
+# en: Enable firecrawl_search in web_agent. Disabled by default; when disabled, this tool is hidden. Self-hosting is optional; enable this to use official keyless search.
 firecrawl_search_enabled = false
 
 # zh: Firecrawl 搜索服务配置。
@@ -1287,8 +1290,8 @@ firecrawl_search_enabled = false
 # zh: Firecrawl API Key。为空时使用 Firecrawl keyless 搜索；填写后会发送 Authorization: Bearer；自部署实例通常也可留空。
 # en: Firecrawl API key. Leave empty for Firecrawl keyless search; when set, Authorization: Bearer is sent; self-hosted instances can usually leave it empty too.
 api_key = ""
-# zh: Firecrawl API 基础地址。可用官方地址配自己的 Key，也可改为自部署实例地址（自托管说明：https://docs.firecrawl.dev/contributing/self-host）。
-# en: Firecrawl API base URL. Use the official endpoint with your own key, or point it at a self-hosted instance (self-host guide: https://docs.firecrawl.dev/contributing/self-host).
+# zh: Firecrawl API 基础地址。官方地址支持 keyless（API Key 留空，受官方配额与限流限制）或自己的 Key，也可改为自部署实例地址（自托管说明：https://docs.firecrawl.dev/contributing/self-host）。
+# en: Firecrawl API base URL. Use the official endpoint with keyless access (empty API key, subject to official quotas and rate limits) or your own key, or point it at a self-hosted instance (self-host guide: https://docs.firecrawl.dev/contributing/self-host).
 base_url = "https://api.firecrawl.dev"
 
 # zh: 代理设置（可选）。
@@ -1325,8 +1328,8 @@ browser_max_concurrency = 0
 # zh: 可选的 Chrome/Chromium 可执行文件路径。留空时优先使用 Playwright 自带浏览器，缺失时再自动查找系统浏览器。
 # en: Optional Chrome/Chromium executable path. Empty prefers Playwright's bundled browser, then discovers an installed system browser if missing.
 browser_executable_path = ""
-# zh: render_html/render_markdown 的 long 布局未显式传 width 时使用的最终图片宽度（像素，320-2048）。
-# en: Final image width used by the long layout when width is omitted (pixels, 320-2048).
+# zh: render_html/render_markdown 的 long 布局未显式传 width 时使用的图片宽度上限（像素，320-2048）。页面自身布局更窄时按「内容宽度 + 2×padding」收敛，两侧不留空白。
+# en: Upper bound of the long-layout image width when width is omitted (pixels, 320-2048). When the page lays out narrower, the image shrinks to content width + 2×padding so no side whitespace is left.
 long_image_default_width = 900
 # zh: long 布局未显式传 padding 时使用的内边距（像素，0-160）。
 # en: Content padding used by the long layout when padding is omitted (pixels, 0-160).

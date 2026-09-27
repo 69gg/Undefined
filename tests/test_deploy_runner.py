@@ -600,8 +600,9 @@ def test_compose_up_timeout_covers_pull_paths(tmp_path: Path) -> None:
     assert spy.timeouts[2] == docker_cli.COMPOSE_TIMEOUT_SECONDS
 
 
+@pytest.mark.parametrize("mode", catalog.DEPLOY_MODES)
 def test_up_creates_full_config_from_example_on_fresh_clone(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str
 ) -> None:
     """全新 clone（无 config.toml）必须先落一份完整配置再打补丁。
 
@@ -615,7 +616,7 @@ def test_up_creates_full_config_from_example_on_fresh_clone(
     _stub_docker(monkeypatch)
 
     assert not (repo / "config.toml").exists()
-    assert runner.run_up(_yes_options(dry_run=False)) == 0
+    assert runner.run_up(_yes_options(mode=mode, dry_run=False)) == 0
 
     created = repo / "config.toml"
     assert created.is_file(), "应已从 config.toml.example 生成 config.toml"
@@ -623,6 +624,37 @@ def test_up_creates_full_config_from_example_on_fresh_clone(
     # 示例里的段落都在，而不是只有被 patch 的那几个键
     for section in ("onebot", "webui", "api", "features", "naga"):
         assert section in parsed, f"生成的 config.toml 缺少 [{section}]"
+    assert parsed["onebot"]["file_send_mode"] == "stream"
+    assert parsed["webui"]["autostart_bot"] is False
+
+
+@pytest.mark.parametrize("mode", catalog.DEPLOY_MODES)
+@pytest.mark.parametrize("previous_file_mode", ("local", "url"))
+def test_up_replaces_legacy_startup_and_file_transport_settings(
+    fake_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    mode: str,
+    previous_file_mode: str,
+) -> None:
+    """已有部署也切换到手动启动与 Stream，保留仅供 URL 模式使用的地址。"""
+    config_path = fake_repo / "config.toml"
+    previous = CONFIG_TOML.replace(
+        'file_send_mode = "local"',
+        f'file_send_mode = "{previous_file_mode}"\nfile_send_host = "files.example"',
+    ).replace("[webui]", "[webui]\nautostart_bot = true")
+    config_path.write_text(previous, encoding="utf-8")
+    _stub_docker(monkeypatch)
+
+    assert runner.run_up(_yes_options(mode=mode, dry_run=False)) == 0
+
+    parsed = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    assert parsed["webui"]["autostart_bot"] is False
+    assert parsed["onebot"]["file_send_mode"] == "stream"
+    assert parsed["onebot"]["file_send_host"] == "files.example"
+    output = capsys.readouterr().out
+    assert "点击“启动机器人”" in output
+    assert "Bot 启动后可用" in output
 
 
 def test_dry_run_does_not_create_config_on_fresh_clone(
@@ -636,6 +668,38 @@ def test_dry_run_does_not_create_config_on_fresh_clone(
 
     assert runner.run_up(_yes_options()) == 0
     assert not (repo / "config.toml").exists()
+
+
+@pytest.mark.parametrize("mode", catalog.DEPLOY_MODES)
+@pytest.mark.parametrize("api_key", ("", "fc-test"), ids=("keyless", "api-key"))
+def test_up_preserves_official_firecrawl_when_not_self_hosted(
+    fake_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str,
+    api_key: str,
+) -> None:
+    """未勾选自托管 Firecrawl 时，官方 keyless / API Key 配置仍可继续使用。"""
+    config_path = fake_repo / "config.toml"
+    previous = (
+        CONFIG_TOML
+        + "\n[search]\nfirecrawl_search_enabled = true\n"
+        + '[search.firecrawl]\nbase_url = "https://api.firecrawl.dev"\n'
+        + f'api_key = "{api_key}"\n'
+    )
+    config_path.write_text(previous, encoding="utf-8")
+    _stub_docker(monkeypatch)
+
+    assert (
+        runner.run_up(_yes_options(mode=mode, services=("searxng",), dry_run=False))
+        == 0
+    )
+
+    parsed = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    assert parsed["search"]["firecrawl_search_enabled"] is True
+    assert parsed["search"]["firecrawl"] == {
+        "base_url": "https://api.firecrawl.dev",
+        "api_key": api_key,
+    }
 
 
 def test_up_keeps_existing_config_untouched_on_dry_run(
