@@ -445,6 +445,178 @@ async def test_render_html_to_image_passes_long_screenshot_options(
     }
 
 
+class _FitFakePage:
+    """记录宽度探测、视口变更与截图参数的假页面。"""
+
+    def __init__(self, natural_width: float | Exception) -> None:
+        self.natural_width = natural_width
+        self.evaluate_calls = 0
+        self.viewport_sizes: list[dict[str, int]] = []
+        self.screenshot_kwargs: dict[str, Any] = {}
+
+    @property
+    def viewport_size(self) -> dict[str, int]:
+        return {"width": 900, "height": 800}
+
+    async def wait_for_load_state(self, _state: str, *, timeout: int) -> None:
+        return None
+
+    async def evaluate(self, _script: str) -> float:
+        self.evaluate_calls += 1
+        if isinstance(self.natural_width, Exception):
+            raise self.natural_width
+        return self.natural_width
+
+    async def set_viewport_size(self, size: dict[str, int]) -> None:
+        self.viewport_sizes.append(size)
+
+    async def screenshot(self, **kwargs: Any) -> None:
+        self.screenshot_kwargs.update(kwargs)
+
+
+async def _render_long_image(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    page: _FitFakePage,
+    fit_content_padding: int | None,
+) -> None:
+    """跑一遍 long 布局渲染；断言只针对传入的假页面记录。"""
+
+    class _FakeCache:
+        async def copy_to(self, _key: str, _dest: str) -> bool:
+            return False
+
+        async def put(self, _key: str, _path: str, _size: int) -> None:
+            return None
+
+    async def _fake_get_render_cache() -> _FakeCache:
+        return _FakeCache()
+
+    async def _fake_render_html_with_page(
+        _html_content: str,
+        callback: Any,
+        **_kwargs: Any,
+    ) -> None:
+        await callback(page)
+
+    async def _no_sleep(_delay: float) -> None:
+        return None
+
+    monkeypatch.setattr(render_module, "get_render_cache", _fake_get_render_cache)
+    monkeypatch.setattr(
+        render_module, "render_html_with_page", _fake_render_html_with_page
+    )
+    monkeypatch.setattr(asyncio, "sleep", _no_sleep)
+
+    kwargs: dict[str, Any] = {
+        "viewport_width": 900,
+        "screenshot_scale": "css",
+        "screenshot_style": "html, body { margin: 0 !important; }",
+    }
+    if fit_content_padding is not None:
+        kwargs["fit_content_padding"] = fit_content_padding
+    await render_module.render_html_to_image(
+        "<html></html>", str(tmp_path / "fit.png"), **kwargs
+    )
+
+
+@pytest.mark.asyncio
+async def test_long_image_shrinks_viewport_to_content_width(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """页面只声明 400px 宽时，长图应为 400 + 2×padding，而不是 900 宽留白。"""
+    page = _FitFakePage(400.0)
+
+    await _render_long_image(
+        monkeypatch,
+        tmp_path,
+        page=page,
+        fit_content_padding=28,
+    )
+
+    assert page.evaluate_calls == 1
+    assert page.viewport_sizes == [{"width": 456, "height": 800}]
+    assert page.screenshot_kwargs["full_page"] is True
+    assert page.screenshot_kwargs["scale"] == "css"
+
+
+@pytest.mark.asyncio
+async def test_long_image_keeps_viewport_when_content_fills_it(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """铺满视口的响应式页面不应被收缩。"""
+    page = _FitFakePage(900.0)
+
+    await _render_long_image(
+        monkeypatch,
+        tmp_path,
+        page=page,
+        fit_content_padding=28,
+    )
+
+    assert page.evaluate_calls == 1
+    assert page.viewport_sizes == []
+
+
+@pytest.mark.asyncio
+async def test_long_image_clamps_fitted_width_to_minimum(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    page = _FitFakePage(100.0)
+
+    await _render_long_image(
+        monkeypatch,
+        tmp_path,
+        page=page,
+        fit_content_padding=0,
+    )
+
+    assert page.viewport_sizes == [
+        {"width": render_module._MIN_FITTED_WIDTH, "height": 800}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_long_image_keeps_viewport_when_width_probe_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    page = _FitFakePage(RuntimeError("probe failed"))
+
+    await _render_long_image(
+        monkeypatch,
+        tmp_path,
+        page=page,
+        fit_content_padding=28,
+    )
+
+    assert page.evaluate_calls == 1
+    assert page.viewport_sizes == []
+
+
+@pytest.mark.asyncio
+async def test_long_image_skips_width_probe_when_fitting_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """未开启自适应（如 default 布局与命令侧渲染）时行为保持原样。"""
+    page = _FitFakePage(400.0)
+
+    await _render_long_image(
+        monkeypatch,
+        tmp_path,
+        page=page,
+        fit_content_padding=None,
+    )
+
+    assert page.evaluate_calls == 0
+    assert page.viewport_sizes == []
+
+
 @pytest.mark.asyncio
 async def test_render_html_with_page_disables_external_network_by_default(
     monkeypatch: pytest.MonkeyPatch,

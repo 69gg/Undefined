@@ -1325,8 +1325,8 @@ browser_max_concurrency = 0
 # zh: 可选的 Chrome/Chromium 可执行文件路径。留空时优先使用 Playwright 自带浏览器，缺失时再自动查找系统浏览器。
 # en: Optional Chrome/Chromium executable path. Empty prefers Playwright's bundled browser, then discovers an installed system browser if missing.
 browser_executable_path = ""
-# zh: render_html/render_markdown 的 long 布局未显式传 width 时使用的最终图片宽度（像素，320-2048）。
-# en: Final image width used by the long layout when width is omitted (pixels, 320-2048).
+# zh: render_html/render_markdown 的 long 布局未显式传 width 时使用的图片宽度上限（像素，320-2048）。页面自身布局更窄时按「内容宽度 + 2×padding」收敛，两侧不留空白。
+# en: Upper bound of the long-layout image width when width is omitted (pixels, 320-2048). When the page lays out narrower, the image shrinks to content width + 2×padding so no side whitespace is left.
 long_image_default_width = 900
 # zh: long 布局未显式传 padding 时使用的内边距（像素，0-160）。
 # en: Content padding used by the long layout when padding is omitted (pixels, 0-160).

@@ -334,9 +334,11 @@ def compute_render_cache_key(
     proxy: str | None,
     screenshot_scale: str = "device",
     screenshot_style: str | None = None,
+    fit_content_padding: int | None = None,
 ) -> str:
     data = json.dumps(
         {
+            "fit_content_padding": fit_content_padding,
             "html_content": html_content,
             "proxy": proxy,
             "screenshot_scale": screenshot_scale,

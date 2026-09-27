@@ -877,7 +877,7 @@ summary = ""
 | `browser_max_concurrency` | `0` | 渲染浏览器最大同时开启数量 | `<=0` 时启用自动值：Linux=`1`，其它平台=`2` |
 | `browser_executable_path` | `""` | 可选 Chrome/Chromium 可执行文件路径 | 留空时优先使用 Playwright 自带浏览器；其缺失时自动查找系统 Chrome/Chromium |
 | `use_proxy` | `false` | 网页抓取链路是否使用 `[proxy]` 中的代理地址 | HTML/Markdown 浏览器渲染始终离线，不使用代理 |
-| `long_image_default_width` | `900` | `layout=long` 未传 `width` 时的最终图片宽度（像素） | 自动钳制到 `320..2048` |
+| `long_image_default_width` | `900` | `layout=long` 未传 `width` 时的图片宽度上限（像素） | 自动钳制到 `320..2048`；页面自身布局更窄时按内容宽度收敛 |
 | `long_image_default_padding` | `28` | `layout=long` 未传 `padding` 时的内边距（像素） | 自动钳制到 `0..160`，且保证小于宽度的一半 |
 
 说明：
@@ -885,7 +885,8 @@ summary = ""
 - 渲染浏览器当前采用单例复用，因此这里限制的是并发页面/上下文数量，而不是浏览器进程数量。
 - 显式修改 `browser_executable_path` 后需重启 Bot；仅当 Playwright 报告自带浏览器缺失时才会自动回退到系统浏览器，其他启动错误仍会原样报出。
 - 配置变更会对后续新的渲染请求生效；已在执行中的渲染任务不受影响。
-- `render.render_html` 和 `render.render_markdown` 默认使用 `layout=default`，视觉效果与旧版一致。显式传 `layout=long` 时，高度按内容自动延伸，使用 CSS 像素截图保证 `width` 对应最终图片宽度，并去掉两侧外部留白。
+- `render.render_html` 和 `render.render_markdown` 默认使用 `layout=default`，视觉效果与旧版一致。显式传 `layout=long` 时，高度按内容自动延伸，使用 CSS 像素截图，并去掉两侧外部留白。
+- 长图宽度会自适应页面自身布局：先探测 `html` / `body` 的盒宽与其后代的最大右边界，若「页面宽度 + 2 × padding」小于设定宽度，就把渲染视口收缩到该值（下限 `320`），使图片两侧不留空白；铺满视口的响应式页面（含 Markdown 模板）探测值等于视口宽度，因此宽度与旧版一致。
 - `width` 可选范围为 `320..2048`，`padding` 可选范围为 `0..160`；两者只能与 `layout=long` 一起使用。HTML 长图支持内联 CSS、脚本和 `data:` / `blob:` 资源；BrowserContext 强制离线并终止全部网络请求，外部图片、字体、样式和脚本不会加载。`padding=0` 可用于全幅设计。
 
 #### `[render.cache]` HTML 渲染结果缓存

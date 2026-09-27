@@ -221,9 +221,18 @@ def test_compute_render_cache_key_is_deterministic_and_distinct() -> None:
         None,
         screenshot_style="body { margin: 0; }",
     )
+    fitted = compute_render_cache_key(
+        "<p>x</p>",
+        1280,
+        None,
+        None,
+        screenshot_style="body { margin: 0; }",
+        fit_content_padding=28,
+    )
 
     assert a == a_again
     assert a != b
     assert a != c
     assert a != css_scale
     assert a != styled
+    assert styled != fitted

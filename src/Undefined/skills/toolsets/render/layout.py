@@ -21,6 +21,7 @@ class RenderLayoutOptions:
     viewport_width: int | None = None
     screenshot_scale: Literal["css", "device"] = "device"
     screenshot_style: str | None = None
+    fit_content_padding: int | None = None
 
     def render_kwargs(self) -> dict[str, Any]:
         """仅为长图返回额外参数，保持默认调用完全兼容。"""
@@ -30,6 +31,7 @@ class RenderLayoutOptions:
             "viewport_width": self.viewport_width,
             "screenshot_scale": self.screenshot_scale,
             "screenshot_style": self.screenshot_style,
+            "fit_content_padding": self.fit_content_padding,
         }
 
 
@@ -166,6 +168,7 @@ def resolve_render_layout(
             viewport_width=width,
             screenshot_scale="css",
             screenshot_style=_long_layout_style(content_kind, padding),
+            fit_content_padding=padding,
         ),
         None,
     )
