@@ -888,7 +888,7 @@ summary = ""
 - 显式修改 `browser_executable_path` 后需重启 Bot；仅当 Playwright 报告自带浏览器缺失时才会自动回退到系统浏览器，其他启动错误仍会原样报出。
 - 配置变更会对后续新的渲染请求生效；已在执行中的渲染任务不受影响。
 - `render.render_html` 和 `render.render_markdown` 默认使用 `layout=default`，视觉效果与旧版一致。显式传 `layout=long` 时，高度按内容自动延伸，使用 CSS 像素截图，并去掉两侧外部留白。
-- 长图宽度会自适应页面自身布局：先探测 `html` / `body` 的盒宽与其后代的最大右边界，若「页面宽度 + 2 × padding」小于设定宽度，就把渲染视口收缩到该值（下限 `320`），使图片两侧不留空白；铺满视口的响应式页面（含 Markdown 模板）探测值等于视口宽度，因此宽度与旧版一致。
+- 长图宽度会自适应页面自身布局：探测显式设置的 `html` 宽度、`body` 的外边距盒宽和滚动宽度，以及其后代的最大右边界；默认 `width: auto` 的 `html` 不参与宽度下限，固定宽度 `body` 无需同时设置 `html` 宽度。若「页面宽度 + 2 × padding」小于设定宽度，就把渲染视口收缩到该值（下限 `320`）；铺满视口的响应式页面（含 Markdown 模板）保持原宽度。
 - `width` 可选范围为 `320..2048`，`padding` 可选范围为 `0..160`；两者只能与 `layout=long` 一起使用。HTML 长图支持内联 CSS、脚本和 `data:` / `blob:` 资源；BrowserContext 强制离线并终止全部网络请求，外部图片、字体、样式和脚本不会加载。`padding=0` 可用于全幅设计。
 
 #### `[render.cache]` HTML 渲染结果缓存

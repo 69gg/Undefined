@@ -70,21 +70,24 @@ _SYSTEM_CHROMIUM_COMMANDS = (
 )
 _RenderResult = TypeVar("_RenderResult")
 
-# 长图宽度自适应时探测页面自身布局宽度的脚本：html/body 的盒宽与 body 所有后代的
-# 最大右边界取最大值，因此「铺满视口」的页面会返回视口宽度（不收缩），只有页面自身
-# 声明了更窄宽度（如 html/body/#wrap 都写死 400px）时才会返回更小的值。
+# 长图宽度探测保留显式 html 宽度；默认 auto 根节点不应阻止固定宽度 body 收缩。
+# 使用 Typed OM 读取 auto，因为 getComputedStyle().width 会将其解析成视口像素宽度。
+# body 的外边距盒宽与后代右边界仍保留响应式页面的完整宽度。
 _CONTENT_WIDTH_SCRIPT = """
 () => {
   const root = document.documentElement;
   const body = document.body;
-  const widths = [root.getBoundingClientRect().width];
+  const rootWidth = root.computedStyleMap().get('width').toString();
+  let width = !body || rootWidth !== 'auto' ? root.getBoundingClientRect().width : 0;
   if (body) {
-    widths.push(body.getBoundingClientRect().width, body.scrollWidth);
+    const style = getComputedStyle(body);
+    const margins = (parseFloat(style.marginLeft) || 0) + (parseFloat(style.marginRight) || 0);
+    width = Math.max(width, body.getBoundingClientRect().width + margins, body.scrollWidth);
     for (const element of body.querySelectorAll('*')) {
-      widths.push(element.getBoundingClientRect().right);
+      width = Math.max(width, element.getBoundingClientRect().right);
     }
   }
-  return Math.max(...widths);
+  return width;
 }
 """
 
