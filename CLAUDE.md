@@ -120,6 +120,7 @@ Management / Runtime 请求 → webui/app.py 或 api/app.py → routes/*
 - `group.get_avatar`：接受 `user_id` 与可选 `size`（40/100/140/640），下载 QQ 头像并注册为附件，返回 `<attachment uid="..."/>` 标签。
 - 统一附件标签：推荐使用 `<attachment uid="..."/>`，系统根据 UID 前缀（`pic_`/`file_`）自动区分图片与文件。旧 `<pic uid="..."/>` 语法向后兼容。
 - 远程附件默认按 `[attachments].remote_download_max_size_mb` 限制下载缓存；超过上限或配置为 `0` 时只登记 URL 引用（`source_ref`），避免大文件造成磁盘和延迟压力。
+- OneBot 图片消息段同时带 NapCat 的 `file` id 与可下载 `url`：先用 `get_image` 解析 `file`，解析失败或返回值既非 HTTP URL 也非本地路径时回落到段内 `url`——否则一次 `get_image` 失败（NapCat 富媒体下载超时）就会把图片静默丢掉。
 
 ### 队列模型
 

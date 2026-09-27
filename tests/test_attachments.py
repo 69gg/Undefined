@@ -331,6 +331,121 @@ async def test_register_message_attachments_remote_reference_keeps_resolved_url(
 
 
 @pytest.mark.asyncio
+async def test_register_message_attachments_falls_back_to_segment_url(
+    tmp_path: Path,
+) -> None:
+    """get_image 失败时用消息段自带的 url 兜底，图片不能被静默丢弃。"""
+    registry = AttachmentRegistry(
+        registry_path=tmp_path / "attachment_registry.json",
+        cache_dir=tmp_path / "attachments",
+        remote_download_max_bytes=0,
+    )
+
+    async def _failing_resolver(_file_id: str) -> str:
+        raise RuntimeError("get_image timeout")
+
+    segment_url = "https://multimedia.nt.qq.com.cn/download?fileid=abc&rkey=xyz"
+    result = await register_message_attachments(
+        registry=registry,
+        segments=[
+            {
+                "type": "image",
+                "data": {
+                    "file": "5d-5d04d373cf0a70c5ce79bbc8e137436b.gif",
+                    "url": segment_url,
+                },
+            }
+        ],
+        scope_key="group:10001",
+        resolve_image_url=_failing_resolver,
+    )
+
+    assert len(result.attachments) == 1
+    uid = result.attachments[0]["uid"]
+    record = registry.resolve(uid, "group:10001")
+    assert record is not None
+    assert record.kind == "image"
+    assert record.source_kind.startswith("remote_image")
+    assert record.source_ref == segment_url
+    assert record.display_name == "5d-5d04d373cf0a70c5ce79bbc8e137436b.gif"
+    assert record.segment_data["original_source_ref"] == (
+        "5d-5d04d373cf0a70c5ce79bbc8e137436b.gif"
+    )
+    # 登记成功时段落文本是可引用的附件标签，而不是「图片丢了」的占位符
+    assert result.normalized_text == f'<attachment uid="{uid}"/>'
+
+
+@pytest.mark.asyncio
+async def test_register_message_attachments_falls_back_when_resolver_returns_file_name(
+    tmp_path: Path,
+) -> None:
+    """get_image 返回裸文件名（非 URL、非本地路径）时同样回落消息段 url。"""
+    registry = AttachmentRegistry(
+        registry_path=tmp_path / "attachment_registry.json",
+        cache_dir=tmp_path / "attachments",
+        remote_download_max_bytes=0,
+    )
+
+    async def _file_name_resolver(_file_id: str) -> str:
+        return "5d-5d04d373cf0a70c5ce79bbc8e137436b.gif"
+
+    segment_url = "https://multimedia.nt.qq.com.cn/download?fileid=abc&rkey=xyz"
+    result = await register_message_attachments(
+        registry=registry,
+        segments=[
+            {
+                "type": "image",
+                "data": {
+                    "file": "5d-5d04d373cf0a70c5ce79bbc8e137436b.gif",
+                    "url": segment_url,
+                },
+            }
+        ],
+        scope_key="group:10001",
+        resolve_image_url=_file_name_resolver,
+    )
+
+    assert len(result.attachments) == 1
+    record = registry.resolve(result.attachments[0]["uid"], "group:10001")
+    assert record is not None
+    assert record.source_ref == segment_url
+
+
+@pytest.mark.asyncio
+async def test_register_message_attachments_keeps_resolver_result_over_segment_url(
+    tmp_path: Path,
+) -> None:
+    """解析成功时仍以 get_image 的结果为准，段内 url 不参与。"""
+    registry = AttachmentRegistry(
+        registry_path=tmp_path / "attachment_registry.json",
+        cache_dir=tmp_path / "attachments",
+        remote_download_max_bytes=0,
+    )
+
+    async def _resolve_image_url(_file_id: str) -> str:
+        return "https://example.com/resolved.jpg"
+
+    result = await register_message_attachments(
+        registry=registry,
+        segments=[
+            {
+                "type": "image",
+                "data": {
+                    "file": "5d-5d04d373cf0a70c5ce79bbc8e137436b.gif",
+                    "url": "https://multimedia.nt.qq.com.cn/download?fileid=abc&rkey=xyz",
+                },
+            }
+        ],
+        scope_key="group:10001",
+        resolve_image_url=_resolve_image_url,
+    )
+
+    record = registry.resolve(result.attachments[0]["uid"], "group:10001")
+    assert record is not None
+    assert record.source_ref == "https://example.com/resolved.jpg"
+
+
+@pytest.mark.asyncio
 async def test_remote_attachment_stream_over_limit_keeps_url_reference(
     tmp_path: Path,
 ) -> None:
