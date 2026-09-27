@@ -1,8 +1,10 @@
 # 安装与部署指南
 
-> 🐳 **在 Linux 上快速部署？直接前往 [Docker 一键部署指南](docker-deploy.md)**：自动部署 Undefined + NapCat，并按需添加搜索、音乐服务。指南包含环境准备、模型配置、QQ 登录和日常管理步骤。
+本项目提供以下部署方式，按推荐顺序排列：
 
-本项目支持 **Docker 一键部署、源码部署和 pip / uv tool 安装**。希望自动搭好 QQ 协议端及可选服务时，使用上面的 Docker 指南；希望自行管理运行环境或修改源码时，按本文的[源码部署](#源码部署推荐)操作。pip / uv tool 安装适合快速体验，但部分功能支持尚不完善。
+1. **[源码部署（首选）](#源码部署推荐)**：直接从仓库安装和运行，便于管理运行环境、修改源码与自定义资源。
+2. **[Docker 一键部署（Linux）](docker-deploy.md)**：希望自动搭建 Undefined + NapCat 及可选搜索、音乐服务时使用，推荐优先于 pip / uv tool 安装。
+3. **[pip / uv tool 安装（快速体验）](#pipuv-tool-部署快速体验)**：适合快速体验，但部分功能支持尚不完善。
 
 > **Release 下载提示**：如果目的是部署 QQ Bot，不需要在 GitHub Release 的 Assets 中挑客户端安装包；选择上述任一种部署方式即可。Release 中的 `Undefined-Console-*` 和 `Undefined-Chat-*` 是可选客户端，选择说明见 [README — Release 下载速查](../README.md#release-下载速查)。
 >
@@ -187,6 +189,20 @@ autostart_bot = true
 
 ---
 
+## 容器化一键部署（`uv run deploy`）
+
+在 Linux 上安装 Docker Engine、`docker compose` 插件、Git 和 uv 后，可直接部署 Undefined + NapCat：
+
+```bash
+git clone https://github.com/69gg/Undefined.git
+cd Undefined
+uv run deploy up
+```
+
+部署结束后，按终端显示的地址和密码进入 WebUI，填写模型 API 与 QQ 身份配置，再到 NapCat 扫码登录。**环境准备、首次配置、远程访问和常见问题请直接看 [Docker 一键部署指南](docker-deploy.md)**。
+
+---
+
 ## pip/uv tool 部署（快速体验）
 
 > **注意**：pip/uv tool 安装方式的功能支持尚不如源码部署完善，也未经过充分测试。如遇问题，建议优先切换到源码部署。
@@ -276,20 +292,6 @@ python -c "from Undefined.utils.resources import resolve_resource_path; print(re
 ```bash
 python -c "from Undefined.utils.resources import read_text_resource; print(len(read_text_resource('res/prompts/undefined.xml')))"
 ```
-
----
-
-## 容器化一键部署（`uv run deploy`）
-
-在 Linux 上安装 Docker Engine、`docker compose` 插件、Git 和 uv 后，可直接部署 Undefined + NapCat：
-
-```bash
-git clone https://github.com/69gg/Undefined.git
-cd Undefined
-uv run deploy up
-```
-
-部署结束后，按终端显示的地址和密码进入 WebUI，填写模型 API 与 QQ 身份配置，再到 NapCat 扫码登录。**环境准备、首次配置、远程访问和常见问题请直接看 [Docker 一键部署指南](docker-deploy.md)**。
 
 ---
 

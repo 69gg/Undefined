@@ -26,9 +26,9 @@
   </tr>
 </table>
 
-> 🐳 **想快速部署 QQ Bot？直接看 [Docker 一键部署指南（Linux）](docs/docker-deploy.md)**：一条命令部署 Undefined + NapCat，按需添加搜索、音乐服务，再按指南完成模型配置和 QQ 登录。
+> **部署首选 [源码部署](docs/deployment.md#源码部署推荐)**；Linux 用户也可选择 [Docker 一键部署](docs/docker-deploy.md)，自动部署 Undefined + NapCat，并按需添加搜索、音乐服务。
 >
-> 手工安装或使用其他系统，请看 [安装与部署指南](docs/deployment.md)。
+> 其他方式：[pip / uv tool 安装（快速体验）](docs/deployment.md#pipuv-tool-部署快速体验)。
 
 ### _与 [NagaAgent](https://github.com/Xxiii8322766509/NagaAgent) 进行联动！_
 
@@ -36,11 +36,11 @@
 
 ## Release 下载速查
 
-**部署 QQ Bot 本身不需要下载 Release**：可以使用 [Docker 一键部署](docs/docker-deploy.md)，也可以按下方[源码快速开始](#-快速开始-源码模式)安装。Release 安装包的用途与平台对应如下：
+**部署 QQ Bot 本身不需要下载 Release**：优先按下方[源码快速开始](#-快速开始-源码模式)安装，Linux 用户也可选择 [Docker 一键部署](docs/docker-deploy.md)。Release 安装包的用途与平台对应如下：
 
 | 目标 | 文件 | 平台 |
 | --- | --- | --- |
-| 部署 / 运行 Bot | 不需要下载 Release；使用 Docker 一键部署，或源码部署并启动 `uv run Undefined-webui` | Docker 一键部署支持 Linux；源码部署支持 Windows / macOS / Linux |
+| 部署 / 运行 Bot | 不需要下载 Release；首选源码部署并启动 `uv run Undefined-webui`，也可使用 Docker 一键部署 | 源码部署支持 Windows / macOS / Linux；Docker 一键部署支持 Linux |
 | 离线安装 / 镜像缓存 | `undefined_bot-*.whl` 或 `undefined_bot-*.tar.gz` | 任意 |
 | 远程管理已有实例 | `Undefined-Console-*`（连接 Management API 打开远程 WebUI） | Windows x64 `*-windows-x64-setup.exe`（批量部署可选 `.msi`）／macOS `*-macos-arm64.dmg`、`*-macos-x64.dmg`／Debian、Ubuntu `*.deb`／其他 Linux `*.AppImage` |
 | 原生聊天客户端 | `Undefined-Chat-*`（连接 Runtime API 聊天） | 同上；Android 为 `*-android-arm64-v8a-release.apk`（旧 32 位设备用 `armeabi-v7a`，模拟器按需 `x86_64` / `x86`） |
@@ -101,8 +101,8 @@ Console 和 Chat 都需要连接已运行的 Undefined 服务：首次部署请�
 
 Undefined 的功能极为丰富，为了让本页面不过于臃肿，我们将各个模块的深入解析与高阶玩法整理成了专题游览图。这里是开启探索的钥匙：
 
-- 🐳 **[Docker 一键部署指南（Linux）](docs/docker-deploy.md)**：部署 Undefined + NapCat，完成模型配置和 QQ 登录，并按需添加搜索、音乐服务。
-- ⚙️ **[安装与部署指南](docs/deployment.md)**：选择部署方式，或按步骤完成源码、pip / uv tool 安装。
+- ⚙️ **[安装与部署指南](docs/deployment.md)**：首选源码部署；按源码、Docker、pip / uv tool 的推荐顺序介绍各安装方式。
+- 🐳 **[Docker 一键部署指南（Linux）](docs/docker-deploy.md)**：源码部署之外的推荐选择，自动部署 Undefined + NapCat，并按需添加搜索、音乐服务。
 - 📦 **[Python 库 API 参考](docs/python-api.md)**：根包 lazy re-export、`Config.from_mapping` / `set_config`、公共 API 符号表与嵌入示例。
 - 🖥️ **[WebUI 使用指南](docs/webui-guide.md)**：管理控制台功能一览——配置编辑、日志查看、认知记忆管理、表情包库、AI 对话与系统监控。
 - 🧭 **[Management API 与远程管理](docs/management-api.md)**：WebUI / App 共用的管理接口、认证、配置/日志/Bot 控制与引导探针说明。
@@ -131,7 +131,7 @@ Undefined 的功能极为丰富，为了让本页面不过于臃肿，我们将�
 
 ## ⚡ 快速开始 (源码模式)
 
-> 👶 **首次部署**：在 Linux 上可以先看 [Docker 一键部署指南](docs/docker-deploy.md)；需要手工安装时，请按 [详细安装与部署指南](docs/deployment.md)操作。
+> 👶 **首次部署**：推荐优先使用源码部署，请按 [详细安装与部署指南](docs/deployment.md#源码部署推荐)逐步操作。
 
 以下步骤适合有一定开发经验、想快速跑起项目源码的用户。我们推荐使用现代 Python 构建工具 `uv`。
 

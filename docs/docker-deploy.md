@@ -1,5 +1,7 @@
 # Docker 一键部署
 
+> 部署方式推荐顺序：[源码部署（首选）](deployment.md#源码部署推荐) → **Docker 一键部署（本文）** → [pip / uv tool 安装](deployment.md#pipuv-tool-部署快速体验)。
+
 在 Linux 上，用一条命令部署 **Undefined + NapCat**，并按需添加搜索、音乐服务。部署工具会连接好各服务、生成访问密码，并在修改已有配置前自动备份。
 
 **第一次部署按下面的顺序操作即可：准备环境 → 执行部署 → 填写模型与 QQ 配置 → 扫码登录 → 测试回复。** 默认不安装 SearXNG、Firecrawl、lxmusic2api，也不启用 NagaAgent 问答；需要时可以再添加。
