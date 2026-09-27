@@ -27,6 +27,7 @@ from Undefined.bilibili.downloader import (
 from Undefined.bilibili.errors import OpusUnavailableError
 from Undefined.bilibili.format import (
     MAX_TEXT_LENGTH,
+    NODE_TEXT_BUDGET,
     format_timestamp,
     split_text_chunks,
 )
@@ -59,6 +60,10 @@ _DEFAULT_BOT_UIN = "10000"
 
 # ``output_mode=uid`` 默认最多登记多少张图片，避免超大图文刷满附件表
 _UID_IMAGE_LIMIT = 9
+
+# 单个内容节点直接容纳的图片上限（与 ``_UID_IMAGE_LIMIT`` 同量级）：
+# 纯图集图文按此切分，避免一个节点塞进整本图集。
+_NODE_MAX_IMAGES = 9
 
 # 获取失败时可降级的语义（投递不确定 / 文件传输错误必须上抛）
 _FATAL_ERROR_FLAGS = ("delivery_uncertain", "file_transfer_error")
@@ -121,39 +126,55 @@ def render_blocks_to_nodes(
     blocks: tuple[OpusBlock, ...],
     *,
     limit: int = MAX_TEXT_LENGTH,
+    node_text_budget: int = NODE_TEXT_BUDGET,
+    max_images_per_node: int = _NODE_MAX_IMAGES,
     node_name: str = "正文",
 ) -> list[dict[str, Any]]:
     """把块序列渲染成内容节点列表。
 
-    - 文本块按 ``limit`` 切分，切分点之后的内容落在新节点；
+    - 文本块先按 ``min(limit, node_text_budget)`` 切分（单块过长时硬切）；
+    - 节点累计字数达到 ``node_text_budget`` 或累计图片数达到
+      ``max_images_per_node`` 时开新节点：一个节点就是 QQ 里的一条消息，
+      不能把整篇正文塞进同一个节点；
     - 图片块作为消息段插入当前位置，可与文本共处同一节点；
     - 节点只有在非空时才会产生。
     """
+    piece_limit = max(1, min(int(limit), int(node_text_budget)))
+    image_limit = max(1, int(max_images_per_node))
     node_segments_list: list[list[dict[str, Any]]] = []
     current: list[dict[str, Any]] = []
+    current_chars = 0
+    current_images = 0
 
     def flush() -> None:
-        nonlocal current
+        nonlocal current, current_chars, current_images
         if current:
             node_segments_list.append(current)
-            current = []
+        current = []
+        current_chars = 0
+        current_images = 0
 
     def append_text(text: str) -> None:
-        nonlocal current
-        chunks = split_text_chunks(text, limit)
-        for index, chunk in enumerate(chunks):
-            if index > 0:
+        nonlocal current_chars
+        for chunk in split_text_chunks(text, piece_limit):
+            if not chunk:
+                continue
+            if current and current_chars + len(chunk) > node_text_budget:
                 flush()
-            if chunk:
-                current.append({"type": "text", "data": {"text": chunk}})
+            current.append({"type": "text", "data": {"text": chunk}})
+            current_chars += len(chunk)
 
     for block in blocks:
         if isinstance(block, TextBlock):
             append_text(block.text)
         elif isinstance(block, ImageBlock):
             for url in block.urls:
-                if url:
-                    current.append({"type": "image", "data": {"file": url}})
+                if not url:
+                    continue
+                if current and current_images >= image_limit:
+                    flush()
+                current.append({"type": "image", "data": {"file": url}})
+                current_images += 1
         else:
             append_text(_card_block_text(block))
     flush()
@@ -169,6 +190,20 @@ def render_blocks_to_nodes(
         )
         for index, segments in enumerate(node_segments_list, start=1)
     ]
+
+
+def _nest_content_nodes(content_nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """正文超过一个节点时，收进顶层「正文」节点的嵌套内容。
+
+    NapCat 的 packet 模式会把**顶层节点**的全部文本写进转发卡片的 ``news``
+    预览（文本元素的预览就是全文），卡片与正文一起膨胀到几十 KB 时会被 QQ
+    拒收（``发送转发消息（res_id：… 失败``，retcode=1200）；嵌套节点的预览
+    只有 ``[卡片消息]``。因此正文一旦超预算就下沉一层，让卡片体积与正文
+    长度解耦。正文只有一个节点（未超预算）时保持原结构。
+    """
+    if len(content_nodes) <= 1:
+        return content_nodes
+    return [_node(content_nodes, name="正文")]
 
 
 def _card_block_text(block: OpusBlock) -> str:
@@ -386,6 +421,9 @@ async def build_opus_nodes(
 ) -> list[dict[str, Any]]:
     """按「元数据 → 内容 → 嵌套」顺序构建合并转发节点。
 
+    正文超过单节点预算时会收进顶层「正文」节点的嵌套内容，避免顶层卡片
+    预览携带全文（详见 :func:`_nest_content_nodes`）。
+
     ``pending_cleanup`` 收集嵌套视频下载产生的临时文件，由调用方在转发
     真正发出之后统一清理（节点里只有 ``file://`` 路径，提前删会发不出去）。
     """
@@ -397,7 +435,7 @@ async def build_opus_nodes(
         pending_cleanup = []
 
     nodes: list[dict[str, Any]] = [_build_meta_node(info)]
-    nodes.extend(render_blocks_to_nodes(info.blocks))
+    nodes.extend(_nest_content_nodes(render_blocks_to_nodes(info.blocks)))
 
     for block in info.blocks:
         if isinstance(block, LinkCardBlock):

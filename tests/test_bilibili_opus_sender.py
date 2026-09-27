@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -9,6 +10,7 @@ import pytest
 
 import Undefined.bilibili.opus_sender as opus_sender
 from Undefined.bilibili.errors import OpusUnavailableError
+from Undefined.bilibili.format import NODE_TEXT_BUDGET
 from Undefined.bilibili.models import (
     ImageBlock,
     LinkCardBlock,
@@ -83,6 +85,57 @@ def _segment_types(node: dict[str, Any]) -> list[str]:
     return [segment["type"] for segment in node["data"]["content"]]
 
 
+def _content_nodes(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """返回正文节点；超预算时正文收进顶层「正文」节点，这里展开一层。"""
+    content = nodes[1:]
+    if len(content) == 1:
+        segments = content[0]["data"]["content"]
+        if (
+            isinstance(segments, list)
+            and segments
+            and isinstance(segments[0], dict)
+            and segments[0].get("type") == "node"
+        ):
+            return list(segments)
+    return content
+
+
+def _iter_segments(nodes: list[dict[str, Any]]) -> Iterator[dict[str, Any]]:
+    """深度遍历节点里的消息段（嵌套节点视为普通节点继续展开）。"""
+    for node in nodes:
+        content = node["data"]["content"]
+        if not isinstance(content, list):
+            continue
+        for segment in content:
+            if segment.get("type") == "node":
+                yield from _iter_segments([segment])
+            else:
+                yield segment
+
+
+def _flatten_text(nodes: list[dict[str, Any]]) -> str:
+    return "".join(
+        str(segment["data"]["text"])
+        for segment in _iter_segments(nodes)
+        if segment["type"] == "text"
+    )
+
+
+def _preview_chars(nodes: list[dict[str, Any]]) -> int:
+    """估算 NapCat packet 卡片 ``news`` 里的文本量：只统计顶层节点直接文本。"""
+    total = 0
+    for node in nodes:
+        content = node["data"]["content"]
+        if not isinstance(content, list):
+            continue
+        total += sum(
+            len(str(segment["data"]["text"]))
+            for segment in content
+            if segment["type"] == "text"
+        )
+    return total
+
+
 # ---------- 节点结构 ----------
 
 
@@ -141,22 +194,12 @@ async def test_long_text_is_split_and_nothing_is_lost() -> None:
     body = "A" * 9000
     nodes = await _build(_info(TextBlock(body)))
 
-    assert len(nodes) == 4  # 1 元数据 + 3 内容
-    contents = nodes[1:]
-    assert [node["data"]["name"] for node in contents] == [
-        "正文 1/3",
-        "正文 2/3",
-        "正文 3/3",
-    ]
-    text = "".join(
-        segment["data"]["text"]
-        for node in contents
-        for segment in node["data"]["content"]
-        if segment["type"] == "text"
-    )
-    assert text == body
+    contents = _content_nodes(nodes)
+    assert len(contents) == 8  # 9000 字按 1200 字预算切成 8 个节点
+    assert contents[0]["data"]["name"].startswith("正文 1/8")
+    assert _flatten_text(_content_nodes(nodes)) == body
     for node in contents:
-        assert len(node["data"]["content"][0]["data"]["text"]) <= 4000
+        assert len(node["data"]["content"][0]["data"]["text"]) <= NODE_TEXT_BUDGET
 
 
 @pytest.mark.asyncio
@@ -164,12 +207,12 @@ async def test_chunking_prefers_newline_boundary() -> None:
     body = "第一行\n" + "B" * 5000
     nodes = await _build(_info(TextBlock(body)))
 
-    assert nodes[1]["data"]["content"][0]["data"]["text"] == "第一行\n"
+    assert _content_nodes(nodes)[0]["data"]["content"][0]["data"]["text"] == "第一行\n"
 
 
 @pytest.mark.asyncio
 async def test_images_keep_relative_position_across_chunks() -> None:
-    # 用 8000 字（正好两整块）确保后续图文块落在独立的节点里，便于断言顺序
+    # 8000 字正好切满预算内的若干块，后续图文块落在独立的节点里，便于断言顺序
     long_text = "C" * 8000
     info = _info(
         TextBlock(long_text),
@@ -178,37 +221,101 @@ async def test_images_keep_relative_position_across_chunks() -> None:
     )
 
     nodes = await _build(info)
-    contents = nodes[1:]
+    contents = _content_nodes(nodes)
 
-    # 超长正文按 4000 字切成两块；图片保留在原文位置（尾段之前），不会被提前或丢弃
+    # 图片保留在原文位置（尾段之前），不会被提前或丢弃
     assert [_segment_types(node) for node in contents] == [
+        ["text"],
+        ["text"],
+        ["text"],
+        ["text"],
+        ["text"],
         ["text"],
         ["text", "image", "text"],
     ]
-    assert contents[1]["data"]["content"][1]["data"]["file"] == (
-        "https://i0.hdslb.com/mid.jpg"
-    )
-    assert contents[1]["data"]["content"][2]["data"]["text"] == "结尾"
-
-    body = "".join(
-        segment["data"]["text"]
-        for node in contents
-        for segment in node["data"]["content"]
-        if segment["type"] == "text"
-    )
-    assert body == long_text + "结尾"
+    last = contents[-1]["data"]["content"]
+    assert last[1]["data"]["file"] == "https://i0.hdslb.com/mid.jpg"
+    assert last[2]["data"]["text"] == "结尾"
+    assert _flatten_text(_content_nodes(nodes)) == long_text + "结尾"
 
 
 @pytest.mark.asyncio
 async def test_code_block_long_text_is_split_without_loss() -> None:
     code = "```python\n" + "x = 1\n" * 2000 + "```"
     nodes = await _build(_info(TextBlock(code)))
-    text = "".join(
-        segment["data"]["text"]
-        for node in nodes[1:]
-        for segment in node["data"]["content"]
+    assert _flatten_text(_content_nodes(nodes)) == code
+
+
+# ---------- 顶层预览收敛 ----------
+
+
+@pytest.mark.asyncio
+async def test_online_shape_body_is_nested_under_single_node() -> None:
+    """线上失败形态回归：107 段共 13589 字 + 20 图不得压进一个顶层节点。"""
+    blocks: list[Any] = [TextBlock("x" * 127) for _ in range(107)]
+    blocks.extend(
+        ImageBlock((f"https://i0.hdslb.com/bfs/new_dyn/{index}.png",))
+        for index in range(20)
     )
-    assert text == code
+    body = "x" * 127 * 107
+
+    nodes = await _build(_info(*blocks))
+
+    assert [node["data"]["name"] for node in nodes] == ["图文信息", "正文"]
+    assert set(_segment_types(nodes[1])) == {"node"}
+    contents = _content_nodes(nodes)
+    assert all(
+        len(str(segment["data"]["text"])) <= NODE_TEXT_BUDGET
+        for node in contents
+        for segment in node["data"]["content"]
+        if segment["type"] == "text"
+    )
+    assert _flatten_text(contents) == body
+    images = [
+        segment["data"]["file"]
+        for segment in _iter_segments(contents)
+        if segment["type"] == "image"
+    ]
+    assert images == [
+        f"https://i0.hdslb.com/bfs/new_dyn/{index}.png" for index in range(20)
+    ]
+    # 顶层预览只带元数据，不再随正文长度膨胀
+    assert _preview_chars(nodes) < 300
+
+
+@pytest.mark.asyncio
+async def test_content_stays_inline_when_within_budget() -> None:
+    body = "D" * NODE_TEXT_BUDGET
+    nodes = await _build(_info(TextBlock(body)))
+
+    assert [node["data"]["name"] for node in nodes] == ["图文信息", "正文"]
+    assert _segment_types(nodes[1]) == ["text"]
+    assert nodes[1]["data"]["content"][0]["data"]["text"] == body
+
+
+@pytest.mark.asyncio
+async def test_budget_overflow_nests_content() -> None:
+    nodes = await _build(_info(TextBlock("E" * (NODE_TEXT_BUDGET + 1))))
+
+    assert [node["data"]["name"] for node in nodes] == ["图文信息", "正文"]
+    assert set(_segment_types(nodes[1])) == {"node"}
+    assert [node["data"]["name"] for node in _content_nodes(nodes)] == [
+        "正文 1/2",
+        "正文 2/2",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_many_images_are_chunked_by_image_limit() -> None:
+    nodes = await _build(
+        _info(
+            *(ImageBlock((f"https://i0.hdslb.com/{index}.jpg",)) for index in range(20))
+        )
+    )
+
+    contents = _content_nodes(nodes)
+    assert [len(node["data"]["content"]) for node in contents] == [9, 9, 2]
+    assert _preview_chars(nodes) < 300
 
 
 # ---------- 嵌套边界 ----------
