@@ -4,7 +4,7 @@
 
 在 Linux 上，用一条命令部署 **Undefined + NapCat**，并按需添加搜索、音乐服务。部署工具会连接好各服务、生成访问密码，并在修改已有配置前自动备份。
 
-**第一次部署按下面的顺序操作即可：准备环境 → 执行部署 → 填写模型与 QQ 配置 → 扫码登录 → 测试回复。** 默认不安装 SearXNG、Firecrawl、lxmusic2api，也不启用 NagaAgent 问答；需要时可以再添加。
+**第一次部署按下面的顺序操作即可：准备环境 → 执行部署 → 填写模型与 QQ 配置 → 扫码登录 → 在 WebUI 启动 Bot → 测试回复。** 默认不安装 SearXNG、Firecrawl、lxmusic2api，也不启用 NagaAgent 问答；需要时可以再添加。
 
 [首次部署](#1-开始前的准备) · [配置与登录](#3-完成配置并登录-qq) · [可选服务](#4-按需添加功能) · [日常管理](#5-日常管理) · [常见问题](#7-常见问题)
 
@@ -90,7 +90,7 @@ uv run deploy status
 ### 扫码登录并测试回复
 
 1. 打开终端显示的 NapCat WebUI 链接，扫描二维码，登录与 `core.bot_qq` 一致的 QQ 帐号。也可执行 `uv run deploy logs napcat --tail 200` 查看登录提示。
-2. 返回 Undefined WebUI，确认 Bot 正在运行；若尚未启动，点击“启动机器人”。容器模式默认启用自动启动，但首次配置未完成时仍需先补齐配置。
+2. 返回 Undefined WebUI，点击“启动机器人”。部署工具会将 `[webui].autostart_bot` 设为 `false`，便于先完成配置与 QQ 登录；容器运行后 WebUI 会等待你手动启动 Bot。
 3. 用另一个 QQ 私聊机器人，或在允许使用的群里 @ 机器人，发送一条简单消息，确认能收到回复。
 
 NapCat 未登录时，Bot 日志提示连不上协议端属于正常现象。遇到问题可同时查看 NapCat 和 Bot 日志，操作说明见 [WebUI 使用指南](webui-guide.md)。
@@ -222,7 +222,7 @@ uv run deploy up --mode host
 uv run Undefined-webui
 ```
 
-宿主机上的 Playwright、FFmpeg 等依赖按 [源码部署指南](deployment.md#源码部署推荐)准备，启动后在 WebUI 中管理 Bot。`container` 与 `host` 模式使用不同的数据目录，切换模式不会自动迁移历史数据。`host` 模式默认使用 `local` 文件发送方式，还需按 [OneBot 文件发送要求](deployment.md#napcat--lagrangecore-部署要求)确认协议端能读取文件，或选择适合的发送模式。
+宿主机上的 Playwright、FFmpeg 等依赖按 [源码部署指南](deployment.md#源码部署推荐)准备。启动 WebUI 后，完成配置与 QQ 登录，再点击“启动机器人”。`host` 模式同样关闭 Bot 自动启动、使用 Stream 向 NapCat 发送文件，无需共享发送目录。`container` 与 `host` 模式使用不同的数据目录，切换模式不会自动迁移历史数据。
 
 ### 常用参数速查
 
@@ -239,9 +239,11 @@ uv run Undefined-webui
 
 ### 配置修改与运行权限
 
-部署工具会更新 OneBot 连接、WebUI / Runtime 监听地址与凭据、所选服务地址等部署配置；模型、访问控制、提示词和历史配置的取值会保留。已有配置在写入前会备份，但写回时可能调整排序、空行或部分注释，可先用 `--dry-run` 查看计划。
+部署工具会更新 OneBot 连接、WebUI / Runtime 监听地址与凭据、Bot 启动方式、文件发送模式和所选服务地址；模型、访问控制、提示词和历史配置的取值会保留。已有配置在写入前会备份，但写回时可能调整排序、空行或部分注释，可先用 `--dry-run` 查看计划。
 
-容器模式自动启用 URL 文件发送，让 NapCat 通过 Runtime 读取待发送文件，无需手工共享发送目录。对收到的仅含 NapCat 容器内路径的文件，仍存在读取限制，见下面的常见问题。
+每次执行 `uv run deploy up`，`container` 与 `host` 模式都会写入 `webui.autostart_bot = false` 和 `onebot.file_send_mode = "stream"`。Bot 由你在 WebUI 中手动启动；本地文件通过已有 OneBot WebSocket 分块上传给 NapCat，无需共享发送目录，也不依赖 Runtime 提供下载地址。`file_send_host` 仅供 URL 模式使用，部署工具不再改写它。
+
+Stream 只处理发送文件。对收到的仅含 NapCat 容器内路径的文件，仍存在读取限制，见下面的常见问题。
 
 本体容器默认挂载宿主机 Docker socket，供 Python 代码执行和代码交付工具使用，因此具备控制宿主机 Docker 的权限，相当于宿主机 root 权限。请在自己可控的机器上部署；需要限制这项权限时，应自行维护 Compose 配置并评估相关工具的可用性。
 
@@ -259,7 +261,7 @@ uv run Undefined-webui
 | `web_search` 提示未启用，或 SearXNG 返回 403 | 确认已选择 SearXNG；`deploy/searxng/settings.yml` 中的 `search.formats` 应包含 `json`。可重跑部署恢复生成配置；手工修改后，用 `docker compose --env-file deploy/.env -f deploy/compose.yaml restart searxng` 重启该服务 |
 | Firecrawl 启动很慢或因内存不足退出 | 先检查 `uv run deploy logs firecrawl-api --tail 200`；该服务资源占用较高，可先不选它，或提供足够资源后再部署 |
 | `music.get_audio` 返回 503 | 检查是否已按[音源配置](#音乐服务的音源配置)放入兼容的脚本并重启音乐服务 |
-| 收到的语音等文件无法读取 | 某些消息只提供 NapCat 容器内的本地路径，Bot 无法直接读取。发送端的 URL 模式不能解决这类接收问题；需按协议端实际能力提供可访问的 URL 或共享文件路径 |
+| 收到的语音等文件无法读取 | 某些消息只提供 NapCat 容器内的本地路径，Bot 无法直接读取。发送端的 Stream 模式不能解决这类接收问题；需按协议端实际能力提供可访问的 URL 或共享文件路径 |
 | 部署中断后状态信息不完整 | 修复报错后重新执行 `uv run deploy up`，补齐部署状态和服务配置 |
 | 清理数据时提示权限不足 | 部分文件由容器以 root 写入。根据命令列出的残留路径，确认不再需要后用具有权限的帐号清理 |
 | 想恢复部署前的 Bot 配置 | 在 WebUI 中停止 Bot，将 `deploy/backup/` 中对应的备份恢复为仓库根目录的 `config.toml`，核对连接地址和凭据后再启动 |

@@ -153,7 +153,7 @@ cd Undefined
 uv run deploy up
 ```
 
-部署结束后，终端会显示 **Undefined WebUI 地址和密码、NapCat 登录链接**。打开 WebUI 填写模型 API、机器人 QQ 号和管理员 QQ 号，再到 NapCat 扫码登录。完整步骤见 [部署后的首次配置](docs/docker-deploy.md#3-完成配置并登录-qq)。
+部署结束后，终端会显示 **Undefined WebUI 地址和密码、NapCat 登录链接**。打开 WebUI 填写模型 API、机器人 QQ 号和管理员 QQ 号，到 NapCat 扫码登录后，再返回 WebUI 点击“启动机器人”。部署配置默认关闭 Bot 自动启动，并使用 Stream 发送文件。完整步骤见 [部署后的首次配置](docs/docker-deploy.md#3-完成配置并登录-qq)。
 
 后续可用 `uv run deploy status` 查看入口与状态、`uv run deploy logs` 查看日志、`uv run deploy down` 停止服务并保留数据。
 

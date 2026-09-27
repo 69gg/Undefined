@@ -199,7 +199,7 @@ cd Undefined
 uv run deploy up
 ```
 
-部署结束后，按终端显示的地址和密码进入 WebUI，填写模型 API 与 QQ 身份配置，再到 NapCat 扫码登录。**环境准备、首次配置、远程访问和常见问题请直接看 [Docker 一键部署指南](docker-deploy.md)**。
+部署结束后，按终端显示的地址和密码进入 WebUI，填写模型 API 与 QQ 身份配置，到 NapCat 扫码登录后，再返回 WebUI 点击“启动机器人”。`container` 与 `host` 模式都会将 `[webui].autostart_bot` 设为 `false`、`[onebot].file_send_mode` 设为 `"stream"`。**环境准备、首次配置、远程访问和常见问题请直接看 [Docker 一键部署指南](docker-deploy.md)**。
 
 ---
 
@@ -320,6 +320,8 @@ URL 使用单文件独立令牌，有效期 16 分钟，支持 HEAD、Range 和�
 `stream` 通过已有 OneBot WebSocket 按 64 KiB 分块上传，每块单独等待确认，最后独立请求完成并校验路径、大小和 SHA-256，再发 QQ 消息。一个 Bot 的 Stream 文件投递串行，多文件顺序准备，文本消息不受上传锁影响。文件准备、发送和明确失败后的回退共用 8 分钟预算，排队等待不计时；协议端文件显式保留 16 分钟。未完成 Stream 失败时仅尝试重置该 Stream，已完成文件依靠保留期回收，不调用清空临时目录的接口。不支持零字节文件，不自动重试上传或跨重启续传。
 
 **旧配置缺少新增字段且未通过环境变量指定模式时继续使用 `local`。** 需要跨文件系统发送时，可显式设置 `onebot.file_send_mode = "url"` 或 `"stream"`。选择 Stream 后，协议端明确不支持扩展时会提示切换配置，不会静默回退。NapCat 扩展不能视为所有 OneBot 实现的共同能力；使用 Lagrange.Core 等实现时应按其实际能力选 `local`，或核对所用消息与普通文件上传接口的 URL 支持后选择 `url`。
+
+使用 `uv run deploy up` 时，部署工具会为配套的 NapCat 显式写入 `file_send_mode = "stream"`，`container` 与 `host` 模式均适用，无需另行共享发送目录或配置 Runtime 下载地址。
 
 实现参考固定版本的 [NapCat 上传示例](https://github.com/NapNeko/NapCatQQ/blob/109d0c1dff755875f3b79795e99cee6115289fbb/packages/napcat-onebot/action/stream/test_upload_stream.py) 与 [UploadFileStream](https://github.com/NapNeko/NapCatQQ/blob/109d0c1dff755875f3b79795e99cee6115289fbb/packages/napcat-onebot/action/stream/UploadFileStream.ts)。Bot 新传输层使用分块 IO，但该上游在合并磁盘分块时仍构造完整内存缓冲区，现有附件登记也可能读取完整文件；**不承诺整个链路固定内存占用**。
 

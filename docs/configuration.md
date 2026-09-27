@@ -236,6 +236,8 @@ model_name = "gpt-4o-mini"
 
 这些选项只影响 Bot 本地文件；已有 HTTP/HTTPS URL、Base64 和协议端资源标识保持原样，展示文件名、附件 UID 和历史来源不变。旧配置未包含新字段且未通过环境变量指定模式时继续采用 `local`，保持原有发送行为；`url` 和 `stream` 需要显式启用。不能假定所有 OneBot 实现或 Lagrange.Core 都支持 NapCat 扩展。
 
+`uv run deploy up` 会为配套的 NapCat 显式设置 `file_send_mode = "stream"`，`container` 与 `host` 模式均适用；无需配置 `file_send_host` 或共享发送目录。上表的 `local` 仍是一般配置及旧配置的默认值。
+
 Stream 本地文件投递在同一 Bot 内串行，纯文本不等待上传锁。Stream／URL 文件准备、发送与明确失败后的文件消息段回退共用 8 分钟预算，排队不计时；临时资源保留 16 分钟。URL 副本在源文件删除或切换模式后仍可下载，到期拒绝新请求，已有下载允许完成。文件准备失败不会触发文件消息段回退或标记已发送；投递发出后无法确认结果时禁止自动重发。不会自动切换模式、自动重试上传或启动 Runtime。
 
 传输过程使用分块 IO；现有附件登记与 NapCat 的分块合并仍可能读取完整文件，不保证整个链路固定内存占用。参见 [三模式部署要求](deployment.md#napcat--lagrangecore-部署要求)、[自托管服务概览](deployment.md#需要一并部署的自托管服务概览) 与 [临时文件接口](openapi.md#onebot-临时文件下载)。
@@ -1154,6 +1156,7 @@ api_key = "replace-with-your-key"
 - `webui.url/port/password/autostart_bot` 修改需重启 WebUI 进程（机器人主进程中也属于重启生效类）。
 - `check_updates` 支持热更新；关闭后只停止页面打开时的自动检查，概览页仍可手动检查。
 - `autostart_bot=true` 时，运行 `uv run Undefined-webui` 会自动拉起 bot 进程，无需手动点击启动按钮；与 WebUI 更新重启后的自动恢复机制（`pending_bot_autostart` marker）互不冲突。
+- `uv run deploy up` 在 `container` 与 `host` 模式下都会写入 `autostart_bot = false`；部署后先完成配置与 QQ 登录，再在 WebUI 点击“启动机器人”。
 - 自动检查在 WebUI 鉴权成功后异步执行，失败不会阻塞或打扰页面。GitHub Release 查询在 WebUI 进程内缓存 15 分钟；同一时刻的并发检查会共享一个在途任务，查询失败时也不会逐个重试外部请求。
 - 自动更新仅支持官方 `origin`、本地 `main` 和干净工作区；确认后会精确快进到最新正式 Release 标签，而不是拉取该标签之后尚未发版的 `main` 提交。
 

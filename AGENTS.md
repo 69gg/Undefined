@@ -35,6 +35,9 @@ The tool supports a `brief` boolean parameter (`default: false`). When `brief: t
 `group.get_avatar` accepts `user_id` (required) and optional `size` (40, 100, 140, 640, default 100). It downloads the QQ avatar and registers it as an attachment, returning an `<attachment uid="..."/>` tag that can be embedded in messages.
 
 ### OneBot local file transport
+
+`uv run deploy up` explicitly selects `stream` for its bundled NapCat in both container and host modes, and sets `webui.autostart_bot = false` so users can configure and log in before starting the Bot in WebUI. These deployment choices do not change the general `local` fallback below.
+
 `[onebot].file_send_mode` selects `local` (default for compatibility, including older configs without this field or an environment override), `url`, or `stream`; URL and Stream require explicit selection. `file_send_host` defaults to `127.0.0.1` and is used only for URL delivery. Both hot reload per logical delivery snapshot. Keep local source paths in business tools, attachment registration and history; `OneBotClient` prepares a separate wire request, including nested forward media. URL mode uses the running Runtime port and per-file 16-minute tokens/copies; Stream requires the NapCat extension, uses 64 KiB chunks and a separate completion request with SHA-256 verification. Stream/URL preparation plus send/fallback share 8 minutes excluding the Stream queue. Preparation errors must not mark delivery or trigger file-segment fallback; uncertain delivery must not be retried. Never log chunk data/tokens, re-interpret completed NapCat paths on the Bot, or call global `clean_stream_temp_file`. The upstream merge and existing attachment registration may still buffer whole files. See [deployment](docs/deployment.md) and [configuration](docs/configuration.md).
 
 ### Merged-forward top-level preview

@@ -477,23 +477,15 @@ def test_bot_container_mounts_repo_and_docker_socket(tmp_path: Path) -> None:
     assert any(volume.endswith(":/data/Undefined/data") for volume in volumes)
 
 
-def test_container_mode_points_file_send_host_at_the_bot_service(
+@pytest.mark.parametrize("mode", catalog.DEPLOY_MODES)
+def test_stream_transport_does_not_write_a_runtime_download_host(
     tmp_path: Path,
+    mode: str,
 ) -> None:
-    """协议端要按**自己**能解析的地址去下载文件。
-
-    取 URL 去取文件的是 NapCat（另一个容器），所以 file_send_host 必须是同网络
-    的服务名；写成 host.docker.internal 会加到错误一侧（别名在本体容器上无效），
-    而且 Runtime API 默认只绑回环，协议端经宿主网关也连不上。
-    """
-    config = generate.build(_ctx(tmp_path, services=("searxng",)))
-    assert (
-        config.patch_plan.desired["onebot.file_send_host"] == generate.BOT_SERVICE_NAME
-    )
-
-    services = _compose_services(config.compose_text)
-    # 本体容器不需要宿主网关别名
-    assert "extra_hosts" not in services["undefined-bot"]
+    """Stream 不依赖 Runtime 下载地址，部署时保留用户原有的 URL 模式配置。"""
+    config = generate.build(_ctx(tmp_path, mode=mode))
+    assert config.patch_plan.desired["onebot.file_send_mode"] == "stream"
+    assert "onebot.file_send_host" not in config.patch_plan.desired
 
 
 def test_container_mode_mounts_nagaagent_submodule_when_enabled(
@@ -724,10 +716,9 @@ def test_patch_plan_container_mode_topology(tmp_path: Path) -> None:
     assert desired["webui.url"] == "0.0.0.0"
     assert desired["api.host"] == "0.0.0.0"
     # 协议端在另一个容器里，本地路径模式不可用
-    assert desired["onebot.file_send_mode"] == "url"
-    assert desired["onebot.file_send_host"] == generate.BOT_SERVICE_NAME
-    # 镜像入口是 WebUI，容器里没人手点「启动机器人」：不自动拉起就等于没部署
-    assert desired["webui.autostart_bot"] is True
+    assert desired["onebot.file_send_mode"] == "stream"
+    # 先填写模型与 QQ 配置，再由用户在 WebUI 启动 Bot。
+    assert desired["webui.autostart_bot"] is False
 
 
 def test_patch_plan_host_mode_topology(tmp_path: Path) -> None:
@@ -735,9 +726,8 @@ def test_patch_plan_host_mode_topology(tmp_path: Path) -> None:
     desired = plan.desired
     assert desired["webui.url"] == "127.0.0.1"
     assert desired["api.host"] == "127.0.0.1"
-    assert desired["onebot.file_send_mode"] == "local"
-    # 宿主机上由用户自己决定怎么起 Bot，部署脚本不该改写这个偏好
-    assert "webui.autostart_bot" not in desired
+    assert desired["onebot.file_send_mode"] == "stream"
+    assert desired["webui.autostart_bot"] is False
 
 
 def test_patch_plan_only_touches_selected_services(tmp_path: Path) -> None:
