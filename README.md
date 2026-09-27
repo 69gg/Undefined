@@ -30,7 +30,7 @@
 
 ---
 
-**[快速开始](#-快速开始-源码模式)**
+> 🚀 **开始使用 Undefined**：从[快速开始](#-快速开始)了解部署步骤、首次配置和可选客户端的下载方式。
 
 ## ⚡ 核心特性
 
@@ -114,11 +114,15 @@ Undefined 的功能极为丰富，为了让本页面不过于臃肿，我们将�
 
 ---
 
-## ⚡ 快速开始 (源码模式)
+## ⚡ 快速开始
 
-> 👶 **首次部署**：推荐优先使用源码部署，请按 [详细安装与部署指南](docs/deployment.md#源码部署推荐)逐步操作。
+推荐优先采用源码部署；希望在 Linux 上自动搭建 Undefined、NapCat 和可选服务时，也可以选择 Docker 一键部署。两种方式任选其一，部署完成后可直接使用 WebUI，也可按本节末尾的说明下载独立客户端。
 
-以下步骤适合有一定开发经验、想快速跑起项目源码的用户。我们推荐使用现代 Python 构建工具 `uv`。
+<a id="-快速开始-源码模式"></a>
+
+### 源码部署（推荐）
+
+使用 `uv` 安装依赖并启动管理控制台。首次部署还需要准备 QQ 协议端、模型 API 和帐号配置，完整步骤见 [源码部署指南](docs/deployment.md#源码部署推荐)。
 
 ```bash
 # 1. 完整克隆源码库（注意附带 NagaAgent 模块）
@@ -132,17 +136,13 @@ uv run playwright install  # 安装浏览器内核（用于页面截图等能力
 
 # 3. 启动管理控制台（推荐入口）
 uv run Undefined-webui
-
-# 4. 在 WebUI 中补齐/校验配置，然后直接点击启动 Bot
-#    如需先手动准备配置，也可以再执行：
-# cp config.toml.example config.toml
 ```
 
-> 浏览器是默认入口；如果你参考 [Release 下载速查](#release-下载速查)下载了桌面端或 Android 安装包，也可以在完成首轮密码设置后，连接到同一个 Management API 地址进行远程管理。
+启动后，按终端显示的地址打开 WebUI，设置管理密码并填写模型与 QQ 配置；校验通过后，在页面中启动 Bot。后续配置、日志查看和 Bot 启停都可以在 WebUI 中完成。
 
----
+<a id="-docker-一键部署linux"></a>
 
-## 🐳 Docker 一键部署（Linux）
+### Docker 一键部署（Linux）
 
 已安装 Docker Engine、`docker compose` 插件、Git 和 uv 后，在 Linux 上执行以下命令；未安装时先看 [开始前的准备](docs/docker-deploy.md#1-开始前的准备)。默认部署 Undefined + NapCat，其他服务按需选择：
 
@@ -156,20 +156,27 @@ uv run deploy up
 
 后续可用 `uv run deploy status` 查看入口与状态、`uv run deploy logs` 查看日志、`uv run deploy down` 停止服务并保留数据。
 
----
+### Release 下载速查
 
-## Release 下载速查
+完成上述部署后，可直接通过浏览器使用 WebUI。需要独立的管理或聊天客户端时，再前往 [GitHub Releases](https://github.com/69gg/Undefined/releases)，按用途选择组件：
 
-**部署 QQ Bot 本身不需要下载 Release**：优先按[源码快速开始](#-快速开始-源码模式)安装，Linux 用户也可选择 [Docker 一键部署](docs/docker-deploy.md)。Release 安装包的用途与平台对应如下：
+| 你需要的功能 | 下载组件 |
+| --- | --- |
+| 远程管理已有实例，编辑配置、查看日志、启停 Bot | **Undefined Console**：选择 `Undefined-Console-*` |
+| 使用独立的原生聊天界面 | **Undefined Chat**：选择 `Undefined-Chat-*` |
 
-| 目标 | 文件 | 平台 |
-| --- | --- | --- |
-| 部署 / 运行 Bot | 不需要下载 Release；首选源码部署并启动 `uv run Undefined-webui`，也可使用 Docker 一键部署 | 源码部署支持 Windows / macOS / Linux；Docker 一键部署支持 Linux |
-| 离线安装 / 镜像缓存 | `undefined_bot-*.whl` 或 `undefined_bot-*.tar.gz` | 任意 |
-| 远程管理已有实例 | `Undefined-Console-*`（连接 Management API 打开远程 WebUI） | Windows x64 `*-windows-x64-setup.exe`（批量部署可选 `.msi`）／macOS `*-macos-arm64.dmg`、`*-macos-x64.dmg`／Debian、Ubuntu `*.deb`／其他 Linux `*.AppImage` |
-| 原生聊天客户端 | `Undefined-Chat-*`（连接 Runtime API 聊天） | 同上；Android 为 `*-android-arm64-v8a-release.apk`（旧 32 位设备用 `armeabi-v7a`，模拟器按需 `x86_64` / `x86`） |
+选好 Console 或 Chat 后，在该组件的文件中选择适合设备的安装包：
 
-Console 和 Chat 都需要连接已运行的 Undefined 服务：首次部署请先按对应指南完成配置和 Bot 启动，再连接客户端。
+| 平台 | 安装包 |
+| --- | --- |
+| Windows x64 | `*-windows-x64-setup.exe`；批量部署可选 `*-windows-x64.msi` |
+| macOS | Apple Silicon 选 `*-macos-arm64.dmg`，Intel 选 `*-macos-x64.dmg` |
+| Linux | Debian / Ubuntu 选 `*.deb`，其他发行版可选 `*.AppImage` |
+| Android | 通常选 `*-android-arm64-v8a-release.apk`；旧 32 位设备选 `armeabi-v7a`，模拟器按架构选择 `x86_64` 或 `x86` |
+
+安装后，Console 连接已部署实例的 Management API，Chat 连接 Bot 的 Runtime API；请使用该实例对应的地址和凭据。**两个客户端都需要已有的 Undefined 服务，部署 Bot 本身无需下载客户端安装包。**
+
+如需离线安装 Python 包或缓存安装文件，可下载 `undefined_bot-*.whl` 或 `undefined_bot-*.tar.gz`；安装方式见 [pip / uv tool 部署说明](docs/deployment.md#pipuv-tool-部署快速体验)。
 
 ---
 
