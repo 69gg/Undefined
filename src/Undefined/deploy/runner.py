@@ -122,6 +122,8 @@ class Wizard:
         if not self.enabled:
             return tuple(default)
         items = list(catalog.OPTIONAL_SERVICES)
+        for service in catalog.REQUIRED_SERVICES:
+            print(f"\n固定部署 {service.label} — {service.about}")
         print("\n额外部署哪些自托管服务？（可多选，回车=全不部署）")
         for position, service in enumerate(items, start=1):
             print(f"  {position}) {service.label} — {service.about}")

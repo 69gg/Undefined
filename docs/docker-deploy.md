@@ -52,7 +52,7 @@ uv run deploy up
 | 向导选项 | 第一次部署怎么选 |
 |---|---|
 | 本体部署方式 | 保持默认 `container`，让 Undefined 和 NapCat 一起在 Docker 中运行 |
-| 额外部署哪些自托管服务 | 暂时不需要就直接回车，之后可以再添加 |
+| 额外部署哪些自托管服务 | 可先看[各服务的用途与选择建议](#4-按需添加功能)；暂时不需要就直接回车，之后可以再添加 |
 | 发布端口的绑定地址 | 保持 `127.0.0.1`；在服务器上部署时，访问方法见下文[远程访问](#在自己的电脑上访问服务器) |
 | 是否拉取 NagaAgent 子模块 | 不需要 NagaAgent 代码问答时选“否” |
 
@@ -115,7 +115,16 @@ uv run deploy up --port-bind 0.0.0.0
 
 ## 4. 按需添加功能
 
-这些服务都不是首次部署的必选项。根据需要在向导中选择，或使用 `--with` 一次列出要部署的可选服务：
+**NapCat 随一键部署安装，是收发 QQ 消息的必需服务。** SearXNG、Firecrawl、lxmusic2api 都是可选项；第一次可以只部署 Undefined + NapCat，之后再按需要添加。
+
+| 服务 | 用来做什么 | 什么时候需要 |
+|---|---|---|
+| NapCat | 登录 QQ、收发消息与文件，连接 Undefined 和 QQ | 使用 QQ 机器人必需，自动安装 |
+| SearXNG | 聚合多个搜索引擎，为 `web_search` 提供搜索结果 | 希望使用 `web_search`，且没有可连接的 SearXNG 实例时 |
+| Firecrawl | 为 `firecrawl_search` 提供自行托管的搜索接口 | 希望自己运行 Firecrawl 时；**不自部署也能使用官方 keyless** |
+| lxmusic2api | 为 `music.*` 提供歌曲搜索、歌单、歌词与音频获取 | 需要音乐功能，且没有可连接的 lxmusic2api 实例时 |
+
+根据需要在向导中选择，或使用 `--with` 一次列出要部署的可选服务：
 
 ```bash
 # 部署 SearXNG 搜索服务
@@ -127,13 +136,44 @@ uv run deploy up --with searxng,lxmusic2api
 
 **`--with` 指定的是本次完整的可选服务列表。** 已部署其他可选服务并希望保留时，请一并列出；不传这个参数会沿用上次选择，`--with ""` 表示取消所有可选服务。
 
-| 服务 | 提供的功能 | 使用提示 |
-|---|---|---|
-| SearXNG | `web_search` 网络搜索 | 自动配置 JSON 搜索接口，默认入口为 `http://127.0.0.1:8080/` |
-| Firecrawl | `firecrawl_search` 搜索 | 使用 `--with firecrawl` 选择；会启动 5 个容器，资源占用较高。默认 API 端口为 `3002`，终端会给出队列管理页，没有独立的 dashboard / playground |
-| lxmusic2api | `music.*` 音乐搜索、歌单、歌词与音频获取 | 默认接口文档为 `http://127.0.0.1:3000/docs`；获取音频还需要自行提供兼容的音源脚本 |
+### NapCat：连接 QQ
 
-### 音乐服务的音源配置
+Undefined 负责理解消息和执行工具，NapCat 负责登录 QQ 并实际收发消息。部署工具会配置好两者的 WebSocket 连接和访问令牌，你只需在部署后扫码登录机器人帐号。默认管理入口是 `http://127.0.0.1:6099/webui`，请使用终端显示的带 token 链接进入。
+
+NapCat 必需，不用在 `--with` 中填写。没有登录 QQ 时，Bot 无法正常收发 QQ 消息；首次登录步骤见[配置与登录](#3-完成配置并登录-qq)。
+
+### SearXNG：聚合网页搜索
+
+SearXNG 为 `web_agent` 中的 `web_search` 工具提供搜索结果，适合希望自己运行搜索服务的用户。选中后会自动开启 JSON 搜索接口，并写入 `[search].searxng_url`；默认浏览器入口是 `http://127.0.0.1:8080/`。
+
+已有可用实例时，可直接在配置中填写它的地址，无需重复部署。未部署且未配置可用地址时，`web_search` 不可用；`grok_search`、`firecrawl_search` 和网页读取工具不受此选项影响，按各自配置使用。
+
+### Firecrawl：官方 keyless 或自托管搜索
+
+**不部署 Firecrawl 容器，不影响 `firecrawl_search` 工具使用官方服务。** 只想使用搜索工具时，可以不勾选 Firecrawl，在 WebUI 的搜索配置中开启该工具、保留官方地址，并将 API Key 留空，即使用官方 keyless。对应 `config.toml` 中的字段如下（修改已有段落即可）：
+
+```toml
+[search]
+firecrawl_search_enabled = true
+
+[search.firecrawl]
+base_url = "https://api.firecrawl.dev"
+api_key = ""
+```
+
+工具默认关闭，需要先将 `firecrawl_search_enabled` 设为 `true`。Keyless 无需 API Key，但受官方按 IP 计算的每日请求与额度限制；需要更高额度时可填写自己的 API Key，详见 [Firecrawl 官方限流说明](https://docs.firecrawl.dev/rate-limits#keyless-no-api-key)。未选自托管 Firecrawl 时，部署工具会保留已有的 Firecrawl 配置；如果之前使用本地实例，切回官方服务时也要将 `base_url` 改回上面的地址。
+
+希望自行托管时，在向导中选择 Firecrawl，或将 `firecrawl` 加入 `--with` 列表。部署工具会开启 `firecrawl_search` 并将其指向本地实例。它会启动 API、浏览器处理服务、Redis、RabbitMQ、PostgreSQL 共 5 个容器，占用的资源较多，适合愿意自行维护服务的用户。
+
+自托管实例的默认 API 端口为 `3002`；终端会给出队列管理页，没有独立的 dashboard / playground。搜索效果取决于实例的搜索后端与网络环境，具体设置见 [Firecrawl 自托管说明](https://docs.firecrawl.dev/contributing/self-host)；同时选择 SearXNG 时，部署工具也不会自动将其设为 Firecrawl 的搜索后端。
+
+### lxmusic2api：音乐搜索与音频获取
+
+lxmusic2api 为 `music.*` 工具提供歌曲搜索、歌单浏览、歌词和音频获取。选中后会自动设置 `[lxmusic2api]` 的服务地址与访问密钥；默认接口文档为 `http://127.0.0.1:3000/docs`。已有服务时，也可自行填写地址和密钥，无需重复部署。
+
+不配置音乐服务时，`music.*` 工具不可用，其余聊天与工具功能可正常使用。搜索、歌单和歌词不需要音源脚本；获取音频还需完成下面的配置。
+
+#### 音乐服务的音源配置
 
 将兼容“LX 自定义源 API v2”的 `.js` 脚本放到：
 
@@ -259,7 +299,7 @@ Stream 只处理发送文件。对收到的仅含 NapCat 容器内路径的文�
 | 容器在运行，但机器人不回复 | 检查 QQ 登录状态、模型与 QQ 配置、WebUI 中的 Bot 状态，以及是否受访问控制限制；查看 `uv run deploy logs undefined-bot napcat --tail 200` 定位错误 |
 | 修改 NapCat 令牌后仍无法连接 | 已登录帐号可能使用单独的网络配置。按部署输出提示，在 NapCat WebUI 中更新该帐号的正向 WebSocket 配置，保存并按提示重启 NapCat |
 | `web_search` 提示未启用，或 SearXNG 返回 403 | 确认已选择 SearXNG；`deploy/searxng/settings.yml` 中的 `search.formats` 应包含 `json`。可重跑部署恢复生成配置；手工修改后，用 `docker compose --env-file deploy/.env -f deploy/compose.yaml restart searxng` 重启该服务 |
-| Firecrawl 启动很慢或因内存不足退出 | 先检查 `uv run deploy logs firecrawl-api --tail 200`；该服务资源占用较高，可先不选它，或提供足够资源后再部署 |
+| Firecrawl 启动很慢或因内存不足退出 | 先检查 `uv run deploy logs firecrawl-api --tail 200`；可暂不自部署，按[官方 keyless 配置](#firecrawl官方-keyless-或自托管搜索)继续使用工具，或提供足够资源后再部署 |
 | `music.get_audio` 返回 503 | 检查是否已按[音源配置](#音乐服务的音源配置)放入兼容的脚本并重启音乐服务 |
 | 收到的语音等文件无法读取 | 某些消息只提供 NapCat 容器内的本地路径，Bot 无法直接读取。发送端的 Stream 模式不能解决这类接收问题；需按协议端实际能力提供可访问的 URL 或共享文件路径 |
 | 部署中断后状态信息不完整 | 修复报错后重新执行 `uv run deploy up`，补齐部署状态和服务配置 |

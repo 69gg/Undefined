@@ -841,8 +841,8 @@ summary = ""
 
 搜索服务部署说明（两者都是可选项，不部署时联网检索仍可由其他子工具承担，概览见[需要一并部署的自托管服务](deployment.md#需要一并部署的自托管服务概览)）：
 
-- **SearXNG**：`searxng_url` 需要指向一个可用的 SearXNG 实例，该实例不由本项目提供。请先按 [SearXNG 官方部署说明](https://docs.searxng.org/) 完成自托管再填写地址；留空时内置 `web_search` 工具不可用（调用会返回“搜索功能未启用”），`grok_search`、`firecrawl_search`、`crawl_webpage` 不受影响。
-- **Firecrawl**：`firecrawl_search_enabled = true` 后有三种用法，按需选择其一——① 官方 keyless（`api_key` 留空，受官方配额与限流约束）；② 官方 + 自己的 API Key（填写 `api_key`，指向默认 `base_url`）；③ 自部署实例（把 `base_url` 改为自部署地址，通常可留空 `api_key`，接口契约仍为 `POST /v2/search`）。自部署请参考 [Firecrawl 自托管说明](https://docs.firecrawl.dev/contributing/self-host)，并注意其搜索能力通常需要另行配置搜索后端（例如 SearXNG）。
+- **SearXNG**：`searxng_url` 需要指向一个可用的 SearXNG 实例，可用 `uv run deploy up --with searxng` 一键部署，或按 [SearXNG 官方部署说明](https://docs.searxng.org/) 手工搭建；已有实例时直接填写地址即可。留空时内置 `web_search` 工具不可用（调用会返回“搜索功能未启用”），`grok_search`、`firecrawl_search`、`crawl_webpage` 不受影响。
+- **Firecrawl**：**不自部署 Firecrawl 也能使用 `firecrawl_search`**。开启 `firecrawl_search_enabled = true` 后有三种用法：① 官方 keyless（保留默认 `base_url`，`api_key` 留空，受[官方配额与限流](https://docs.firecrawl.dev/rate-limits#keyless-no-api-key)约束）；② 官方 + 自己的 API Key（填写 `api_key`，保留默认 `base_url`）；③ 自部署实例（把 `base_url` 改为自部署地址，通常可留空 `api_key`，接口契约仍为 `POST /v2/search`）。`uv run deploy up` 未选择 Firecrawl 时会保留已有的工具开关、地址与 Key，不会因此禁用工具。示例见 [Firecrawl 使用方式](docker-deploy.md#firecrawl官方-keyless-或自托管搜索)；自部署请参考 [Firecrawl 自托管说明](https://docs.firecrawl.dev/contributing/self-host)，并注意其搜索后端可能需要另行配置（例如 SearXNG）。
 
 ---
 

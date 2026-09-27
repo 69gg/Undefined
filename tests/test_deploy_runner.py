@@ -670,6 +670,38 @@ def test_dry_run_does_not_create_config_on_fresh_clone(
     assert not (repo / "config.toml").exists()
 
 
+@pytest.mark.parametrize("mode", catalog.DEPLOY_MODES)
+@pytest.mark.parametrize("api_key", ("", "fc-test"), ids=("keyless", "api-key"))
+def test_up_preserves_official_firecrawl_when_not_self_hosted(
+    fake_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str,
+    api_key: str,
+) -> None:
+    """未勾选自托管 Firecrawl 时，官方 keyless / API Key 配置仍可继续使用。"""
+    config_path = fake_repo / "config.toml"
+    previous = (
+        CONFIG_TOML
+        + "\n[search]\nfirecrawl_search_enabled = true\n"
+        + '[search.firecrawl]\nbase_url = "https://api.firecrawl.dev"\n'
+        + f'api_key = "{api_key}"\n'
+    )
+    config_path.write_text(previous, encoding="utf-8")
+    _stub_docker(monkeypatch)
+
+    assert (
+        runner.run_up(_yes_options(mode=mode, services=("searxng",), dry_run=False))
+        == 0
+    )
+
+    parsed = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    assert parsed["search"]["firecrawl_search_enabled"] is True
+    assert parsed["search"]["firecrawl"] == {
+        "base_url": "https://api.firecrawl.dev",
+        "api_key": api_key,
+    }
+
+
 def test_up_keeps_existing_config_untouched_on_dry_run(
     fake_repo: Path,
 ) -> None:

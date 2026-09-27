@@ -1270,15 +1270,15 @@ use_proxy = false
 # en: Search tool priority for web_agent. Disabled tools are hidden; enabled tools are preferred in this order by prompt guidance, not hard routing.
 priority = ["grok_search", "firecrawl_search", "web_search"]
 # zh: SearxNG 搜索服务地址，例如 http://127.0.0.1:8849。
-# zh: 该服务需自行部署（官方说明：https://docs.searxng.org/），本项目不提供；留空时内置 web_search 工具不可用，grok_search / firecrawl_search / crawl_webpage 不受影响。
+# zh: 可用 uv run deploy up --with searxng 一键部署，或连接已有实例（官方说明：https://docs.searxng.org/）；留空时内置 web_search 工具不可用，grok_search / firecrawl_search / crawl_webpage 不受影响。
 # en: SearxNG service URL, e.g. http://127.0.0.1:8849.
-# en: This service must be self-deployed (official guide: https://docs.searxng.org/); when empty the built-in web_search tool is unavailable while grok_search / firecrawl_search / crawl_webpage keep working.
+# en: Deploy with uv run deploy up --with searxng or connect to an existing instance (official guide: https://docs.searxng.org/); when empty the built-in web_search tool is unavailable while grok_search / firecrawl_search / crawl_webpage keep working.
 searxng_url = ""
 # zh: 是否在 web_agent 中启用 grok_search。关闭时该工具会从 web_agent 工具列表中隐藏。
 # en: Enable grok_search in web_agent. When disabled, this tool is hidden from the web_agent tool list.
 grok_search_enabled = false
-# zh: 是否在 web_agent 中启用 firecrawl_search。默认关闭；关闭时该工具会隐藏。
-# en: Enable firecrawl_search in web_agent. Disabled by default; when disabled, this tool is hidden.
+# zh: 是否在 web_agent 中启用 firecrawl_search。默认关闭；关闭时该工具会隐藏。无需自部署 Firecrawl，启用后可使用官方 keyless。
+# en: Enable firecrawl_search in web_agent. Disabled by default; when disabled, this tool is hidden. Self-hosting is optional; enable this to use official keyless search.
 firecrawl_search_enabled = false
 
 # zh: Firecrawl 搜索服务配置。
@@ -1287,8 +1287,8 @@ firecrawl_search_enabled = false
 # zh: Firecrawl API Key。为空时使用 Firecrawl keyless 搜索；填写后会发送 Authorization: Bearer；自部署实例通常也可留空。
 # en: Firecrawl API key. Leave empty for Firecrawl keyless search; when set, Authorization: Bearer is sent; self-hosted instances can usually leave it empty too.
 api_key = ""
-# zh: Firecrawl API 基础地址。可用官方地址配自己的 Key，也可改为自部署实例地址（自托管说明：https://docs.firecrawl.dev/contributing/self-host）。
-# en: Firecrawl API base URL. Use the official endpoint with your own key, or point it at a self-hosted instance (self-host guide: https://docs.firecrawl.dev/contributing/self-host).
+# zh: Firecrawl API 基础地址。官方地址支持 keyless（API Key 留空，受官方配额与限流限制）或自己的 Key，也可改为自部署实例地址（自托管说明：https://docs.firecrawl.dev/contributing/self-host）。
+# en: Firecrawl API base URL. Use the official endpoint with keyless access (empty API key, subject to official quotas and rate limits) or your own key, or point it at a self-hosted instance (self-host guide: https://docs.firecrawl.dev/contributing/self-host).
 base_url = "https://api.firecrawl.dev"
 
 # zh: 代理设置（可选）。

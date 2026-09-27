@@ -131,7 +131,7 @@ def _add_common_options(parser: argparse.ArgumentParser) -> None:
             action="append_const",
             const=service.key,
             default=None,
-            help=f"等价于 --with {service.key}（{service.label}）",
+            help=f"等价于 --with {service.key}（{service.label}）；{service.about}",
         )
 
     naga = parser.add_mutually_exclusive_group()

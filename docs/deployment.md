@@ -79,25 +79,25 @@ uv run playwright install
 
 ### 4. 需要一并部署的自托管服务（概览）
 
-除 Python 运行环境外，下列服务由部署方自行搭建；后面的 pip/uv tool 部署方式同样适用。本节只说明**必要性与配置位置**，不重复各上游仓库的安装步骤——请按官方部署说明完成部署后，再在 `config.toml` 中填写地址与凭据。
+下列服务为 QQ 消息、搜索和音乐功能提供支持，后面的 pip/uv tool 部署方式同样适用。OneBot 协议端是使用 QQ 机器人的必需组件，其他服务按需选择；已有实例时可直接填写地址与凭据，Firecrawl 也可使用官方 keyless，无需自行部署。各服务的用途和选择建议见 [Docker 一键部署指南](docker-deploy.md#4-按需添加功能)，手工搭建请参考下表的官方说明。
 
 | 服务 | 必要性 | 配置位置 | 官方部署说明 |
 |---|---|---|---|
 | **OneBot V11 协议端**（NapCat / Lagrange.Core） | **必需**：Undefined 自身不实现 QQ 协议，QQ 消息的收发完全由协议端决定 | `[onebot]`，见[配置说明](configuration.md#43-onebot-协议端连接) | [NapCatQQ](https://github.com/NapNeko/NapCatQQ)、[Lagrange.Core](https://github.com/LagrangeDev/Lagrange.Core)、[OneBot V11 标准](https://github.com/botuniverse/onebot-11) |
 | **SearXNG 搜索服务** | 可选：只影响 `web_agent` 的内置 `web_search` 工具 | `[search].searxng_url`，见[配置说明](configuration.md#412-search-搜索) | [SearXNG（自托管）](https://docs.searxng.org/) |
-| **Firecrawl 搜索服务** | 可选，且默认关闭（`firecrawl_search_enabled = false`）：可用官方 keyless，或官方 + 自己的 API Key，或指向自部署实例 | `[search.firecrawl]`，见[配置说明](configuration.md#412-search-搜索) | [Firecrawl 自托管说明](https://docs.firecrawl.dev/contributing/self-host) |
+| **Firecrawl 搜索服务** | 自托管可选；`firecrawl_search` 工具可使用官方 keyless、官方 API Key 或自部署实例，需开启 `firecrawl_search_enabled`（默认 `false`） | `[search].firecrawl_search_enabled`、`[search.firecrawl]`，见[配置说明](configuration.md#412-search-搜索) | [Firecrawl 自托管说明](https://docs.firecrawl.dev/contributing/self-host) |
 | **lxmusic2api 音乐服务** | 可选：为 `music.*` 工具集提供数据与音频解析能力，不随本项目发布 | `[lxmusic2api]`，见[配置说明](configuration.md#4201-lxmusic2api-音乐服务) | [lxmusic2api](https://github.com/69gg/lxmusic2api) |
 
 各项不部署时的具体影响：
 
 - **不部署 OneBot 协议端**：Bot 无法登录，收发不了任何 QQ 消息；严格模式缺少 `onebot.ws_url` 会直接报错退出。
-- **不部署 SearXNG**：`web_search` 调用时提示未启用；`grok_search`、`firecrawl_search`、`crawl_webpage` 不受影响，联网检索能力不中断。
-- **不启用 Firecrawl**：仅 `firecrawl_search` 工具不可用。
+- **不部署 SearXNG 且未配置可用实例**：`web_search` 不可用；`grok_search`、`firecrawl_search`、`crawl_webpage` 按各自配置使用，不受该部署选项影响。
+- **不自部署 Firecrawl**：仍可使用 `firecrawl_search`。将 `[search].firecrawl_search_enabled` 设为 `true`，保留 `base_url = "https://api.firecrawl.dev"`、`api_key = ""`，即可使用官方 keyless；也可填写自己的 API Key。只有关闭工具开关时，`firecrawl_search` 才会隐藏。完整示例和配额说明见 [Firecrawl 使用方式](docker-deploy.md#firecrawl官方-keyless-或自托管搜索)。
 - **不部署 lxmusic2api**（或 `[lxmusic2api].api_key` 留空）：全部 `music.*` 工具从模型工具列表隐藏，其余功能不受影响。
 
 补充说明：
 
-- 上表只列“需要自己起一个服务”的项。模型端点（`[models.*]`）不在此列：它既可以是自部署的 OpenAI 兼容服务，也可以是远端 API，按需选择即可。
+- 上表只列 QQ、搜索和音乐相关的配套服务。模型端点（`[models.*]`）不在此列：它既可以是自部署的 OpenAI 兼容服务，也可以是远端 API，按需选择即可。
 - **想省掉手工搭建**：上述服务（NapCat 必需，SearXNG / Firecrawl / lxmusic2api 按需）都可用 `uv run deploy up` 一键部署，见 [Docker 一键部署指南](docker-deploy.md)。
 - OneBot 协议端除自身部署外，还要按文件发送模式确认文件系统可见性，见下文 [NapCat / Lagrange.Core 部署要求](#napcat--lagrangecore-部署要求)。
 - 若使用 `config/mcp.json` 中基于 `npx` 的 MCP 服务器，宿主机还需具备 Node.js 运行时。
