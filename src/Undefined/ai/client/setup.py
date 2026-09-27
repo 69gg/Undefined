@@ -202,6 +202,9 @@ class ClientSetupMixin:
         self._meme_service: Any = None
         if self.runtime_config is not None:
             self.attachment_registry = AttachmentRegistry(
+                remote_download_allow_private_origins=(
+                    self.runtime_config.attachment_remote_download_allow_private_origins
+                ),
                 remote_download_max_bytes=_attachment_remote_download_max_bytes(
                     self.runtime_config
                 ),
@@ -625,6 +628,9 @@ class ClientSetupMixin:
 
     def apply_attachment_config(self, runtime_config: Config) -> None:
         self.attachment_registry.set_limits(
+            remote_download_allow_private_origins=(
+                runtime_config.attachment_remote_download_allow_private_origins
+            ),
             remote_download_max_bytes=_attachment_remote_download_max_bytes(
                 runtime_config
             ),

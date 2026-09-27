@@ -16,7 +16,7 @@ src/Undefined/
 │   ├── llm/       # ModelRequester、streaming、thinking、sanitize
 │   ├── prompts/   # PromptBuilder、system_context、文件插槽与 cognitive 片段
 │   └── multimodal/# 多模态检测、解析与分析
-├── attachments/   # 附件注册、渲染、作用域隔离
+├── attachments/   # 附件注册、渲染、作用域隔离；remote.py 校验出站目标并固定下载 IP
 ├── arxiv/         # arXiv 论文解析、元信息获取、PDF 下载与发送
 ├── bilibili/      # B站视频流解析、分段下载、异步发送；图文（opus）解析与合并转发
 ├── cognitive/     # 认知记忆系统（service/ 门面 + historian/ 史官后台）

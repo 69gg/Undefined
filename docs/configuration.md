@@ -693,6 +693,7 @@ document_instruction = "passage: "
 | 字段 | 默认值 | 说明 |
 |---|---:|---|
 | `remote_download_max_size_mb` | `25` | 远程附件自动下载并缓存的最大大小（MB）。超过上限时只登记 URL 引用；设为 `0` 可完全禁用远程附件下载 |
+| `remote_download_allow_private_origins` | `[]` | 允许访问非公网地址的受信任媒体服务 origin，例如 `["http://media.internal:8080"]`。精确匹配协议、主机与端口，不支持路径、凭据或通配符；支持热重载 |
 | `use_proxy` | `false` | 远程附件下载是否使用 `[proxy]` 中的代理地址 |
 | `cache_max_total_size_mb` | `0` | 附件缓存文件总大小上限（MB）。`0` 表示不按总容量清理；达到上限时优先删除最旧本地缓存副本，有 URL 的记录会保留 UID 与 URL 以便后续回源 |
 | `cache_max_records` | `2000` | 附件登记记录最大数量。`0` 表示不限制数量 |
@@ -701,6 +702,10 @@ document_instruction = "passage: "
 | `url_max_length` | `8192` | 允许登记的远程附件 URL 最大长度。`0` 表示不限制长度 |
 
 外部接收的远程图片或文件默认会先下载到附件缓存再生成 UID，避免后续 URL 失效；大文件超过阈值时，UID 仍会生成，但绑定的是 URL 引用而不是缓存文件，AI 可在上下文中看到原始 `source_ref`。如果本地缓存因总容量或时间清理被删除，但记录仍保留 URL，后续需要文件内容时会优先按 URL 回源下载。
+
+远程附件下载默认只允许公网 HTTP(S) 目标，拒绝 URL 内的凭据、回环、私网、链路本地、组播等非公网目标。域名的全部解析结果都必须符合策略；实际请求固定到已校验的 IP，并保留原始 Host、TLS SNI 和证书校验，避免校验后再次解析造成 DNS 重绑定绕过。每次重定向和后续回源都重新校验目标；DNS、连接、跳转与下载共用 120 秒总时限，最多跟随 20 次跳转。策略拒绝或网络错误不会降级登记成新的 URL 引用。
+
+需要从 NapCat 等内网媒体服务下载时，只将确认可信的精确 origin 加入 `remote_download_allow_private_origins`；该配置允许从对应服务的任意路径下载，不会放行其他端口、协议或跳转目标。修改配置只影响后续下载，不删除现有缓存。仅登记 URL 引用时不会发起 DNS 或 HTTP 请求；真正回源时仍须通过当时的目标策略。`use_proxy` 保持生效，代理会收到已校验的目标 IP，代理地址本身由部署者信任；代理模式也需要 Bot 本机能够解析目标域名。
 
 合并转发会复用同一注册表登记为 `forward_...` UID，并在实时 AI 输入中显示为 `<forward uid="..."/>`。收到合并转发时会在预处理阶段递归保存当前可访问的转发树到 `data/cache/forward_snapshots/`，后续 `messages.get_forward_msg` 读取时优先使用本地快照；缺失时才回源 OneBot 并补写快照。历史记录仍保留递归展开后的文本，但同一轮 prompt 会按 `message_id` 剔除当前消息的历史副本，因此实时上下文只保留 UID；需要查看第一层或内层内容时，AI 会调用工具按层读取，内层合并转发会继续分配新的 `forward_...` UID。如果协议端无法二次读取内层转发，会返回明确诊断和可见原始字段。
 
@@ -1496,6 +1501,7 @@ api_key = "replace-with-your-key"
 | TOML 路径 | 环境变量 |
 |-----------|----------|
 | `attachments.use_proxy` | `ATTACHMENTS_USE_PROXY` |
+| `attachments.remote_download_allow_private_origins` | `ATTACHMENTS_REMOTE_DOWNLOAD_ALLOW_PRIVATE_ORIGINS` |
 
 #### `arxiv`
 

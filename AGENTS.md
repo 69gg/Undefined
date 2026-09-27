@@ -46,6 +46,7 @@ NapCat's packet mode builds the forward card (`com.tencent.multimsg`) preview fr
 ### Unified attachment tag
 Use `<attachment uid="..."/>` for both images and files. The legacy `<pic uid="..."/>` tag is still supported for backward compatibility but `attachment` is the recommended unified syntax. The system distinguishes image vs file based on the UID prefix (`pic_`/`file_`).
 Remote attachments are cached only up to `[attachments].remote_download_max_size_mb`; larger items, or all remote items when the value is `0`, are registered as URL references with `source_ref` instead of downloaded file content.
+Remote attachment downloads, redirects, and later refetches must pass the destination policy in `attachments/remote.py`: default to public addresses, pin the validated IP while preserving Host/TLS verification, and only allow private destinations for exact origins explicitly configured in `[attachments].remote_download_allow_private_origins`. URL-only registration performs no DNS or HTTP request; refetch must revalidate under the current policy. Policy failures must not become new URL references.
 OneBot image segments carry both NapCat's `file` id and a downloadable `url`. The `file` id is resolved through `get_image` first; when that fails or returns something that is neither an HTTP URL nor a local path, the segment's own `url` is used instead — otherwise a failed `get_image` (NapCat rich-media download timeout) silently drops the image.
 
 ### Auto processing pipelines

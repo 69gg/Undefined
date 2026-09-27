@@ -11,6 +11,7 @@ import httpx
 import pytest
 
 from Undefined.attachments import forward_snapshot
+from Undefined.attachments import remote as attachment_remote
 from Undefined.attachments import segments as attachment_segments
 from Undefined.attachments import (
     AttachmentRecord,
@@ -33,6 +34,14 @@ _PNG_BYTES = (
     b"\x0b\xe7\x02\x9d"
     b"\x00\x00\x00\x00IEND\xaeB`\x82"
 )
+
+
+@pytest.fixture(autouse=True)
+def _mock_remote_dns(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def resolve(host: str, port: int) -> tuple[str, ...]:
+        return ("93.184.216.34",)
+
+    monkeypatch.setattr(attachment_remote, "resolve_host_addresses", resolve)
 
 
 @pytest.mark.asyncio

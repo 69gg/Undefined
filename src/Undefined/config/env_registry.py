@@ -62,6 +62,10 @@ ENV_REGISTRY: Final[dict[tuple[str, ...], str]] = {
     ("core", "superadmin_qq"): "SUPERADMIN_QQ",
     ("features", "pool_enabled"): "MODEL_POOL_ENABLED",
     ("attachments", "use_proxy"): "ATTACHMENTS_USE_PROXY",
+    (
+        "attachments",
+        "remote_download_allow_private_origins",
+    ): "ATTACHMENTS_REMOTE_DOWNLOAD_ALLOW_PRIVATE_ORIGINS",
     ("arxiv", "use_proxy"): "ARXIV_USE_PROXY",
     ("bilibili", "use_proxy"): "BILIBILI_USE_PROXY",
     ("github", "use_proxy"): "GITHUB_USE_PROXY",

@@ -31,6 +31,7 @@ def _make_runtime_config(**kwargs: Any) -> Any:
 
     defaults: dict[str, Any] = {
         "attachment_remote_download_max_size_mb": 50,
+        "attachment_remote_download_allow_private_origins": [],
         "attachment_cache_max_total_size_mb": 200,
         "attachment_cache_max_age_days": 7,
         "attachment_cache_max_records": 1000,

@@ -27,6 +27,7 @@ def test_api_config_defaults_when_missing(tmp_path: Path) -> None:
     assert cfg.api.tool_invoke_timeout == 120
     assert cfg.api.tool_invoke_callback_timeout == 10
     assert cfg.attachment_remote_download_max_size_mb == 25
+    assert cfg.attachment_remote_download_allow_private_origins == []
     assert cfg.attachment_cache_max_total_size_mb == 0
     assert cfg.attachment_cache_max_records == 2000
     assert cfg.attachment_cache_max_age_days == 7
@@ -40,6 +41,7 @@ def test_attachment_limits_config(tmp_path: Path) -> None:
         """
 [attachments]
 remote_download_max_size_mb = 8
+remote_download_allow_private_origins = ["http://media.internal:8080"]
 cache_max_total_size_mb = 512
 cache_max_records = 300
 cache_max_age_days = 14
@@ -49,6 +51,9 @@ url_max_length = 4096
     )
 
     assert cfg.attachment_remote_download_max_size_mb == 8
+    assert cfg.attachment_remote_download_allow_private_origins == [
+        "http://media.internal:8080"
+    ]
     assert cfg.attachment_cache_max_total_size_mb == 512
     assert cfg.attachment_cache_max_records == 300
     assert cfg.attachment_cache_max_age_days == 14
@@ -76,6 +81,19 @@ url_max_length = -4096
     assert cfg.attachment_cache_max_age_days == 0
     assert cfg.attachment_url_reference_max_records == 0
     assert cfg.attachment_url_max_length == 0
+
+
+def test_attachment_private_origins_env_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(
+        "ATTACHMENTS_REMOTE_DOWNLOAD_ALLOW_PRIVATE_ORIGINS",
+        "http://media.internal:9090",
+    )
+    cfg = _load_config(tmp_path / "config.toml", "")
+    assert cfg.attachment_remote_download_allow_private_origins == [
+        "http://media.internal:9090"
+    ]
 
 
 def test_bilibili_danmaku_config_defaults_and_fallback(tmp_path: Path) -> None:

@@ -121,6 +121,7 @@ _SECURITY_KEYS: set[str] = {
 }
 
 _ATTACHMENT_KEYS: set[str] = {
+    "attachment_remote_download_allow_private_origins",
     "attachment_remote_download_max_size_mb",
     "attachment_cache_max_total_size_mb",
     "attachment_cache_max_records",
