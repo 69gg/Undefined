@@ -16,6 +16,12 @@ _DOUYIN_URL_PATTERN = re.compile(
     r"(?:https?://)?(?:(?:www|v|www\.ies|m)\.)?(?:douyin|iesdouyin)\.com/[^\s<>\"]+",
     re.IGNORECASE,
 )
+# 任意链接（不限抖音），仅用于排除链接里的数字：``bilibili.com/opus/<19 位>``
+# 这类 ID 会被 ``_AWEME_ID_PATTERN`` 误认成裸 aweme_id。
+_ANY_URL_PATTERN = re.compile(
+    r"(?:https?://)?(?:[\w-]+\.)+[a-z]{2,}(?:/[^\s<>\"]*)?",
+    re.IGNORECASE,
+)
 _AWEME_ID_PATTERN = re.compile(r"(?<!\d)(\d{16,25})(?!\d)")
 
 
@@ -49,20 +55,21 @@ def _is_douyin_url(url: str) -> bool:
 def extract_douyin_ids(text: str) -> list[str]:
     """Extract Douyin URLs and naked aweme IDs from text, preserving order."""
 
+    raw = str(text or "")
     items: list[str] = []
     seen: set[str] = set()
-    url_spans: list[tuple[int, int]] = []
+    # 链接里的数字一律不算裸 aweme_id（含非抖音链接）
+    url_spans = [match.span() for match in _ANY_URL_PATTERN.finditer(raw)]
 
-    for match in _DOUYIN_URL_PATTERN.finditer(str(text or "")):
+    for match in _DOUYIN_URL_PATTERN.finditer(raw):
         url = _normalize_url(match.group(0))
         if not url or not _is_douyin_url(url):
             continue
-        url_spans.append(match.span())
         if url not in seen:
             seen.add(url)
             items.append(url)
 
-    for match in _AWEME_ID_PATTERN.finditer(str(text or "")):
+    for match in _AWEME_ID_PATTERN.finditer(raw):
         start = match.start()
         if any(span_start <= start < span_end for span_start, span_end in url_spans):
             continue

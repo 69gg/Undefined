@@ -26,7 +26,7 @@ Bilibili 自动提取管线命中 B 站链接、BV 号或 AV 号后，会发送�
 
 ## 内置 Douyin 管线
 
-Douyin 自动提取管线命中 `v.douyin.com/...`、`douyin.com/video/<id>` 或裸 aweme_id 后，会发送一次两节点合并转发：视频信息、视频文件或视频状态。
+Douyin 自动提取管线命中 `v.douyin.com/...`、`douyin.com/video/<id>` 或裸 aweme_id 后，会发送一次两节点合并转发：视频信息、视频文件或视频状态。裸数字只匹配不落在任何链接内的 16–25 位数字：链接里的 ID（如 `bilibili.com/opus/933099353259638816`）不会被当成 aweme_id，否则同一张图文链接会同时触发图文与抖音两条管线。
 
 下载链路读取抖音 SSR share 页中的 `window._ROUTER_DATA`，从 `video.play_addr` 提取 token，再按 `[douyin].prefer_ratios` 探测 `aweme/v1/play/`。探测使用 2 字节 Range GET，并优先按 `Content-Range` 中的总长度对重复文件去重，缺失时回退 `Content-Length`。
 
