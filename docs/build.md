@@ -318,8 +318,32 @@ npm install
 2. `verify-native-app`：分别对 Console 和 Chat 执行 `npm run check`。
 3. `build-tauri-desktop`：分别构建 Console / Chat 的 Linux `.AppImage` / `.deb`、Windows `.exe` / `.msi`、macOS x64 `.dmg` 和 macOS arm64 `.dmg`。
 4. `build-tauri-android`：分别构建 Console / Chat 的 Android `.apk`。
-5. `publish-release`：汇总所有产物并上传 GitHub Release；Release notes 从 `CHANGELOG.md` 最新版本条目生成，不读取 tag 注释。
-6. `publish-pypi`：发布 Python 包到 PyPI。
+5. `build-docker` / `merge-docker`：构建并发布 Docker 多架构镜像，详见下节。
+6. `publish-release`：汇总所有产物并上传 GitHub Release；Release notes 从 `CHANGELOG.md` 最新版本条目生成，不读取 tag 注释。
+7. `publish-pypi`：发布 Python 包到 PyPI。
+
+### Docker 镜像构建与维护
+
+本节面向镜像维护者。部署和使用步骤见 [Docker 一键部署指南](docker-deploy.md)。
+
+| 镜像 | 内容与版本 |
+|---|---|
+| `ghcr.io/<owner>/undefined-bot:v<版本>` | Undefined 本体，包含 Python 3.12、项目依赖、FFmpeg、Docker CLI 和 Playwright Chromium；版本与项目版本一致 |
+| `ghcr.io/<owner>/undefined-lxmusic2api:<短sha>` | 从 lxmusic2api 上游固定 commit 构建，使用该 commit 的短 SHA 作为 tag |
+
+`.github/workflows/release.yml` 在推送 `v*` tag 时构建这两个镜像。`build-docker` 在原生 amd64 / arm64 runner 上分别构建并推送 digest，`merge-docker` 再合并为支持 `linux/amd64` 与 `linux/arm64` 的 manifest。镜像发布使用内置 `GITHUB_TOKEN`，`packages: write` 权限仅授予这两个 job，无需额外配置推送 secret。
+
+该工作流没有 `workflow_dispatch`，旧 tag 不会自动补建镜像。需要本地构建时，在仓库根目录执行以下命令，并将 `<owner>` 与 `<版本>` 替换成部署时使用的镜像 owner 和当前项目版本：
+
+```bash
+docker build -f src/Undefined/deploy/templates/Dockerfile.bot -t 'ghcr.io/<owner>/undefined-bot:v<版本>' .
+```
+
+镜像定义集中在 `src/Undefined/deploy/images.py`：
+
+- 升级 lxmusic2api 时，更新 `LXMUSIC2API_UPSTREAM_SHA` 为完整的 40 位 commit SHA，再发布新版本；CI 会构建对应镜像，部署脚本只在选中该服务时解析它。
+- 升级 NapCat、SearXNG、Firecrawl 及依赖时，更新对应镜像引用并同步 `PIN_VERIFIED_ON`。其中 `playwright-service` 与 `nuq-postgres` 当前使用 `latest`。
+- 修改后运行 `uv run pytest tests/test_deploy_catalog.py tests/test_deploy_generate.py tests/test_deploy_packaging.py`，核对镜像引用、生成配置与打包资源。
 
 ### CI 工作流（ci.yml）
 

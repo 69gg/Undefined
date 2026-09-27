@@ -1,8 +1,10 @@
 # 安装与部署指南
 
-提供源码部署与 pip/uv tool 安装两种方式：**源码部署是推荐的首选方式**，功能完整且经过充分测试；pip/uv tool 安装适合快速体验，但部分功能支持尚不完善。
+> 🐳 **在 Linux 上快速部署？直接前往 [Docker 一键部署指南](docker-deploy.md)**：自动部署 Undefined + NapCat，并按需添加搜索、音乐服务。指南包含环境准备、模型配置、QQ 登录和日常管理步骤。
 
-> **Release 下载提示**：如果目的是部署 QQ Bot，不需要在 GitHub Release 的 Assets 中挑客户端安装包；按本文源码部署或 pip/uv tool 安装即可。Release 中的 `Undefined-Console-*` 和 `Undefined-Chat-*` 是可选客户端，选择说明见 [README — Release 下载速查](../README.md#release-下载速查)。
+本项目支持 **Docker 一键部署、源码部署和 pip / uv tool 安装**。希望自动搭好 QQ 协议端及可选服务时，使用上面的 Docker 指南；希望自行管理运行环境或修改源码时，按本文的[源码部署](#源码部署推荐)操作。pip / uv tool 安装适合快速体验，但部分功能支持尚不完善。
+
+> **Release 下载提示**：如果目的是部署 QQ Bot，不需要在 GitHub Release 的 Assets 中挑客户端安装包；选择上述任一种部署方式即可。Release 中的 `Undefined-Console-*` 和 `Undefined-Chat-*` 是可选客户端，选择说明见 [README — Release 下载速查](../README.md#release-下载速查)。
 >
 > **作为 Python 库嵌入**：若你不需要启动 QQ Bot CLI，而是要在自己的应用或测试中复用 Undefined 组件（配置、`AIClient`、Skills、认知记忆等），请参阅 [Python 库 API 参考](python-api.md) 与 [配置详解 — 库嵌入配置](configuration.md#2-库嵌入配置)。CLI 入口（`Undefined` / `Undefined-webui`）行为不受库嵌入 API 影响。
 >
@@ -94,7 +96,7 @@ uv run playwright install
 补充说明：
 
 - 上表只列“需要自己起一个服务”的项。模型端点（`[models.*]`）不在此列：它既可以是自部署的 OpenAI 兼容服务，也可以是远端 API，按需选择即可。
-- **想省掉手工搭建**：上述服务（NapCat 必需，SearXNG / Firecrawl / lxmusic2api 按需）都可用 `uv run deploy up` 一键容器化部署，镜像与 pin 版本由本项目管理，见[容器化一键部署](docker-deploy.md)。
+- **想省掉手工搭建**：上述服务（NapCat 必需，SearXNG / Firecrawl / lxmusic2api 按需）都可用 `uv run deploy up` 一键部署，见 [Docker 一键部署指南](docker-deploy.md)。
 - OneBot 协议端除自身部署外，还要按文件发送模式确认文件系统可见性，见下文 [NapCat / Lagrange.Core 部署要求](#napcat--lagrangecore-部署要求)。
 - 若使用 `config/mcp.json` 中基于 `npx` 的 MCP 服务器，宿主机还需具备 Node.js 运行时。
 - Code Delivery Agent 需要宿主机提供 Docker，发送原生语音与 B 站视频合并需要 FFmpeg，详见上文[其它宿主环境依赖](#其它宿主环境依赖)。
@@ -279,17 +281,15 @@ python -c "from Undefined.utils.resources import read_text_resource; print(len(r
 
 ## 容器化一键部署（`uv run deploy`）
 
-除上面的手工部署外，仓库还提供一条命令完成「本体 + NapCat + 按需自托管服务」的容器化部署：
+在 Linux 上安装 Docker Engine、`docker compose` 插件、Git 和 uv 后，可直接部署 Undefined + NapCat：
 
 ```bash
-git clone --recursive https://github.com/69gg/Undefined.git
+git clone https://github.com/69gg/Undefined.git
 cd Undefined
-uv run deploy up          # 交互式向导；默认只部署本体 + NapCat
+uv run deploy up
 ```
 
-脚本会：生成 `deploy/` 下的 compose 与各服务配置 → 按最小差异修改 `config.toml`（改前备份）→ 校验并启动容器 → 输出各服务入口与凭据（含带 token 的 NapCat WebUI 链接）。
-
-需要 Linux + Docker Engine（含 `docker compose` v2 插件）+ `git`。完整说明（两种部署模式、可选服务、端口与凭据、Docker 访问方式、升级与排查）见 **[容器化一键部署](docker-deploy.md)**。
+部署结束后，按终端显示的地址和密码进入 WebUI，填写模型 API 与 QQ 身份配置，再到 NapCat 扫码登录。**环境准备、首次配置、远程访问和常见问题请直接看 [Docker 一键部署指南](docker-deploy.md)**。
 
 ---
 

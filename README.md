@@ -26,22 +26,26 @@
   </tr>
 </table>
 
+> 🐳 **想快速部署 QQ Bot？直接看 [Docker 一键部署指南（Linux）](docs/docker-deploy.md)**：一条命令部署 Undefined + NapCat，按需添加搜索、音乐服务，再按指南完成模型配置和 QQ 登录。
+>
+> 手工安装或使用其他系统，请看 [安装与部署指南](docs/deployment.md)。
+
 ### _与 [NagaAgent](https://github.com/Xxiii8322766509/NagaAgent) 进行联动！_
 
 ---
 
 ## Release 下载速查
 
-**部署 QQ Bot 本身不需要下载 Release**：Release 里都是可选组件。源码部署见下方[快速开始](#-快速开始-源码模式)，安装包用途与平台对应如下：
+**部署 QQ Bot 本身不需要下载 Release**：可以使用 [Docker 一键部署](docs/docker-deploy.md)，也可以按下方[源码快速开始](#-快速开始-源码模式)安装。Release 安装包的用途与平台对应如下：
 
 | 目标 | 文件 | 平台 |
 | --- | --- | --- |
-| 部署 / 运行 Bot | 不需要下载 Release；源码部署并启动 `uv run Undefined-webui` | 任意 |
+| 部署 / 运行 Bot | 不需要下载 Release；使用 Docker 一键部署，或源码部署并启动 `uv run Undefined-webui` | Docker 一键部署支持 Linux；源码部署支持 Windows / macOS / Linux |
 | 离线安装 / 镜像缓存 | `undefined_bot-*.whl` 或 `undefined_bot-*.tar.gz` | 任意 |
 | 远程管理已有实例 | `Undefined-Console-*`（连接 Management API 打开远程 WebUI） | Windows x64 `*-windows-x64-setup.exe`（批量部署可选 `.msi`）／macOS `*-macos-arm64.dmg`、`*-macos-x64.dmg`／Debian、Ubuntu `*.deb`／其他 Linux `*.AppImage` |
 | 原生聊天客户端 | `Undefined-Chat-*`（连接 Runtime API 聊天） | 同上；Android 为 `*-android-arm64-v8a-release.apk`（旧 32 位设备用 `armeabi-v7a`，模拟器按需 `x86_64` / `x86`） |
 
-Console 和 Chat 都需要连接已运行的 Undefined 服务：首次部署请先启动 `Undefined-webui`，完成配置和 Bot 启动后再连接。
+Console 和 Chat 都需要连接已运行的 Undefined 服务：首次部署请先按对应指南完成配置和 Bot 启动，再连接客户端。
 
 ## ⚡ 核心特性
 
@@ -97,8 +101,8 @@ Console 和 Chat 都需要连接已运行的 Undefined 服务：首次部署请�
 
 Undefined 的功能极为丰富，为了让本页面不过于臃肿，我们将各个模块的深入解析与高阶玩法整理成了专题游览图。这里是开启探索的钥匙：
 
-- ⚙️ **[安装与部署指南](docs/deployment.md)**：不管你是需要 `pip` 无脑一键安装，还是源码二次开发，这里的排坑指南应有尽有。
-- 🐳 **[容器化一键部署](docs/docker-deploy.md)**：`uv run deploy` 一条命令拉起本体 + NapCat 与按需自托管服务（SearXNG / Firecrawl / lxmusic2api），含端口、凭据、模式选择与排查。
+- 🐳 **[Docker 一键部署指南（Linux）](docs/docker-deploy.md)**：部署 Undefined + NapCat，完成模型配置和 QQ 登录，并按需添加搜索、音乐服务。
+- ⚙️ **[安装与部署指南](docs/deployment.md)**：选择部署方式，或按步骤完成源码、pip / uv tool 安装。
 - 📦 **[Python 库 API 参考](docs/python-api.md)**：根包 lazy re-export、`Config.from_mapping` / `set_config`、公共 API 符号表与嵌入示例。
 - 🖥️ **[WebUI 使用指南](docs/webui-guide.md)**：管理控制台功能一览——配置编辑、日志查看、认知记忆管理、表情包库、AI 对话与系统监控。
 - 🧭 **[Management API 与远程管理](docs/management-api.md)**：WebUI / App 共用的管理接口、认证、配置/日志/Bot 控制与引导探针说明。
@@ -127,7 +131,7 @@ Undefined 的功能极为丰富，为了让本页面不过于臃肿，我们将�
 
 ## ⚡ 快速开始 (源码模式)
 
-> 👶 **新手必看**：如果您是首次部署此类项目或不熟悉 Git/环境配置，**强烈建议直接前往 [《详细安装与部署指南》](docs/deployment.md)** 阅读手把手教程，避免遇到常见报错。
+> 👶 **首次部署**：在 Linux 上可以先看 [Docker 一键部署指南](docs/docker-deploy.md)；需要手工安装时，请按 [详细安装与部署指南](docs/deployment.md)操作。
 
 以下步骤适合有一定开发经验、想快速跑起项目源码的用户。我们推荐使用现代 Python 构建工具 `uv`。
 
@@ -153,25 +157,19 @@ uv run Undefined-webui
 
 ---
 
-## 🐳 快速开始 (容器模式，Linux)
+## 🐳 Docker 一键部署（Linux）
 
-不想手工装 Python 依赖、也不想自己起 NapCat / SearXNG 等服务？一条命令搞定（需要 Docker Engine，含 `docker compose` v2 插件）：
+已安装 Docker Engine、`docker compose` 插件、Git 和 uv 后，在 Linux 上执行以下命令；未安装时先看 [开始前的准备](docs/docker-deploy.md#1-开始前的准备)。默认部署 Undefined + NapCat，其他服务按需选择：
 
 ```bash
-git clone --recursive https://github.com/69gg/Undefined.git
+git clone https://github.com/69gg/Undefined.git
 cd Undefined
-
-# 交互式向导：选“本体是否进容器”，以及要额外部署哪些自托管服务（默认全不选）
 uv run deploy up
-
-# 非交互式：只跑本体 + NapCat
-uv run deploy up --yes
 ```
 
-脚本会自动生成 compose 与各服务配置、按最小差异改好 `config.toml`（改前备份）、启动容器，最后把 **Undefined WebUI 密码、带 token 的 NapCat WebUI 链接、各服务入口**一次性打印出来。
+部署结束后，终端会显示 **Undefined WebUI 地址和密码、NapCat 登录链接**。打开 WebUI 填写模型 API、机器人 QQ 号和管理员 QQ 号，再到 NapCat 扫码登录。完整步骤见 [部署后的首次配置](docs/docker-deploy.md#3-完成配置并登录-qq)。
 
-后续：`uv run deploy status` 看状态与凭据、`uv run deploy logs` 看日志、`uv run deploy down` 停止（数据保留）。完整说明见 [容器化一键部署](docs/docker-deploy.md)。
-
+后续可用 `uv run deploy status` 查看入口与状态、`uv run deploy logs` 查看日志、`uv run deploy down` 停止服务并保留数据。
 
 ---
 
