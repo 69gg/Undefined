@@ -19,7 +19,7 @@ _DOUYIN_URL_PATTERN = re.compile(
 # 任意链接（不限抖音），仅用于排除链接里的数字：``bilibili.com/opus/<19 位>``
 # 这类 ID 会被 ``_AWEME_ID_PATTERN`` 误认成裸 aweme_id。
 _ANY_URL_PATTERN = re.compile(
-    r"(?:https?://)?(?:[\w-]+\.)+[a-z]{2,}(?:/[^\s<>\"]*)?",
+    r"(?:https?://)?(?:[\w-]+\.)+[a-z]{2,}(?::\d+)?(?:[/?#][^\s<>\"]*)?",
     re.IGNORECASE,
 )
 _AWEME_ID_PATTERN = re.compile(r"(?<!\d)(\d{16,25})(?!\d)")

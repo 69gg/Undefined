@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from Undefined.douyin.parser import (
     canonical_share_url,
     extract_douyin_ids,
@@ -85,4 +87,22 @@ def test_extract_douyin_ids_keeps_urls_and_naked_ids_together() -> None:
     assert extract_douyin_ids(text) == [
         "https://v.douyin.com/abc123/",
         "7312345678901234567",
+    ]
+
+
+@pytest.mark.parametrize("scheme", ["https://", ""])
+@pytest.mark.parametrize(
+    "url",
+    [
+        "example.com:8080/video/7312345678901234567",
+        "example.com?id=7312345678901234567",
+        "example.com#7312345678901234567",
+        "example.com:8080?id=7312345678901234567",
+        "example.com:8080#7312345678901234567",
+    ],
+)
+def test_extract_douyin_ids_excludes_complete_url_spans(scheme: str, url: str) -> None:
+    assert extract_douyin_ids(f"{scheme}{url}") == []
+    assert extract_douyin_ids(f"{scheme}{url} 7312345678901234568") == [
+        "7312345678901234568"
     ]
