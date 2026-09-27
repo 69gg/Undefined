@@ -29,7 +29,7 @@ from Undefined.attachments import (
 from Undefined.config import Config
 from Undefined.onebot import OneBotClient
 from Undefined.onebot.client import OneBotDeliveryUncertainError
-from Undefined.onebot.file_errors import FileTransferError
+from Undefined.onebot.file_errors import FileTransferError, OneBotAPIError
 from Undefined.utils import io
 from Undefined.utils.history import MessageHistoryManager
 from Undefined.utils.common import (
@@ -226,6 +226,166 @@ def _split_text_chunks(text: str, limit: int = MAX_MESSAGE_LENGTH) -> list[str]:
         chunks.append(text[start:end])
         start = end
     return chunks
+
+
+# 合并转发「顶层节点直接携带的文本」预算。
+#
+# NapCat 的 packet 模式把转发卡片（``com.tencent.multimsg``）的 `news` 预览
+# 建成「每个顶层节点所有元素预览的拼接」，文本元素的预览就是它的全文（图片
+# 预览是短 summary、嵌套节点预览只有 `[卡片消息]`）。顶层文本因此直接决定
+# 卡片体积：实测约 1–2KB 的卡片可发、约 14KB 的卡片被 QQ 拒收
+# （``发送转发消息（res_id：… 失败``，retcode=1200）。这里取 2000 字作为
+# 上限，并有需要时把超出的内容下沉为嵌套节点。
+_FORWARD_PREVIEW_TEXT_BUDGET = 2000
+
+# 下沉后的单个嵌套节点文本上限：≈ QQ 单条消息，取值与
+# ``bilibili.format.NODE_TEXT_BUDGET`` 一致。
+_FORWARD_INLINE_TEXT_BUDGET = 1200
+
+
+def _segments_direct_text_length(content: Any) -> int:
+    """节点直接携带的文本长度；嵌套节点不计入（其预览只是 ``[卡片消息]``）。"""
+    if not isinstance(content, list):
+        return 0
+    total = 0
+    for segment in content:
+        if not isinstance(segment, dict) or segment.get("type") != "text":
+            continue
+        data = segment.get("data")
+        if isinstance(data, dict):
+            total += len(str(data.get("text", "")))
+    return total
+
+
+def _node_content_segments(content: Any) -> list[dict[str, Any]]:
+    """把节点内容规范成消息段列表（字符串内容视为单个文本段）。"""
+    if isinstance(content, str):
+        return [{"type": "text", "data": {"text": content}}] if content else []
+    if isinstance(content, list):
+        return [segment for segment in content if isinstance(segment, dict)]
+    return []
+
+
+def _pack_forward_segments(
+    segments: list[dict[str, Any]],
+    *,
+    node_text_budget: int = _FORWARD_INLINE_TEXT_BUDGET,
+) -> list[list[dict[str, Any]]]:
+    """按累计文本上限把消息段打包成多个块，顺序不变、图片跟随原位置。"""
+    budget = max(1, int(node_text_budget))
+    chunks: list[list[dict[str, Any]]] = []
+    current: list[dict[str, Any]] = []
+    current_chars = 0
+    for segment in segments:
+        if segment.get("type") != "text":
+            current.append(segment)
+            continue
+        data = segment.get("data")
+        text = str(data.get("text", "")) if isinstance(data, dict) else ""
+        for piece in _split_text_chunks(text, budget):
+            if current and current_chars + len(piece) > budget:
+                chunks.append(current)
+                current = []
+                current_chars = 0
+            current.append({"type": "text", "data": {"text": piece}})
+            current_chars += len(piece)
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def _nest_forward_node(
+    node: dict[str, Any],
+    *,
+    node_text_budget: int = _FORWARD_INLINE_TEXT_BUDGET,
+) -> dict[str, Any] | None:
+    """把节点的直接内容下沉为嵌套节点；没有可下沉的内容时返回 ``None``。"""
+    data = node.get("data")
+    if not isinstance(data, dict):
+        return None
+    segments = _node_content_segments(data.get("content"))
+    if not segments:
+        return None
+    chunks = _pack_forward_segments(segments, node_text_budget=node_text_budget)
+    if not chunks:
+        return None
+    name = str(data.get("name") or "")
+    total = len(chunks)
+    nested_nodes: list[dict[str, Any]] = []
+    for index, chunk in enumerate(chunks, start=1):
+        nested_data: dict[str, Any] = {
+            "name": f"{name} {index}/{total}" if total > 1 else name,
+            "content": chunk,
+        }
+        if "uin" in data:
+            nested_data["uin"] = data["uin"]
+        nested_nodes.append({"type": "node", "data": nested_data})
+    return {**node, "data": {**data, "content": nested_nodes}}
+
+
+def _bound_forward_preview(
+    nodes: list[dict[str, Any]],
+    *,
+    preview_budget: int = _FORWARD_PREVIEW_TEXT_BUDGET,
+    node_text_budget: int = _FORWARD_INLINE_TEXT_BUDGET,
+) -> list[dict[str, Any]]:
+    """收敛合并转发顶层节点的文本预览（见 ``_FORWARD_PREVIEW_TEXT_BUDGET``）。
+
+    顶层直接文本合计超过 ``preview_budget`` 时，按文本量从大到小把节点的内容
+    下沉为嵌套节点，直到预算够用；嵌套节点段原样保留、不递归。小转发不受影响。
+    """
+    if not nodes:
+        return nodes
+    sizes = [
+        _segments_direct_text_length(node.get("data", {}).get("content"))
+        if isinstance(node.get("data"), dict)
+        else 0
+        for node in nodes
+    ]
+    total = sum(sizes)
+    budget = max(1, int(preview_budget))
+    if total <= budget:
+        return nodes
+
+    bounded = list(nodes)
+    remaining = total
+    for index in sorted(
+        range(len(bounded)), key=lambda item: sizes[item], reverse=True
+    ):
+        if remaining <= budget:
+            break
+        nested = _nest_forward_node(bounded[index], node_text_budget=node_text_budget)
+        if nested is None:
+            continue
+        bounded[index] = nested
+        remaining -= sizes[index]
+        logger.info(
+            "[合并转发] 顶层预览超预算，内容已下沉为嵌套节点: node=%s chars=%s preview=%s/%s",
+            nested["data"].get("name"),
+            sizes[index],
+            remaining,
+            budget,
+        )
+    return bounded
+
+
+def _forward_structure_summary(nodes: list[dict[str, Any]]) -> str:
+    """转发结构摘要，用于发送失败时定位（顶层文本即卡片 `news` 的规模）。"""
+    preview = 0
+    segments = 0
+    images = 0
+    for node in nodes:
+        content = node.get("data", {}).get("content")
+        if not isinstance(content, list):
+            continue
+        segments += len(content)
+        for segment in content:
+            if not isinstance(segment, dict):
+                continue
+            if segment.get("type") == "image":
+                images += 1
+        preview += _segments_direct_text_length(content)
+    return f"节点={len(nodes)} 顶层文本={preview} 段={segments} 图片={images}"
 
 
 async def _prepare_weixin_delivery_units(
@@ -1154,8 +1314,19 @@ class MessageSender:
                 f"type=group reason={reason} group_id={int(group_id)} enabled={enabled}"
             )
 
+        messages = _bound_forward_preview(messages)
         logger.info("[发送合并转发] 目标群:%s | 节点数:%s", group_id, len(messages))
-        await self.onebot.send_forward_msg(group_id, messages)
+        try:
+            await self.onebot.send_forward_msg(group_id, messages)
+        except OneBotAPIError as exc:
+            logger.error(
+                "[发送合并转发] 目标群:%s 发送被拒绝: retcode=%s | %s | err=%s",
+                group_id,
+                getattr(exc, "retcode", None),
+                _forward_structure_summary(messages),
+                exc,
+            )
+            raise
 
         text_content = str(history_message or "").strip()
         if not auto_history or not text_content:
@@ -1194,13 +1365,24 @@ class MessageSender:
         if not callable(send_private_forward):
             raise RuntimeError("OneBot 客户端不支持私聊合并转发")
 
+        messages = _bound_forward_preview(messages)
         logger.info(
             "[发送私聊合并转发] 目标用户:%s | 节点数:%s", user_id, len(messages)
         )
         try:
-            await send_private_forward(user_id, messages)
-        except TypeError:
-            await send_private_forward(user_id=user_id, messages=messages)
+            try:
+                await send_private_forward(user_id, messages)
+            except TypeError:
+                await send_private_forward(user_id=user_id, messages=messages)
+        except OneBotAPIError as exc:
+            logger.error(
+                "[发送私聊合并转发] 目标用户:%s 发送被拒绝: retcode=%s | %s | err=%s",
+                user_id,
+                getattr(exc, "retcode", None),
+                _forward_structure_summary(messages),
+                exc,
+            )
+            raise
 
         text_content = str(history_message or "").strip()
         if not auto_history or not text_content:

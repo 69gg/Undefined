@@ -121,6 +121,7 @@ Management / Runtime 请求 → webui/app.py 或 api/app.py → routes/*
 - 统一附件标签：推荐使用 `<attachment uid="..."/>`，系统根据 UID 前缀（`pic_`/`file_`）自动区分图片与文件。旧 `<pic uid="..."/>` 语法向后兼容。
 - 远程附件默认按 `[attachments].remote_download_max_size_mb` 限制下载缓存；超过上限或配置为 `0` 时只登记 URL 引用（`source_ref`），避免大文件造成磁盘和延迟压力。
 - OneBot 图片消息段同时带 NapCat 的 `file` id 与可下载 `url`：先用 `get_image` 解析 `file`，解析失败或返回值既非 HTTP URL 也非本地路径时回落到段内 `url`——否则一次 `get_image` 失败（NapCat 富媒体下载超时）就会把图片静默丢掉。
+- 合并转发顶层预览：NapCat packet 模式的转发卡片 `news` 是「每个**顶层**节点所有元素预览」的拼接，文本元素预览即全文（图片是短 summary、嵌套节点只有 `[卡片消息]`），所以顶层文本量≈卡片体积（约 1–2KB 可发、约 14KB 会被拒收并报 retcode=1200 `发送转发消息（res_id：… 失败`）。`MessageSender._bound_forward_preview` 在发送前收敛：顶层直接文本合计超过 `_FORWARD_PREVIEW_TEXT_BUDGET`（2000）时，把节点内容下沉为 ≤`_FORWARD_INLINE_TEXT_BUDGET`（1200）字的嵌套节点；大块正文应由业务层自行放进嵌套节点（如 B 站图文发送器）。
 
 ### 队列模型
 
