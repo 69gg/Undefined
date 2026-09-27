@@ -121,7 +121,7 @@ skills/
 ## 运行机制（重要）
 
 - **注册表 handler 导入与校验**: 启动时读取 `config.json` 建立 schema，并立即导入每个 `handler.py`；导入失败的技能会记录 `load_error`、打印错误日志，并从对外 schema 中排除，主 AI 不会看到不可调用的技能。
-- **handler 模块名即真实包路径**: 随包技能的 handler 按 `Undefined.skills.<...>.handler` 导入，因此 `handler.py` 内可以使用同目录相对导入（`from .helper import ...`）；常规 `import` 与注册表加载得到同一个模块对象。
+- **handler 模块名即真实包路径**: 随包技能的 handler 按 `Undefined.skills.<...>.handler` 导入，因此 `handler.py` 内可以使用同目录相对导入（`from .helper import ...`）；常规 `import` 与注册表加载得到同一个模块对象。模块名以真实包根 `Undefined/skills` 为准，与注册表把哪一层目录当作 `base_dir` 无关——Agent 私有工具（`agents/<agent>/tools/<tool>/handler.py`）同样是 `Undefined.skills.agents.<agent>.tools.<tool>.handler`，不会退化成不存在的 `Undefined.skills.tools.<tool>`。
 - **模型 schema 按需投影**: 可通过 `skills.tool_search_enabled`（即 `[skills]` 下的 `tool_search_enabled`）让主 AI 首轮只看到配置为始终加载的工具和 `tool_search` schema，其余工具以名称目录提示，检索后从下一模型轮开始可调用。它只降低模型上下文占用，不会卸载注册表或提前导入 handler；子 Agent 不使用该投影。
 - **结构化日志 + 统计**: 统一输出 `event=execute`、`status=success/timeout/error` 等结构化字段，并记录执行耗时与成功/失败计数。
 - **超时与取消**: 工具 / 工具集执行默认 480 秒超时（Agent 调用未启用超时），超时会返回提示并记录统计。

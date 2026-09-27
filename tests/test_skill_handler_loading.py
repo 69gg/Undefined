@@ -4,11 +4,18 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 from Undefined.skills.agents import AgentRegistry
+from Undefined.skills.agents.agent_tool_registry import AgentToolRegistry
 from Undefined.skills.tools import ToolRegistry
 from Undefined.skills.toolsets import ToolSetRegistry
 
 PACKAGE_ROOT = Path(__file__).parents[1] / "src" / "Undefined"
+SKILLS_ROOT = (PACKAGE_ROOT / "skills").resolve()
+AGENT_TOOLS_DIRS = sorted(
+    path for path in (SKILLS_ROOT / "agents").glob("*/tools") if path.is_dir()
+)
 
 
 def _write_skill(
@@ -72,6 +79,71 @@ def test_toolset_handlers_load_with_canonical_names() -> None:
     item = registry._items["render.render_latex"]
     assert item.module_name == "Undefined.skills.toolsets.render.render_latex.handler"
     assert item.handler is not None
+
+
+@pytest.mark.parametrize(
+    "tools_dir",
+    AGENT_TOOLS_DIRS,
+    ids=[path.parent.name for path in AGENT_TOOLS_DIRS],
+)
+def test_agent_private_tool_handlers_load_with_real_package_names(
+    tools_dir: Path,
+) -> None:
+    """Agent 私有工具的 base_dir 是 ``<agent>/tools``，模块名仍须是真实包路径。
+
+    这是 #97 引入的回归点：按 base_dir 名称上溯一级会把模块算成不存在的
+    ``Undefined.skills.tools.<tool>``，导致所有 Agent 私有工具被排除出 schema。
+    """
+    agent_name = tools_dir.parent.name
+    registry = AgentToolRegistry(
+        tools_dir,
+        current_agent_name=agent_name,
+        is_main_agent=False,
+    )
+    local_names = {
+        path.name
+        for path in tools_dir.iterdir()
+        if path.is_dir()
+        and (path / "config.json").is_file()
+        and (path / "handler.py").is_file()
+    }
+    local_items = {
+        name: item
+        for name, item in registry._items.items()
+        if item.module_name is not None
+    }
+
+    assert registry.skills_root == SKILLS_ROOT
+    assert registry.get_load_failures() == {}
+    assert local_names
+    assert set(local_items) == local_names
+    for name, item in local_items.items():
+        assert item.handler is not None, name
+        assert item.loaded is True, name
+        assert item.module_name is not None
+        assert item.module_name.startswith(
+            f"Undefined.skills.agents.{agent_name}.tools."
+        ), item.module_name
+        assert item.module_name.endswith(".handler")
+
+
+def test_file_analysis_multimodal_tool_is_callable() -> None:
+    """图片/文件分析依赖的多模态工具必须真的可调用（纯 prompt 层面的失败不可见）。"""
+    tools_dir = SKILLS_ROOT / "agents" / "file_analysis_agent" / "tools"
+    registry = AgentToolRegistry(
+        tools_dir,
+        current_agent_name="file_analysis_agent",
+        is_main_agent=False,
+    )
+
+    item = registry._items["analyze_multimodal"]
+    assert item.module_name == (
+        "Undefined.skills.agents.file_analysis_agent.tools.analyze_multimodal.handler"
+    )
+    assert callable(item.handler)
+    assert "analyze_multimodal" in {
+        schema["function"]["name"] for schema in registry.get_tools_schema()
+    }
 
 
 def test_broken_handler_is_reported_and_hidden_from_schema(tmp_path: Path) -> None:
