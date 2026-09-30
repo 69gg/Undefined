@@ -121,10 +121,10 @@ def build_forward_nodes(
 ) -> list[dict[str, Any]]:
     """构建合并转发节点：信息 / 密码或状态 / PDF 文件。
 
-    PDF 是本地合成好的真实文件，随转发一起上传；群聊下 NapCat 会把它作为群文件上传
-    （``isGroupFile``、``busid=102``），元素里带上 ``fileId`` / ``fileMd5`` / ``fileSha1``。
-    实测 QQ 客户端在这种节点上点下载仍会报「获取发送地址失败」（该文案只在 QQ 客户端里，
-    NapCat 侧上传与发送都成功），属于 QQ 对转发内文件下载的限制。
+    PDF 是本地合成好的真实文件，随转发一起上传：群聊下 NapCat 会把它作为群文件上传
+    （``isGroupFile``、``busid=102``，元素里带 ``fileId`` / ``fileMd5`` / ``fileSha1``），
+    因此同一个 PDF 也会出现在群文件列表里，转发节点里的文件可以直接下载
+    （2026-10-01 用 14MB PDF 实测通过）。文件只发一次，不另外发独立文件消息。
     """
     if pdf_path is None:
         if not password:
