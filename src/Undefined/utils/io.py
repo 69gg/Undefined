@@ -8,15 +8,31 @@ import os
 import shutil
 import tempfile
 import time
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Coroutine, Iterator
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, TypeVar
 
 import aiofiles
 
 from Undefined.utils.file_lock import FileLock
 
 logger = logging.getLogger(__name__)
+_T = TypeVar("_T")
+
+
+async def run_cancellation_safe(operation: Coroutine[Any, Any, _T]) -> _T:
+    """等读写临界区真正收敛后才传播取消，避免线程写入晚于锁释放。"""
+    task = asyncio.create_task(operation)
+    cancelled = False
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            cancelled = True
+    result = task.result()
+    if cancelled:
+        raise asyncio.CancelledError
+    return result
 
 
 async def iter_file_chunks(path: Path, chunk_size: int) -> AsyncIterator[bytes]:

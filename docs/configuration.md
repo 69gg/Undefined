@@ -1262,9 +1262,9 @@ api_key = "replace-with-your-key"
 | `recent_messages_inject_k` | `12` | 注入给史官的近期消息条数 |
 | `recent_message_line_max_len` | `240` | 每条近期消息最大字符数 |
 | `source_message_max_len` | `800` | 当前触发消息最大字符数 |
-| `poll_interval_seconds` | `1.0` | 队列轮询间隔；小于 `0.1` 时按 `0.1` 秒处理，避免空队列忙循环 |
-| `stale_job_timeout_seconds` | `300.0` | processing 超时回收阈值 |
-| `max_concurrency` | `4` | 史官同时在途任务上限（最小 `1`）；超出后暂停取新任务，需重启生效 |
+| `poll_interval_seconds` | `1.0` | 无可执行阶段时的轮询间隔；最小 `0.1` 秒，阶段完成会提前唤醒调度 |
+| `stale_job_timeout_seconds` | `300.0` | 启动及轮询时恢复遗留 processing 的超时阈值；排除当前活跃任务，未恢复任务仍占实体顺位 |
+| `max_concurrency` | `4` | 同时执行的史官阶段上限（最小 `1`）；事件处理及不同实体的侧写可以并发，同实体等待不占名额；需重启生效 |
 
 ### 4.26.5 `[cognitive.profile]`
 
@@ -1280,8 +1280,8 @@ api_key = "replace-with-your-key"
 | `path` | `data/cognitive/queues` | 队列目录 |
 | `failed_max_age_days` | `30` | failed 文件保留天数 |
 | `failed_max_files` | `500` | failed 文件上限 |
-| `failed_cleanup_interval` | `100` | 每派发多少个任务后触发一次清理；`0` 禁用 |
-| `job_max_retries` | `3` | 单任务自动重试次数 |
+| `failed_cleanup_interval` | `100` | 每派发多少个阶段后触发一次清理；`0` 禁用 |
+| `job_max_retries` | `3` | 单任务累计自动重试次数；阶段切换不计次，成功目标不重做，耗尽后记为失败并放行后续同实体更新 |
 
 ---
 

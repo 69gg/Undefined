@@ -20,6 +20,8 @@ src/Undefined/
 ├── arxiv/         # arXiv 论文解析、元信息获取、PDF 下载与发送
 ├── bilibili/      # B站视频流解析、分段下载、异步发送；图文（opus）解析与合并转发
 ├── cognitive/     # 认知记忆系统（service/ 门面 + historian/ 史官后台）
+│   ├── historian/ # worker.py 阶段执行；scheduling.py 持久化进度与逐实体就绪选择
+│   └── job_queue.py # 有序文件队列、阶段回队、检查点与遗留任务恢复（梗库共用）
 ├── config/        # 配置系统（parsers/ 域解析 + load_sections/ 分段加载 + loader shim）
 ├── handlers/      # OneBot 消息分流（message_flow / poke / repeat / auto_extract）
 ├── onebot/        # OneBot WebSocket 客户端

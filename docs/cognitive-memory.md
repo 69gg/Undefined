@@ -60,7 +60,7 @@ ls data/cognitive/chromadb/
 
 ### 前台零阻塞
 
-AI 调用 `end` 工具结束对话时，只做一次文件落盘（p95 < 5ms），不等待 LLM 改写或向量入库：
+AI 调用 `end` 工具结束对话时，只做任务落盘，不等待 LLM 改写或向量入库：
 
 ```
 用户消息 → AI 处理 → end 工具
@@ -76,30 +76,35 @@ AI 调用 `end` 工具结束对话时，只做一次文件落盘（p95 < 5ms）�
 
 ### 后台史官流水线
 
-```
-pending/{job_id}.json
-    │
-    ▼ dequeue（原子 os.replace）
-processing/{job_id}.json
-    │
-    ▼ LLM 绝对化改写（消灭代词/相对时间/相对地点；尽量提炼为带时间锚点的独立事实；结合“当前输入批次原文 + 最近消息参考”做实体消歧）
-    │
-    ▼ 正则闸门检查
-    │   通过 → is_absolute=true
-    │   失败（重试 N 次后）→ 降级写入 is_absolute=false + warning
-    │
-    ▼ ChromaDB upsert（events collection）
-    │
-    ▼ 若有 observations → 可按 group/sender 等视角生成多条事件记录
-    ▼ 若有 observations → 检索该实体历史事件注入 merge 上下文 → tool_call 结构化提取 → 更新侧写文件 + 向量库
-    │
-    ▼ complete（删除 processing 文件）
-        异常 → 重试次数 < job_max_retries？
-                是 → requeue 回 pending（原子 os.replace）
-                否 → failed/{job_id}.json
+史官在单 Runtime 内运行一个调度器，并按 `max_concurrency` 有界并发执行阶段。队列仍使用 `pending / processing / failed` 文件目录：
+
+```text
+end → pending（持久化入队顺序）
+          │
+          ├─ 事件阶段就绪 → processing
+          │    改写 observation → 保存改写结果 → upsert event → 保存入库进度
+          │    回 pending，等待各实体侧写顺位
+          │
+          └─ 某实体轮到本任务 → processing
+               实体锁 → 读取当前完整 profile → 构造合并上下文 → LLM
+               → 写侧写文件 → 更新侧写向量 → 保存该目标完成进度
+               还有目标：回 pending；全部完成：删除 processing
+
+阶段失败 → 保留原顺位与已完成进度，累计自动重试
+重试耗尽 → failed，放行该任务尚未完成实体的后续更新
 ```
 
-史官是独立的后台 `asyncio.Task`，不走主消息队列，不影响任何前台响应。默认单 worker，按需可扩展多 worker 并发消费。
+**同实体有序、不同实体并发**：排序键为 `(entity_type, entity_id)`。同一群或逻辑 QQ 的侧写按史官入队顺序合并；原始消息到达顺序、请求 UUID 字典序、模型完成顺序均不是排序依据。后面的任务可以先完成事件改写和事件入库，但必须等前面的侧写提交后，才读取 profile 并构造合并上下文。合并模型直接看到完整快照，`read_profile` 读取当前目标也返回同一轮快照；读取失败进入重试，不能当作“暂无侧写”。
+
+等待顺位的任务留在磁盘队列，不创建等待协程、不占执行名额。群侧写与发送者侧写分别调度，某个用户目标被阻塞时，同一任务已经轮到的群目标可以先执行。不同实体的 LLM 合并可以同时进行；Chroma 的实际数据库访问仍使用下文的共享单 worker 调度。昵称刷新和侧写恢复复用同一实体锁，避免基于旧副本覆盖正文。
+
+**进度与恢复**：任务保存 `_enqueue_order` 以及 `_historian_progress`（已改写文本、已入库事件数、已完成侧写目标）。自动重试只处理未完成部分，阶段切换不增加 `_retry_count`。文件、向量和目标进度均提交后才放行下一个同实体更新；明确 `skip=true` 也会完成目标。没有有效更新或明确跳过的模型结束按失败处理。
+
+失败不会自动回滚已经写入的侧写文件。向量写入或进度保存失败时，重试会重新读取当前实际文件；重试耗尽后，后续任务同样基于当前实际版本继续。停止或取消执行任务时，先等待正在进行的读写阶段收敛，再释放实体占用。启动及轮询恢复超过 `stale_job_timeout_seconds` 的遗留 `processing`，排除活跃任务；未达到恢复阈值的遗留任务仍占其实体顺位，不阻塞其他实体。
+
+旧任务缺少新增字段时继续兼容：优先从旧任务 ID 末尾的入队毫秒恢复顺序，再使用载荷时间与稳定 ID 排序；同毫秒内缺失的真实先后无法追溯。人工通过 `retry_all()` 重新入队终态失败任务时，会获得新顺位并重置重试次数，保留原事件时间和成功进度。队列按单 Runtime 持有设计，不支持多个进程共享同一队列并发写入。
+
+QQ 私聊、群聊里的用户观察与 iLink 私聊按绑定的逻辑 QQ 共用 `user:<QQ号>` 顺序；群侧写为 `group:<群号>`。微信帐号别名、物理地址和后来改绑不改变已入队任务的身份。已有侧写不会自动按历史事件重建。
 
 ### 史官参考上下文
 
@@ -259,7 +264,7 @@ source_event_id: abc123_0_1740218400000
 
 ```
 pending/    → 待处理（end 工具写入）
-processing/ → 处理中（史官原子移动）
+processing/ → 阶段执行中或等待恢复的遗留任务（原子移动）
 failed/     → 失败（自动清理，默认保留 30 天）
 ```
 
@@ -334,9 +339,9 @@ data/cognitive/
 | `recent_messages_inject_k` | int | `12` | 提供给史官的最近消息参考条数（0=禁用，支持热更新） |
 | `recent_message_line_max_len` | int | `240` | 最近消息参考中每条文本最大长度（支持热更新） |
 | `source_message_max_len` | int | `800` | 当前消息原文最大长度（支持热更新） |
-| `poll_interval_seconds` | float | `1.0` | 史官轮询间隔秒数，小于 `0.1` 时按 `0.1` 处理（支持热更新） |
-| `stale_job_timeout_seconds` | float | `300.0` | 启动时恢复 stale 任务的超时阈值 |
-| `max_concurrency` | int | `4` | 史官同时在途任务上限（最小 `1`），超出后暂停取新任务；需重启生效 |
+| `poll_interval_seconds` | float | `1.0` | 无就绪阶段时的轮询间隔，最小 `0.1` 秒；阶段完成提前唤醒（支持热更新） |
+| `stale_job_timeout_seconds` | float | `300.0` | 启动及轮询恢复遗留 processing 的阈值；排除活跃任务，未恢复任务仍占实体顺位 |
+| `max_concurrency` | int | `4` | 同时执行的史官阶段上限（最小 `1`）；不同实体并发，同实体等待不占名额；需重启生效 |
 
 ### [cognitive.profile]
 
@@ -352,8 +357,8 @@ data/cognitive/
 | `path` | str | `data/cognitive/queues` | 队列文件存储路径 |
 | `failed_max_age_days` | int | `30` | failed 队列文件最大保留天数 |
 | `failed_max_files` | int | `500` | failed 队列最大文件数 |
-| `failed_cleanup_interval` | int | `100` | 每派发 N 个任务执行一次清理（0 禁用，每个阈值仅执行一次） |
-| `job_max_retries` | int | `3` | 单个任务最大自动重试次数（超过后移入 failed，0=不重试） |
+| `failed_cleanup_interval` | int | `100` | 每派发 N 个阶段执行一次清理（0 禁用，每个阈值仅执行一次） |
+| `job_max_retries` | int | `3` | 单任务累计自动重试次数；阶段切换不计次，耗尽后移入 failed 并放行后续同实体任务，0=不重试 |
 
 ### [models.embedding]（必须配置）
 
@@ -540,8 +545,8 @@ failed 文件中包含原始 job 数据和 `error` 字段，记录失败原因�
 
 **Q: 史官处理速度跟不上怎么办？**
 
-单个 worker 按 `cognitive.historian.max_concurrency`（默认 4）并发处理任务，每个任务需要 1-2 次 LLM 调用。高并发场景下 `pending/` 目录会积压，但不影响前台响应；可提高 `max_concurrency`（需重启）或降低 `poll_interval_seconds` 加快消费速度。提高并发会同步放大 LLM 调用量与费用，请按模型配额评估。
+单个调度器按 `cognitive.historian.max_concurrency`（默认 4）并发执行事件或侧写阶段。多个实体可并发合并，同实体的后续侧写仍须等待前序提交；等待不占名额。每条 observation 需要事件改写，每个目标还需独立侧写合并，具体调用量取决于工具轮次与重试。可提高 `max_concurrency`（需重启）增加不同实体的吞吐，按模型配额评估调用量与费用。
 
 **Q: 同一实体的两个任务同时改写侧写，会不会丢观察？**
 
-不会。侧写合并的「读取 → LLM 改写 → 写入」整段按实体互斥执行，同一用户/群聊的相邻任务会串行改写，后一个任务基于前一个任务已落盘的侧写继续合并。
+同实体的「读取完整 profile → 构造上下文 → LLM 合并 → 写文件 → 更新向量 → 保存进度」按入队顺序执行。后一个模型调用读取前一个成功提交后的完整侧写；即使后一个事件改写先完成，也不能提前读取或缓存旧 profile。不同实体可以同时合并。前序终态失败时会放行，后续读取当前实际文件；这保证执行顺序，不代表模型推理或跨存储写入具有事务回滚能力。

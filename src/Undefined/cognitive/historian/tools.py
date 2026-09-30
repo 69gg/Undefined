@@ -42,7 +42,7 @@ _PROFILE_TOOL = {
     "type": "function",
     "function": {
         "name": "update_profile",
-        "description": "更新用户/群侧写。调用前必须先用 read_profile 查看当前内容",
+        "description": "仅更新本轮目标实体的侧写，基于上下文中已提供的当前侧写快照合并",
         "parameters": {
             "type": "object",
             "properties": {
