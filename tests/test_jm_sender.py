@@ -106,8 +106,12 @@ async def test_send_jm_book_sends_forward_then_file(
     assert pdf_path is not None
     args = sender.send_group_forward_message.await_args
     nodes = args.args[1]
-    # 文件不进节点：QQ 拿不到转发节点内文件元素的下载地址（点击会报「获取发送地址失败」）
-    assert [node["data"]["name"] for node in nodes] == ["本子信息", "解密密码"]
+    # 需求要求 PDF 节点留在转发里；可下载的入口是紧随其后的独立文件消息
+    assert [node["data"]["name"] for node in nodes] == ["本子信息", "解密密码", "PDF"]
+    file_segment = nodes[2]["data"]["content"][0]
+    assert file_segment["type"] == "file"
+    assert file_segment["data"]["file"] == f"file://{pdf_path.resolve()}"
+    assert file_segment["data"]["name"] == pdf_path.name
     assert "JM1114751" in nodes[0]["data"]["content"]
     assert "测试本子" in nodes[0]["data"]["content"]
     assert f"：{captured['password']}" in nodes[1]["data"]["content"]

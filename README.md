@@ -70,7 +70,7 @@
 - **可选音乐工具集**：配置独立部署的 [lxmusic2api](https://github.com/69gg/lxmusic2api) 后，主 AI 可搜索歌曲/歌单、浏览热搜与排行榜、读取歌词/封面/评论、跨平台匹配并交付普通音频附件；完整 Track 通过任务内短引用流转，只暴露面向用户的高层 `music.*` 能力，不暴露下载作业生命周期接口。详见 [使用指南](docs/usage.md#音乐-music) 与 [配置说明](docs/configuration.md#4201-lxmusic2api-音乐服务)。
 - **arXiv 论文提取、搜索与分析**：自动检测消息中的 arXiv 链接/标识并发送论文信息与 PDF；`arxiv_paper` 也可只返回 PDF 附件 UID，供 `file_analysis_agent` 做文本提取或指定页视觉分析；`arxiv_search` 负责论文检索。
 - **GitHub 仓库卡片**：自动检测 GitHub 仓库链接或 `owner/repo` 仓库 ID，获取 public 仓库信息并发送简洁图片卡片，展示头像、简介、stars、forks、issues、contributors 等概览；API 与头像下载统一遵循 `[github].use_proxy`，头像以内联资源进入离线渲染器。
-- **禁漫（JM）本子提取**：自动检测 `JM`+车号或禁漫链接，下载全部章节并合成为一个 AES-256 加密 PDF，以「本子信息 / 解密密码」合并转发加一条独立 PDF 文件消息发送（QQ 不支持转发节点内文件的下载），密码每次随机生成且不写入历史；默认关闭，`[jm].auto_extract_enabled` 打开。详见 [配置说明](docs/configuration.md#4203-jm-禁漫自动提取)。
+- **禁漫（JM）本子提取**：自动检测 `JM`+车号或禁漫链接，下载全部章节并合成为一个 AES-256 加密 PDF，以「本子信息 / 解密密码 / PDF 文件」三节点合并转发发送，并补一条独立文件消息作为可下载入口（QQ 点转发节点内文件会报「获取发送地址失败」），密码每次随机生成且不写入历史；默认关闭，`[jm].auto_extract_enabled` 打开。详见 [配置说明](docs/configuration.md#4203-jm-禁漫自动提取)。
 - **自动处理管线**：Bilibili、arXiv、GitHub、JM 等自动提取统一运行在 `skills/pipelines` 中，斜杠命令优先级更高；命令输入/输出会写入历史，非命令消息会并行检测和处理命中管线，结果通过统一发送层写入历史并登记附件 UID 后再进入 AI 回复。远程大附件超过 `[attachments].remote_download_max_size_mb` 时只登记 URL 引用，避免无界下载和缓存膨胀。
 - **同 sender 短时消息合并**：默认开启。连续发的多条消息会合并到同一轮 AI 调用，AI 一次看到全部意图自行识别"独立请求/修正/打断"；告别"画猫→改成狗"的重复触发与回复打架。主提示词按 batcher 的"当前输入批次"语义适配，关闭该功能可能导致连续补充/修正消息与提示词不匹配，需要单独适配。可选投机预发送让用户停顿时 LLM 提前开跑、新消息可在未发出回复前取消，进一步压低响应延迟。详见 [docs/message-batching.md](docs/message-batching.md)。
 - **思维链支持**：支持开启思维链，提升复杂逻辑推理能力。

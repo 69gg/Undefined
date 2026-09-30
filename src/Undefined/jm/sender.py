@@ -115,24 +115,43 @@ def build_password_text(password: str) -> str:
 def build_forward_nodes(
     info_text: str,
     *,
+    pdf_path: Path | None = None,
     password: str = "",
     status_text: str = "",
 ) -> list[dict[str, Any]]:
-    """构建合并转发节点：信息 + 密码（或状态说明）。
+    """构建合并转发节点：信息 / 密码或状态 / PDF 文件。
 
-    PDF 不放节点里：QQ 的合并转发节点内文件元素没有可解析的下载源，客户端点下载
-    会报「获取发送地址失败」（发送本身却是成功的，NapCat 也会照发）。文件一律作为
-    紧随其后的独立文件消息投递。
+    PDF 节点保留在转发里（文件在本地合成后随转发一起上传，群聊下会成为真正的群文件）。
+    但 QQ 客户端拿不到**转发节点内**文件元素的下载地址，点击会报「获取发送地址失败」
+    （该文案只存在于 QQ 客户端；NapCat 侧上传与发送都是成功的），所以调用方还要把同一个
+    文件作为独立文件消息再发一次，用户才有可用的下载入口。
     """
-    if not password:
-        # 没有可发送的 PDF 时用状态说明替代密码节点
+    if pdf_path is None:
+        if not password:
+            # 没有可发送的 PDF 时用状态说明替代密码与文件节点
+            return [
+                _node(info_text, name="本子信息"),
+                _node(status_text or "PDF 未发送", name="状态"),
+            ]
         return [
             _node(info_text, name="本子信息"),
-            _node(status_text or "PDF 未发送", name="状态"),
+            _node(build_password_text(password), name="解密密码"),
         ]
     return [
         _node(info_text, name="本子信息"),
         _node(build_password_text(password), name="解密密码"),
+        _node(
+            [
+                {
+                    "type": "file",
+                    "data": {
+                        "file": f"file://{pdf_path.resolve()}",
+                        "name": pdf_path.name,
+                    },
+                }
+            ],
+            name="PDF",
+        ),
     ]
 
 
@@ -214,12 +233,14 @@ async def _send_result(
     pdf_path: Path,
     history_message: str,
 ) -> None:
-    """先发「信息 + 密码」合并转发，再把 PDF 作为独立文件消息发出去。
+    """先发「信息 + 密码 + PDF」三节点合并转发，再补一条独立文件消息。
 
-    文件不能放进转发节点：QQ 客户端对节点内的文件元素拿不到下载地址，点下载会报
-    「获取发送地址失败」，而发送请求本身是成功的（回退逻辑因此永远等不到异常）。
+    转发里的 PDF 节点是需求要求的结构，但 QQ 客户端点它下载会报「获取发送地址失败」
+    （见 build_forward_nodes 的说明）；独立文件消息才是用户真正能下载的入口。两者用
+    同一个本地文件：群聊下按内容去重，不会重复占用群空间（``stream`` / ``url`` 传输
+    模式下字节会再传一遍给协议端）。
     """
-    nodes = build_forward_nodes(info_text, password=password)
+    nodes = build_forward_nodes(info_text, pdf_path=pdf_path, password=password)
     try:
         await _send_forward(
             sender, target_type, target_id, nodes, history_message=history_message
