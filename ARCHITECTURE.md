@@ -40,6 +40,12 @@ graph TB
             GitHubSender["sender.py<br/>图片卡片发送<br/>• 头像 • 简介 • 统计"]
         end
 
+        subgraph JmModule["JM 模块 (jm/)"]
+            JmParser["parser.py<br/>车号解析<br/>• JM+数字 • 禁漫链接 • 分享卡片"]
+            JmDownloader["downloader.py<br/>整本下载合成<br/>• jmcpy 逐章下载<br/>• 合并为加密 PDF"]
+            JmSender["sender.py<br/>合并转发发送<br/>• 信息/密码/PDF • 失败回退"]
+        end
+
         subgraph SecurityLayer["安全防线 (services/)"]
             SecurityService["SecurityService<br/>安全服务<br/>• 注入攻击检测<br/>• 速率限制<br/>[security.py]"]
             InjectionAgent["InjectionResponseAgent<br/>注入响应生成<br/>[injection_response_agent.py]"]
@@ -228,8 +234,13 @@ graph TB
     GitHubParser -->|"仓库ID"| GitHubClient
     GitHubClient -->|"public仓库信息"| GitHubSender
     GitHubSender -->|"发送图片卡片"| OneBotClient
-    
-    MessageHandler -->|"2.7 自动化"| AutomationService
+
+    MessageHandler -->|"2.7 非命令自动管线"| JmParser
+    JmParser -->|"车号"| JmDownloader
+    JmDownloader -->|"加密 PDF"| JmSender
+    JmSender -->|"发送合并转发"| OneBotClient
+
+    MessageHandler -->|"2.8 自动化"| AutomationService
     AutomationService -->|"读写"| AutomationStorage
     AutomationStorage -->|"异步读写"| IOUtils
     
@@ -850,6 +861,7 @@ description: 从 PDF 文件中提取文本和表格，填写表单。当用户�
 | **Bilibili** | `bilibili.auto_extract_enabled`, `bilibili.cookie`, `bilibili.prefer_quality` | B站视频自动提取与下载 |
 | **arXiv** | `arxiv.auto_extract_enabled`, `arxiv.max_file_size`, `arxiv.auto_extract_max_items` | arXiv 论文自动提取、搜索与 PDF 发送 |
 | **GitHub** | `github.auto_extract_enabled`, `github.request_timeout_seconds`, `github.request_retries`, `github.auto_extract_max_items` | GitHub public 仓库自动提取与图片卡片发送 |
+| **JM（禁漫）** | `jm.auto_extract_enabled`, `jm.max_file_size`, `jm.max_chapters`, `jm.auto_extract_max_items` | JM 车号自动提取、整本加密 PDF 与合并转发 |
 | **思考链** | `*.thinking_enabled` | 思维链支持 |
 | **思维链兼容** | `*.thinking_tool_call_compat` | 思维链 + 工具调用兼容 |
 | **WebUI** | `webui.url`, `webui.port`, `webui.password` | 配置控制台 |

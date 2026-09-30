@@ -1572,6 +1572,49 @@ auto_extract_private_ids = []
 # en: Max number of GitHub repositories to auto-process from one message. <=0 falls back to 3, >10 is clamped to 10.
 auto_extract_max_items = 3
 
+# zh: 禁漫（JM / 18comic）自动提取配置。命中后下载整本并合成为一个加密 PDF，以合并转发发送（信息 / 解密密码 / PDF 文件）。
+# en: JM (18comic) auto-extraction settings. On match, the whole book is downloaded, merged into one encrypted PDF, and sent as a merged forward (info / password / PDF file).
+[jm]
+# zh: 是否让禁漫接口与图片下载使用 [proxy] 代理地址。默认关闭。
+# en: Whether JM API and image downloads use proxy addresses from [proxy]. Disabled by default.
+use_proxy = false
+# zh: 是否启用自动提取（检测到 JM+数字车号或禁漫链接时自动下载并发送）。默认关闭。
+# en: Enable auto-extraction (auto-download and send when JM book IDs or JM links are detected). Disabled by default.
+auto_extract_enabled = false
+# zh: 自动提取功能的群聊白名单（空=跟随全局 access.allowed_group_ids）。
+# en: Group allowlist for auto-extraction (empty = follow global access.allowed_group_ids).
+auto_extract_group_ids = []
+# zh: 自动提取功能的私聊白名单（空=跟随全局 access.allowed_private_ids）。
+# en: Private chat allowlist for auto-extraction (empty = follow global access.allowed_private_ids).
+auto_extract_private_ids = []
+# zh: 单条消息最多自动处理几个车号。<=0 回退 1，>5 截断到 5；每项是一整本 PDF，所以默认只处理 1 个。
+# en: Max number of book IDs to auto-process from one message. <=0 falls back to 1, >5 is clamped to 5; each item is a whole-book PDF, so only one is processed by default.
+auto_extract_max_items = 1
+# zh: PDF 体积上限（MB），超过则只发送信息节点。0=不限。
+# en: PDF size limit (MB); exceeding it sends the info node only. 0=unlimited.
+max_file_size = 100
+# zh: 单本最多下载并合并几章。0=不限（全部章节）。
+# en: Max chapters downloaded and merged per book. 0=unlimited (all chapters).
+max_chapters = 0
+# zh: PDF 页面分辨率（DPI）。<=0 回退 150。
+# en: PDF page resolution (DPI). <=0 falls back to 150.
+pdf_dpi = 150.0
+# zh: 需要重新编码时的图片质量（1-100）。<1 回退 95，>100 截断到 100。
+# en: Image quality when re-encoding (1-100). <1 falls back to 95, >100 is clamped to 100.
+image_quality = 95
+# zh: 图片下载并发数。<1 回退 8，>32 截断到 32。
+# en: Image download concurrency. <1 falls back to 8, >32 is clamped to 32.
+download_concurrency = 8
+# zh: 接口请求超时（秒）。<=0 回退 20，>120 截断到 120。
+# en: API request timeout (seconds). <=0 falls back to 20, >120 is clamped to 120.
+request_timeout = 20.0
+# zh: 图片下载超时（秒）。<=0 回退 60，>600 截断到 600。
+# en: Image download timeout (seconds). <=0 falls back to 60, >600 is clamped to 600.
+image_timeout = 60.0
+# zh: jmcpy 的配置目录（登录态与会话文件所在目录，可指向已登录的 JMCPY_HOME）。留空使用平台默认目录。
+# en: jmcpy config directory (login session files; point it at an existing JMCPY_HOME). Empty uses the platform default directory.
+session_dir = ""
+
 # zh: Code Delivery Agent 配置（代码交付 Agent，在 Docker 容器中编写代码并打包上传）。
 # en: Code Delivery Agent settings (writes code in Docker containers and delivers packaged results).
 [code_delivery]

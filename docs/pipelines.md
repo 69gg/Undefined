@@ -1,6 +1,6 @@
 # 自动处理管线开发指南
 
-自动处理管线位于 `src/Undefined/skills/pipelines/`，用于在普通消息进入 AI 自动回复前执行自动提取，例如 Bilibili 视频、Bilibili 图文（opus）、抖音视频、arXiv 论文和 GitHub 仓库卡片。斜杠命令优先级高于自动处理管线，命中命令后不会继续触发自动提取或 AI 回复。
+自动处理管线位于 `src/Undefined/skills/pipelines/`，用于在普通消息进入 AI 自动回复前执行自动提取，例如 Bilibili 视频、Bilibili 图文（opus）、抖音视频、arXiv 论文、GitHub 仓库卡片和禁漫（JM）本子。斜杠命令优先级高于自动处理管线，命中命令后不会继续触发自动提取或 AI 回复。
 
 `MessageHandler` 启动时会通过异步初始化在线程中加载管线配置和 handler 模块，避免目录扫描、`config.json` 读取和模块导入阻塞事件循环；注册 OneBot 消息回调前会等待首次加载完成，后续热重载也在线程中执行。
 
@@ -48,6 +48,23 @@ Bilibili 图文管线命中 `bilibili.com/opus/<id>`、`t.bilibili.com/<id>`、`
 
 管线只在 `auto_extract_enabled` 与 `opus_enabled` 同时为真、且会话命中白名单时生效；与视频管线相互独立，同一条消息同时包含 BV 号与图文链接时两条管线各自发送。
 
+## 内置 JM（禁漫）管线
+
+JM 管线命中 `JM` 前缀加 5–8 位车号（`JM1114751`、`jm 1114751`、`jm:1114751`）或主机名含 `18comic` / `jmcomic` 的链接（`/album/<id>`、`/photo/<id>`、`?id=<id>`）后，发送一次外层合并转发，节点顺序固定：
+
+1. `本子信息`：车号与标题、作者、章节数、标签、观看/点赞、页数、PDF 大小、简介预览与车号链接；
+2. `解密密码`：每次随机生成的 8 位 PDF 打开密码；
+3. `PDF`：`file` 消息段指向本地合成的加密 PDF。
+
+多章节本子按章节顺序全部下载（`[jm].max_chapters` 可限制），再合成为一个 AES-256 加密 PDF。裸数字不触发，避免群号、时间戳等误报；`xxjm1234567` 这类前缀也不触发。
+
+失败语义：
+
+- 三节点转发被拒（合并转发节点内的 `file` 段渲染取决于 QQ 客户端）时退化为「两节点转发（信息 + 密码）+ 单独文件消息」，两次转发都失败则退化为普通消息加单独文件；密码始终不会写进历史摘要。
+- 下载量或 PDF 体积超过 `[jm].max_file_size`、以及没有下到任何页面时，只发信息与状态两个节点，不发密码与文件。
+
+实现说明：图片解码与 PDF 合成是同步 CPU 工作，下载整体在 `asyncio.to_thread` 中通过 jmcpy 的同步客户端执行，不阻塞事件循环；单次任务不可取消，由 `[jm].request_timeout` / `image_timeout` 与 jmcpy 的多端点重试兜底。
+
 ## 目录结构
 
 ```text
@@ -68,7 +85,10 @@ src/Undefined/skills/pipelines/
 ├── arxiv/
 │   ├── config.json
 │   └── handler.py
-└── github/
+├── github/
+│   ├── config.json
+│   └── handler.py
+└── jm/
     ├── config.json
     └── handler.py
 ```

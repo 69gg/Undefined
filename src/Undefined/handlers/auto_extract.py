@@ -148,6 +148,29 @@ class AutoExtractMixin:
 
         return repo_ids
 
+    def _extract_jm_ids(
+        self, text: str, message_content: list[dict[str, Any]]
+    ) -> list[str]:
+        """从文本和消息段中提取禁漫（JM）车号。"""
+        from Undefined.jm.parser import extract_from_json_message, extract_jm_ids
+
+        book_ids: list[str] = []
+        seen: set[str] = set()
+
+        for book_id in extract_jm_ids(text):
+            if book_id in seen:
+                continue
+            seen.add(book_id)
+            book_ids.append(book_id)
+
+        for book_id in extract_from_json_message(message_content):
+            if book_id in seen:
+                continue
+            seen.add(book_id)
+            book_ids.append(book_id)
+
+        return book_ids
+
     async def _handle_bilibili_extract(
         self,
         target_id: int,
@@ -399,3 +422,49 @@ class AutoExtractMixin:
                     type(exc).__name__,
                     exc,
                 )
+
+    async def _handle_jm_extract(
+        self,
+        target_id: int,
+        book_ids: list[str],
+        target_type: str,
+        sender: Any | None = None,
+    ) -> None:
+        """处理禁漫（JM）自动提取和发送。"""
+        from Undefined.jm.sender import send_jm_book
+
+        max_items = max(1, int(getattr(self.config, "jm_auto_extract_max_items", 1)))
+        resolved_sender = sender or self.sender
+        for book_id in book_ids[:max_items]:
+            try:
+                result = await send_jm_book(
+                    book_id,
+                    sender=resolved_sender,
+                    target_type=target_type,  # type: ignore[arg-type]
+                    target_id=target_id,
+                    config=self.config,
+                )
+                logger.info(
+                    "[JM] 自动提取完成 %s → %s:%s: %s",
+                    book_id,
+                    target_type,
+                    target_id,
+                    result,
+                )
+            except Exception as exc:
+                logger.exception(
+                    "[JM] 自动提取失败 %s → %s:%s: exc_type=%s exc=%r",
+                    book_id,
+                    target_type,
+                    target_id,
+                    type(exc).__name__,
+                    exc,
+                )
+                try:
+                    error_msg = f"JM 提取失败：{exc}"
+                    if target_type == "group":
+                        await resolved_sender.send_group_message(target_id, error_msg)
+                    else:
+                        await resolved_sender.send_private_message(target_id, error_msg)
+                except Exception:
+                    pass

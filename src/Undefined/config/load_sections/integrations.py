@@ -27,6 +27,17 @@ _MAX_GITHUB_REQUEST_TIMEOUT_SECONDS: float = 60.0
 _MAX_GITHUB_REQUEST_RETRIES: int = 5
 _DEFAULT_GITHUB_AUTO_EXTRACT_MAX_ITEMS: int = 3
 _MAX_GITHUB_AUTO_EXTRACT_MAX_ITEMS: int = 10
+_DEFAULT_JM_REQUEST_TIMEOUT_SECONDS: float = 20.0
+_MAX_JM_REQUEST_TIMEOUT_SECONDS: float = 120.0
+_DEFAULT_JM_IMAGE_TIMEOUT_SECONDS: float = 60.0
+_MAX_JM_IMAGE_TIMEOUT_SECONDS: float = 600.0
+_DEFAULT_JM_AUTO_EXTRACT_MAX_ITEMS: int = 1
+_MAX_JM_AUTO_EXTRACT_MAX_ITEMS: int = 5
+_DEFAULT_JM_MAX_FILE_SIZE_MB: int = 100
+_DEFAULT_JM_PDF_DPI: float = 150.0
+_DEFAULT_JM_IMAGE_QUALITY: int = 95
+_DEFAULT_JM_DOWNLOAD_CONCURRENCY: int = 8
+_MAX_JM_DOWNLOAD_CONCURRENCY: int = 32
 _DEFAULT_LXMUSIC2API_BASE_URL: str = "http://127.0.0.1:3000"
 
 
@@ -221,6 +232,73 @@ def load_integrations(
     if github_auto_extract_max_items > _MAX_GITHUB_AUTO_EXTRACT_MAX_ITEMS:
         github_auto_extract_max_items = _MAX_GITHUB_AUTO_EXTRACT_MAX_ITEMS
 
+    # JM（禁漫）配置
+    jm_use_proxy = _coerce_bool(
+        _get_value(data, ("jm", "use_proxy"), "JM_USE_PROXY"), False
+    )
+    jm_auto_extract_enabled = _coerce_bool(
+        _get_value(data, ("jm", "auto_extract_enabled"), None), False
+    )
+    jm_auto_extract_group_ids = _coerce_int_list(
+        _get_value(data, ("jm", "auto_extract_group_ids"), None)
+    )
+    jm_auto_extract_private_ids = _coerce_int_list(
+        _get_value(data, ("jm", "auto_extract_private_ids"), None)
+    )
+    jm_auto_extract_max_items = _coerce_int(
+        _get_value(data, ("jm", "auto_extract_max_items"), None),
+        _DEFAULT_JM_AUTO_EXTRACT_MAX_ITEMS,
+    )
+    if jm_auto_extract_max_items <= 0:
+        jm_auto_extract_max_items = _DEFAULT_JM_AUTO_EXTRACT_MAX_ITEMS
+    if jm_auto_extract_max_items > _MAX_JM_AUTO_EXTRACT_MAX_ITEMS:
+        jm_auto_extract_max_items = _MAX_JM_AUTO_EXTRACT_MAX_ITEMS
+    jm_max_file_size = _coerce_int(
+        _get_value(data, ("jm", "max_file_size"), None), _DEFAULT_JM_MAX_FILE_SIZE_MB
+    )
+    if jm_max_file_size < 0:
+        jm_max_file_size = _DEFAULT_JM_MAX_FILE_SIZE_MB
+    jm_max_chapters = _coerce_int(_get_value(data, ("jm", "max_chapters"), None), 0)
+    if jm_max_chapters < 0:
+        jm_max_chapters = 0
+    jm_pdf_dpi = _coerce_float(
+        _get_value(data, ("jm", "pdf_dpi"), None), _DEFAULT_JM_PDF_DPI
+    )
+    if jm_pdf_dpi <= 0:
+        jm_pdf_dpi = _DEFAULT_JM_PDF_DPI
+    jm_image_quality = _coerce_int(
+        _get_value(data, ("jm", "image_quality"), None), _DEFAULT_JM_IMAGE_QUALITY
+    )
+    if jm_image_quality < 1:
+        jm_image_quality = _DEFAULT_JM_IMAGE_QUALITY
+    if jm_image_quality > 100:
+        jm_image_quality = 100
+    jm_download_concurrency = _coerce_int(
+        _get_value(data, ("jm", "download_concurrency"), None),
+        _DEFAULT_JM_DOWNLOAD_CONCURRENCY,
+    )
+    if jm_download_concurrency < 1:
+        jm_download_concurrency = _DEFAULT_JM_DOWNLOAD_CONCURRENCY
+    if jm_download_concurrency > _MAX_JM_DOWNLOAD_CONCURRENCY:
+        jm_download_concurrency = _MAX_JM_DOWNLOAD_CONCURRENCY
+    jm_request_timeout = _coerce_float(
+        _get_value(data, ("jm", "request_timeout"), None),
+        _DEFAULT_JM_REQUEST_TIMEOUT_SECONDS,
+    )
+    if jm_request_timeout <= 0:
+        jm_request_timeout = _DEFAULT_JM_REQUEST_TIMEOUT_SECONDS
+    if jm_request_timeout > _MAX_JM_REQUEST_TIMEOUT_SECONDS:
+        jm_request_timeout = _MAX_JM_REQUEST_TIMEOUT_SECONDS
+    jm_image_timeout = _coerce_float(
+        _get_value(data, ("jm", "image_timeout"), None),
+        _DEFAULT_JM_IMAGE_TIMEOUT_SECONDS,
+    )
+    if jm_image_timeout <= 0:
+        jm_image_timeout = _DEFAULT_JM_IMAGE_TIMEOUT_SECONDS
+    if jm_image_timeout > _MAX_JM_IMAGE_TIMEOUT_SECONDS:
+        jm_image_timeout = _MAX_JM_IMAGE_TIMEOUT_SECONDS
+    jm_session_dir = _coerce_str(_get_value(data, ("jm", "session_dir"), None), "")
+
     # Code Delivery Agent 配置
     code_delivery_enabled = _coerce_bool(
         _get_value(data, ("code_delivery", "enabled"), None), True
@@ -386,6 +464,19 @@ def load_integrations(
         "github_auto_extract_group_ids": github_auto_extract_group_ids,
         "github_auto_extract_private_ids": github_auto_extract_private_ids,
         "github_auto_extract_max_items": github_auto_extract_max_items,
+        "jm_use_proxy": jm_use_proxy,
+        "jm_auto_extract_enabled": jm_auto_extract_enabled,
+        "jm_auto_extract_group_ids": jm_auto_extract_group_ids,
+        "jm_auto_extract_private_ids": jm_auto_extract_private_ids,
+        "jm_auto_extract_max_items": jm_auto_extract_max_items,
+        "jm_max_file_size": jm_max_file_size,
+        "jm_max_chapters": jm_max_chapters,
+        "jm_pdf_dpi": jm_pdf_dpi,
+        "jm_image_quality": jm_image_quality,
+        "jm_download_concurrency": jm_download_concurrency,
+        "jm_request_timeout": jm_request_timeout,
+        "jm_image_timeout": jm_image_timeout,
+        "jm_session_dir": jm_session_dir,
         "code_delivery_enabled": code_delivery_enabled,
         "code_delivery_task_root": code_delivery_task_root,
         "code_delivery_docker_image": code_delivery_docker_image,

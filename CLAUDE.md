@@ -70,6 +70,7 @@ bash scripts/install_git_hooks.sh
 | `arxiv/` | arXiv 论文解析、元信息获取、PDF 下载与发送 |
 | `bilibili/` | B 站链接/BV 解析、视频下载与发送 |
 | `github/` | GitHub public 仓库解析、API 获取与图片卡片发送 |
+| `jm/` | 禁漫（JM / 18comic）车号解析、整本 PDF 下载合成与加密合并转发 |
 | `api/` | Runtime API / Management API 相关服务；路由拆分在 `api/routes/`，包含 `chat`、`cognitive`、`health`、`memes`、`memory`、`naga`、`system`、`tools` |
 | `webui/` | aiohttp 管理控制台；路由拆分在 `webui/routes/`，覆盖配置、日志、运行态、表情包与系统管理 |
 | `mcp/` | MCP 工具注册、连接与转换 |
@@ -86,7 +87,7 @@ OneBot WebSocket → onebot/ → handlers/
   → 附件登记 / 访问控制 / 表情包入库
   → SecurityService(注入检测)
   → CommandDispatcher(斜杠指令，命中即结束后续处理)
-  → skills/pipelines(Bilibili / arXiv / GitHub 并行自动提取)
+  → skills/pipelines(Bilibili / Douyin / arXiv / GitHub / JM 并行自动提取)
   → Automations(pipeline 后接入；consume_ai_loop 时 await 并拦截对应 AI，否则后台执行并立刻放行；发生在 MessageBatcher 之前)
   → MessageBatcher(同 sender 短时合并；拍一拍/buffer 内 @bot 旁路)
   → AICoordinator → QueueManager(按模型隔离, 6 条车道)

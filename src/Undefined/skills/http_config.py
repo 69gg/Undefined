@@ -74,6 +74,7 @@ def _scope_use_proxy(config: Any, proxy_scope: str) -> bool:
         "douyin": "douyin_use_proxy",
         "arxiv": "arxiv_use_proxy",
         "github": "github_use_proxy",
+        "jm": "jm_use_proxy",
         "naga": "naga.use_proxy",
         "api_callback": "api.tool_invoke_callback_use_proxy",
     }
