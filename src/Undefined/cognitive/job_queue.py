@@ -100,13 +100,23 @@ class JobQueue:
 
     def _next_order(self) -> int:
         if self._last_order is None:
-            self._last_order = max(
-                (
-                    job_order(item.job_id, item.data)[0]
-                    for item in self._entries(include_failed=True)
-                ),
-                default=0,
-            )
+            last_order = 0
+            for directory in (
+                self._pending_dir,
+                self._processing_dir,
+                self._failed_dir,
+            ):
+                for path in directory.glob("*.json"):
+                    try:
+                        data = self._read(path)
+                    except (OSError, ValueError):
+                        # 入队只需恢复顺序基准；调度仍严格读取未完成任务。
+                        logger.warning(
+                            "[认知队列] 顺序恢复使用不可读任务的 ID: %s", path
+                        )
+                        data = {}
+                    last_order = max(last_order, job_order(path.stem, data)[0])
+            self._last_order = last_order
         self._last_order = max(time.time_ns(), self._last_order + 1)
         return self._last_order
 

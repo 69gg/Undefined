@@ -57,6 +57,43 @@ async def test_legacy_jobs_use_enqueue_suffix_then_payload_time(tmp_path: Path) 
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("state", ["pending", "processing", "failed"])
+@pytest.mark.parametrize("read_error", [False, True])
+async def test_order_seed_tolerates_unreadable_jobs_but_scheduling_stays_strict(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    state: str,
+    read_error: bool,
+) -> None:
+    queue = JobQueue(tmp_path)
+    broken = tmp_path / state / "old_1_2000.json"
+    broken.write_text("", encoding="utf-8")
+    await write_json(tmp_path / "pending/valid_1_1000.json", {"_enqueue_order": 1})
+    read = queue._read
+
+    def read_with_error(path: Path) -> dict[str, Any]:
+        if path == broken and read_error:
+            raise OSError("unreadable")
+        return read(path)
+
+    monkeypatch.setattr(queue, "_read", read_with_error)
+    monkeypatch.setattr("Undefined.cognitive.job_queue.time.time_ns", lambda: 1)
+    first = await queue.enqueue({"request_id": "first"})
+    second = await queue.enqueue({"request_id": "second"})
+    assert read(tmp_path / "pending" / f"{first}.json")["_enqueue_order"] == (
+        2_000_000_001
+    )
+    assert read(tmp_path / "pending" / f"{second}.json")["_enqueue_order"] == (
+        2_000_000_002
+    )
+    if state == "failed":
+        assert len(await queue.list_jobs()) == 3
+    else:
+        with pytest.raises(OSError if read_error else ValueError):
+            await queue.list_jobs()
+
+
+@pytest.mark.asyncio
 async def test_stage_retry_and_manual_retry_preserve_progress(tmp_path: Path) -> None:
     queue = JobQueue(tmp_path)
     first = await queue.enqueue({"request_id": "z", "timestamp_epoch": 123})
