@@ -1596,11 +1596,11 @@ max_file_size = 100
 # zh: 单本最多下载并合并几章。0=不限（全部章节）。
 # en: Max chapters downloaded and merged per book. 0=unlimited (all chapters).
 max_chapters = 0
-# zh: PDF 页面分辨率（DPI）。<=0 回退 150。
-# en: PDF page resolution (DPI). <=0 falls back to 150.
+# zh: PDF 页面分辨率（DPI），所有页统一按它换算物理尺寸（页宽 = 像素宽 ÷ DPI × 72）。<=0 回退 150。页像素不做缩放。
+# en: PDF page resolution (DPI); every page uses it for its physical size (page width = pixels / DPI * 72). <=0 falls back to 150. Page pixels are never rescaled.
 pdf_dpi = 150.0
-# zh: 需要重新编码时的图片质量（1-100）。<1 回退 95，>100 截断到 100。
-# en: Image quality when re-encoding (1-100). <1 falls back to 95, >100 is clamped to 100.
+# zh: PDF 内页 JPEG 质量（1-100，色度 4:4:4，每页只编码一次）。<1 回退 95，>100 截断到 100；提高到 98/100 约增加 30%/50% 体积。
+# en: JPEG quality for PDF pages (1-100, chroma 4:4:4, exactly one encode per page). <1 falls back to 95, >100 is clamped to 100; 98/100 costs roughly 30%/50% more size.
 image_quality = 95
 # zh: 图片下载并发数。<1 回退 8，>32 截断到 32。
 # en: Image download concurrency. <1 falls back to 8, >32 is clamped to 32.

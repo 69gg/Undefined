@@ -4,7 +4,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Literal
 
+import fitz
 import pytest
+from jmcpy.imaging import block_count, descramble
+from jmcpy.models import Picture
+from PIL import Image
 
 import Undefined.jm.client as jm_client
 import Undefined.jm.downloader as jm_downloader
@@ -21,8 +25,10 @@ class _FakeChapter:
 
 
 class _FakeArtifact:
-    def __init__(self, size: int) -> None:
+    def __init__(self, path: Path, size: int, picture: Any) -> None:
+        self.path = path
         self.size = size
+        self.picture = picture
 
 
 class _FakeDownloadResult:
@@ -30,10 +36,21 @@ class _FakeDownloadResult:
         self.paths = tuple(paths)
         self.failures = tuple(object() for _ in range(failures))
         self._page_size = page_size
+        self._artifacts = [
+            _FakeArtifact(path, page_size, _fake_picture(path)) for path in paths
+        ]
 
     def __iter__(self) -> Any:
-        for _ in self.paths:
-            yield _FakeArtifact(self._page_size)
+        return iter(self._artifacts)
+
+
+def _fake_picture(path: Path) -> Any:
+    return SimpleNamespace(
+        filename=path.name,
+        chapter_id=111,
+        scramble_id=0,
+        suffix=path.suffix,
+    )
 
 
 def _fake_book(chapter_ids: list[tuple[int, int]]) -> Any:
@@ -82,8 +99,8 @@ class _FakeClient:
         *,
         output: Any,
         dest: Path,
+        decode: bool,
         concurrency: int,
-        quality: int,
     ) -> _FakeDownloadResult:
         dest.mkdir(parents=True, exist_ok=True)
         paths: list[Path] = []
@@ -97,7 +114,7 @@ class _FakeClient:
                 "output": output,
                 "dest": dest,
                 "concurrency": concurrency,
-                "quality": quality,
+                "decode": decode,
             }
         )
         return _FakeDownloadResult(paths, page_size=self.page_size)
@@ -125,9 +142,10 @@ def _capture_write_pdf(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     captured: dict[str, Any] = {}
 
     def _write_pdf(
-        sources: Any, output: Path, *, dpi: float, quality: int, password: str | None
+        pages: Any, output: Path, *, dpi: float, quality: int, password: str
     ) -> Path:
-        captured["sources"] = list(sources)
+        captured["pages"] = list(pages)
+        captured["sources"] = [path for path, _picture in pages]
         captured["dpi"] = dpi
         captured["quality"] = quality
         captured["password"] = password
@@ -135,7 +153,7 @@ def _capture_write_pdf(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         output.write_bytes(b"%PDF-1.4")
         return output
 
-    monkeypatch.setattr(jm_downloader, "write_pdf", _write_pdf)
+    monkeypatch.setattr(jm_downloader, "_write_pdf", _write_pdf)
     return captured
 
 
@@ -185,7 +203,8 @@ async def test_download_book_pdf_merges_all_chapters_in_order(
     assert [item["chapter_id"] for item in client.downloads] == [111, 222]
     assert client.downloads[0]["dest"] != client.downloads[1]["dest"]
     assert client.downloads[0]["concurrency"] == 4
-    assert client.downloads[0]["quality"] == 95
+    # 取服务端原始字节：解扰与编码交给写 PDF 那一步，避免多一代有损压缩
+    assert client.downloads[0]["decode"] is False
 
 
 @pytest.mark.asyncio
@@ -313,3 +332,66 @@ def test_build_settings_leaves_home_unset_when_session_dir_empty(
 
     assert settings.home is None
     assert settings.proxy is None
+
+
+def _page_png(path: Path, size: tuple[int, int], *, band: int = 0) -> Path:
+    image = Image.new("RGB", size, (255, 255, 255))
+    for index in range(0, size[1], 7):
+        colour = (band, index % 256, 0)
+        image.paste(colour, (0, index, size[0], min(index + 3, size[1])))
+    image.save(path, format="PNG")
+    return path
+
+
+def test_write_pdf_keeps_one_page_scale_for_every_page(tmp_path: Path) -> None:
+    pages = [
+        (_page_png(tmp_path / "a.png", (600, 900)), _fake_picture(Path("00001.webp"))),
+        (
+            _page_png(tmp_path / "b.png", (900, 600), band=10),
+            _fake_picture(Path("00002.webp")),
+        ),
+        (
+            _page_png(tmp_path / "c.png", (600, 900), band=20),
+            _fake_picture(Path("00003.webp")),
+        ),
+    ]
+
+    output = jm_downloader._write_pdf(
+        pages, tmp_path / "out.pdf", dpi=150.0, quality=95, password="Ab3xK9Qm"
+    )
+
+    doc = fitz.open(output)
+    assert doc.needs_pass
+    assert doc.authenticate("Ab3xK9Qm") > 0
+    assert doc.page_count == 3
+    # 每页都按同一个 DPI 换算物理尺寸，不再出现第一页 150 DPI、其余 72 DPI 的错位
+    expected = [(288, 432), (432, 288), (288, 432)]
+    for page, (width, height) in zip(doc, expected):
+        assert (round(page.rect.width), round(page.rect.height)) == (width, height)
+        info = doc.extract_image(page.get_images(full=True)[0][0])
+        assert info["ext"] == "jpeg"
+        assert (info["width"], info["height"]) == (
+            width * 150 // 72,
+            height * 150 // 72,
+        )
+
+
+def test_load_page_descrambles_server_blocks(tmp_path: Path) -> None:
+    original = Image.new("RGB", (30, 100))
+    for index in range(10):
+        original.paste(
+            (index * 25 % 256, index * 17 % 256, index * 9 % 256),
+            (0, index * 10, 30, index * 10 + 10),
+        )
+    # 服务端把竖直分块打乱；10 块时是整块反转，反转两次即还原
+    scrambled = descramble(original, 10)
+    path = tmp_path / "00001.webp"
+    scrambled.save(path, format="PNG")
+    picture = Picture(
+        chapter_id=42, index=1, filename="00001.webp", url="", scramble_id=42
+    )
+
+    restored = jm_downloader._load_page(path, picture)
+
+    assert block_count(42, 42, "00001.webp") == 10
+    assert restored.tobytes() == original.tobytes()

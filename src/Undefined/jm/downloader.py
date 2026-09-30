@@ -4,20 +4,35 @@ jmcpy 的异步实现内部仍会同步执行图片解码与 PDF 合成（``_to_
 ``_finalize`` 直接在协程里跑），放在事件循环里会阻塞其它消息处理，因此这里用
 同步 ``Client`` 配合 :func:`asyncio.to_thread`，线程里可以放心做 CPU 与磁盘工作。
 代价是单次任务不可取消，由 jmcpy 自己的请求超时与多端点重试兜底。
+
+合成不走 ``jmcpy.imaging.write_pdf``，原因是画质：
+
+* jmcpy 的 ``write_pdf`` 只给第一页传 ``resolution``，追加页退回默认 72 DPI，
+  于是同一份 PDF 里第一页 5.6in 宽、其余页 11.7in 宽——阅读器按单一缩放显示
+  时，第一页之后的页面会被放大两倍，看起来发虚；
+* PATH 输出会先把解扰后的图重新编码一次（WebP/JPEG），再在合成时编码第二次，
+  多留一代有损压缩。
+
+这里改为 ``decode=False`` 取服务端原始字节（无损），自己解扰、只编码一次
+（JPEG 4:4:4），并用 PyMuPDF 逐页写入、统一页尺寸、最后做 AES-256 加密。
 """
 
 from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+import io
 import logging
 from pathlib import Path
 from typing import Any, Literal
 import uuid
 
+import fitz
 from jmcpy import Book, Client, ExportFormat, Settings
-from jmcpy.imaging import write_pdf
+from jmcpy.imaging import block_count, descramble, load_image
+from jmcpy.models import Picture
 from jmcpy.texts import sanitize_filename
+from PIL import Image
 
 from Undefined.jm.client import build_settings
 from Undefined.utils.http_download import cleanup_download_dir
@@ -27,6 +42,10 @@ logger = logging.getLogger(__name__)
 
 _JM_DOWNLOAD_DIR = DOWNLOAD_CACHE_DIR / "jm"
 _BOOK_ID_PREFIX = "JM"
+#: JPEG 色度不做下采样：漫画的彩色描边与文字在 4:2:0 下会发虚
+_JPEG_SUBSAMPLING = 0
+#: PDF 页物理尺寸 = 像素 ÷ DPI，所有页统一用这个 DPI
+_POINTS_PER_INCH = 72.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,6 +91,56 @@ def _limit_bytes(max_file_size_mb: int) -> int | None:
     return max_file_size_mb * 1024 * 1024 if max_file_size_mb > 0 else None
 
 
+def _load_page(page_path: Path, picture: Picture) -> Image.Image:
+    """读取一页原图并按需解扰（服务端把竖直分块打乱，块数由章节号与文件名决定）。"""
+    image = load_image(page_path.read_bytes())
+    blocks = block_count(picture.scramble_id, picture.chapter_id, picture.filename)
+    if blocks > 1:
+        image = descramble(image, blocks)
+    # PDF 只稳定支持这几种颜色模式，其余统一转 RGB
+    return image if image.mode == "RGB" else image.convert("RGB")
+
+
+def _write_pdf(
+    pages: list[tuple[Path, Picture]],
+    output: Path,
+    *,
+    dpi: float,
+    quality: int,
+    password: str,
+) -> Path:
+    """把页面按顺序合成一个加密 PDF（页尺寸统一、每页只编码一次）。"""
+    document = fitz.open()
+    try:
+        for page_path, picture in pages:
+            image = _load_page(page_path, picture)
+            width, height = image.size
+            page = document.new_page(
+                width=width * _POINTS_PER_INCH / dpi,
+                height=height * _POINTS_PER_INCH / dpi,
+            )
+            buffer = io.BytesIO()
+            image.save(
+                buffer,
+                format="JPEG",
+                quality=quality,
+                subsampling=_JPEG_SUBSAMPLING,
+            )
+            # MuPDF 对 JPEG 流做 DCT 直通：上面这一次编码就是 PDF 里的最终数据
+            page.insert_image(page.rect, stream=buffer.getvalue())
+        document.save(
+            str(output),
+            encryption=fitz.PDF_ENCRYPT_AES_256,
+            user_pw=password,
+            owner_pw=password,
+            garbage=3,
+            deflate=True,
+        )
+    finally:
+        document.close()
+    return output
+
+
 def _download_sync(
     book_id: str,
     task_dir: Path,
@@ -89,7 +158,7 @@ def _download_sync(
         # 声明总数取本子自身的章节列表，不受 max_chapters 截断影响
         declared_chapters = len(book.chapters) or 1
         chapter_ids = _chapter_ids(book, max_chapters=max_chapters)
-        pages: list[Path] = []
+        pages: list[tuple[Path, Picture]] = []
         failed_pages = 0
         downloaded_chapters = 0
         total_bytes = 0
@@ -101,15 +170,18 @@ def _download_sync(
                     "[JM] 章节没有图片，跳过: book=%s chapter=%s", book_id, chapter_id
                 )
                 continue
-            # 每章独立的目录：同名章节复用同名目录时，overwrite=False 会拿旧图
+            # 每章独立的目录：同名章节复用同名目录时，overwrite=False 会拿旧图。
+            # decode=False 取服务端原始字节（无损），解扰与编码在写 PDF 时做一次。
             result = client.download(
                 chapter,
                 output=ExportFormat.PATH,
                 dest=task_dir / f"c{index:03d}",
+                decode=False,
                 concurrency=settings.concurrency,
-                quality=image_quality,
             )
-            pages.extend(result.paths)
+            for item in result:
+                if item.path is not None:
+                    pages.append((item.path, item.picture))
             failed_pages += len(result.failures)
             downloaded_chapters += 1
             total_bytes += sum(item.size or 0 for item in result)
@@ -143,7 +215,7 @@ def _download_sync(
                 failed_pages=failed_pages,
             )
 
-        pdf_path = write_pdf(
+        pdf_path = _write_pdf(
             pages,
             task_dir / _pdf_file_name(book),
             dpi=pdf_dpi,

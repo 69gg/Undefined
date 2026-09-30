@@ -5,9 +5,10 @@
 - 新增 `jm` 自动处理管线（`src/Undefined/skills/pipelines/jm/`，`order = 12`）与 `src/Undefined/jm/`（车号解析、jmcpy 客户端设置、整本下载合成、合并转发发送）。依赖新增 `jmcpy`。
 - 触发规则：`JM` 前缀加 5–8 位车号（`JM1114751` / `jm 1114751` / `jm:1114751` / `jm-1114751`，大小写不敏感），以及主机名含 `18comic` 或 `jmcomic` 的链接（`/album/<id>`、`/photo/<id>`、`?id=<id>`），QQ 分享卡片里的链接同样解析。前缀必须落在词边界上（`xxjm1234567` 不触发），数字后不跟数字（9 位以上不会被截成 8 位）；裸数字不触发，避免群号、时间戳误报。
 - 多章节本子按章节顺序全部下载（`[jm].max_chapters` 可限制）后合成为一个 AES-256 加密 PDF，`[jm].pdf_dpi` / `image_quality` 控制体积与画质。
+- PDF 合成改为自己写入而不是复用 `jmcpy.imaging.write_pdf`：原实现只给第一页传分辨率，追加页退回默认 72 DPI，同一份 PDF 里第一页 5.6in 宽、其余页 11.7in 宽，阅读器按单一缩放显示时第一页之后的页面被放大两倍而发虚；现在每页都按 `[jm].pdf_dpi` 统一换算物理尺寸。同时改为 `decode=False` 取服务端原始字节（无损落盘）、自己解扰、每页只编码一次 JPEG（`image_quality`，色度 4:4:4）并直接作为 PDF 图像数据，去掉了原先「先重编码一次、合成时再编码一次」的第二代有损压缩；页像素始终不缩放，画质上限由站点源图分辨率决定。
 - 发送结构固定为三个节点：本子信息（车号、标题、作者、章节数、标签、观看/点赞、页数、大小、简介预览与车号链接）、PDF 解密密码（每次随机生成 8 位，字母表去掉 `0/O/1/l/I` 等形近字符）、PDF 文件（`file` 消息段，遵循 `[onebot].file_send_mode`）。密码只出现在转发节点中，写入历史的摘要只说「密码见转发节点」，后续 AI 轮次不会复述密码。
 - 合并转发节点内嵌 `file` 段的渲染取决于 QQ 客户端：三节点发送被拒时自动退化为「两节点转发（信息 + 密码）+ 单独 PDF 文件消息」，两次转发都失败时退化为普通消息加单独文件。
-- 体积与失败语义：下载量超过 `[jm].max_file_size`（按章节图片累计判断并在合成后复核 PDF 实际大小）或没有下到任何页面时，只发信息与状态两个节点，不发密码与文件；车号不存在或接口不可用时发送一行 `JM 提取失败：<原因>` 并记录异常类型与堆栈。
+- 体积与失败语义：下载量超过 `[jm].max_file_size`（先按各章节原始图片累计预判、合成后再复核 PDF 实际大小；该上限同时约束内存占用，PDF 在内存中合成后写盘）或没有下到任何页面时，只发信息与状态两个节点，不发密码与文件；车号不存在或接口不可用时发送一行 `JM 提取失败：<原因>` 并记录异常类型与堆栈。
 - 新增 `[jm]` 配置段：`auto_extract_enabled`（默认 `false`）、`use_proxy`、`auto_extract_group_ids` / `auto_extract_private_ids`（空时跟随全局 access）、`auto_extract_max_items`（默认 1，上限 5）、`max_file_size`、`max_chapters`、`pdf_dpi`、`image_quality`、`download_concurrency`、`request_timeout`、`image_timeout`、`session_dir`（jmcpy 配置目录，可复用已保存的登录态）；`[jm].use_proxy` 支持环境变量 `JM_USE_PROXY`。
 - 图片解码与 PDF 合成是同步 CPU 工作，下载整体通过 `asyncio.to_thread` 使用 jmcpy 的同步客户端执行，不阻塞事件循环；单次任务不可取消，由 `[jm].request_timeout` / `image_timeout` 与 jmcpy 的多端点重试兜底。
 
