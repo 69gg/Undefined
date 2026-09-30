@@ -1746,7 +1746,7 @@ wheels = [
 
 [[package]]
 name = "jmcpy"
-version = "0.1.1"
+version = "0.1.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cryptography" },
@@ -1755,9 +1755,9 @@ dependencies = [
     { name = "platformdirs" },
     { name = "pypdf" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/9a/4f/f570f1f6a98741edc455ac8fa5530d2794accfa4f534eee5261642318040/jmcpy-0.1.1.tar.gz", hash = "sha256:f0d5d2e403d17b0fdc2608a115e5be78184e7d4407772c2c2cc4750c4c70db3b", size = 126015, upload-time = "2026-09-30T13:34:12.985Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b6/0c/397b83a0dc56ee79ea4f4e6490cc83b2523b5c23e22419013e95e48df866/jmcpy-0.1.2.tar.gz", hash = "sha256:db98e51bb1c516bda5c5e2b976a25661ad1569d1d0e55a8eb7d625c48bb7efd4", size = 128841, upload-time = "2026-09-30T15:11:32.422Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/4e/aa/f4c72b5dc5fce541c0d0e74d627f64ae252954b4dcaf7c372eb64157ec2c/jmcpy-0.1.1-py3-none-any.whl", hash = "sha256:f85e93ef502c6cec2d3cbc7538b84604fa652eda5caed89ea35547c3843282b6", size = 83316, upload-time = "2026-09-30T13:34:11.978Z" },
+    { url = "https://files.pythonhosted.org/packages/3c/3b/4c1ccb95689b5678ec2272e84ba2f90d06f464eab9df6fb3dfcbcf7950fd/jmcpy-0.1.2-py3-none-any.whl", hash = "sha256:76c75a4799205c5ac130f2dfe4a12859c365a789ddac7122bda4456943b8c17e", size = 84199, upload-time = "2026-09-30T15:11:31.462Z" },
 ]
 
 [[package]]
@@ -4798,7 +4798,7 @@ requires-dist = [
     { name = "crawl4ai", specifier = ">=0.8.6" },
     { name = "fastmcp", specifier = ">=3.1.1" },
     { name = "httpx", specifier = ">=0.27.0" },
-    { name = "jmcpy", specifier = ">=0.1.1" },
+    { name = "jmcpy", specifier = ">=0.1.2" },
     { name = "langchain-community", specifier = ">=0.3.0" },
     { name = "linkify-it-py", specifier = ">=2.0.3" },
     { name = "lunar-python", specifier = ">=1.4.8" },

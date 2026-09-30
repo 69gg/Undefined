@@ -5,16 +5,18 @@ jmcpy 的异步实现内部仍会同步执行图片解码与 PDF 合成（``_to_
 同步 ``Client`` 配合 :func:`asyncio.to_thread`，线程里可以放心做 CPU 与磁盘工作。
 代价是单次任务不可取消，由 jmcpy 自己的请求超时与多端点重试兜底。
 
-合成不走 ``jmcpy.imaging.write_pdf``，原因是画质：
+合成不走 ``jmcpy.imaging.write_pdf``，而是自己用 PyMuPDF 逐页写入，原因是：
 
-* jmcpy 的 ``write_pdf`` 只给第一页传 ``resolution``，追加页退回默认 72 DPI，
-  于是同一份 PDF 里第一页 5.6in 宽、其余页 11.7in 宽——阅读器按单一缩放显示
-  时，第一页之后的页面会被放大两倍，看起来发虚；
-* PATH 输出会先把解扰后的图重新编码一次（WebP/JPEG），再在合成时编码第二次，
-  多留一代有损压缩。
+* 要把**多个章节**合进同一个 PDF——jmcpy 的下载 API 只能一章一个 PDF；
+* 每页只编码一次：``download(output=PATH)`` 会先把解扰后的图重新编码一次
+  （WebP/JPEG），合成时再编码第二次；这里用 ``decode=False`` 取服务端原始字节
+  （无损落盘），自己解扰后只编码一次 JPEG（4:4:4，漫画的彩色描边在 4:2:0 下
+  会发虚）；
+* 页尺寸由我们统一控制（页宽 = 像素宽 ÷ dpi × 72）。
 
-这里改为 ``decode=False`` 取服务端原始字节（无损），自己解扰、只编码一次
-（JPEG 4:4:4），并用 PyMuPDF 逐页写入、统一页尺寸、最后做 AES-256 加密。
+jmcpy ≤0.1.1 的 ``write_pdf`` 还会让追加页退回默认 72 DPI（同一份 PDF 里第一页
+5.6in 宽、其余页 11.7in 宽），该问题已在 0.1.2 修复；这里保留自建组装是为了上面
+三点，与那个 bug 无关。
 """
 
 from __future__ import annotations
