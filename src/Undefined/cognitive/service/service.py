@@ -14,6 +14,7 @@ from Undefined.cognitive.chroma_scheduler import (
     CHROMA_PRIORITY_FOREGROUND_CRITICAL,
 )
 from Undefined.utils.coerce import safe_float
+from Undefined.utils.io import run_cancellation_safe
 from Undefined.cognitive.service.helpers import (
     _build_profile_vector_payload,
     _compose_where,
@@ -110,63 +111,71 @@ class CognitiveService:
         if self._profile_storage is None or self._vector_store is None:
             return False
 
-        existing = await self._profile_storage.read_profile(
-            normalized_entity_type,
-            normalized_entity_id,
-        )
-        if not existing:
-            return False
+        async def _sync() -> bool:
+            async with self._profile_storage.merge_guard(
+                normalized_entity_type, normalized_entity_id
+            ):
+                existing = await self._profile_storage.read_profile(
+                    normalized_entity_type,
+                    normalized_entity_id,
+                )
+                if not existing:
+                    return False
 
-        parsed = _parse_profile_markdown(existing)
-        if parsed is None:
-            return False
-        frontmatter, evaluation, summary, roast = parsed
-        current_name = _current_profile_name(normalized_entity_type, frontmatter)
-        if current_name == normalized_name:
-            return False
+                parsed = _parse_profile_markdown(existing)
+                if parsed is None:
+                    return False
+                frontmatter, evaluation, summary, roast = parsed
+                current_name = _current_profile_name(
+                    normalized_entity_type, frontmatter
+                )
+                if current_name == normalized_name:
+                    return False
 
-        frontmatter["name"] = normalized_name
-        frontmatter["updated_at"] = datetime.now().isoformat()
-        if normalized_entity_type == "user":
-            frontmatter["nickname"] = normalized_name
-            frontmatter["qq"] = normalized_entity_id
-        else:
-            frontmatter["group_name"] = normalized_name
-            frontmatter["group_id"] = normalized_entity_id
+                frontmatter["name"] = normalized_name
+                frontmatter["updated_at"] = datetime.now().isoformat()
+                if normalized_entity_type == "user":
+                    frontmatter["nickname"] = normalized_name
+                    frontmatter["qq"] = normalized_entity_id
+                else:
+                    frontmatter["group_name"] = normalized_name
+                    frontmatter["group_id"] = normalized_entity_id
 
-        updated_markdown = _serialize_profile_markdown(
-            frontmatter, summary, evaluation=evaluation, roast=roast
-        )
-        await self._profile_storage.write_profile(
-            normalized_entity_type,
-            normalized_entity_id,
-            updated_markdown,
-        )
+                updated_markdown = _serialize_profile_markdown(
+                    frontmatter, summary, evaluation=evaluation, roast=roast
+                )
+                await self._profile_storage.write_profile(
+                    normalized_entity_type,
+                    normalized_entity_id,
+                    updated_markdown,
+                )
 
-        profile_doc, profile_metadata = _build_profile_vector_payload(
-            entity_type=normalized_entity_type,
-            entity_id=normalized_entity_id,
-            effective_name=normalized_name,
-            tags=_normalize_profile_tags(frontmatter.get("tags")),
-            summary=summary,
-            evaluation=evaluation,
-            roast=roast,
-        )
-        await call_vector_store_method(
-            self._vector_store.upsert_profile,
-            f"{normalized_entity_type}:{normalized_entity_id}",
-            profile_doc,
-            profile_metadata,
-            priority=CHROMA_PRIORITY_FOREGROUND,
-        )
-        logger.info(
-            "[认知服务] 已刷新侧写展示名: entity_type=%s entity_id=%s old=%s new=%s",
-            normalized_entity_type,
-            normalized_entity_id,
-            current_name,
-            normalized_name,
-        )
-        return True
+                profile_doc, profile_metadata = _build_profile_vector_payload(
+                    entity_type=normalized_entity_type,
+                    entity_id=normalized_entity_id,
+                    effective_name=normalized_name,
+                    tags=_normalize_profile_tags(frontmatter.get("tags")),
+                    summary=summary,
+                    evaluation=evaluation,
+                    roast=roast,
+                )
+                await call_vector_store_method(
+                    self._vector_store.upsert_profile,
+                    f"{normalized_entity_type}:{normalized_entity_id}",
+                    profile_doc,
+                    profile_metadata,
+                    priority=CHROMA_PRIORITY_FOREGROUND,
+                )
+                logger.info(
+                    "[认知服务] 已刷新侧写展示名: entity_type=%s entity_id=%s old=%s new=%s",
+                    normalized_entity_type,
+                    normalized_entity_id,
+                    current_name,
+                    normalized_name,
+                )
+                return True
+
+        return await run_cancellation_safe(_sync())
 
     @staticmethod
     def _uid_candidates(user_id: str, sender_id: str) -> list[str]:

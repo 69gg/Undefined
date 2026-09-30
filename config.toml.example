@@ -1811,14 +1811,14 @@ recent_message_line_max_len = 240
 # zh: 触发本轮的“当前消息原文”最大字符数（超出会截断）。
 # en: Max characters of the current source message attached to historian jobs.
 source_message_max_len = 800
-# zh: 队列轮询间隔（秒）。
-# en: Queue poll interval (seconds).
+# zh: 无可执行阶段时的轮询间隔（秒）；阶段完成会提前唤醒调度。
+# en: Idle poll interval (seconds); phase completion wakes the scheduler early.
 poll_interval_seconds = 1.0
-# zh: 任务超时时间（秒），超时后重新入队。
-# en: Stale job timeout (seconds), re-queued after timeout.
+# zh: 启动和轮询时恢复遗留 processing 的阈值（秒）；活跃任务不回收，未恢复任务仍占实体顺位。
+# en: Recover orphan processing jobs after this age; live jobs are excluded and orphans retain entity order.
 stale_job_timeout_seconds = 300.0
-# zh: 史官同时在途处理的任务上限（>=1）；超出后暂停取新任务，避免并发无上限。
-# en: Max in-flight historian jobs (>=1); new jobs wait until in-flight drops below it.
+# zh: 史官同时执行的阶段上限（>=1）；不同实体可并发，同实体等待不占名额，需重启生效。
+# en: Max active historian phases (>=1); independent entities run concurrently, ordered waits use no slot. Restart required.
 max_concurrency = 4
 
 [cognitive.profile]
@@ -1839,11 +1839,11 @@ failed_max_age_days = 30
 # zh: 失败任务最大文件数。
 # en: Max number of failed job files.
 failed_max_files = 500
-# zh: 每处理多少条任务触发一次失败队列清理。
-# en: Failed queue cleanup interval (number of jobs processed).
+# zh: 每派发多少个史官阶段触发一次失败队列清理；0 禁用。
+# en: Failed queue cleanup interval (number of historian phases dispatched); 0 disables cleanup.
 failed_cleanup_interval = 100
-# zh: 单个任务最大自动重试次数（超过后移入 failed，0=不重试）。
-# en: Max auto-retries per job before moving to failed (0=no retry).
+# zh: 单任务累计自动重试次数；阶段切换不计次，耗尽后移入 failed 并放行后续同实体任务，0=不重试。
+# en: Total auto-retries per job; phase transitions do not count, terminal failure releases following entity updates (0=no retry).
 job_max_retries = 3
 
 [memes]

@@ -1,18 +1,54 @@
-"""文件持久化任务队列：pending → processing → complete/failed。"""
+"""单进程文件任务队列：持久化入队顺序与原子阶段切换。"""
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import time
+from collections.abc import Callable, Collection
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, TypeVar
 from uuid import uuid4
 
-from Undefined.utils.io import read_json, write_json
+from Undefined.utils.io import run_cancellation_safe, write_json_sync
 
 logger = logging.getLogger(__name__)
+_T = TypeVar("_T")
+QueueState = Literal["pending", "processing", "failed"]
+
+
+def job_order(job_id: str, job: dict[str, Any]) -> tuple[int, str]:
+    """旧 ID 末尾为入队毫秒；mtime 会随重试改变，不能用作顺序。"""
+    order = job.get("_enqueue_order")
+    if isinstance(order, int) and not isinstance(order, bool) and order > 0:
+        return order, job_id
+    try:
+        return int(job_id.rsplit("_", 1)[-1]) * 1_000_000, job_id
+    except ValueError:
+        pass
+    for field in ("timestamp_utc", "timestamp_local"):
+        try:
+            stamp = datetime.fromisoformat(str(job.get(field, "")))
+            if stamp.tzinfo is None:
+                stamp = stamp.replace(tzinfo=timezone.utc)
+            return int(stamp.timestamp() * 1_000_000_000), job_id
+        except (ValueError, OverflowError, OSError):
+            continue
+    try:
+        return int(float(job.get("timestamp_epoch", 0)) * 1_000_000_000), job_id
+    except (TypeError, ValueError, OverflowError):
+        return 0, job_id
+
+
+@dataclass(frozen=True)
+class QueuedJob:
+    job_id: str
+    data: dict[str, Any]
+    state: QueueState
 
 
 class JobQueue:
@@ -21,179 +57,207 @@ class JobQueue:
         self._pending_dir = base / "pending"
         self._processing_dir = base / "processing"
         self._failed_dir = base / "failed"
-        for d in (self._pending_dir, self._processing_dir, self._failed_dir):
-            d.mkdir(parents=True, exist_ok=True)
-        stale_lock_count = 0
-        for d in (self._pending_dir, self._processing_dir, self._failed_dir):
-            for lock_file in d.glob("*.lock"):
+        self._lock = asyncio.Lock()
+        self._last_order: int | None = None
+        for directory in (self._pending_dir, self._processing_dir, self._failed_dir):
+            directory.mkdir(parents=True, exist_ok=True)
+            for lock_file in directory.glob("*.lock"):
                 lock_file.unlink(missing_ok=True)
-                stale_lock_count += 1
-        if stale_lock_count:
-            logger.info("[认知队列] 清理遗留 lock 文件: count=%s", stale_lock_count)
-        logger.info(
-            "[认知队列] 初始化完成: base=%s pending=%s processing=%s failed=%s",
-            str(base),
-            str(self._pending_dir),
-            str(self._processing_dir),
-            str(self._failed_dir),
-        )
+
+    async def _run_locked(self, operation: Callable[[], _T]) -> _T:
+        # to_thread 被取消时磁盘操作仍可能执行，必须等其收敛后才释放队列锁。
+        async with self._lock:
+            return await run_cancellation_safe(asyncio.to_thread(operation))
+
+    @staticmethod
+    def _read(path: Path) -> dict[str, Any]:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError(f"任务载荷必须是 JSON object: {path}")
+        return data
+
+    def _entries(self, *, include_failed: bool = False) -> list[QueuedJob]:
+        directories: list[tuple[QueueState, Path]] = [
+            ("pending", self._pending_dir),
+            ("processing", self._processing_dir),
+        ]
+        if include_failed:
+            directories.append(("failed", self._failed_dir))
+        entries: list[QueuedJob] = []
+        for state, directory in directories:
+            for path in directory.glob("*.json"):
+                try:
+                    data = self._read(path)
+                except (OSError, ValueError):
+                    # failed 清理可与顺序基准恢复并行；终态坏文件不应阻断新任务。
+                    # 未完成文件则必须暴露错误，不能忽略可能存在的实体前驱。
+                    if state != "failed":
+                        raise
+                    logger.warning("[认知队列] 跳过不可读的 failed 文件: %s", path)
+                    continue
+                entries.append(QueuedJob(path.stem, data, state))
+        return sorted(entries, key=lambda item: job_order(item.job_id, item.data))
+
+    def _next_order(self) -> int:
+        if self._last_order is None:
+            last_order = 0
+            for directory in (
+                self._pending_dir,
+                self._processing_dir,
+                self._failed_dir,
+            ):
+                for path in directory.glob("*.json"):
+                    try:
+                        data = self._read(path)
+                    except (OSError, ValueError):
+                        # 入队只需恢复顺序基准；调度仍严格读取未完成任务。
+                        logger.warning(
+                            "[认知队列] 顺序恢复使用不可读任务的 ID: %s", path
+                        )
+                        data = {}
+                    last_order = max(last_order, job_order(path.stem, data)[0])
+            self._last_order = last_order
+        self._last_order = max(time.time_ns(), self._last_order + 1)
+        return self._last_order
+
+    @staticmethod
+    def _move(source: Path, destination: Path) -> None:
+        os.replace(source, destination)
+        source.with_name(f"{source.name}.lock").unlink(missing_ok=True)
 
     async def enqueue(self, job: dict[str, Any]) -> str:
-        request_id = str(job.get("request_id") or str(uuid4()))
-        end_seq = job.get("end_seq", 0)
-        job_id = f"{request_id}_{end_seq}_{int(time.time() * 1000)}"
-        await write_json(self._pending_dir / f"{job_id}.json", job)
-        logger.info(
-            "[认知队列] 入队成功: job_id=%s request_id=%s user=%s group=%s sender=%s",
-            job_id,
-            request_id,
-            job.get("user_id", ""),
-            job.get("group_id", ""),
-            job.get("sender_id", ""),
-        )
+        def _enqueue() -> str:
+            data = dict(job)
+            order = self._next_order()
+            data["_enqueue_order"] = order
+            request_id = str(data.get("request_id") or uuid4())
+            job_id = f"{request_id}_{data.get('end_seq', 0)}_{uuid4().hex}_{order // 1_000_000}"
+            write_json_sync(self._pending_dir / f"{job_id}.json", data)
+            return job_id
+
+        job_id = await self._run_locked(_enqueue)
+        logger.info("[认知队列] 入队成功: job_id=%s", job_id)
         return job_id
 
-    async def dequeue(self) -> tuple[str, dict[str, Any]] | None:
-        def _pick() -> tuple[str, dict[str, Any]] | None:
-            files = sorted(self._pending_dir.glob("*.json"))
-            for f in files:
-                dst = self._processing_dir / f.name
-                try:
-                    os.replace(f, dst)
-                    import json
+    async def list_jobs(self) -> list[QueuedJob]:
+        """一致读取 pending/processing；遗留 processing 也参与实体顺序。"""
+        return await self._run_locked(self._entries)
 
-                    with open(dst, "r", encoding="utf-8") as fh:
-                        data = json.load(fh)
-                    lock_file = f.with_name(f"{f.name}.lock")
-                    lock_file.unlink(missing_ok=True)
-                    return f.stem, data
-                except (OSError, Exception) as exc:
-                    logger.warning(
-                        "[认知队列] 出队失败，跳过文件: file=%s err=%s",
-                        str(f),
-                        exc,
-                    )
-                    continue
+    def _claim(self, job_id: str) -> tuple[str, dict[str, Any]] | None:
+        source = self._pending_dir / f"{job_id}.json"
+        if not source.exists():
+            return None
+        data = self._read(source)
+        self._move(source, self._processing_dir / source.name)
+        return job_id, data
+
+    async def claim(self, job_id: str) -> tuple[str, dict[str, Any]] | None:
+        return await self._run_locked(lambda: self._claim(job_id))
+
+    async def dequeue(self) -> tuple[str, dict[str, Any]] | None:
+        """兼容普通消费者；史官通过 list_jobs/claim 选择就绪阶段。"""
+
+        def _pick() -> tuple[str, dict[str, Any]] | None:
+            for entry in self._entries():
+                if entry.state == "pending":
+                    return self._claim(entry.job_id)
             return None
 
-        result = await asyncio.to_thread(_pick)
-        if result:
-            job_id, data = result
-            logger.info(
-                "[认知队列] 出队成功: job_id=%s retry_count=%s has_observations=%s",
-                job_id,
-                data.get("_retry_count", 0),
-                data.get("has_observations", data.get("has_new_info", False)),
+        return await self._run_locked(_pick)
+
+    async def checkpoint(self, job_id: str, job: dict[str, Any]) -> None:
+        def _save() -> None:
+            path = self._processing_dir / f"{job_id}.json"
+            if not path.is_file():
+                raise FileNotFoundError(path)
+            write_json_sync(path, job)
+
+        await self._run_locked(_save)
+
+    async def release(self, job_id: str) -> None:
+        """正常阶段切换：保留顺序、进度和重试次数。"""
+        await self._run_locked(
+            lambda: self._move(
+                self._processing_dir / f"{job_id}.json",
+                self._pending_dir / f"{job_id}.json",
             )
-        return result
+        )
 
     async def complete(self, job_id: str) -> None:
-        p = self._processing_dir / f"{job_id}.json"
-
         def _remove() -> None:
-            p.unlink(missing_ok=True)
-            p.with_name(f"{p.name}.lock").unlink(missing_ok=True)
+            path = self._processing_dir / f"{job_id}.json"
+            path.unlink(missing_ok=True)
+            path.with_name(f"{path.name}.lock").unlink(missing_ok=True)
 
-        await asyncio.to_thread(_remove)
-        logger.info("[认知队列] 任务完成并移除 processing: job_id=%s", job_id)
+        await self._run_locked(_remove)
+        logger.info("[认知队列] 任务完成: job_id=%s", job_id)
 
     async def fail(self, job_id: str, error: str) -> None:
-        src = self._processing_dir / f"{job_id}.json"
-        data = await read_json(src) or {}
-        data["error"] = error
-        await write_json(self._failed_dir / f"{job_id}.json", data)
+        def _fail() -> None:
+            source = self._processing_dir / f"{job_id}.json"
+            data = self._read(source)
+            data["error"] = error
+            write_json_sync(source, data)
+            self._move(source, self._failed_dir / source.name)
 
-        def _remove() -> None:
-            src.unlink(missing_ok=True)
-            src.with_name(f"{src.name}.lock").unlink(missing_ok=True)
-
-        await asyncio.to_thread(_remove)
-        logger.warning(
-            "[认知队列] 任务写入 failed: job_id=%s error=%s",
-            job_id,
-            error,
-        )
+        await self._run_locked(_fail)
+        logger.warning("[认知队列] 任务失败: job_id=%s error=%s", job_id, error)
 
     async def requeue(self, job_id: str, error: str) -> None:
-        """将 processing 任务移回 pending，递增 _retry_count（原子操作）。"""
-        src = self._processing_dir / f"{job_id}.json"
-        dst = self._pending_dir / f"{job_id}.json"
-        data = await read_json(src) or {}
-        data["_retry_count"] = data.get("_retry_count", 0) + 1
-        data["_last_error"] = error
-        await write_json(src, data)
-        await asyncio.to_thread(lambda: os.replace(src, dst))
-        logger.info(
-            "[认知队列] 任务回队: job_id=%s retry_count=%s last_error=%s",
-            job_id,
-            data.get("_retry_count", 0),
-            error,
-        )
+        def _requeue() -> None:
+            source = self._processing_dir / f"{job_id}.json"
+            data = self._read(source)
+            data["_retry_count"] = int(data.get("_retry_count", 0)) + 1
+            data["_last_error"] = error
+            write_json_sync(source, data)
+            self._move(source, self._pending_dir / source.name)
+
+        await self._run_locked(_requeue)
+        logger.info("[认知队列] 自动重试: job_id=%s error=%s", job_id, error)
 
     async def retry_all(self) -> int:
-        """将所有 failed 任务移回 pending 队列，返回重试数量。"""
+        """人工重试终态失败任务：保留原事件与完成进度，重新排到队尾。"""
 
-        def _move_all() -> int:
-            import json
-
+        def _retry() -> int:
             count = 0
-            for f in self._failed_dir.glob("*.json"):
-                try:
-                    data = json.loads(f.read_text("utf-8"))
-                    data.pop("error", None)
-                    dst = self._pending_dir / f.name
-                    dst.write_text(json.dumps(data, ensure_ascii=False), "utf-8")
-                    f.unlink()
-                    f.with_name(f"{f.name}.lock").unlink(missing_ok=True)
-                    count += 1
-                except (OSError, Exception) as exc:
-                    logger.warning(
-                        "[认知队列] failed 任务回队失败: file=%s err=%s",
-                        str(f),
-                        exc,
-                    )
+            for entry in self._entries(include_failed=True):
+                if entry.state != "failed":
                     continue
+                data = entry.data
+                data.pop("error", None)
+                data.pop("_last_error", None)
+                data["_retry_count"] = 0
+                data["_enqueue_order"] = self._next_order()
+                source = self._failed_dir / f"{entry.job_id}.json"
+                write_json_sync(source, data)
+                self._move(source, self._pending_dir / source.name)
+                count += 1
             return count
 
-        count = await asyncio.to_thread(_move_all)
-        logger.info("[认知队列] failed 批量回队完成: count=%s", count)
-        return count
+        return await self._run_locked(_retry)
 
-    async def recover_stale(self, timeout_seconds: float) -> int:
+    async def recover_stale(
+        self, timeout_seconds: float, *, exclude_job_ids: Collection[str] = ()
+    ) -> int:
+        excluded = frozenset(exclude_job_ids)
+
         def _recover() -> int:
             now = time.time()
             count = 0
-            for f in self._processing_dir.glob("*.json"):
-                try:
-                    if now - f.stat().st_mtime > timeout_seconds:
-                        os.replace(f, self._pending_dir / f.name)
-                        f.with_name(f"{f.name}.lock").unlink(missing_ok=True)
-                        count += 1
-                except OSError as exc:
-                    logger.warning(
-                        "[认知队列] 恢复陈旧任务失败: file=%s err=%s",
-                        str(f),
-                        exc,
-                    )
+            for path in self._processing_dir.glob("*.json"):
+                if path.stem in excluded:
                     continue
+                if now - path.stat().st_mtime > timeout_seconds:
+                    self._move(path, self._pending_dir / path.name)
+                    count += 1
             return count
 
-        count = await asyncio.to_thread(_recover)
-        if count > 0:
-            logger.info(
-                "[认知队列] 已恢复陈旧任务: count=%s timeout_seconds=%s",
-                count,
-                timeout_seconds,
-            )
-        else:
-            logger.info(
-                "[认知队列] 无需恢复陈旧任务: timeout_seconds=%s",
-                timeout_seconds,
-            )
+        count = await self._run_locked(_recover)
+        if count:
+            logger.info("[认知队列] 恢复遗留任务: count=%s", count)
         return count
 
     def snapshot(self) -> dict[str, Any]:
-        """返回队列目录计数快照。"""
         return {
             "pending": sum(1 for _ in self._pending_dir.glob("*.json")),
             "processing": sum(1 for _ in self._processing_dir.glob("*.json")),

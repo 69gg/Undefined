@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from typing import Any, Callable, cast
 
@@ -66,6 +67,10 @@ class _FakeProfileStorage:
     def __init__(self, initial_profile: str | None = None) -> None:
         self.profile = initial_profile
         self.last_write: tuple[str, str, str] | None = None
+        self.lock = asyncio.Lock()
+
+    def merge_guard(self, _entity_type: str, _entity_id: str) -> asyncio.Lock:
+        return self.lock
 
     async def read_profile(
         self,

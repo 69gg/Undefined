@@ -6,7 +6,9 @@ import asyncio
 import contextlib
 import json
 import logging
+from collections.abc import Coroutine
 from datetime import datetime, timezone, tzinfo
+from functools import partial
 from typing import Any, Callable
 
 from Undefined.ai.transports.openai_transport import RESPONSES_OUTPUT_ITEMS_KEY
@@ -21,7 +23,17 @@ from Undefined.cognitive.service.helpers import (
 )
 from Undefined.cognitive.vector_store_compat import call_vector_store_method
 from Undefined.config.models import HISTORIAN_MIN_POLL_INTERVAL_SECONDS
+from Undefined.cognitive.job_queue import QueuedJob
+from Undefined.cognitive.historian.scheduling import (
+    EntityKey,
+    HistorianProgress,
+    observations,
+    resolve_profile_targets,
+    select_ready_phase,
+    target_key,
+)
 from Undefined.utils.tool_calls import extract_required_tool_call_arguments
+from Undefined.utils.io import run_cancellation_safe
 
 from Undefined.cognitive.historian.helpers import (
     _coerce_bool,
@@ -64,6 +76,8 @@ class HistorianWorker:
         self._stop_event = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
         self._inflight_tasks: set[asyncio.Task[None]] = set()
+        self._active_jobs: dict[str, EntityKey | None] = {}
+        self._wakeup = asyncio.Event()
 
     async def _prepare_query_embedding(self, query_text: str) -> list[float] | None:
         embed_query = getattr(self._vector_store, "embed_query", None)
@@ -87,6 +101,9 @@ class HistorianWorker:
         return normalized
 
     async def start(self) -> None:
+        if self._task is not None and not self._task.done():
+            return
+        self._stop_event.clear()
         logger.info("[史官] Worker 启动中")
         self._task = asyncio.create_task(self._poll_loop())
         logger.info("[史官] Worker 已启动")
@@ -94,94 +111,141 @@ class HistorianWorker:
     async def stop(self) -> None:
         logger.info("[史官] Worker 停止中")
         self._stop_event.set()
+        self._wakeup.set()
         if self._task:
             await self._task
         logger.info("[史官] Worker 已停止")
 
+    def _phase_finished(self, job_id: str, task: asyncio.Task[None]) -> None:
+        self._inflight_tasks.discard(task)
+        self._active_jobs.pop(job_id, None)
+        self._wakeup.set()
+        if not task.cancelled() and (error := task.exception()) is not None:
+            logger.error(
+                "[史官] 阶段未能收敛，保留 processing 等待恢复: job_id=%s error=%s",
+                job_id,
+                error,
+            )
+
     async def _poll_loop(self) -> None:
         dispatch_count = 0
-        logger.info("[史官] 轮询循环已开始")
-        while not self._stop_event.is_set():
-            config = self._config_getter()
-            poll_interval = max(
-                HISTORIAN_MIN_POLL_INTERVAL_SECONDS,
-                float(config.poll_interval_seconds),
-            )
-            if len(self._inflight_tasks) >= self._max_concurrency:
-                # 唯一的并发门禁（发车门控）：在途任务达到上限时先不取新任务，
-                # 限制「同时存在的任务对象数量」让 dequeue 暂停，既保证在途
-                # 处理不超过 max_concurrency，也避免任务与队列取出的消息
-                # 无界堆积在内存里。任务数可能因 done 回调尚未触发而短暂
-                # 偏高，最多多休眠一个轮询周期，不做补偿。
-                await asyncio.sleep(poll_interval)
-                continue
-            result = await self._job_queue.dequeue()
-            if result:
-                job_id, job = result
-                task = asyncio.create_task(self._process_job_with_retry(job_id, job))
-                self._inflight_tasks.add(task)
-                task.add_done_callback(self._inflight_tasks.discard)
-                dispatch_count += 1
-                logger.info(
-                    "[史官] 任务已发车: job_id=%s inflight=%s",
-                    job_id,
-                    len(self._inflight_tasks),
-                )
-                if (
-                    config.failed_cleanup_interval > 0
-                    and dispatch_count % config.failed_cleanup_interval == 0
-                ):
-                    from Undefined.utils.cache import cleanup_cache_dir
-
-                    cleanup_cache_dir(
-                        self._job_queue._failed_dir,
-                        max_age_seconds=config.failed_max_age_days * 86400,
-                        max_files=config.failed_max_files,
-                    )
-                    logger.info(
-                        "[史官] failed 队列清理已执行: interval=%s max_age_days=%s max_files=%s",
-                        config.failed_cleanup_interval,
-                        config.failed_max_age_days,
-                        config.failed_max_files,
-                    )
-
-            await asyncio.sleep(poll_interval)
-
-        if self._inflight_tasks:
-            logger.info(
-                "[史官] 等待在途任务收敛: inflight=%s", len(self._inflight_tasks)
-            )
-            await asyncio.gather(*list(self._inflight_tasks), return_exceptions=True)
-        logger.info("[史官] 轮询循环已结束")
-
-    async def _process_job_with_retry(self, job_id: str, job: dict[str, Any]) -> None:
-        # 并发上限由 _poll_loop 的在途计数门控统一保证（见 worker 构造处的
-        # 说明）：发车前限制任务对象数量，最多同时存在 _max_concurrency 个，
-        # 因此这里不再叠加同上限的 Semaphore——两个上限一致时后者恒不阻塞，
-        # 只会让维护者误以为并发由两层共同决定。若将来新增绕过发车门控的
-        # 调用路径，必须一并接入门禁，而不是在这里补锁。
         try:
-            await self._process_job(job_id, job)
-        except Exception as e:
-            retry_count = job.get("_retry_count", 0)
+            while not self._stop_event.is_set():
+                self._wakeup.clear()
+                config = self._config_getter()
+                poll_interval = max(
+                    HISTORIAN_MIN_POLL_INTERVAL_SECONDS,
+                    float(config.poll_interval_seconds),
+                )
+                try:
+                    await self._job_queue.recover_stale(
+                        config.stale_job_timeout_seconds,
+                        exclude_job_ids=self._active_jobs,
+                    )
+                    if len(self._inflight_tasks) < self._max_concurrency:
+                        entries: list[QueuedJob] = await self._job_queue.list_jobs()
+                        ready = select_ready_phase(entries, self._active_jobs)
+                        if ready is not None:
+                            claimed = await self._job_queue.claim(ready.entry.job_id)
+                            if claimed is not None:
+                                job_id, job = claimed
+                                self._active_jobs[job_id] = (
+                                    target_key(ready.target) if ready.target else None
+                                )
+                                task = asyncio.create_task(
+                                    self._process_job_with_retry(
+                                        job_id, job, target=ready.target
+                                    ),
+                                    name=f"historian:{job_id}",
+                                )
+                                self._inflight_tasks.add(task)
+                                task.add_done_callback(
+                                    partial(self._phase_finished, job_id)
+                                )
+                                dispatch_count += 1
+                                logger.info(
+                                    "[史官] 阶段发车: job_id=%s target=%s inflight=%s",
+                                    job_id,
+                                    self._active_jobs[job_id],
+                                    len(self._inflight_tasks),
+                                )
+                                if (
+                                    config.failed_cleanup_interval > 0
+                                    and dispatch_count % config.failed_cleanup_interval
+                                    == 0
+                                ):
+                                    from Undefined.utils.cache import cleanup_cache_dir
+
+                                    await asyncio.to_thread(
+                                        cleanup_cache_dir,
+                                        self._job_queue._failed_dir,
+                                        max_age_seconds=config.failed_max_age_days
+                                        * 86400,
+                                        max_files=config.failed_max_files,
+                                    )
+                                continue
+                except Exception:
+                    logger.exception("[史官] 阶段调度失败，保留队列状态等待重试")
+                try:
+                    await asyncio.wait_for(self._wakeup.wait(), timeout=poll_interval)
+                except TimeoutError:
+                    pass
+        except asyncio.CancelledError:
+            # 轮询在进入收尾 gather 前被取消时，也要取消正在等待模型的阶段。
+            for task in self._inflight_tasks:
+                task.cancel()
+            raise
+        finally:
+            # 正常停止等待阶段结束；取消时只等待已开始的提交临界区收敛。
+            if self._inflight_tasks:
+                await asyncio.gather(
+                    *list(self._inflight_tasks), return_exceptions=True
+                )
+
+    async def _process_job_with_retry(
+        self, job_id: str, job: dict[str, Any], *, target: dict[str, str] | None = None
+    ) -> None:
+        # 模型调用可取消；磁盘/向量提交在各自的临界区内保护。
+        await self._execute_phase(job_id, job, target)
+
+    async def _execute_phase(
+        self, job_id: str, job: dict[str, Any], target: dict[str, str] | None
+    ) -> None:
+        try:
+            if target is None:
+                await self._process_job(job_id, job)
+            else:
+                progress = HistorianProgress.from_job(job)
+                await self._merge_profiles(
+                    job,
+                    "\n".join(progress.rewrites),
+                    job_id,
+                    target=target,
+                    progress=progress,
+                )
+                await self._finish_phase(job_id, job, progress)
+        except Exception as error:
+            retry_count = int(job.get("_retry_count", 0))
             max_retries = self._config_getter().job_max_retries
             if retry_count < max_retries:
                 logger.warning(
-                    "[史官] 任务 %s 处理失败 (%s/%s)，将自动重试: %s",
+                    "[史官] 阶段失败，保留顺位重试: job_id=%s retry=%s/%s error=%s",
                     job_id,
                     retry_count + 1,
                     max_retries,
-                    e,
+                    error,
                 )
-                await self._job_queue.requeue(job_id, str(e))
+                await run_cancellation_safe(self._job_queue.requeue(job_id, str(error)))
             else:
-                logger.error(
-                    "[史官] 任务 %s 达到最大重试次数 (%s)，移入 failed: %s",
-                    job_id,
-                    max_retries,
-                    e,
-                )
-                await self._job_queue.fail(job_id, str(e))
+                await run_cancellation_safe(self._job_queue.fail(job_id, str(error)))
+
+    async def _finish_phase(
+        self, job_id: str, job: dict[str, Any], progress: HistorianProgress
+    ) -> None:
+        if progress.pending_targets(job):
+            await run_cancellation_safe(self._job_queue.release(job_id))
+        else:
+            await run_cancellation_safe(self._job_queue.complete(job_id))
 
     async def _rewrite_and_validate(self, job: dict[str, Any], job_id: str) -> str:
         """改写为绝对化事件文本。"""
@@ -200,21 +264,8 @@ class HistorianWorker:
             len(job.get("profile_targets", []) or []),
         )
 
-        raw_observations = (
-            job.get("observations")
-            if "observations" in job
-            else job.get("new_info", [])
-        )
-        if isinstance(raw_observations, str):
-            observation_items = (
-                [raw_observations.strip()] if raw_observations.strip() else []
-            )
-        elif isinstance(raw_observations, list):
-            observation_items = [
-                str(s).strip() for s in raw_observations if str(s).strip()
-            ]
-        else:
-            observation_items = []
+        observation_items = observations(job)
+        progress = HistorianProgress.from_job(job)
 
         base_metadata: dict[str, Any] = {
             "request_id": job.get("request_id", ""),
@@ -233,45 +284,31 @@ class HistorianWorker:
             "schema_version": job.get("schema_version", "final_v1"),
         }
 
-        canonicals: list[str] = []
+        for idx in range(progress.events_written, len(observation_items)):
+            event_id = f"{job_id}_{idx}" if len(observation_items) > 1 else job_id
+            if idx >= len(progress.rewrites):
+                canonical = await self._rewrite_and_validate(
+                    {**job, "observations": observation_items[idx]}, event_id
+                )
+                progress.rewrites.append(canonical)
+                progress.store(job)
+                await run_cancellation_safe(self._job_queue.checkpoint(job_id, job))
 
-        if observation_items:
-            # 每条 observation 独立改写+入库
-            for idx, info_item in enumerate(observation_items):
-                sub_job = {**job, "observations": info_item}
-                event_id = f"{job_id}_{idx}" if len(observation_items) > 1 else job_id
-                canonical = await self._rewrite_and_validate(sub_job, event_id)
-                meta = {
-                    **base_metadata,
-                    "has_observations": True,
-                }
+            # 重试使用相同事件 ID 和已保存的改写，不重复调用模型改写。
+            async def commit_event() -> None:
                 await call_vector_store_method(
                     self._vector_store.upsert_event,
                     event_id,
-                    canonical,
-                    meta,
+                    progress.rewrites[idx],
+                    {**base_metadata, "has_observations": True},
                     priority=CHROMA_PRIORITY_BACKGROUND,
                 )
-                canonicals.append(canonical)
-                logger.info(
-                    "[史官] 任务 %s 事件入库完成(%s/%s): len=%s",
-                    event_id,
-                    idx + 1,
-                    len(observation_items),
-                    len(canonical),
-                )
+                progress.events_written = idx + 1
+                progress.store(job)
+                await self._job_queue.checkpoint(job_id, job)
 
-        has_obs = (
-            job.get("has_observations")
-            if "has_observations" in job
-            else job.get("has_new_info", False)
-        )
-        if has_obs and canonicals:
-            merged_canonical = "\n".join(canonicals)
-            await self._merge_profiles(job, merged_canonical, job_id)
-
-        await self._job_queue.complete(job_id)
-        logger.info("[史官] 任务 %s 处理完成", job_id)
+            await run_cancellation_safe(commit_event())
+        await self._finish_phase(job_id, job, progress)
 
     def _extract_required_tool_args(
         self,
@@ -403,96 +440,46 @@ class HistorianWorker:
         return text
 
     def _resolve_profile_targets(self, job: dict[str, Any]) -> list[dict[str, str]]:
-        targets: list[dict[str, str]] = []
-        seen: set[tuple[str, str]] = set()
-        raw_targets = job.get("profile_targets")
-        if isinstance(raw_targets, list):
-            for item in raw_targets:
-                if not isinstance(item, dict):
-                    continue
-                entity_type = str(item.get("entity_type", "")).strip()
-                raw_entity_id = item.get("entity_id")
-                entity_id = (
-                    str(raw_entity_id).strip() if raw_entity_id is not None else ""
-                )
-                if entity_type not in {"user", "group"} or not entity_id:
-                    continue
-                key = (entity_type, entity_id)
-                if key in seen:
-                    continue
-                seen.add(key)
-                targets.append(
-                    {
-                        "entity_type": entity_type,
-                        "entity_id": entity_id,
-                        "perspective": str(item.get("perspective", "")).strip(),
-                        "preferred_name": str(item.get("preferred_name", "")).strip(),
-                    }
-                )
-        if targets:
-            return targets
-
-        entity_type = "group" if str(job.get("group_id", "")).strip() else "user"
-        entity_id = str(
-            job.get("group_id") or job.get("user_id") or job.get("sender_id", "")
-        ).strip()
-        if entity_id:
-            targets.append(
-                {
-                    "entity_type": entity_type,
-                    "entity_id": entity_id,
-                    "perspective": "legacy",
-                    "preferred_name": "",
-                }
-            )
-        return targets
+        return resolve_profile_targets(job)
 
     async def _merge_profiles(
-        self, job: dict[str, Any], canonical: str, event_id: str
+        self,
+        job: dict[str, Any],
+        canonical: str,
+        event_id: str,
+        *,
+        target: dict[str, str] | None = None,
+        progress: HistorianProgress | None = None,
     ) -> None:
-        targets = self._resolve_profile_targets(job)
-        if not targets:
-            logger.warning("[史官] 任务 %s 侧写合并跳过：缺少目标实体", event_id)
-            return
-        logger.info(
-            "[史官] 任务 %s 开始合并侧写: target_count=%s targets=%s",
-            event_id,
-            len(targets),
-            [
-                (t["entity_type"], t["entity_id"], t.get("perspective", ""))
-                for t in targets
-            ],
-        )
-        success_count = 0
-        for index, target in enumerate(targets, start=1):
-            try:
-                # 同一实体的「读 → LLM → 写」整段互斥，避免并发合并互相覆盖
-                async with self._profile_merge_guard(target):
-                    merged = await self._merge_profile_target(
-                        job=job,
-                        canonical=canonical,
-                        event_id=event_id,
-                        target=target,
-                        target_index=index,
-                        target_count=len(targets),
-                    )
-                if merged:
-                    success_count += 1
-            except Exception as exc:
-                logger.exception(
-                    "[史官] 任务 %s 侧写目标合并失败: target=%s:%s perspective=%s err=%s",
-                    event_id,
-                    target.get("entity_type", ""),
-                    target.get("entity_id", ""),
-                    target.get("perspective", ""),
-                    exc,
+        targets = [target] if target is not None else self._resolve_profile_targets(job)
+        for index, current in enumerate(targets, start=1):
+            # 顺位由调度器保证；实体锁同时隔离昵称刷新和人工恢复。
+            async with self._profile_merge_guard(current):
+                await self._merge_profile_target(
+                    job=job,
+                    canonical=canonical,
+                    event_id=event_id,
+                    target=current,
+                    target_index=index,
+                    target_count=len(targets),
+                    progress=progress,
                 )
-        logger.info(
-            "[史官] 任务 %s 侧写合并结束: success=%s total=%s",
-            event_id,
-            success_count,
-            len(targets),
-        )
+
+    async def _commit_profile_target(
+        self,
+        job: dict[str, Any],
+        event_id: str,
+        target: dict[str, str],
+        progress: HistorianProgress | None,
+        write: Coroutine[Any, Any, None] | None = None,
+    ) -> None:
+        """侧写文件、向量与目标进度作为同一个取消保护区提交。"""
+        if write is not None:
+            await write
+        if progress is not None:
+            progress.finish_target(target)
+            progress.store(job)
+            await self._job_queue.checkpoint(event_id, job)
 
     def _profile_merge_guard(self, target: dict[str, str]) -> Any:
         """返回目标实体的合并互斥锁；存储层未提供时退化为无锁上下文。"""
@@ -652,6 +639,7 @@ class HistorianWorker:
         target: dict[str, str],
         target_index: int,
         target_count: int,
+        progress: HistorianProgress | None = None,
     ) -> bool:
         entity_type = str(target.get("entity_type", "")).strip()
         entity_id = str(target.get("entity_id", "")).strip()
@@ -711,25 +699,15 @@ class HistorianWorker:
         now_local = now_local_dt.isoformat()
         now_utc = now_utc_dt.isoformat()
 
-        profile_updated_at = "（暂无/未知）"
-        try:
-            existing_profile = await self._profile_storage.read_profile(
-                entity_type, entity_id
-            )
-        except Exception as exc:
-            logger.warning(
-                "[史官] 任务 %s 预读侧写失败: entity_type=%s entity_id=%s error=%s",
-                event_id,
-                entity_type,
-                entity_id,
-                exc,
-            )
-            existing_profile = ""
-        if str(existing_profile or "").strip():
-            extracted_updated_at = _extract_frontmatter_updated_at(
-                str(existing_profile)
-            )
-            profile_updated_at = extracted_updated_at or "（暂无/未知）"
+        existing_profile = await self._profile_storage.read_profile(
+            entity_type, entity_id
+        )
+        profile_snapshot = (
+            existing_profile if existing_profile is not None else "（暂无侧写）"
+        )
+        profile_updated_at = (
+            _extract_frontmatter_updated_at(existing_profile or "") or "（暂无/未知）"
+        )
 
         from Undefined.utils.resources import read_text_resource
 
@@ -760,6 +738,7 @@ class HistorianWorker:
             now_local=_escape_braces(now_local),
             now_utc=_escape_braces(now_utc),
             profile_updated_at=_escape_braces(profile_updated_at),
+            current_profile=profile_snapshot,
             timestamp_local=_escape_braces(str(job.get("timestamp_local", ""))),
             timezone=_escape_braces(timezone_label),
             event_id=_escape_braces(event_id),
@@ -855,11 +834,15 @@ class HistorianWorker:
                         or not rp_eid.isalnum()
                     ):
                         tc_content = "错误：entity_type 或 entity_id 无效"
+                    elif (rp_et, rp_eid) == (entity_type, entity_id):
+                        tc_content = profile_snapshot
                     else:
                         profile_text = await self._profile_storage.read_profile(
                             rp_et, rp_eid
                         )
-                        tc_content = profile_text or "（暂无侧写）"
+                        tc_content = (
+                            profile_text if profile_text is not None else "（暂无侧写）"
+                        )
                     logger.info(
                         "[史官] 任务 %s read_profile: %s:%s len=%s",
                         event_id,
@@ -887,6 +870,15 @@ class HistorianWorker:
                             }
                         )
                         continue
+                    if (up_et, up_eid) != (entity_type, entity_id):
+                        tool_results.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tc_id,
+                                "content": "错误：只能更新本次目标实体",
+                            }
+                        )
+                        continue
                     raw_skip = tc_args.get("skip", False)
                     skip = (
                         raw_skip.lower() not in ("false", "0", "no", "")
@@ -903,6 +895,9 @@ class HistorianWorker:
                             perspective,
                             skip_reason or "unspecified",
                         )
+                        await run_cancellation_safe(
+                            self._commit_profile_target(job, event_id, target, progress)
+                        )
                         tool_results.append(
                             {
                                 "role": "tool",
@@ -911,7 +906,7 @@ class HistorianWorker:
                             }
                         )
                         done = True
-                        continue
+                        break
 
                     summary = str(tc_args.get("summary", "")).strip()
                     evaluation = str(tc_args.get("evaluation", "")).strip()
@@ -978,23 +973,32 @@ class HistorianWorker:
                         or (f"GID:{up_eid}" if up_et == "group" else f"UID:{up_eid}")
                     )
 
-                    await self._write_profile(
-                        entity_type=up_et,
-                        entity_id=up_eid,
-                        effective_name=effective_name,
-                        tags=up_tags,
-                        summary=summary,
-                        evaluation=evaluation,
-                        roast=roast,
-                        event_id=event_id,
-                        perspective=perspective,
-                        now_timezone=now_local_dt.tzinfo,
+                    await run_cancellation_safe(
+                        self._commit_profile_target(
+                            job,
+                            event_id,
+                            target,
+                            progress,
+                            self._write_profile(
+                                entity_type=up_et,
+                                entity_id=up_eid,
+                                effective_name=effective_name,
+                                tags=up_tags,
+                                summary=summary,
+                                evaluation=evaluation,
+                                roast=roast,
+                                event_id=event_id,
+                                perspective=perspective,
+                                now_timezone=now_local_dt.tzinfo,
+                            ),
+                        )
                     )
                     tool_results.append(
                         {"role": "tool", "tool_call_id": tc_id, "content": "侧写已更新"}
                     )
                     result = True
                     done = True
+                    break
 
                 else:
                     tool_results.append(
@@ -1007,6 +1011,8 @@ class HistorianWorker:
 
             messages.extend(tool_results)
             if done:
-                break
+                return result
 
-        return result
+        raise RuntimeError(
+            f"侧写合并未产生有效更新或明确跳过: {event_id} {entity_type}:{entity_id}"
+        )

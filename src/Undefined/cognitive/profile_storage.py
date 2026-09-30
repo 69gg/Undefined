@@ -10,6 +10,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from Undefined.utils.io import run_cancellation_safe
+
 logger = logging.getLogger(__name__)
 
 
@@ -120,7 +122,7 @@ class ProfileStorage:
                     except OSError:
                         pass
 
-            await asyncio.to_thread(_write)
+            await run_cancellation_safe(asyncio.to_thread(_write))
         revisions = await self.list_revisions(entity_type, entity_id)
         logger.info(
             "[认知侧写] 写入完成: entity_type=%s entity_id=%s revisions=%s",

@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import re
 from datetime import datetime, timedelta
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -191,21 +189,21 @@ async def test_merge_profile_target_user_queries_history_with_sender_or_user_id(
         "recent_messages": [],
     }
 
-    result = await worker._merge_profile_target(
-        job=job,
-        canonical="测试用户(123456)表示长期偏好 Python",
-        event_id="job-1",
-        target={
-            "entity_type": "user",
-            "entity_id": "123456",
-            "perspective": "sender",
-            "preferred_name": "测试用户",
-        },
-        target_index=1,
-        target_count=1,
-    )
+    with pytest.raises(RuntimeError, match="未产生有效更新"):
+        await worker._merge_profile_target(
+            job=job,
+            canonical="测试用户(123456)表示长期偏好 Python",
+            event_id="job-1",
+            target={
+                "entity_type": "user",
+                "entity_id": "123456",
+                "perspective": "sender",
+                "preferred_name": "测试用户",
+            },
+            target_index=1,
+            target_count=1,
+        )
 
-    assert result is False
     assert vector_store.embed_query_calls == 1
     assert {"sender_id": "123456"} in vector_store.where_calls
     assert {"user_id": "123456"} in vector_store.where_calls
@@ -229,137 +227,6 @@ async def test_merge_profile_target_user_queries_history_with_sender_or_user_id(
     local_dt = datetime.fromisoformat(local_match.group(1))
     assert local_dt.tzinfo is not None
     assert local_dt.utcoffset() == timedelta(hours=8)
-
-
-@pytest.mark.asyncio
-async def test_poll_loop_dispatches_without_waiting_previous_job_completion() -> None:
-    started: list[str] = []
-    finished: list[str] = []
-    first_job_gate = asyncio.Event()
-
-    class _FakeQueue:
-        def __init__(self) -> None:
-            self._items: list[tuple[str, dict[str, Any]] | None] = [
-                ("job-1", {"_retry_count": 0}),
-                ("job-2", {"_retry_count": 0}),
-                None,
-                None,
-            ]
-
-        async def dequeue(self) -> tuple[str, dict[str, Any]] | None:
-            if self._items:
-                return self._items.pop(0)
-            return None
-
-        async def requeue(self, _job_id: str, _error: str) -> None:
-            return None
-
-        async def fail(self, _job_id: str, _error: str) -> None:
-            return None
-
-    queue = _FakeQueue()
-
-    class _DispatchWorker(HistorianWorker):
-        async def _process_job(self, job_id: str, job: dict[str, Any]) -> None:
-            _ = job
-            started.append(job_id)
-            if job_id == "job-1":
-                await first_job_gate.wait()
-                finished.append(job_id)
-                return
-
-            # 关键断言：第二单启动时，第一单尚未完成。
-            assert "job-1" in started
-            assert "job-1" not in finished
-            finished.append(job_id)
-            first_job_gate.set()
-            self._stop_event.set()
-
-    worker = _DispatchWorker(
-        job_queue=queue,
-        vector_store=None,
-        profile_storage=None,
-        ai_client=None,
-        config_getter=lambda: SimpleNamespace(
-            poll_interval_seconds=0.01,
-            failed_cleanup_interval=0,
-            failed_max_age_days=30,
-            failed_max_files=500,
-            job_max_retries=0,
-        ),
-    )
-
-    await asyncio.wait_for(worker._poll_loop(), timeout=1.0)
-
-    assert started[:2] == ["job-1", "job-2"]
-    assert "job-1" in finished and "job-2" in finished
-
-
-@pytest.mark.asyncio
-async def test_poll_loop_cleans_failed_queue_once_per_dispatch_threshold(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    stop_event = asyncio.Event()
-    cleanup_calls: list[tuple[Path, int, int]] = []
-
-    def _record_cleanup(
-        path: Path,
-        *,
-        max_age_seconds: int,
-        max_files: int,
-    ) -> int:
-        cleanup_calls.append((path, max_age_seconds, max_files))
-        return 0
-
-    monkeypatch.setattr(
-        "Undefined.utils.cache.cleanup_cache_dir",
-        _record_cleanup,
-    )
-
-    class _FakeQueue:
-        def __init__(self) -> None:
-            self._failed_dir = tmp_path
-            self.dequeue_calls = 0
-
-        async def dequeue(self) -> tuple[str, dict[str, Any]] | None:
-            self.dequeue_calls += 1
-            if self.dequeue_calls == 1:
-                return "job-1", {"_retry_count": 0}
-            if self.dequeue_calls >= 4:
-                stop_event.set()
-            return None
-
-        async def requeue(self, _job_id: str, _error: str) -> None:
-            return None
-
-        async def fail(self, _job_id: str, _error: str) -> None:
-            return None
-
-    class _NoopWorker(HistorianWorker):
-        async def _process_job(self, job_id: str, job: dict[str, Any]) -> None:
-            _ = job_id, job
-
-    queue = _FakeQueue()
-    worker = _NoopWorker(
-        job_queue=queue,
-        vector_store=None,
-        profile_storage=None,
-        ai_client=None,
-        config_getter=lambda: SimpleNamespace(
-            poll_interval_seconds=0,
-            failed_cleanup_interval=1,
-            failed_max_age_days=30,
-            failed_max_files=500,
-            job_max_retries=0,
-        ),
-    )
-    worker._stop_event = stop_event
-
-    await asyncio.wait_for(worker._poll_loop(), timeout=2.0)
-
-    assert queue.dequeue_calls == 4
-    assert cleanup_calls == [(tmp_path, 30 * 86400, 500)]
 
 
 def test_extract_required_tool_args_preserves_job_context_in_error() -> None:
@@ -658,36 +525,36 @@ async def test_merge_profile_target_rejects_empty_evaluation() -> None:
         ai_client=_FakeAIClient(),
         config_getter=lambda: SimpleNamespace(),
     )
-    result = await worker._merge_profile_target(
-        job={
-            "observations": ["测试"],
-            "request_type": "private",
-            "user_id": "123456",
-            "group_id": "",
-            "sender_id": "123456",
-            "sender_name": "测试用户",
-            "group_name": "",
-            "timestamp_local": "2026-06-07T12:00:00+08:00",
-            "timezone": "Asia/Shanghai",
-            "request_id": "req-eval",
-            "end_seq": 1,
-            "message_ids": [],
-            "memo": "",
-            "source_message": "测试",
-            "recent_messages": [],
-        },
-        canonical="测试",
-        event_id="job-eval",
-        target={
-            "entity_type": "user",
-            "entity_id": "123456",
-            "perspective": "sender",
-            "preferred_name": "测试用户",
-        },
-        target_index=1,
-        target_count=1,
-    )
-    assert result is False
+    with pytest.raises(RuntimeError, match="未产生有效更新"):
+        await worker._merge_profile_target(
+            job={
+                "observations": ["测试"],
+                "request_type": "private",
+                "user_id": "123456",
+                "group_id": "",
+                "sender_id": "123456",
+                "sender_name": "测试用户",
+                "group_name": "",
+                "timestamp_local": "2026-06-07T12:00:00+08:00",
+                "timezone": "Asia/Shanghai",
+                "request_id": "req-eval",
+                "end_seq": 1,
+                "message_ids": [],
+                "memo": "",
+                "source_message": "测试",
+                "recent_messages": [],
+            },
+            canonical="测试",
+            event_id="job-eval",
+            target={
+                "entity_type": "user",
+                "entity_id": "123456",
+                "perspective": "sender",
+                "preferred_name": "测试用户",
+            },
+            target_index=1,
+            target_count=1,
+        )
 
 
 @pytest.mark.asyncio
@@ -760,33 +627,33 @@ async def test_merge_profile_target_rejects_empty_roast() -> None:
         ai_client=_FakeAIClient(),
         config_getter=lambda: SimpleNamespace(),
     )
-    result = await worker._merge_profile_target(
-        job={
-            "observations": ["测试"],
-            "request_type": "private",
-            "user_id": "123456",
-            "group_id": "",
-            "sender_id": "123456",
-            "sender_name": "测试用户",
-            "group_name": "",
-            "timestamp_local": "2026-06-07T12:00:00+08:00",
-            "timezone": "Asia/Shanghai",
-            "request_id": "req-roast",
-            "end_seq": 1,
-            "message_ids": [],
-            "memo": "",
-            "source_message": "测试",
-            "recent_messages": [],
-        },
-        canonical="测试",
-        event_id="job-roast",
-        target={
-            "entity_type": "user",
-            "entity_id": "123456",
-            "perspective": "sender",
-            "preferred_name": "测试用户",
-        },
-        target_index=1,
-        target_count=1,
-    )
-    assert result is False
+    with pytest.raises(RuntimeError, match="未产生有效更新"):
+        await worker._merge_profile_target(
+            job={
+                "observations": ["测试"],
+                "request_type": "private",
+                "user_id": "123456",
+                "group_id": "",
+                "sender_id": "123456",
+                "sender_name": "测试用户",
+                "group_name": "",
+                "timestamp_local": "2026-06-07T12:00:00+08:00",
+                "timezone": "Asia/Shanghai",
+                "request_id": "req-roast",
+                "end_seq": 1,
+                "message_ids": [],
+                "memo": "",
+                "source_message": "测试",
+                "recent_messages": [],
+            },
+            canonical="测试",
+            event_id="job-roast",
+            target={
+                "entity_type": "user",
+                "entity_id": "123456",
+                "perspective": "sender",
+                "preferred_name": "测试用户",
+            },
+            target_index=1,
+            target_count=1,
+        )
