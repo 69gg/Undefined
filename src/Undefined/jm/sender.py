@@ -121,10 +121,10 @@ def build_forward_nodes(
 ) -> list[dict[str, Any]]:
     """构建合并转发节点：信息 / 密码或状态 / PDF 文件。
 
-    PDF 节点保留在转发里（文件在本地合成后随转发一起上传，群聊下会成为真正的群文件）。
-    但 QQ 客户端拿不到**转发节点内**文件元素的下载地址，点击会报「获取发送地址失败」
-    （该文案只存在于 QQ 客户端；NapCat 侧上传与发送都是成功的），所以调用方还要把同一个
-    文件作为独立文件消息再发一次，用户才有可用的下载入口。
+    PDF 是本地合成好的真实文件，随转发一起上传；群聊下 NapCat 会把它作为群文件上传
+    （``isGroupFile``、``busid=102``），元素里带上 ``fileId`` / ``fileMd5`` / ``fileSha1``。
+    实测 QQ 客户端在这种节点上点下载仍会报「获取发送地址失败」（该文案只在 QQ 客户端里，
+    NapCat 侧上传与发送都成功），属于 QQ 对转发内文件下载的限制。
     """
     if pdf_path is None:
         if not password:
@@ -233,12 +233,10 @@ async def _send_result(
     pdf_path: Path,
     history_message: str,
 ) -> None:
-    """先发「信息 + 密码 + PDF」三节点合并转发，再补一条独立文件消息。
+    """发送「信息 + 密码 + PDF」三节点合并转发。
 
-    转发里的 PDF 节点是需求要求的结构，但 QQ 客户端点它下载会报「获取发送地址失败」
-    （见 build_forward_nodes 的说明）；独立文件消息才是用户真正能下载的入口。两者用
-    同一个本地文件：群聊下按内容去重，不会重复占用群空间（``stream`` / ``url`` 传输
-    模式下字节会再传一遍给协议端）。
+    文件只在转发里，不再额外发独立文件消息。群聊下这次上传会让 PDF 同时出现在群的
+    文件列表里（``busid=102``），那是 QQ 自己的行为，不是我们单独发出去的。
     """
     nodes = build_forward_nodes(info_text, pdf_path=pdf_path, password=password)
     try:
@@ -262,22 +260,13 @@ async def _send_result(
             build_password_text(password),
             history_message=history_message,
         )
-
-    try:
-        await _send_file(
-            sender, target_type, target_id, str(pdf_path), str(pdf_path.name)
-        )
-    except Exception:
-        logger.exception("[JM] PDF 文件发送失败: book=%s", book_id)
+        # 转发发不出去时，文件只能退化为独立文件消息，否则用户拿不到 PDF
         try:
-            await _send_text(
-                sender,
-                target_type,
-                target_id,
-                "PDF 上传失败，本次没有发送文件（信息与密码如上）。",
+            await _send_file(
+                sender, target_type, target_id, str(pdf_path), str(pdf_path.name)
             )
         except Exception:
-            pass
+            logger.exception("[JM] PDF 文件回退发送失败: book=%s", book_id)
 
 
 async def send_jm_book(

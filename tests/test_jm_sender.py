@@ -116,7 +116,8 @@ async def test_send_jm_book_sends_forward_then_file(
     assert "测试本子" in nodes[0]["data"]["content"]
     assert f"：{captured['password']}" in nodes[1]["data"]["content"]
     assert len(captured["password"]) == 8
-    sender.send_group_file.assert_awaited_once_with(20001, str(pdf_path), pdf_path.name)
+    # 文件只在转发里：不外发独立文件消息
+    sender.send_group_file.assert_not_awaited()
     # 历史摘要不含密码，只说明密码在转发节点里
     history_message = args.kwargs["history_message"]
     assert captured["password"] not in history_message
@@ -125,7 +126,7 @@ async def test_send_jm_book_sends_forward_then_file(
 
 
 @pytest.mark.asyncio
-async def test_send_jm_book_sends_file_even_when_forward_fails(
+async def test_send_jm_book_falls_back_to_file_message_when_forward_fails(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     sender = _sender()
@@ -141,7 +142,7 @@ async def test_send_jm_book_sends_file_even_when_forward_fails(
         config=SimpleNamespace(),
     )
 
-    # 转发失败不影响文件投递；文件仍然走独立文件消息
+    # 转发本身发不出去时才退化为独立文件消息，否则用户拿不到 PDF
     pdf_path = result.pdf_path
     assert pdf_path is not None
     sender.send_group_file.assert_awaited_once_with(20001, str(pdf_path), pdf_path.name)
