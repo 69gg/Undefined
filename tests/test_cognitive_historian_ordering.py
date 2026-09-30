@@ -512,28 +512,260 @@ async def test_stop_and_restart_resume_saved_events_and_target_progress(
 
 
 @pytest.mark.asyncio
-async def test_cancellation_waits_for_vector_and_progress_before_release(
-    tmp_path: Path,
+@pytest.mark.parametrize("phase", ["rewrite", "merge"])
+async def test_cancelled_model_call_preserves_job_for_recovery(
+    tmp_path: Path, phase: str
 ) -> None:
     h = harness(tmp_path)
     key = ("user", "1")
-    h.vectors.profile_gate = asyncio.Event()
+    gate = asyncio.Event()
+    if phase == "rewrite":
+        h.worker.rewrite_gates["A"] = gate
+    else:
+        h.ai.gates[("A", key)] = gate
     first = await h.queue.enqueue(make_job("A", key))
     await h.queue.enqueue(make_job("B", key))
     async with running(h):
-        await asyncio.wait_for(h.vectors.profile_started.wait(), 5)
+        await until(
+            lambda: (
+                "A" in h.worker.rewrite_started
+                if phase == "rewrite"
+                else h.ai.event("A", key).is_set()
+            )
+        )
         task = next(
             task
             for task in h.worker._inflight_tasks
             if task.get_name() == f"historian:{first}"
         )
         task.cancel()
-        await asyncio.sleep(0)
-        assert first in h.worker._active_jobs
+        done, _ = await asyncio.wait({task}, timeout=1)
+        assert task in done, "取消不能等待模型返回"
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        entry = next(item for item in await h.queue.list_jobs() if item.job_id == first)
+        progress = HistorianProgress.from_job(entry.data)
+        assert entry.state == "processing"
+        assert progress.events_written == (1 if phase == "merge" else 0)
+        assert not progress.completed_targets
+        assert entry.data.get("_retry_count", 0) == 0
         assert not h.ai.event("B", key).is_set()
-        h.vectors.profile_gate.set()
+        assert not h.vectors.profiles
+        assert await h.storage.read_profile(*key) is None
+        gate.set()
+        h.worker.config.stale_job_timeout_seconds = -1
+        h.worker._wakeup.set()
         await drained(h)
+    assert h.worker.rewrites["A"] == (1 if phase == "merge" else 2)
     assert "profile A" in h.ai.calls[-1][2]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("phase", ["rewrite", "merge"])
+@pytest.mark.parametrize("cancel_target", ["stop", "poll"])
+async def test_cancelling_worker_does_not_wait_for_model(
+    tmp_path: Path, phase: str, cancel_target: str
+) -> None:
+    h = harness(tmp_path)
+    key = ("user", "1")
+    gate = asyncio.Event()
+    if phase == "rewrite":
+        h.worker.rewrite_gates["A"] = gate
+    else:
+        h.ai.gates[("A", key)] = gate
+    await h.queue.enqueue(make_job("A", key))
+    stopped: asyncio.Task[None] | None = None
+    await h.worker.start()
+    try:
+        await until(
+            lambda: (
+                "A" in h.worker.rewrite_started
+                if phase == "rewrite"
+                else h.ai.event("A", key).is_set()
+            )
+        )
+        if cancel_target == "stop":
+            stopped = asyncio.create_task(h.worker.stop())
+            await until(h.worker._stop_event.is_set)
+        else:
+            stopped = h.worker._task
+            assert stopped is not None
+        stopped.cancel()
+        done, _ = await asyncio.wait({stopped}, timeout=1)
+        assert stopped in done, "停止被取消后不能继续等待模型返回"
+        with pytest.raises(asyncio.CancelledError):
+            await stopped
+        assert not h.worker._inflight_tasks
+        assert not h.worker._active_jobs
+        assert h.queue.snapshot()["processing"] == 1
+        assert not h.vectors.profiles
+    finally:
+        gate.set()
+        if stopped is not None:
+            await asyncio.gather(stopped, return_exceptions=True)
+        await asyncio.gather(h.worker.stop(), return_exceptions=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["file", "vector", "checkpoint", "skip_checkpoint"])
+async def test_cancellation_waits_for_profile_commit_before_release(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stage: str
+) -> None:
+    h = harness(tmp_path)
+    key = ("user", "1")
+    gate = asyncio.Event()
+    started = asyncio.Event()
+    first = await h.queue.enqueue(make_job("A", key))
+    await h.queue.enqueue(make_job("B", key))
+    write = h.storage.write_profile
+    checkpoint = h.queue.checkpoint
+
+    async def blocked_write(entity_type: str, entity_id: str, content: str) -> None:
+        started.set()
+        await gate.wait()
+        await write(entity_type, entity_id, content)
+
+    async def blocked_checkpoint(job_id: str, job: dict[str, Any]) -> None:
+        if job_id == first and HistorianProgress.from_job(job).completed_targets:
+            started.set()
+            await gate.wait()
+        await checkpoint(job_id, job)
+
+    if stage == "file":
+        monkeypatch.setattr(h.storage, "write_profile", blocked_write)
+    elif stage == "vector":
+        h.vectors.profile_gate = gate
+        started = h.vectors.profile_started
+    else:
+        monkeypatch.setattr(h.queue, "checkpoint", blocked_checkpoint)
+        if stage == "skip_checkpoint":
+            h.ai.skips.add("A")
+    async with running(h):
+        try:
+            await asyncio.wait_for(started.wait(), 5)
+            task = next(
+                task
+                for task in h.worker._inflight_tasks
+                if task.get_name() == f"historian:{first}"
+            )
+            task.cancel()
+            await asyncio.sleep(0)
+            task.cancel()
+            await asyncio.sleep(0)
+            assert not task.done()
+            assert first in h.worker._active_jobs
+            assert not h.ai.event("B", key).is_set()
+        finally:
+            gate.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        entry = next(item for item in await h.queue.list_jobs() if item.job_id == first)
+        assert entry.state == "processing"
+        assert HistorianProgress.from_job(entry.data).completed_targets == ["user:1"]
+        h.worker.config.stale_job_timeout_seconds = -1
+        h.worker._wakeup.set()
+        await drained(h)
+    assert [label for label, _, _ in h.ai.calls] == ["A", "B"]
+    assert h.worker.rewrites["A"] == 1
+    if stage == "skip_checkpoint":
+        assert h.ai.calls[-1][2] == "（暂无侧写）"
+    else:
+        assert "profile A" in h.ai.calls[-1][2]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["vector", "checkpoint"])
+async def test_cancelled_event_commit_finishes_checkpoint_before_recovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stage: str
+) -> None:
+    h = harness(tmp_path)
+    job = make_job("A", ("user", "1"))
+    job["observations"] = ["first observation", "second observation"]
+    job_id = await h.queue.enqueue(job)
+    claimed = await h.queue.claim(job_id)
+    assert claimed is not None
+    gate = asyncio.Event()
+    started = asyncio.Event()
+    upsert_event = h.vectors.upsert_event
+    checkpoint = h.queue.checkpoint
+
+    async def blocked_upsert(
+        event_id: str, text: str, metadata: dict[str, Any]
+    ) -> None:
+        started.set()
+        await gate.wait()
+        await upsert_event(event_id, text, metadata)
+
+    async def blocked_checkpoint(job_id: str, job: dict[str, Any]) -> None:
+        if HistorianProgress.from_job(job).events_written:
+            started.set()
+            await gate.wait()
+        await checkpoint(job_id, job)
+
+    if stage == "vector":
+        monkeypatch.setattr(h.vectors, "upsert_event", blocked_upsert)
+    else:
+        monkeypatch.setattr(h.queue, "checkpoint", blocked_checkpoint)
+    task = asyncio.create_task(h.worker._process_job_with_retry(*claimed))
+    try:
+        await asyncio.wait_for(started.wait(), 5)
+        task.cancel()
+        await asyncio.sleep(0)
+        assert not task.done()
+    finally:
+        gate.set()
+        await asyncio.gather(task, return_exceptions=True)
+    assert task.cancelled()
+    entry = (await h.queue.list_jobs())[0]
+    progress = HistorianProgress.from_job(entry.data)
+    assert entry.state == "processing"
+    assert progress.events_written == 1
+    assert len(progress.rewrites) == 1
+    assert list(h.vectors.events) == [f"{job_id}_0"]
+    assert h.worker.rewrites["A"] == 1
+    h.worker.config.stale_job_timeout_seconds = -1
+    async with running(h):
+        await drained(h)
+    assert h.worker.rewrites["A"] == 2
+    assert len(h.vectors.events) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("transition", ["release", "complete", "requeue", "fail"])
+async def test_cancelled_queue_transition_finishes_before_phase_returns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, transition: str
+) -> None:
+    h = harness(tmp_path, retries=0 if transition == "fail" else 1)
+    job = make_job("A") if transition == "complete" else make_job("A", ("user", "1"))
+    job_id = await h.queue.enqueue(job)
+    claimed = await h.queue.claim(job_id)
+    assert claimed is not None
+    if transition in {"requeue", "fail"}:
+        h.vectors.event_failures = 1
+    started = asyncio.Event()
+    gate = asyncio.Event()
+    original = getattr(h.queue, transition)
+
+    async def blocked_transition(job_id: str, *args: Any) -> None:
+        started.set()
+        await gate.wait()
+        await original(job_id, *args)
+
+    monkeypatch.setattr(h.queue, transition, blocked_transition)
+    task = asyncio.create_task(h.worker._process_job_with_retry(*claimed))
+    try:
+        await asyncio.wait_for(started.wait(), 5)
+        task.cancel()
+        await asyncio.sleep(0)
+        assert not task.done()
+    finally:
+        gate.set()
+        await asyncio.gather(task, return_exceptions=True)
+    assert task.cancelled()
+    snapshot = h.queue.snapshot()
+    assert snapshot["processing"] == 0
+    assert snapshot["pending"] == (1 if transition in {"release", "requeue"} else 0)
+    assert snapshot["failed"] == (1 if transition == "fail" else 0)
 
 
 @pytest.mark.asyncio

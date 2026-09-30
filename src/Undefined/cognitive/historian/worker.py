@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import json
 import logging
+from collections.abc import Coroutine
 from datetime import datetime, timezone, tzinfo
 from functools import partial
 from typing import Any, Callable
@@ -189,8 +190,13 @@ class HistorianWorker:
                     await asyncio.wait_for(self._wakeup.wait(), timeout=poll_interval)
                 except TimeoutError:
                     pass
+        except asyncio.CancelledError:
+            # 轮询在进入收尾 gather 前被取消时，也要取消正在等待模型的阶段。
+            for task in self._inflight_tasks:
+                task.cancel()
+            raise
         finally:
-            # 正常停止/取消轮询均等待实际阶段结束，不能提前释放实体占用。
+            # 正常停止等待阶段结束；取消时只等待已开始的提交临界区收敛。
             if self._inflight_tasks:
                 await asyncio.gather(
                     *list(self._inflight_tasks), return_exceptions=True
@@ -199,9 +205,8 @@ class HistorianWorker:
     async def _process_job_with_retry(
         self, job_id: str, job: dict[str, Any], *, target: dict[str, str] | None = None
     ) -> None:
-        # 磁盘/向量库的线程操作不能随外层 Task 一起取消。保护整个阶段，
-        # 取消请求只在读写、进度提交或失败回队收敛后传播。
-        await run_cancellation_safe(self._execute_phase(job_id, job, target))
+        # 模型调用可取消；磁盘/向量提交在各自的临界区内保护。
+        await self._execute_phase(job_id, job, target)
 
     async def _execute_phase(
         self, job_id: str, job: dict[str, Any], target: dict[str, str] | None
@@ -230,17 +235,17 @@ class HistorianWorker:
                     max_retries,
                     error,
                 )
-                await self._job_queue.requeue(job_id, str(error))
+                await run_cancellation_safe(self._job_queue.requeue(job_id, str(error)))
             else:
-                await self._job_queue.fail(job_id, str(error))
+                await run_cancellation_safe(self._job_queue.fail(job_id, str(error)))
 
     async def _finish_phase(
         self, job_id: str, job: dict[str, Any], progress: HistorianProgress
     ) -> None:
         if progress.pending_targets(job):
-            await self._job_queue.release(job_id)
+            await run_cancellation_safe(self._job_queue.release(job_id))
         else:
-            await self._job_queue.complete(job_id)
+            await run_cancellation_safe(self._job_queue.complete(job_id))
 
     async def _rewrite_and_validate(self, job: dict[str, Any], job_id: str) -> str:
         """改写为绝对化事件文本。"""
@@ -287,18 +292,22 @@ class HistorianWorker:
                 )
                 progress.rewrites.append(canonical)
                 progress.store(job)
-                await self._job_queue.checkpoint(job_id, job)
+                await run_cancellation_safe(self._job_queue.checkpoint(job_id, job))
+
             # 重试使用相同事件 ID 和已保存的改写，不重复调用模型改写。
-            await call_vector_store_method(
-                self._vector_store.upsert_event,
-                event_id,
-                progress.rewrites[idx],
-                {**base_metadata, "has_observations": True},
-                priority=CHROMA_PRIORITY_BACKGROUND,
-            )
-            progress.events_written = idx + 1
-            progress.store(job)
-            await self._job_queue.checkpoint(job_id, job)
+            async def commit_event() -> None:
+                await call_vector_store_method(
+                    self._vector_store.upsert_event,
+                    event_id,
+                    progress.rewrites[idx],
+                    {**base_metadata, "has_observations": True},
+                    priority=CHROMA_PRIORITY_BACKGROUND,
+                )
+                progress.events_written = idx + 1
+                progress.store(job)
+                await self._job_queue.checkpoint(job_id, job)
+
+            await run_cancellation_safe(commit_event())
         await self._finish_phase(job_id, job, progress)
 
     def _extract_required_tool_args(
@@ -453,11 +462,24 @@ class HistorianWorker:
                     target=current,
                     target_index=index,
                     target_count=len(targets),
+                    progress=progress,
                 )
-                if progress is not None:
-                    progress.finish_target(current)
-                    progress.store(job)
-                    await self._job_queue.checkpoint(event_id, job)
+
+    async def _commit_profile_target(
+        self,
+        job: dict[str, Any],
+        event_id: str,
+        target: dict[str, str],
+        progress: HistorianProgress | None,
+        write: Coroutine[Any, Any, None] | None = None,
+    ) -> None:
+        """侧写文件、向量与目标进度作为同一个取消保护区提交。"""
+        if write is not None:
+            await write
+        if progress is not None:
+            progress.finish_target(target)
+            progress.store(job)
+            await self._job_queue.checkpoint(event_id, job)
 
     def _profile_merge_guard(self, target: dict[str, str]) -> Any:
         """返回目标实体的合并互斥锁；存储层未提供时退化为无锁上下文。"""
@@ -617,6 +639,7 @@ class HistorianWorker:
         target: dict[str, str],
         target_index: int,
         target_count: int,
+        progress: HistorianProgress | None = None,
     ) -> bool:
         entity_type = str(target.get("entity_type", "")).strip()
         entity_id = str(target.get("entity_id", "")).strip()
@@ -872,6 +895,9 @@ class HistorianWorker:
                             perspective,
                             skip_reason or "unspecified",
                         )
+                        await run_cancellation_safe(
+                            self._commit_profile_target(job, event_id, target, progress)
+                        )
                         tool_results.append(
                             {
                                 "role": "tool",
@@ -947,17 +973,25 @@ class HistorianWorker:
                         or (f"GID:{up_eid}" if up_et == "group" else f"UID:{up_eid}")
                     )
 
-                    await self._write_profile(
-                        entity_type=up_et,
-                        entity_id=up_eid,
-                        effective_name=effective_name,
-                        tags=up_tags,
-                        summary=summary,
-                        evaluation=evaluation,
-                        roast=roast,
-                        event_id=event_id,
-                        perspective=perspective,
-                        now_timezone=now_local_dt.tzinfo,
+                    await run_cancellation_safe(
+                        self._commit_profile_target(
+                            job,
+                            event_id,
+                            target,
+                            progress,
+                            self._write_profile(
+                                entity_type=up_et,
+                                entity_id=up_eid,
+                                effective_name=effective_name,
+                                tags=up_tags,
+                                summary=summary,
+                                evaluation=evaluation,
+                                roast=roast,
+                                event_id=event_id,
+                                perspective=perspective,
+                                now_timezone=now_local_dt.tzinfo,
+                            ),
+                        )
                     )
                     tool_results.append(
                         {"role": "tool", "tool_call_id": tc_id, "content": "侧写已更新"}
