@@ -86,7 +86,7 @@ def test_generate_pdf_password_uses_safe_eight_char_alphabet() -> None:
 
 
 @pytest.mark.asyncio
-async def test_send_jm_book_sends_three_nodes(
+async def test_send_jm_book_sends_forward_then_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     sender = _sender()
@@ -101,20 +101,18 @@ async def test_send_jm_book_sends_three_nodes(
         config=SimpleNamespace(),
     )
 
-    assert status.startswith("JM1114751 已发送合并转发")
+    assert status.startswith("JM1114751 已发送合并转发与 PDF 文件")
     pdf_path = result.pdf_path
     assert pdf_path is not None
     args = sender.send_group_forward_message.await_args
     nodes = args.args[1]
-    assert [node["data"]["name"] for node in nodes] == ["本子信息", "解密密码", "PDF"]
+    # 文件不进节点：QQ 拿不到转发节点内文件元素的下载地址（点击会报「获取发送地址失败」）
+    assert [node["data"]["name"] for node in nodes] == ["本子信息", "解密密码"]
     assert "JM1114751" in nodes[0]["data"]["content"]
     assert "测试本子" in nodes[0]["data"]["content"]
     assert f"：{captured['password']}" in nodes[1]["data"]["content"]
     assert len(captured["password"]) == 8
-    file_segment = nodes[2]["data"]["content"][0]
-    assert file_segment["type"] == "file"
-    assert file_segment["data"]["file"] == f"file://{pdf_path.resolve()}"
-    assert file_segment["data"]["name"] == pdf_path.name
+    sender.send_group_file.assert_awaited_once_with(20001, str(pdf_path), pdf_path.name)
     # 历史摘要不含密码，只说明密码在转发节点里
     history_message = args.kwargs["history_message"]
     assert captured["password"] not in history_message
@@ -123,19 +121,12 @@ async def test_send_jm_book_sends_three_nodes(
 
 
 @pytest.mark.asyncio
-async def test_send_jm_book_falls_back_to_two_nodes_and_file(
+async def test_send_jm_book_sends_file_even_when_forward_fails(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     sender = _sender()
     result = _result(tmp_path)
-    calls: list[int] = []
-
-    async def _forward(*args: Any, **kwargs: Any) -> None:
-        calls.append(1)
-        if len(calls) == 1:
-            raise RuntimeError("file node rejected")
-
-    sender.send_group_forward_message.side_effect = _forward
+    sender.send_group_forward_message.side_effect = RuntimeError("forward rejected")
     _patch_download(monkeypatch, result, tmp_path / "task")
 
     await send_jm_book(
@@ -146,13 +137,10 @@ async def test_send_jm_book_falls_back_to_two_nodes_and_file(
         config=SimpleNamespace(),
     )
 
-    assert len(calls) == 2
-    second_nodes = sender.send_group_forward_message.await_args.args[1]
-    assert [node["data"]["name"] for node in second_nodes] == ["本子信息", "解密密码"]
+    # 转发失败不影响文件投递；文件仍然走独立文件消息
     pdf_path = result.pdf_path
     assert pdf_path is not None
     sender.send_group_file.assert_awaited_once_with(20001, str(pdf_path), pdf_path.name)
-    sender.send_group_message.assert_not_awaited()
 
 
 @pytest.mark.asyncio

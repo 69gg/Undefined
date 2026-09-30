@@ -115,38 +115,24 @@ def build_password_text(password: str) -> str:
 def build_forward_nodes(
     info_text: str,
     *,
-    pdf_path: Path | None = None,
     password: str = "",
     status_text: str = "",
 ) -> list[dict[str, Any]]:
-    """构建合并转发节点：信息 / 密码或状态 / PDF 文件。"""
-    if pdf_path is None:
-        if not password:
-            # 没有可发送的 PDF 时用状态说明替代密码与文件节点
-            return [
-                _node(info_text, name="本子信息"),
-                _node(status_text or "PDF 未发送", name="状态"),
-            ]
-        # 发送失败回退：先只发信息与密码，PDF 随后单独发送
+    """构建合并转发节点：信息 + 密码（或状态说明）。
+
+    PDF 不放节点里：QQ 的合并转发节点内文件元素没有可解析的下载源，客户端点下载
+    会报「获取发送地址失败」（发送本身却是成功的，NapCat 也会照发）。文件一律作为
+    紧随其后的独立文件消息投递。
+    """
+    if not password:
+        # 没有可发送的 PDF 时用状态说明替代密码节点
         return [
             _node(info_text, name="本子信息"),
-            _node(build_password_text(password), name="解密密码"),
+            _node(status_text or "PDF 未发送", name="状态"),
         ]
     return [
         _node(info_text, name="本子信息"),
         _node(build_password_text(password), name="解密密码"),
-        _node(
-            [
-                {
-                    "type": "file",
-                    "data": {
-                        "file": f"file://{pdf_path.resolve()}",
-                        "name": pdf_path.name,
-                    },
-                }
-            ],
-            name="PDF",
-        ),
     ]
 
 
@@ -217,7 +203,7 @@ async def _send_file(
         await sender.send_private_file(target_id, file_path, file_name)
 
 
-async def _send_with_file(
+async def _send_result(
     sender: "MessageSender",
     target_type: Literal["group", "private"],
     target_id: int,
@@ -228,31 +214,18 @@ async def _send_with_file(
     pdf_path: Path,
     history_message: str,
 ) -> None:
-    """优先三节点转发；失败时退化为两节点转发 + 单独文件消息。"""
-    nodes = build_forward_nodes(info_text, pdf_path=pdf_path, password=password)
+    """先发「信息 + 密码」合并转发，再把 PDF 作为独立文件消息发出去。
+
+    文件不能放进转发节点：QQ 客户端对节点内的文件元素拿不到下载地址，点下载会报
+    「获取发送地址失败」，而发送请求本身是成功的（回退逻辑因此永远等不到异常）。
+    """
+    nodes = build_forward_nodes(info_text, password=password)
     try:
         await _send_forward(
             sender, target_type, target_id, nodes, history_message=history_message
         )
-        return
     except Exception:
-        logger.exception(
-            "[JM] 三节点合并转发失败，回退为两节点转发与单独文件: book=%s", book_id
-        )
-
-    text_nodes = build_forward_nodes(info_text, password=password)
-    try:
-        await _send_forward(
-            sender,
-            target_type,
-            target_id,
-            text_nodes,
-            history_message=history_message,
-        )
-    except Exception:
-        logger.exception(
-            "[JM] 两节点合并转发同样失败，回退为普通消息: book=%s", book_id
-        )
+        logger.exception("[JM] 合并转发失败，回退为普通消息: book=%s", book_id)
         # 历史里不留密码：历史摘要与用户可见正文分开
         await _send_text(
             sender,
@@ -274,7 +247,16 @@ async def _send_with_file(
             sender, target_type, target_id, str(pdf_path), str(pdf_path.name)
         )
     except Exception:
-        logger.exception("[JM] PDF 文件单独发送失败: book=%s", book_id)
+        logger.exception("[JM] PDF 文件发送失败: book=%s", book_id)
+        try:
+            await _send_text(
+                sender,
+                target_type,
+                target_id,
+                "PDF 上传失败，本次没有发送文件（信息与密码如上）。",
+            )
+        except Exception:
+            pass
 
 
 async def send_jm_book(
@@ -320,7 +302,7 @@ async def send_jm_book(
                 )
             return f"JM{book_id} 已发送信息（{note}）"
 
-        await _send_with_file(
+        await _send_result(
             sender,
             target_type,
             target_id,
@@ -331,7 +313,7 @@ async def send_jm_book(
             history_message=history_message,
         )
         return (
-            f"JM{book_id} 已发送合并转发"
+            f"JM{book_id} 已发送合并转发与 PDF 文件"
             f"（{result.downloaded_chapters} 章 / {result.page_count} 页 / "
             f"{_format_size(result.size_bytes)}）"
         )
