@@ -4,15 +4,18 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Literal
 
+import asyncio
+
 import fitz
 import pytest
 from jmcpy.imaging import block_count, descramble
+from jmcpy import Book
 from jmcpy.models import Picture
 from PIL import Image
 
 import Undefined.jm.client as jm_client
 import Undefined.jm.downloader as jm_downloader
-from Undefined.jm.downloader import download_book_pdf
+from Undefined.jm.downloader import JmDownload, download_book_pdf
 
 
 class _FakeChapter:
@@ -534,3 +537,47 @@ async def test_download_book_pdf_counts_failed_pages(
 
     assert result.status == "ok"
     assert result.failed_pages == 1
+
+
+@pytest.mark.asyncio
+async def test_download_book_pdf_cleans_up_after_cancellation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """取消后线程仍在写盘：必须等它结束再清理，不留残留原图/未加密 PDF。"""
+    import threading
+
+    started = threading.Event()
+    release = threading.Event()
+
+    def _slow(*_args: Any, **_kwargs: Any) -> Any:
+        started.set()
+        release.wait(10)
+        return JmDownload(
+            status="ok",
+            book=Book(book_id=1114751, title="测试本子"),
+            pdf_path=None,
+            page_count=0,
+            size_bytes=0,
+            chapter_count=1,
+            downloaded_chapters=0,
+            failed_pages=0,
+        )
+
+    monkeypatch.setattr(jm_downloader, "_download_sync", _slow)
+
+    task = asyncio.create_task(
+        download_book_pdf("1114751", config=_config(), password=None)
+    )
+    assert await asyncio.to_thread(started.wait, 10), "下载线程没能启动"
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    # 取消时目录还在（线程仍在写），放行线程后由回调清理
+    assert list((tmp_path / "jm").glob("*")), "取消瞬间不应删除仍在写入的目录"
+    release.set()
+
+    for _ in range(100):
+        if not list((tmp_path / "jm").glob("*")):
+            break
+        await asyncio.sleep(0.05)
+    assert list((tmp_path / "jm").glob("*")) == [], "取消后必须清掉任务目录"

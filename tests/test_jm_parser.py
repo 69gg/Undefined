@@ -106,3 +106,38 @@ def test_extract_jm_ids_ignores_url_and_filename_context() -> None:
     assert extract_jm_ids("video_jm1234567.mp4") == []
     assert extract_jm_ids("https://example.com/x/jm1234567") == []
     assert extract_jm_ids("看这个 jm1234567") == ["1234567"]
+
+
+def test_extract_jm_ids_keeps_original_text_order() -> None:
+    # 车号在前、链接在后：先出现的必须排在前面（默认只取第一个，顺序错了会下错本）
+    assert extract_jm_ids("jm1111111 https://18comic.vip/album/2222222") == [
+        "1111111",
+        "2222222",
+    ]
+    assert extract_jm_ids("https://18comic.vip/album/2222222 然后 jm1111111") == [
+        "2222222",
+        "1111111",
+    ]
+
+
+def test_extract_from_json_message_survives_malformed_segment() -> None:
+    segments: list[dict[str, Any]] = [
+        {"type": "json", "data": "not-a-dict"},
+        {"type": "json", "data": None},
+        {"type": "json"},
+        {
+            "type": "json",
+            "data": {
+                "data": '{"meta":{"detail_1":{"qqdocurl":"https://18comic.vip/album/3333333"}}}'
+            },
+        },
+    ]
+
+    # 畸形段落不能中断整条消息的检测
+    assert extract_from_json_message(segments) == ["3333333"]
+
+
+def test_extract_from_json_message_skips_broken_json_body() -> None:
+    segments = [{"type": "json", "data": {"data": "{not json"}}]
+
+    assert extract_from_json_message(segments) == []

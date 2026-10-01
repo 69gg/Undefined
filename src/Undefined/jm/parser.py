@@ -12,6 +12,7 @@ import html
 import json
 import logging
 import re
+from collections.abc import Iterator
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -24,9 +25,9 @@ logger = logging.getLogger(__name__)
 _MIN_BOOK_ID = 10_000
 _MAX_BOOK_ID = 99_999_999
 
-#: ``jm`` + 数字；前缀前不能是字母数字（避免 ``xxjm123``），数字后不能跟数字（避免截断长数字）
-#: 前缀前不能是字母数字，也不能是 URL/路径/文件名的分隔符
-#: （``t.me/jm1234567``、``video_jm1234567.mp4`` 都不算车号）
+#: ``jm`` + 数字；前缀前不能是字母数字，也不能是 URL/路径/文件名的分隔符
+#: （``xxjm1234567``、``t.me/jm1234567``、``video_jm1234567.mp4`` 都不算车号），
+#: 数字后不能跟数字（避免截断长数字）
 _JM_TOKEN_REGEX = re.compile(
     r"(?<![0-9A-Za-z._/\\-])jm\s*[:：#\-]?\s*(\d{5,8})(?!\d)", re.I
 )
@@ -78,6 +79,16 @@ def _append_candidate(
     results.append(normalized)
 
 
+def _iter_candidates(text: str) -> Iterator[tuple[int, str]]:
+    """产出 ``(位置, 候选串)``：链接与 ``JM`` 车号混排时也按原文顺序排列。"""
+    for match in _URL_REGEX.finditer(text):
+        candidate = _strip_wrapper_chars(match.group(0))
+        if _is_jm_host(urlsplit(candidate).hostname or ""):
+            yield match.start(), candidate
+    for match in _JM_TOKEN_REGEX.finditer(text):
+        yield match.start(), match.group(1)
+
+
 def extract_jm_ids(text: str) -> list[str]:
     """从纯文本中提取禁漫车号（按出现顺序去重）。"""
     results: list[str] = []
@@ -85,14 +96,11 @@ def extract_jm_ids(text: str) -> list[str]:
     if not text:
         return results
 
-    for match in _URL_REGEX.finditer(text):
-        candidate = _strip_wrapper_chars(match.group(0))
-        if not _is_jm_host(urlsplit(candidate).hostname or ""):
-            continue
+    # 链接与车号统一按原文位置排序：混排时取到的第一个必须是用户先写的那个
+    for _position, candidate in sorted(
+        _iter_candidates(text), key=lambda item: item[0]
+    ):
         _append_candidate(candidate, results=results, seen=seen)
-
-    for match in _JM_TOKEN_REGEX.finditer(text):
-        _append_candidate(match.group(1), results=results, seen=seen)
 
     return results
 
@@ -122,7 +130,12 @@ def extract_from_json_message(segments: list[dict[str, Any]]) -> list[str]:
         if segment.get("type") != "json":
             continue
 
-        raw_data = segment.get("data", {}).get("data", "")
+        # data 可能是字符串/列表等畸形结构：不能让它抛异常，否则同一条消息里
+        # 后面所有段落（含合法卡片）的检测都会被丢掉
+        segment_data = segment.get("data")
+        raw_data = (
+            segment_data.get("data", "") if isinstance(segment_data, dict) else ""
+        )
         if not raw_data:
             continue
 

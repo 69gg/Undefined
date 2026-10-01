@@ -3,13 +3,12 @@ from __future__ import annotations
 import logging
 from typing import Any, Literal
 
-from Undefined.attachments import scope_from_context
-from Undefined.jm.downloader import fetch_book
-from Undefined.jm.parser import normalize_jm_id
-from Undefined.jm.sender import (
-    fetch_jm_book_attachment,
-    format_jm_book_info,
-    send_jm_book,
+from Undefined.skills.shared import (
+    jm_book_attachment_text,
+    jm_book_info_text,
+    jm_normalize_book_id,
+    jm_scope_key,
+    jm_send_book,
 )
 
 logger = logging.getLogger(__name__)
@@ -49,7 +48,7 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
     if not raw_book_id:
         return "book_id 不能为空"
 
-    book_id = normalize_jm_id(raw_book_id)
+    book_id = jm_normalize_book_id(raw_book_id)
     if book_id is None:
         return f"无法解析禁漫车号: {raw_book_id}（支持 JM350234、350234 或禁漫链接，车号 5-8 位）"
 
@@ -61,20 +60,15 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
 
     try:
         if output_mode == "info":
-            book = await fetch_book(book_id, config=runtime_config)
-            return format_jm_book_info(book)
+            return await jm_book_info_text(book_id, config=runtime_config)
 
         if output_mode == "uid":
             if runtime_config is None:
                 return "缺少必要的运行时组件（runtime_config）"
-            attachment_registry = context.get("attachment_registry")
-            scope_key = str(context.get("scope_key") or "").strip()
-            if not scope_key:
-                scope_key = scope_from_context(context) or ""
-            return await fetch_jm_book_attachment(
-                book_id=book_id,
-                attachment_registry=attachment_registry,
-                scope_key=scope_key,
+            return await jm_book_attachment_text(
+                book_id,
+                registry=context.get("attachment_registry"),
+                scope_key=jm_scope_key(context),
                 config=runtime_config,
             )
 
@@ -89,7 +83,7 @@ async def execute(args: dict[str, Any], context: dict[str, Any]) -> str:
         if runtime_config is None:
             return "缺少必要的运行时组件（runtime_config）"
 
-        return await send_jm_book(
+        return await jm_send_book(
             book_id,
             sender=sender,
             target_type=target_type,

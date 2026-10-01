@@ -27,6 +27,7 @@ from dataclasses import dataclass
 import functools
 import io
 import logging
+import shutil
 from pathlib import Path
 from typing import Any, Literal
 import uuid
@@ -335,30 +336,58 @@ async def download_book_pdf(
 
     ``password`` 给出时用 AES-256 加密（自动提取用），``None`` 时输出未加密 PDF
     （附件 UID 模式用，便于 PDF 解析）。调用方负责在发送或登记完成后清理任务目录
-    （``cleanup_download_path``）；本函数抛异常时自己清理，不留残留目录。
+    （``cleanup_download_path``）；本函数抛异常或被取消时自己清理，不留残留目录。
     """
     task_dir = ensure_dir(_JM_DOWNLOAD_DIR / uuid.uuid4().hex)
     loop = asyncio.get_running_loop()
+    future = loop.run_in_executor(
+        _DOWNLOAD_POOL,
+        functools.partial(
+            _download_sync,
+            book_id,
+            task_dir,
+            password=password,
+            settings=build_settings(config),
+            max_chapters=int(getattr(config, "jm_max_chapters", 0)),
+            max_file_size_mb=int(getattr(config, "jm_max_file_size", 100)),
+            pdf_dpi=float(getattr(config, "jm_pdf_dpi", 150.0)),
+            image_quality=int(getattr(config, "jm_image_quality", 95)),
+        ),
+    )
     try:
-        result = await loop.run_in_executor(
-            _DOWNLOAD_POOL,
-            functools.partial(
-                _download_sync,
-                book_id,
-                task_dir,
-                password=password,
-                settings=build_settings(config),
-                max_chapters=int(getattr(config, "jm_max_chapters", 0)),
-                max_file_size_mb=int(getattr(config, "jm_max_file_size", 100)),
-                pdf_dpi=float(getattr(config, "jm_pdf_dpi", 150.0)),
-                image_quality=int(getattr(config, "jm_image_quality", 95)),
-            ),
-        )
-    except Exception:
-        # 异常路径下调用方拿不到 task_dir，必须在这里清掉已下载的原图
-        await cleanup_download_dir(task_dir)
+        # shield：协程被取消时不要把线程一起取消——同步下载停不下来，强行删目录
+        # 只会被后续写入重新创建，所以等它跑完再清理
+        result = await asyncio.shield(future)
+    except BaseException:
+        if future.done():
+            # 异常路径下调用方拿不到 task_dir，必须在这里清掉已下载的原图
+            await cleanup_download_dir(task_dir)
+        else:
+            _cleanup_when_finished(future, task_dir, loop=loop)
         raise
     return result, task_dir
+
+
+def _remove_dir_now(path: Path) -> None:
+    shutil.rmtree(path, ignore_errors=True)
+
+
+def _cleanup_when_finished(
+    future: "asyncio.Future[JmDownload]",
+    task_dir: Path,
+    *,
+    loop: asyncio.AbstractEventLoop,
+) -> None:
+    """线程仍在写盘时，等它结束后再删任务目录（取消/超时路径）。"""
+
+    def _on_done(_future: "asyncio.Future[JmDownload]") -> None:
+        try:
+            loop.run_in_executor(None, _remove_dir_now, task_dir)
+        except RuntimeError:
+            # 事件循环已关闭：退化为同步删除，避免残留原图或未加密 PDF
+            _remove_dir_now(task_dir)
+
+    future.add_done_callback(_on_done)
 
 
 async def cleanup_download_path(task_dir: Path) -> None:

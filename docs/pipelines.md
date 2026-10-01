@@ -69,7 +69,7 @@ PDF 合成没有走 `jmcpy.imaging.write_pdf`，而是自己用 PyMuPDF 逐页�
 
 AI 侧另有 `jm_book` 工具（`src/Undefined/skills/tools/jm_book/`），与 `arxiv_paper` 同构：`send` 等价自动提取，`uid` 只注册未加密 PDF 附件 UID（共享给 `file_analysis_agent`），`info` 只取详情。
 
-实现说明：图片解码与 PDF 合成是同步 CPU 工作，下载整体在 `asyncio.to_thread` 中通过 jmcpy 的同步客户端执行，不阻塞事件循环；单次任务不可取消，由 `[jm].request_timeout` / `image_timeout` 与 jmcpy 的多端点重试兜底。PDF 在内存中合成后写盘，因此 `[jm].max_file_size` 只是近似内存上限（预判按源图字节、复核按编码后字节，JPEG 重编码可能更大）。下载跑在模块专用的线程池（上限 2 个并发本子）里，不占用事件循环默认执行器；单页解码失败只跳过该页并计入「下载失败 N 页」，不会让整本失败；任务目录在成功、超限、空结果与异常四条路径上都会清理。
+实现说明：图片解码与 PDF 合成是同步 CPU 工作，下载整体在 `asyncio.to_thread` 中通过 jmcpy 的同步客户端执行，不阻塞事件循环；单次任务不可取消，由 `[jm].request_timeout` / `image_timeout` 与 jmcpy 的多端点重试兜底。PDF 在内存中合成后写盘，因此 `[jm].max_file_size` 只是近似内存上限（预判按源图字节、复核按编码后字节，JPEG 重编码可能更大）。下载跑在模块专用的线程池（上限 2 个并发本子）里，不占用事件循环默认执行器；单页解码失败只跳过该页并计入「下载失败 N 页」，不会让整本失败；任务目录在成功、超限、空结果与异常四条路径上都会清理；协程被取消时线程仍在写盘，改为等它跑完再删，避免残留原图或未加密 PDF。
 
 ## 目录结构
 
