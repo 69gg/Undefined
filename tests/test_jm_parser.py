@@ -81,3 +81,28 @@ def test_extract_from_json_message_reads_share_card() -> None:
 def test_extract_from_json_message_tolerates_broken_payload() -> None:
     segments: list[dict[str, Any]] = [{"type": "json", "data": {"data": "{not-json"}}]
     assert extract_from_json_message(segments) == []
+
+
+def test_extract_jm_ids_reads_id_query_links() -> None:
+    assert extract_jm_ids("https://18comic.vip/?id=350234") == ["350234"]
+    assert extract_jm_ids("https://jmcomic.me/album/350234?foo=1&id=350234") == [
+        "350234"
+    ]
+
+
+def test_extract_jm_ids_accepts_digit_bounds() -> None:
+    assert extract_jm_ids("jm10000") == ["10000"]  # 5 位下界
+    assert extract_jm_ids("jm99999999") == ["99999999"]  # 8 位上界
+
+
+def test_extract_jm_ids_accepts_fullwidth_separators() -> None:
+    assert extract_jm_ids("jm：350234") == ["350234"]
+    assert extract_jm_ids("JM 350234") == ["350234"]
+
+
+def test_extract_jm_ids_ignores_url_and_filename_context() -> None:
+    # 前缀前是 URL/路径/文件名分隔符时不算车号，避免把外部链接当车号下载
+    assert extract_jm_ids("https://t.me/jm1234567") == []
+    assert extract_jm_ids("video_jm1234567.mp4") == []
+    assert extract_jm_ids("https://example.com/x/jm1234567") == []
+    assert extract_jm_ids("看这个 jm1234567") == ["1234567"]

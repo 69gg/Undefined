@@ -1590,11 +1590,11 @@ auto_extract_private_ids = []
 # zh: 单条消息最多自动处理几个车号。<=0 回退 1，>5 截断到 5；每项是一整本 PDF，所以默认只处理 1 个。
 # en: Max number of book IDs to auto-process from one message. <=0 falls back to 1, >5 is clamped to 5; each item is a whole-book PDF, so only one is processed by default.
 auto_extract_max_items = 1
-# zh: PDF 体积上限（MB），超过则只发送信息节点。0=不限。
-# en: PDF size limit (MB); exceeding it sends the info node only. 0=unlimited.
+# zh: PDF 体积上限（MB），超过则只发送信息节点（按编码后字节判定，合成中即会中止）。0=不限，<0 回退 100。
+# en: PDF size limit in MB; exceeding it sends the info node only (checked on encoded bytes, aborts mid-build). 0=unlimited, <0 falls back to 100.
 max_file_size = 100
-# zh: 单本最多下载并合并几章。0=不限（全部章节）。
-# en: Max chapters downloaded and merged per book. 0=unlimited (all chapters).
+# zh: 单本最多下载并合并几章（取前 N 章）。0=不限（全部章节），<0 回退 0。
+# en: Max chapters downloaded and merged per book (first N). 0=unlimited, <0 falls back to 0.
 max_chapters = 0
 # zh: PDF 页面分辨率（DPI），所有页统一按它换算物理尺寸（页宽 = 像素宽 ÷ DPI × 72）。<=0 回退 150。页像素不做缩放。
 # en: PDF page resolution (DPI); every page uses it for its physical size (page width = pixels / DPI * 72). <=0 falls back to 150. Page pixels are never rescaled.

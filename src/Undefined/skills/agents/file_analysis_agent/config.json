@@ -2,7 +2,7 @@
     "type": "function",
     "function": {
         "name": "file_analysis_agent",
-        "description": "文件分析助手，支持解析各种文件格式：文档（PDF、Word、PPT、Excel）、代码、压缩包、图片、音频、视频等。参数优先使用内部附件 UID，也兼容 URL、legacy file_id、arXiv ID/URL 和 Bilibili BV/AV/URL。",
+        "description": "文件分析助手，支持解析各种文件格式：文档（PDF、Word、PPT、Excel）、代码、压缩包、图片、音频、视频等。参数优先使用内部附件 UID，也兼容 URL、legacy file_id、arXiv ID/URL、Bilibili BV/AV/URL 和禁漫车号/链接。",
         "parameters": {
             "type": "object",
             "properties": {

@@ -22,7 +22,9 @@ jmcpy ≤0.1.1 的 ``write_pdf`` 还会让追加页退回默认 72 DPI（同一�
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+import functools
 import io
 import logging
 from pathlib import Path
@@ -44,6 +46,12 @@ logger = logging.getLogger(__name__)
 
 _JM_DOWNLOAD_DIR = DOWNLOAD_CACHE_DIR / "jm"
 _BOOK_ID_PREFIX = "JM"
+#: 整本下载是分钟级、不可取消的任务：用专用线程池，避免占满事件循环默认执行器
+#: （默认池同时承担 utils/io 的磁盘写入），同时把并发本子数限制在这个数量。
+_MAX_CONCURRENT_DOWNLOADS = 2
+_DOWNLOAD_POOL = ThreadPoolExecutor(
+    max_workers=_MAX_CONCURRENT_DOWNLOADS, thread_name_prefix="jm-download"
+)
 #: JPEG 色度不做下采样：漫画的彩色描边与文字在 4:2:0 下会发虚
 _JPEG_SUBSAMPLING = 0
 #: PDF 页物理尺寸 = 像素 ÷ DPI，所有页统一用这个 DPI
@@ -96,11 +104,26 @@ def _limit_bytes(max_file_size_mb: int) -> int | None:
 def _load_page(page_path: Path, picture: Picture) -> Image.Image:
     """读取一页原图并按需解扰（服务端把竖直分块打乱，块数由章节号与文件名决定）。"""
     image = load_image(page_path.read_bytes())
+    # 动图不做分块还原（与 jmcpy 的 UNDECODED_SUFFIXES 语义一致）
     blocks = block_count(picture.scramble_id, picture.chapter_id, picture.filename)
-    if blocks > 1:
+    if blocks > 1 and not picture.is_animated:
         image = descramble(image, blocks)
     # PDF 只稳定支持这几种颜色模式，其余统一转 RGB
     return image if image.mode == "RGB" else image.convert("RGB")
+
+
+@dataclass(frozen=True, slots=True)
+class _PdfBuild:
+    """PDF 组装结果。"""
+
+    status: Literal["ok", "oversize", "empty"]
+    #: ``oversize`` / ``empty`` 时为 ``None``
+    path: Path | None
+    page_count: int
+    #: 成功写入的页在 PDF 里的编码字节数（``max_file_size`` 按它判定）
+    encoded_bytes: int
+    #: 组装阶段因解码失败被跳过的页数
+    failed_pages: int
 
 
 def _write_pdf(
@@ -110,16 +133,28 @@ def _write_pdf(
     dpi: float,
     quality: int,
     password: str | None,
-) -> Path:
+    limit_bytes: int | None,
+) -> _PdfBuild:
     """把页面按顺序合成一个 PDF（页尺寸统一、每页只编码一次）。
 
     ``password`` 为 ``None`` 时不加密——附件 UID 模式要交给 PDF 解析，加密会让
-    ``extract_pdf`` / ``describe_pdf_page`` 打不开。
+    ``extract_pdf`` / ``describe_pdf_page`` 打不开。单页解码失败只跳过该页并计数，
+    不整本放弃；累计编码字节超过 ``limit_bytes`` 时提前中止（此时 PDF 未落盘）。
     """
     document = fitz.open()
+    page_count = 0
+    encoded_bytes = 0
+    failed_pages = 0
     try:
         for page_path, picture in pages:
-            image = _load_page(page_path, picture)
+            try:
+                image = _load_page(page_path, picture)
+            except Exception:
+                failed_pages += 1
+                logger.warning(
+                    "[JM] 跳过无法解码的页面: %s", page_path.name, exc_info=True
+                )
+                continue
             width, height = image.size
             page = document.new_page(
                 width=width * _POINTS_PER_INCH / dpi,
@@ -132,8 +167,24 @@ def _write_pdf(
                 quality=quality,
                 subsampling=_JPEG_SUBSAMPLING,
             )
+            data = buffer.getvalue()
+            encoded_bytes += len(data)
+            if limit_bytes is not None and encoded_bytes > limit_bytes:
+                logger.info(
+                    "[JM] PDF 编码后体积超过上限，提前中止: bytes=%s limit=%s",
+                    encoded_bytes,
+                    limit_bytes,
+                )
+                return _PdfBuild(
+                    "oversize", None, page_count, encoded_bytes, failed_pages
+                )
             # MuPDF 对 JPEG 流做 DCT 直通：上面这一次编码就是 PDF 里的最终数据
-            page.insert_image(page.rect, stream=buffer.getvalue())
+            page.insert_image(page.rect, stream=data)
+            page_count += 1
+
+        if page_count == 0:
+            return _PdfBuild("empty", None, 0, encoded_bytes, failed_pages)
+
         if password is None:
             document.save(str(output), garbage=3, deflate=True)
         else:
@@ -147,7 +198,7 @@ def _write_pdf(
             )
     finally:
         document.close()
-    return output
+    return _PdfBuild("ok", output, page_count, encoded_bytes, failed_pages)
 
 
 def _download_sync(
@@ -224,29 +275,40 @@ def _download_sync(
                 failed_pages=failed_pages,
             )
 
-        pdf_path = _write_pdf(
+        build = _write_pdf(
             pages,
             task_dir / _pdf_file_name(book),
             dpi=pdf_dpi,
             quality=image_quality,
             password=password,
+            limit_bytes=limit_bytes,
         )
-        size_bytes = pdf_path.stat().st_size
-        status: Literal["ok", "oversize"] = "ok"
-        if limit_bytes is not None and size_bytes > limit_bytes:
+        failed_pages += build.failed_pages
+        if build.status != "ok" or build.path is None:
             logger.info(
-                "[JM] PDF 超过体积上限: book=%s bytes=%s limit=%sMB",
+                "[JM] PDF 未生成: book=%s status=%s pages=%s bytes=%s",
                 book_id,
-                size_bytes,
-                max_file_size_mb,
+                build.status,
+                build.page_count,
+                build.encoded_bytes,
             )
-            status = "oversize"
+            return JmDownload(
+                status=build.status,
+                book=book,
+                pdf_path=None,
+                page_count=build.page_count,
+                size_bytes=build.encoded_bytes or None,
+                chapter_count=declared_chapters,
+                downloaded_chapters=downloaded_chapters,
+                failed_pages=failed_pages,
+            )
+
         return JmDownload(
-            status=status,
+            status="ok",
             book=book,
-            pdf_path=pdf_path,
-            page_count=len(pages),
-            size_bytes=size_bytes,
+            pdf_path=build.path,
+            page_count=build.page_count,
+            size_bytes=build.path.stat().st_size,
             chapter_count=declared_chapters,
             downloaded_chapters=downloaded_chapters,
             failed_pages=failed_pages,
@@ -273,20 +335,29 @@ async def download_book_pdf(
 
     ``password`` 给出时用 AES-256 加密（自动提取用），``None`` 时输出未加密 PDF
     （附件 UID 模式用，便于 PDF 解析）。调用方负责在发送或登记完成后清理任务目录
-    （``cleanup_download_path``）。
+    （``cleanup_download_path``）；本函数抛异常时自己清理，不留残留目录。
     """
     task_dir = ensure_dir(_JM_DOWNLOAD_DIR / uuid.uuid4().hex)
-    result = await asyncio.to_thread(
-        _download_sync,
-        book_id,
-        task_dir,
-        password=password,
-        settings=build_settings(config),
-        max_chapters=int(getattr(config, "jm_max_chapters", 0)),
-        max_file_size_mb=int(getattr(config, "jm_max_file_size", 100)),
-        pdf_dpi=float(getattr(config, "jm_pdf_dpi", 150.0)),
-        image_quality=int(getattr(config, "jm_image_quality", 95)),
-    )
+    loop = asyncio.get_running_loop()
+    try:
+        result = await loop.run_in_executor(
+            _DOWNLOAD_POOL,
+            functools.partial(
+                _download_sync,
+                book_id,
+                task_dir,
+                password=password,
+                settings=build_settings(config),
+                max_chapters=int(getattr(config, "jm_max_chapters", 0)),
+                max_file_size_mb=int(getattr(config, "jm_max_file_size", 100)),
+                pdf_dpi=float(getattr(config, "jm_pdf_dpi", 150.0)),
+                image_quality=int(getattr(config, "jm_image_quality", 95)),
+            ),
+        )
+    except Exception:
+        # 异常路径下调用方拿不到 task_dir，必须在这里清掉已下载的原图
+        await cleanup_download_dir(task_dir)
+        raise
     return result, task_dir
 
 

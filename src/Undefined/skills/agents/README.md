@@ -275,10 +275,10 @@ mv skills/tools/my_tool skills/agents/my_agent/tools/
 - **grok_search 参数**：使用 `search_request`，用自然语言完整叙述搜索要求，不要只传关键词。
 
 ### file_analysis_agent（文件分析助手）
-- **功能**：分析用户提供的附件、内部 UID、URL、legacy file_id、arXiv 论文标识或 Bilibili 视频标识，提取文件内容。
+- **功能**：分析用户提供的附件、内部 UID、URL、legacy file_id、arXiv 论文标识、Bilibili 视频标识或禁漫车号，提取文件内容。
 - **适用场景**：PDF/Word/Excel/PPT/文本/代码/压缩包解析，图片、音频、视频等多模态内容识别，arXiv 论文 PDF 分析，Bilibili 视频内容分析。
 - **不适用**：没有文件来源的开放式搜索、需要联网查资料的问题、执行文件或安全鉴定。
-- **子工具**：`download_file`, `detect_file_type`, `read_text_file`, `extract_pdf`, `describe_pdf_page`, `extract_docx`, `extract_xlsx`, `extract_pptx`, `extract_archive`, `analyze_code`, `analyze_multimodal`, `cleanup_temp`；还可调用共享主工具 `arxiv_paper(output_mode=uid)`、`bilibili_video(output_mode=uid)`、`bilibili_opus(output_mode=uid)` 与 `douyin_video(output_mode=uid)` 获取待分析附件 UID（图文返回 `pic_xxx`）。
+- **子工具**：`download_file`, `detect_file_type`, `read_text_file`, `extract_pdf`, `describe_pdf_page`, `extract_docx`, `extract_xlsx`, `extract_pptx`, `extract_archive`, `analyze_code`, `analyze_multimodal`, `cleanup_temp`；还可调用共享主工具 `arxiv_paper(output_mode=uid)`、`bilibili_video(output_mode=uid)`、`bilibili_opus(output_mode=uid)`、`douyin_video(output_mode=uid)` 与 `jm_book(output_mode=uid)` 获取待分析附件 UID（图文返回 `pic_xxx`，禁漫输出未加密 PDF）。
 
 ### naga_code_analysis_agent（NagaAgent 代码分析助手）
 - **功能**：只读分析 NagaAgent 项目的结构、源码、配置、构建、部署和实现细节。

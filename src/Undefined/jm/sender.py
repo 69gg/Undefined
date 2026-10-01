@@ -93,7 +93,7 @@ def build_info_text(result: JmDownload, *, note: str = "") -> str:
         lines.append(" | ".join(stats))
 
     summary = f"页数: {result.page_count}"
-    if result.size_bytes is not None:
+    if result.pdf_path is not None and result.size_bytes is not None:
         summary += f" | PDF: {_format_size(result.size_bytes)}"
     lines.append(summary)
     if result.failed_pages:
@@ -129,15 +129,10 @@ def build_forward_nodes(
     （2026-10-01 用 14MB PDF 实测通过）。文件只发一次，不另外发独立文件消息。
     """
     if pdf_path is None:
-        if not password:
-            # 没有可发送的 PDF 时用状态说明替代密码与文件节点
-            return [
-                _node(info_text, name="本子信息"),
-                _node(status_text or "PDF 未发送", name="状态"),
-            ]
+        # 没有可发送的 PDF 时用状态说明替代密码与文件节点
         return [
             _node(info_text, name="本子信息"),
-            _node(build_password_text(password), name="解密密码"),
+            _node(status_text or "PDF 未发送", name="状态"),
         ]
     return [
         _node(info_text, name="本子信息"),
@@ -175,13 +170,8 @@ def build_history_message(result: JmDownload) -> str:
     return "\n".join(lines)
 
 
-def format_jm_book_info(book: Book, *, description_preview_chars: int = 0) -> str:
+def format_jm_book_info(book: Book) -> str:
     """本子详情的文本形式（工具 ``output_mode=info`` 用，不下载任何图片）。"""
-    limit = (
-        description_preview_chars
-        if description_preview_chars > 0
-        else _DESCRIPTION_PREVIEW_CHARS
-    )
     lines = [f"「JM{book.book_id} {book.title or '未知标题'}」"]
     if book.authors:
         lines.append(f"作者: {', '.join(book.authors)}")
@@ -198,7 +188,7 @@ def format_jm_book_info(book: Book, *, description_preview_chars: int = 0) -> st
     if stats:
         lines.append(" | ".join(stats))
 
-    description = _preview(book.description, limit)
+    description = _preview(book.description)
     if description and description != book.title:
         lines.extend(["---", description])
 
@@ -300,14 +290,21 @@ async def _send_text(
     message: str,
     *,
     history_message: str | None = None,
+    auto_history: bool = True,
 ) -> None:
     if target_type == "group":
         await sender.send_group_message(
-            target_id, message, history_message=history_message
+            target_id,
+            message,
+            auto_history,
+            history_message=history_message,
         )
     else:
         await sender.send_private_message(
-            target_id, message, history_message=history_message
+            target_id,
+            message,
+            auto_history,
+            history_message=history_message,
         )
 
 
@@ -324,6 +321,17 @@ async def _send_file(
         await sender.send_private_file(target_id, file_path, file_name)
 
 
+def _is_fatal_delivery_error(exc: BaseException) -> bool:
+    """投递结果未确认 / 文件传输错误：绝不能降级重发（仓库约定）。
+
+    判据与 ``bilibili/opus_sender.py`` 的 ``_FATAL_ERROR_FLAGS`` 一致：这类异常
+    可能已经送达，换个 action 再发一次会造成真实重复投递。
+    """
+    return bool(getattr(exc, "delivery_uncertain", False)) or bool(
+        getattr(exc, "file_transfer_error", False)
+    )
+
+
 async def _send_result(
     sender: "MessageSender",
     target_type: Literal["group", "private"],
@@ -334,20 +342,25 @@ async def _send_result(
     password: str,
     pdf_path: Path,
     history_message: str,
-) -> None:
-    """发送「信息 + 密码 + PDF」三节点合并转发。
+) -> str:
+    """发送「信息 + 密码 + PDF」三节点合并转发，返回可记录的真实投递状态。
 
     文件只在转发里，不再额外发独立文件消息。群聊下这次上传会让 PDF 同时出现在群的
     文件列表里（``busid=102``），那是 QQ 自己的行为，不是我们单独发出去的。
+    投递未确认 / 文件传输错误一律上抛，只有协议端**明确拒绝**才降级重发；降级时
+    文件没有别的入口，必须补发一条独立文件消息，否则用户拿不到 PDF。
     """
     nodes = build_forward_nodes(info_text, pdf_path=pdf_path, password=password)
     try:
         await _send_forward(
             sender, target_type, target_id, nodes, history_message=history_message
         )
-    except Exception:
-        logger.exception("[JM] 合并转发失败，回退为普通消息: book=%s", book_id)
-        # 历史里不留密码：历史摘要与用户可见正文分开
+    except Exception as exc:
+        if _is_fatal_delivery_error(exc):
+            logger.error("[JM] 合并转发投递结果未确认，不重发: book=%s", book_id)
+            raise
+        logger.exception("[JM] 合并转发失败，回退为普通消息 + 文件: book=%s", book_id)
+        # 历史里不留密码：历史摘要与用户可见正文分开；密码消息只记「已单独发送」
         await _send_text(
             sender,
             target_type,
@@ -360,15 +373,27 @@ async def _send_result(
             target_type,
             target_id,
             build_password_text(password),
-            history_message=history_message,
+            history_message="[JM] PDF 解密密码已单独发送",
         )
-        # 转发发不出去时，文件只能退化为独立文件消息，否则用户拿不到 PDF
         try:
             await _send_file(
                 sender, target_type, target_id, str(pdf_path), str(pdf_path.name)
             )
-        except Exception:
-            logger.exception("[JM] PDF 文件回退发送失败: book=%s", book_id)
+        except Exception as file_exc:
+            if _is_fatal_delivery_error(file_exc):
+                logger.error("[JM] 文件投递结果未确认，不重发: book=%s", book_id)
+                raise
+            logger.exception("[JM] 降级后的 PDF 文件发送失败: book=%s", book_id)
+            await _send_text(
+                sender,
+                target_type,
+                target_id,
+                "PDF 上传失败，本次没有发送文件（信息与密码如上）。",
+                auto_history=False,
+            )
+            return "合并转发与 PDF 文件均发送失败，已改为普通消息发送信息与密码"
+        return "合并转发被拒，已改为普通消息发送信息与密码，并补发独立 PDF 文件"
+    return "已发送合并转发与 PDF 文件"
 
 
 async def send_jm_book(
@@ -403,7 +428,12 @@ async def send_jm_book(
                     nodes,
                     history_message=history_message,
                 )
-            except Exception:
+            except Exception as exc:
+                if _is_fatal_delivery_error(exc):
+                    logger.error(
+                        "[JM] 状态转发投递结果未确认，不重发: book=%s", book_id
+                    )
+                    raise
                 logger.exception("[JM] 状态合并转发失败: book=%s", book_id)
                 await _send_text(
                     sender,
@@ -414,7 +444,7 @@ async def send_jm_book(
                 )
             return f"JM{book_id} 已发送信息（{note}）"
 
-        await _send_result(
+        status = await _send_result(
             sender,
             target_type,
             target_id,
@@ -425,7 +455,7 @@ async def send_jm_book(
             history_message=history_message,
         )
         return (
-            f"JM{book_id} 已发送合并转发与 PDF 文件"
+            f"JM{book_id} {status}"
             f"（{result.downloaded_chapters} 章 / {result.page_count} 页 / "
             f"{_format_size(result.size_bytes)}）"
         )

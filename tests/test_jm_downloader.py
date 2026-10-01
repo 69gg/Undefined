@@ -142,16 +142,25 @@ def _capture_write_pdf(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     captured: dict[str, Any] = {}
 
     def _write_pdf(
-        pages: Any, output: Path, *, dpi: float, quality: int, password: str
-    ) -> Path:
+        pages: Any,
+        output: Path,
+        *,
+        dpi: float,
+        quality: int,
+        password: str | None,
+        limit_bytes: int | None,
+    ) -> Any:
         captured["pages"] = list(pages)
         captured["sources"] = [path for path, _picture in pages]
         captured["dpi"] = dpi
         captured["quality"] = quality
         captured["password"] = password
+        captured["limit_bytes"] = limit_bytes
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_bytes(b"%PDF-1.4")
-        return output
+        return jm_downloader._PdfBuild(
+            "ok", output, len(captured["pages"]), output.stat().st_size, 0
+        )
 
     monkeypatch.setattr(jm_downloader, "_write_pdf", _write_pdf)
     return captured
@@ -356,11 +365,20 @@ def test_write_pdf_keeps_one_page_scale_for_every_page(tmp_path: Path) -> None:
         ),
     ]
 
-    output = jm_downloader._write_pdf(
-        pages, tmp_path / "out.pdf", dpi=150.0, quality=95, password="Ab3xK9Qm"
+    build = jm_downloader._write_pdf(
+        pages,
+        tmp_path / "out.pdf",
+        dpi=150.0,
+        quality=95,
+        password="Ab3xK9Qm",
+        limit_bytes=None,
     )
 
-    doc = fitz.open(output)
+    assert build.status == "ok"
+    assert build.path is not None
+    assert build.page_count == 3
+    assert build.failed_pages == 0
+    doc = fitz.open(build.path)
     assert doc.needs_pass
     assert doc.authenticate("Ab3xK9Qm") > 0
     assert doc.page_count == 3
@@ -395,3 +413,124 @@ def test_load_page_descrambles_server_blocks(tmp_path: Path) -> None:
 
     assert block_count(42, 42, "00001.webp") == 10
     assert restored.tobytes() == original.tobytes()
+
+
+def test_write_pdf_can_skip_encryption(tmp_path: Path) -> None:
+    pages = [
+        (_page_png(tmp_path / "a.png", (300, 400)), _fake_picture(Path("00001.webp")))
+    ]
+
+    build = jm_downloader._write_pdf(
+        pages,
+        tmp_path / "plain.pdf",
+        dpi=150.0,
+        quality=95,
+        password=None,
+        limit_bytes=None,
+    )
+
+    assert build.status == "ok" and build.path is not None
+    doc = fitz.open(build.path)
+    assert not doc.needs_pass, "uid 模式必须输出未加密 PDF，否则 PDF 解析工具打不开"
+
+
+def test_write_pdf_stops_when_encoded_size_exceeds_limit(tmp_path: Path) -> None:
+    pages = [
+        (_page_png(tmp_path / "a.png", (600, 900)), _fake_picture(Path("00001.webp")))
+    ]
+
+    build = jm_downloader._write_pdf(
+        pages,
+        tmp_path / "big.pdf",
+        dpi=150.0,
+        quality=95,
+        password=None,
+        limit_bytes=1,
+    )
+
+    assert build.status == "oversize"
+    assert build.path is None
+    assert not (tmp_path / "big.pdf").exists(), "提前中止时不应留下半成品 PDF"
+
+
+def test_write_pdf_skips_undecodable_page(tmp_path: Path) -> None:
+    good = _page_png(tmp_path / "good.png", (300, 400))
+    broken = tmp_path / "broken.webp"
+    broken.write_bytes(b"not an image")
+    pages = [
+        (good, _fake_picture(Path("00001.webp"))),
+        (broken, _fake_picture(Path("00002.webp"))),
+        (good, _fake_picture(Path("00003.webp"))),
+    ]
+
+    build = jm_downloader._write_pdf(
+        pages,
+        tmp_path / "partial.pdf",
+        dpi=150.0,
+        quality=95,
+        password=None,
+        limit_bytes=None,
+    )
+
+    assert build.status == "ok"
+    assert build.page_count == 2, "坏页被跳过，其余页照常出 PDF"
+    assert build.failed_pages == 1
+
+
+def test_write_pdf_reports_empty_when_every_page_fails(tmp_path: Path) -> None:
+    broken = tmp_path / "broken.webp"
+    broken.write_bytes(b"not an image")
+
+    build = jm_downloader._write_pdf(
+        [(broken, _fake_picture(Path("00001.webp")))],
+        tmp_path / "empty.pdf",
+        dpi=150.0,
+        quality=95,
+        password=None,
+        limit_bytes=None,
+    )
+
+    assert build.status == "empty"
+    assert build.path is None
+    assert build.failed_pages == 1
+
+
+@pytest.mark.asyncio
+async def test_download_book_pdf_cleans_up_when_download_raises(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def _boom(*_args: Any, **_kwargs: Any) -> Any:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(jm_downloader, "_download_sync", _boom)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        await download_book_pdf("1114751", config=_config(), password="Ab3xK9Qm")
+
+    leftovers = list((tmp_path / "jm").glob("*"))
+    assert leftovers == [], f"异常路径不得留下任务目录: {leftovers}"
+
+
+@pytest.mark.asyncio
+async def test_download_book_pdf_counts_failed_pages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # 每章 2 页，其中 1 页下载失败：失败数应汇总到 JmDownload.failed_pages
+    _install_client(monkeypatch, chapter_ids=[(111, 1)])
+    _capture_write_pdf(monkeypatch)
+
+    original_download = _FakeClient.download
+
+    def _download_with_failure(self: Any, chapter: Any, **kwargs: Any) -> Any:
+        result = original_download(self, chapter, **kwargs)
+        result.failures = (object(),)
+        return result
+
+    monkeypatch.setattr(_FakeClient, "download", _download_with_failure)
+
+    result, _ = await download_book_pdf(
+        "1114751", config=_config(), password="Ab3xK9Qm"
+    )
+
+    assert result.status == "ok"
+    assert result.failed_pages == 1

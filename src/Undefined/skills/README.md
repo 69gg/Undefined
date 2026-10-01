@@ -14,9 +14,11 @@ skills/
 │   ├── models.py
 │   ├── context.py
 │   ├── bilibili/
+│   ├── bilibili_opus/
 │   ├── douyin/
 │   ├── arxiv/
-│   └── github/
+│   ├── github/
+│   └── jm/
 │
 ├── tools/          # 基础小工具，直接暴露给 AI 调用
 │   ├── __init__.py
@@ -77,7 +79,7 @@ skills/
 - **目录结构**: `pipelines/{pipeline_name}/config.json + handler.py`。
 - **执行方式**: 同一条非命令消息会并行检测全部管线，并行处理全部命中结果；处理产出的消息通过统一发送层写入历史并自动登记本地媒体/文件附件后，再进入 AI 自动回复。
 - **热重载**: 跟随 `[skills]` 的 `hot_reload`、`hot_reload_interval`、`hot_reload_debounce` 配置。
-- **示例**: `bilibili`, `douyin`, `arxiv`, `github`
+- **示例**: `bilibili`, `bilibili_opus`, `douyin`, `arxiv`, `github`, `jm`
 
 ### 基础工具
 

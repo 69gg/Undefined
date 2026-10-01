@@ -7,7 +7,7 @@
 - `intro.md`：能力说明
 - `prompt.md`：系统提示词
 - `tools/`：文件解析与分析工具
-- 共享主工具：通过 callable 仅可调用 `arxiv_paper(output_mode=uid)`、`bilibili_video(output_mode=uid)`、`bilibili_opus(output_mode=uid)` 与 `douyin_video(output_mode=uid)`，用于把 arXiv / Bilibili 视频与图文 / 抖音标识转换为当前会话附件 UID 后再分析（图文会把正文图片逐张登记为 `pic_xxx`）
+- 共享主工具：通过 callable 仅可调用 `arxiv_paper(output_mode=uid)`、`bilibili_video(output_mode=uid)`、`bilibili_opus(output_mode=uid)`、`douyin_video(output_mode=uid)` 与 `jm_book(output_mode=uid)`，用于把 arXiv / Bilibili 视频与图文 / 抖音 / 禁漫车号转换为当前会话附件 UID 后再分析（图文会把正文图片逐张登记为 `pic_xxx`，禁漫车号输出未加密整本 PDF）
 
 运行机制：
 - 由 `AgentRegistry` 自动发现并注册

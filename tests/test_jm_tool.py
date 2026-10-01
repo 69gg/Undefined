@@ -136,3 +136,71 @@ def test_jm_book_tool_definition_is_sendable_to_file_agent() -> None:
     assert config["function"]["name"] == "jm_book"
     assert set(config["function"]["parameters"]["required"]) == {"book_id"}
     assert callable_config["allowed_callers"] == ["file_analysis_agent"]
+
+
+@pytest.mark.asyncio
+async def test_jm_book_uid_mode_requires_runtime_config() -> None:
+    result = await execute(
+        {"book_id": "350234", "output_mode": "uid"}, _context(runtime_config=None)
+    )
+
+    assert result == "缺少必要的运行时组件（runtime_config）"
+
+
+@pytest.mark.asyncio
+async def test_jm_book_send_mode_requires_sender() -> None:
+    result = await execute({"book_id": "350234"}, _context(sender=None))
+
+    assert result == "缺少必要的运行时组件（sender）"
+
+
+@pytest.mark.asyncio
+async def test_jm_book_send_mode_needs_a_target_session() -> None:
+    result = await execute(
+        {"book_id": "350234"},
+        _context(request_type=None, group_id=None, user_id=None),
+    )
+
+    assert "无法确定目标会话" in result
+
+
+@pytest.mark.asyncio
+async def test_jm_book_rejects_invalid_target_arguments() -> None:
+    bad_type = await execute(
+        {"book_id": "350234", "target_type": "channel", "target_id": 1}, _context()
+    )
+    assert "target_type 只能是" in bad_type
+
+    bad_id = await execute(
+        {"book_id": "350234", "target_type": "group", "target_id": "abc"}, _context()
+    )
+    assert "target_id 必须是整数" in bad_id
+
+
+@pytest.mark.asyncio
+async def test_jm_book_uid_mode_falls_back_to_scope_from_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fetch_attachment = AsyncMock(return_value="ok")
+    monkeypatch.setattr(jm_tool, "fetch_jm_book_attachment", fetch_attachment)
+    monkeypatch.setattr(jm_tool, "scope_from_context", lambda _ctx: "group:1074091596")
+
+    await execute({"book_id": "350234", "output_mode": "uid"}, _context())
+
+    call = fetch_attachment.await_args
+    assert call is not None
+    assert call.kwargs["scope_key"] == "group:1074091596"
+
+
+@pytest.mark.asyncio
+async def test_jm_book_reports_unexpected_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        jm_tool, "fetch_book", AsyncMock(side_effect=RuntimeError("源站 403"))
+    )
+
+    result = await execute({"book_id": "350234", "output_mode": "info"}, _context())
+
+    assert "禁漫本子处理失败" in result
+    assert "源站 403" in result

@@ -151,3 +151,50 @@ def test_jm_use_proxy_reads_environment(
     config = _load_config(tmp_path, "")
 
     assert config.jm_use_proxy is True
+
+
+def test_jm_config_clamps_upper_bounds(tmp_path: Path) -> None:
+    config = _load_config(
+        tmp_path,
+        (
+            "[jm]\n"
+            "auto_extract_max_items = 0\n"
+            "image_quality = 1000\n"
+            "download_concurrency = 999\n"
+            "request_timeout = 1000.0\n"
+            "image_timeout = 100000.0\n"
+        ),
+    )
+
+    assert config.jm_auto_extract_max_items == 1
+    assert config.jm_image_quality == 100
+    assert config.jm_download_concurrency == 32
+    assert config.jm_request_timeout == 120.0
+    assert config.jm_image_timeout == 600.0
+
+
+def test_jm_config_rejects_negative_values(tmp_path: Path) -> None:
+    """负值必须被回退成默认值，而不是原样传下去。"""
+    config = _load_config(
+        tmp_path,
+        (
+            "[jm]\n"
+            "auto_extract_max_items = -3\n"
+            "max_file_size = -1\n"
+            "max_chapters = -9\n"
+            "pdf_dpi = -150.0\n"
+            "image_quality = -5\n"
+            "download_concurrency = -8\n"
+            "request_timeout = -1.0\n"
+            "image_timeout = -1.0\n"
+        ),
+    )
+
+    assert config.jm_auto_extract_max_items == 1
+    assert config.jm_max_file_size == 100
+    assert config.jm_max_chapters == 0
+    assert config.jm_pdf_dpi == 150.0
+    assert config.jm_image_quality == 95
+    assert config.jm_download_concurrency == 8
+    assert config.jm_request_timeout == 20.0
+    assert config.jm_image_timeout == 60.0

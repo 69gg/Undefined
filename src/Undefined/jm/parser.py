@@ -25,7 +25,11 @@ _MIN_BOOK_ID = 10_000
 _MAX_BOOK_ID = 99_999_999
 
 #: ``jm`` + 数字；前缀前不能是字母数字（避免 ``xxjm123``），数字后不能跟数字（避免截断长数字）
-_JM_TOKEN_REGEX = re.compile(r"(?<![0-9A-Za-z])jm\s*[:：#\-]?\s*(\d{5,8})(?!\d)", re.I)
+#: 前缀前不能是字母数字，也不能是 URL/路径/文件名的分隔符
+#: （``t.me/jm1234567``、``video_jm1234567.mp4`` 都不算车号）
+_JM_TOKEN_REGEX = re.compile(
+    r"(?<![0-9A-Za-z._/\\-])jm\s*[:：#\-]?\s*(\d{5,8})(?!\d)", re.I
+)
 _URL_REGEX = re.compile(r"https?://[^\s<>()\"']+", re.I)
 #: 链接归属：主机名包含这些关键词时按禁漫链接处理
 _JM_HOST_KEYWORDS = ("18comic", "jmcomic")

@@ -1,6 +1,6 @@
 # 文件分析助手
 
-用于分析用户提供的附件、内部 UID、URL、legacy file_id、arXiv 论文标识或 Bilibili 视频标识，并从文件内容中识别、提取、摘要或统计信息。
+用于分析用户提供的附件、内部 UID、URL、legacy file_id、arXiv 论文标识、Bilibili 视频标识或禁漫（JM）车号，并从文件内容中识别、提取、摘要或统计信息。
 
 可处理：
 - PDF、Word、Excel、PPT、文本、代码和压缩包
