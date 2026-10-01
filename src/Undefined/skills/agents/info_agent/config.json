@@ -2,7 +2,7 @@
     "type": "function",
     "function": {
         "name": "info_agent",
-        "description": "信息查询助手，提供天气、热搜、新闻、历史、网络诊断、B站查询、arXiv 搜索、编码工具等各类实用信息查询功能。",
+        "description": "信息查询助手，提供天气、热搜、新闻、历史、网络诊断、B站查询、arXiv 搜索、禁漫（JM）本子搜索、编码工具等各类实用信息查询功能。",
         "parameters": {
             "type": "object",
             "properties": {

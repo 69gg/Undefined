@@ -1,0 +1,55 @@
+{
+    "type": "function",
+    "function": {
+        "name": "jm_search",
+        "description": "查询禁漫（JM / 18comic）本子列表，返回车号（JM<数字>）、标题、作者、分类与更新时间，只查询不下载、不发送消息。三种模式：mode=search 关键词检索（可限定站内/作品/作者/标签/角色、分类、时间范围与排序），mode=browse 按分类浏览（不需要关键词），mode=ranking 日/周/月排行榜。可按 page 翻页；拿到车号后可交给主 AI 的 jm_book 取详情或 PDF 附件。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "mode": {
+                    "type": "string",
+                    "enum": ["search", "browse", "ranking"],
+                    "description": "查询模式：search=关键词检索（默认）、browse=按分类浏览、ranking=排行榜"
+                },
+                "msg": {
+                    "type": "string",
+                    "description": "搜索关键词，mode=search 时必填（至少 2 个字；也可直接输入纯数字车号定位到该本子）。mode=browse / ranking 不要传。"
+                },
+                "n": {
+                    "type": "integer",
+                    "description": "返回条数上限（默认 5，最大 20）"
+                },
+                "page": {
+                    "type": "integer",
+                    "description": "页码（默认 1）"
+                },
+                "target": {
+                    "type": "string",
+                    "enum": ["site", "work", "author", "tag", "actor"],
+                    "description": "搜索维度，仅 mode=search 生效：site=站内（默认）、work=作品、author=作者、tag=标签、actor=登场角色"
+                },
+                "sort": {
+                    "type": "string",
+                    "enum": ["latest", "views", "pictures", "likes", "score", "comments"],
+                    "description": "排序方式，mode=search / browse 生效：latest=最新（默认）、views=观看数、pictures=图片数、likes=点赞数、score=评分、comments=评论数。mode=ranking 固定按观看数排序。"
+                },
+                "time_range": {
+                    "type": "string",
+                    "enum": ["all", "day", "week", "month"],
+                    "description": "mode=search / browse 的发布时间范围（默认 all）；mode=ranking 时表示榜单跨度：day=日榜、week=周榜、month=月榜，all 等同 week"
+                },
+                "genre": {
+                    "type": "string",
+                    "enum": ["all", "doujin", "single", "short", "another", "hanman", "meiman", "doujin_cosplay", "3d", "english_site"],
+                    "description": "大分类，三种模式都支持（默认 all 不限）：doujin=同人、single=单行本、short=短篇、another=其他、hanman=汉漫、meiman=美漫、doujin_cosplay=同人Cosplay、3d=3D、english_site=英译站"
+                },
+                "sub_genre": {
+                    "type": "string",
+                    "enum": ["chinese", "japanese", "cg", "youth", "other", "3d", "cosplay"],
+                    "description": "副分类，必须与 genre 一起使用（不能只给 sub_genre）：chinese=中文、japanese=日文、cg=CG、youth=青年、other=其他、3d=3D、cosplay=Cosplay。副分类只有网页端接口支持，可能因反爬失败。"
+                }
+            },
+            "required": []
+        }
+    }
+}

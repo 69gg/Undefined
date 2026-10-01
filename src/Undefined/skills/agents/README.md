@@ -295,9 +295,9 @@ mv skills/tools/my_tool skills/agents/my_agent/tools/
 
 ### info_agent（信息查询助手）
 - **功能**：调用结构化工具完成参数明确的信息查询。
-- **适用场景**：天气、金价、热搜、历史、Whois、网络诊断、测速、编码/哈希、B 站、QQ 等级、arXiv 检索。
+- **适用场景**：天气、金价、热搜、历史、Whois、网络诊断、测速、编码/哈希、B 站、QQ 等级、arXiv 检索、禁漫本子搜索。
 - **不适用**：开放式网页搜索、网页阅读、来源核验、文件解析或长篇研究。
-- **子工具**：`weather_query`, `gold_price`, `baiduhot`, `weibohot`, `douyinhot`, `history`, `whois`, `net_check`, `speed`, `tcping`, `base64`, `hash`, `bilibili_search`, `bilibili_user_info`, `qq_level_query`, `arxiv_search`。
+- **子工具**：`weather_query`, `gold_price`, `baiduhot`, `weibohot`, `douyinhot`, `history`, `whois`, `net_check`, `speed`, `tcping`, `base64`, `hash`, `bilibili_search`, `bilibili_user_info`, `qq_level_query`, `arxiv_search`, `jm_search`。
 
 ### entertainment_agent（娱乐助手）
 - **功能**：轻松互动、趣味内容和休闲创作。
