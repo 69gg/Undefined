@@ -70,7 +70,7 @@ bash scripts/install_git_hooks.sh
 | `arxiv/` | arXiv 论文解析、元信息获取、PDF 下载与发送 |
 | `bilibili/` | B 站链接/BV 解析、视频下载与发送 |
 | `github/` | GitHub public 仓库解析、API 获取与图片卡片发送 |
-| `jm/` | 禁漫（JM / 18comic）车号解析、整本 PDF 下载合成与加密合并转发 |
+| `jm/` | 禁漫（JM / 18comic）车号解析、关键词搜索、整本 PDF 下载合成与加密合并转发 |
 | `api/` | Runtime API / Management API 相关服务；路由拆分在 `api/routes/`，包含 `chat`、`cognitive`、`health`、`memes`、`memory`、`naga`、`system`、`tools` |
 | `webui/` | aiohttp 管理控制台；路由拆分在 `webui/routes/`，覆盖配置、日志、运行态、表情包与系统管理 |
 | `mcp/` | MCP 工具注册、连接与转换 |

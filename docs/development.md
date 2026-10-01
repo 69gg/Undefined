@@ -24,7 +24,7 @@ src/Undefined/
 │   └── job_queue.py # 有序文件队列、阶段回队、检查点与遗留任务恢复（梗库共用）
 ├── config/        # 配置系统（parsers/ 域解析 + load_sections/ 分段加载 + loader shim）
 ├── handlers/      # OneBot 消息分流（message_flow / poke / repeat / auto_extract）
-├── jm/            # 禁漫（JM / 18comic）车号解析、整本 PDF 下载合成与合并转发
+├── jm/            # 禁漫（JM / 18comic）车号解析、关键词搜索、整本 PDF 下载合成与合并转发
 ├── onebot/        # OneBot WebSocket 客户端
 ├── skills/        # 技能插件核心目录 (存放所有的工具与智能体)
 │   ├── tools/           # 基础原子的工具 (独立的功能单元，如读写文件、网络请求等)

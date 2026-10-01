@@ -7,7 +7,12 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from jmcpy import Genre, SearchTarget, SortBy, SubGenre, TimeRange
+
+    from Undefined.jm.searcher import JmListingMode
 
 
 def private_access_error(
@@ -83,6 +88,45 @@ async def jm_book_info_text(book_id: str, *, config: Any) -> str:
     return format_jm_book_info(await fetch_book(book_id, config=config))
 
 
+async def jm_search_text(
+    query: str,
+    *,
+    config: Any,
+    mode: JmListingMode,
+    page: int,
+    limit: int,
+    target: SearchTarget,
+    sort: SortBy,
+    time_range: TimeRange,
+    genre: Genre,
+    sub_genre: SubGenre | None,
+) -> str:
+    """查询禁漫本子列表（搜索 / 浏览 / 排行），返回可直接给用户/模型的文本。"""
+    from Undefined.jm.searcher import describe_query, fetch_listing, format_listing
+
+    listing = await fetch_listing(
+        config=config,
+        mode=mode,
+        query=query,
+        page=page,
+        target=target,
+        sort=sort,
+        time_range=time_range,
+        genre=genre,
+        sub_genre=sub_genre,
+    )
+    heading = describe_query(
+        mode=mode,
+        query=query,
+        target=target,
+        sort=sort,
+        time_range=time_range,
+        genre=genre,
+        sub_genre=sub_genre,
+    )
+    return format_listing(listing, heading=heading, limit=limit)
+
+
 async def jm_book_attachment_text(
     book_id: str,
     *,
@@ -126,6 +170,7 @@ __all__ = [
     "jm_book_info_text",
     "jm_normalize_book_id",
     "jm_scope_key",
+    "jm_search_text",
     "jm_send_book",
     "parse_positive_int",
     "private_access_error",

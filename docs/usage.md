@@ -90,15 +90,17 @@ Undefined 搭载了基于 ChromaDB 向量数据库的后台认知系统，无需
 
 ### `info_agent` — 信息查询助手
 
-整合了多种公开信息查询能力，覆盖天气、热搜、域名、哔哩哔哩以及学术论文等信息源。
+整合了多种公开信息查询能力，覆盖天气、热搜、域名、哔哩哔哩、学术论文以及禁漫本子等信息源。
 
-**子工具**：`weather_query`、`*hot`（热搜榜）、`whois`（域名查询）、`bilibili_search`、`bilibili_user_info`、`arxiv_search`
+**子工具**：`weather_query`、`*hot`（热搜榜）、`whois`（域名查询）、`bilibili_search`、`bilibili_user_info`、`arxiv_search`、`jm_search`（禁漫本子搜索）
 
 **示例：**
 > *"北京明天的天气怎么样？"*
 > *"查一下今天的微博热搜前十名。"*
 > *"帮我查询 arxiv 上关于 Chain-of-Thought 的最新论文。"*
 > *"查一下 B 站 UP 主 xxx 的近期投稿情况。"*
+> *"搜一下 mana 作者的同人本子有哪些。"*
+> *"看看禁漫这周的排行榜前十。"*
 
 ---
 
