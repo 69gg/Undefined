@@ -136,10 +136,12 @@ async def test_send_jm_book_sends_forward_then_standalone_file(
     # 可下载的入口是转发之后那条独立文件消息
     sender.send_group_file.assert_awaited_once_with(20001, str(pdf_path), pdf_path.name)
     assert sender.order == ["group_forward", "group_file"]
-    # 历史摘要不含密码，只说明密码在转发节点里
+    # 历史摘要不含密码，只说明密码在转发节点里；文件还没上传，不能提前声称已发送
     history_message = args.kwargs["history_message"]
     assert captured["password"] not in history_message
     assert "密码见转发节点" in history_message
+    assert "随后单独发送" in history_message
+    assert "已单独发送" not in history_message
     captured["cleanup"].assert_awaited_once_with(tmp_path / "task")
 
 
@@ -302,8 +304,42 @@ async def test_send_jm_book_reports_when_pdf_upload_fails(
     assert status.startswith("JM1114751 已发送合并转发，PDF 文件发送失败"), status
     last = sender.send_group_message.await_args_list[-1]
     assert "PDF 上传失败" in last.args[1]
-    # 提示消息不写历史（避免第三条重复摘要）：auto_history 是第三个位置参数
-    assert last.args[2] is False
+    assert "信息与密码如上" in last.args[1]
+    # 提示写入历史：转发摘要只说「随后发送」，真正发没发出去靠这条收口
+    assert last.args[2] is True
+
+
+@pytest.mark.asyncio
+async def test_send_jm_book_upload_failure_notice_avoids_claiming_uncertain_forward(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """转发投递未确认 + 文件也失败时，提示不能说「信息与密码如上」。"""
+
+    class _Uncertain(RuntimeError):
+        delivery_uncertain = True
+
+    sender = _sender()
+    result = _result(tmp_path)
+    sender.send_group_forward_message.side_effect = _Uncertain("timeout")
+    sender.send_group_file.side_effect = RuntimeError("upload failed")
+    _patch_download(monkeypatch, result, tmp_path / "task")
+
+    status = await send_jm_book(
+        "1114751",
+        sender=sender,
+        target_type="group",
+        target_id=20001,
+        config=SimpleNamespace(),
+    )
+
+    assert status.startswith("JM1114751 合并转发投递结果未确认，PDF 文件发送失败"), (
+        status
+    )
+    notice = sender.send_group_message.await_args_list[-1].args[1]
+    assert "投递结果未确认" in notice
+    assert "信息与密码如上" not in notice
+    # 转发本身不重发，这里只发一条提示
+    assert sender.send_group_message.await_count == 1
 
 
 @pytest.mark.asyncio

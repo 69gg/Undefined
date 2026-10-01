@@ -147,8 +147,10 @@ def build_history_message(result: JmDownload) -> str:
         f"章节: {result.chapter_count} 章 | 页数: {result.page_count}",
     ]
     if result.ok:
+        # 这条摘要随转发写入，此时文件还没上传：不能提前声称已发送。
+        # 上传成功时 send_group_file 会自己补一条「[文件] … 」历史，失败时补提示。
         lines.append(
-            f"PDF: 已单独发送加密文件（{_format_size(result.size_bytes)}，密码见转发节点）"
+            f"PDF: 加密文件随后单独发送（{_format_size(result.size_bytes)}，密码见转发节点）"
         )
     else:
         lines.append("PDF: 未发送")
@@ -341,7 +343,8 @@ async def _send_result(
     转发被协议端**明确拒绝**时降级为两条普通消息（信息 / 密码）。投递结果未确认
     （``delivery_uncertain`` / ``file_transfer_error``）时不能降级重发信息与密码——
     转发可能已经送达；但文件是另一条消息、此前从未发出，必须继续单独发送，否则用户
-    整本下载白跑。文件自身投递结果未确认时同样不重发，直接上抛调用方。
+    整本下载白跑。文件自身投递结果未确认时同样不重发，直接上抛调用方；普通失败时补
+    一条写入历史的「PDF 上传失败」提示，转发投递未确认时提示不声称信息与密码已送达。
     """
     nodes = build_forward_nodes(info_text, password=password)
     forward_status = _FORWARD_SENT
@@ -386,13 +389,14 @@ async def _send_result(
             logger.error("[JM] 文件投递结果未确认，不重发: book=%s", book_id)
             raise
         logger.exception("[JM] PDF 文件发送失败: book=%s", book_id)
-        await _send_text(
-            sender,
-            target_type,
-            target_id,
-            "PDF 上传失败，本次没有发送文件（信息与密码如上）。",
-            auto_history=False,
+        # 转发投递未确认时不能声称「信息与密码如上」——转发可能压根没送达
+        notice = (
+            "PDF 上传失败，本次没有发送文件（合并转发投递结果未确认，信息与密码可能没有送达）。"
+            if forward_status == _FORWARD_UNCERTAIN
+            else "PDF 上传失败，本次没有发送文件（信息与密码如上）。"
         )
+        # 写进历史：转发摘要只说「随后发送」，真正发没发出去靠这条记录收口
+        await _send_text(sender, target_type, target_id, notice)
         return f"{forward_status}，PDF 文件发送失败"
     return f"{forward_status}，PDF 文件已单独发送"
 
