@@ -109,7 +109,7 @@ async def jm_send_book(
     target_id: int,
     config: Any,
 ) -> str:
-    """下载整本并发送「信息 / 密码 / PDF」三节点合并转发。"""
+    """下载整本，发送「信息 / 密码」合并转发并单独发送加密 PDF 文件。"""
     from Undefined.jm.sender import send_jm_book as _send_jm_book
 
     return await _send_jm_book(
