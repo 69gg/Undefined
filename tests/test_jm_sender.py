@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import zipfile
 from types import SimpleNamespace
 from typing import Any, Literal
 from unittest.mock import AsyncMock
@@ -9,11 +10,19 @@ import pytest
 from jmcpy import Book
 
 import Undefined.jm.sender as jm_sender
-from Undefined.jm.downloader import JmDownload
+from Undefined.jm.downloader import (
+    ChapterPdfInfo,
+    JmChapterArchive,
+    JmDownload,
+    JmPlainDownload,
+)
 from Undefined.jm.sender import (
     generate_pdf_password,
     send_jm_book,
 )
+
+#: 一个 8 位密码，与 generate_pdf_password 的字母表一致
+_PASSWORD = "Ab3xK9Qm"
 
 
 def _book() -> Book:
@@ -29,18 +38,60 @@ def _book() -> Book:
     )
 
 
-def _result(
+def _archive_result(
+    tmp_path: Path,
+    *,
+    status: Literal["ok", "partial", "empty"] = "ok",
+    skipped_chapters: int = 0,
+    size_bytes: int | None = None,
+) -> JmChapterArchive:
+    """自动提取路径的结果：一个装了 N 份章节 PDF 的 zip。"""
+    zip_path = tmp_path / "JM1114751 测试本子.zip"
+    pdfs = (
+        (
+            ChapterPdfInfo(
+                order=1, chapter_id=111, title="序章", page_count=60, size_bytes=2048
+            ),
+            ChapterPdfInfo(
+                order=2, chapter_id=222, title="", page_count=60, size_bytes=2048
+            ),
+        )
+        if status != "empty"
+        else ()
+    )
+    if status != "empty":
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as archive:
+            for pdf in pdfs:
+                archive.writestr(f"JM1114751 {pdf.order:03d}.pdf", b"%PDF-1.4")
+    if size_bytes is None:
+        size_bytes = 12_345_678 if status != "empty" else None
+    return JmChapterArchive(
+        status=status,
+        book=_book(),
+        zip_path=zip_path if status != "empty" else None,
+        size_bytes=size_bytes,
+        page_count=0 if status == "empty" else 120,
+        chapter_count=3,
+        downloaded_chapters=1 if status == "empty" else 3,
+        failed_pages=0,
+        skipped_chapters=skipped_chapters,
+        pdfs=pdfs,
+    )
+
+
+def _plain_result(
     tmp_path: Path,
     *,
     status: Literal["ok", "oversize", "empty"] = "ok",
     size_bytes: int | None = None,
-) -> JmDownload:
+) -> JmPlainDownload:
+    """uid 路径的结果：一份未加密整本 PDF。"""
     pdf_path = tmp_path / "JM1114751 测试本子.pdf"
     if status == "ok":
         pdf_path.write_bytes(b"%PDF-1.4")
     if size_bytes is None:
         size_bytes = 12_345_678 if status == "ok" else None
-    return JmDownload(
+    return JmPlainDownload(
         status=status,
         book=_book(),
         pdf_path=pdf_path if status == "ok" else None,
@@ -78,14 +129,14 @@ def _patch_download(
     captured: dict[str, Any] = {}
 
     async def _fake_download(
-        book_id: str, *, config: Any, password: str
+        book_id: str, *, config: Any, password: str | None = None
     ) -> tuple[JmDownload, Path]:
         captured["book_id"] = book_id
         captured["password"] = password
         captured["config"] = config
         return result, task_dir
 
-    monkeypatch.setattr(jm_sender, "download_book_pdf", _fake_download)
+    monkeypatch.setattr(jm_sender, "download_book", _fake_download)
     cleanup = AsyncMock()
     monkeypatch.setattr(jm_sender, "cleanup_download_path", cleanup)
     captured["cleanup"] = cleanup
@@ -102,11 +153,11 @@ def test_generate_pdf_password_uses_safe_eight_char_alphabet() -> None:
 
 
 @pytest.mark.asyncio
-async def test_send_jm_book_sends_forward_then_standalone_file(
+async def test_send_jm_book_sends_forward_then_standalone_zip(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     sender = _sender()
-    result = _result(tmp_path)
+    result = _archive_result(tmp_path)
     captured = _patch_download(monkeypatch, result, tmp_path / "task")
 
     status = await send_jm_book(
@@ -117,9 +168,10 @@ async def test_send_jm_book_sends_forward_then_standalone_file(
         config=SimpleNamespace(),
     )
 
-    assert status.startswith("JM1114751 已发送合并转发，PDF 文件已单独发送")
-    pdf_path = result.pdf_path
-    assert pdf_path is not None
+    assert status.startswith("JM1114751 已发送合并转发，zip 文件已单独发送")
+    assert status.endswith("（2 章 / 120 页 / 11.8MB）")
+    zip_path = result.zip_path
+    assert zip_path is not None
     args = sender.send_group_forward_message.await_args
     nodes = args.args[1]
     # 文件不进转发：转发节点里的文件在 QQ 客户端下载会失败
@@ -128,13 +180,18 @@ async def test_send_jm_book_sends_forward_then_standalone_file(
     info_text = nodes[0]["data"]["content"]
     assert "JM1114751" in info_text
     assert "测试本子" in info_text
+    # 信息节点说明每章一份 PDF 与 zip 大小
+    assert "本次出 2 份 PDF" in info_text
+    assert "zip: 11.8MB" in info_text
     # 末尾展示可复制的车号，不再放站点链接
     assert info_text.strip().endswith("JM1114751")
     assert "18comic" not in info_text
+    # 密码节点写明这是 zip 内所有 PDF 共用的密码
+    assert "zip 内所有 PDF 的解密密码" in nodes[1]["data"]["content"]
     assert f"：{captured['password']}" in nodes[1]["data"]["content"]
     assert len(captured["password"]) == 8
     # 可下载的入口是转发之后那条独立文件消息
-    sender.send_group_file.assert_awaited_once_with(20001, str(pdf_path), pdf_path.name)
+    sender.send_group_file.assert_awaited_once_with(20001, str(zip_path), zip_path.name)
     assert sender.order == ["group_forward", "group_file"]
     # 历史摘要不含密码，只说明密码在转发节点里；文件还没上传，不能提前声称已发送
     history_message = args.kwargs["history_message"]
@@ -142,15 +199,41 @@ async def test_send_jm_book_sends_forward_then_standalone_file(
     assert "密码见转发节点" in history_message
     assert "随后单独发送" in history_message
     assert "已单独发送" not in history_message
+    assert "每章一份" in history_message
     captured["cleanup"].assert_awaited_once_with(tmp_path / "task")
 
 
 @pytest.mark.asyncio
-async def test_send_jm_book_falls_back_to_plain_messages_then_file(
+async def test_send_jm_book_mentions_skipped_chapters_in_info(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """被跳过的章节必须写在用户看得到的地方，不能静默少发。"""
+    sender = _sender()
+    result = _archive_result(tmp_path, status="partial", skipped_chapters=2)
+    _patch_download(monkeypatch, result, tmp_path / "task")
+
+    await send_jm_book(
+        "1114751",
+        sender=sender,
+        target_type="group",
+        target_id=20001,
+        config=SimpleNamespace(),
+    )
+
+    info_text = sender.send_group_forward_message.await_args.args[1][0]["data"][
+        "content"
+    ]
+    assert "2 章未打包" in info_text
+    # partial 仍然照发 zip
+    sender.send_group_file.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_send_jm_book_falls_back_to_plain_messages_then_zip(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     sender = _sender()
-    result = _result(tmp_path)
+    result = _archive_result(tmp_path)
     sender.send_group_forward_message.side_effect = RuntimeError("forward rejected")
     captured = _patch_download(monkeypatch, result, tmp_path / "task")
 
@@ -162,18 +245,19 @@ async def test_send_jm_book_falls_back_to_plain_messages_then_file(
         config=SimpleNamespace(),
     )
 
-    # 转发发不出去时才退化为两条普通消息，文件照旧单独发送
+    # 转发发不出去时才退化为两条普通消息，zip 照旧单独发送
     assert sender.order == ["group_message", "group_message", "group_file"]
     password_call = sender.send_group_message.await_args_list[1]
     assert captured["password"] in password_call.args[1]
+    assert "zip 内所有 PDF 的解密密码" in password_call.args[1]
     # 普通消息兜底时历史里同样不留密码
     for call in sender.send_group_message.await_args_list:
         history_message = call.kwargs["history_message"]
         assert history_message is not None
         assert captured["password"] not in history_message
-    pdf_path = result.pdf_path
-    assert pdf_path is not None
-    sender.send_group_file.assert_awaited_once_with(20001, str(pdf_path), pdf_path.name)
+    zip_path = result.zip_path
+    assert zip_path is not None
+    sender.send_group_file.assert_awaited_once_with(20001, str(zip_path), zip_path.name)
 
 
 @pytest.mark.asyncio
@@ -186,7 +270,7 @@ async def test_send_jm_book_keeps_sending_file_when_forward_is_uncertain(
         delivery_uncertain = True
 
     sender = _sender()
-    result = _result(tmp_path)
+    result = _archive_result(tmp_path)
     sender.send_group_forward_message.side_effect = _Uncertain("timeout")
     _patch_download(monkeypatch, result, tmp_path / "task")
 
@@ -204,7 +288,7 @@ async def test_send_jm_book_keeps_sending_file_when_forward_is_uncertain(
     # 文件丢在这里等于整本下载白跑
     sender.send_group_file.assert_awaited_once()
     assert "合并转发投递结果未确认" in status
-    assert "PDF 文件已单独发送" in status
+    assert "zip 文件已单独发送" in status
 
 
 @pytest.mark.asyncio
@@ -215,7 +299,7 @@ async def test_send_jm_book_does_not_resend_when_forward_transfer_failed(
         file_transfer_error = True
 
     sender = _sender()
-    result = _result(tmp_path)
+    result = _archive_result(tmp_path)
     sender.send_group_forward_message.side_effect = _TransferFailed("prepare failed")
     _patch_download(monkeypatch, result, tmp_path / "task")
 
@@ -242,7 +326,7 @@ async def test_send_jm_book_does_not_retry_when_file_delivery_is_uncertain(
         delivery_uncertain = True
 
     sender = _sender()
-    result = _result(tmp_path)
+    result = _archive_result(tmp_path)
     sender.send_group_file.side_effect = _Uncertain("timeout")
     _patch_download(monkeypatch, result, tmp_path / "task")
 
@@ -267,7 +351,7 @@ async def test_send_jm_book_does_not_retry_when_file_transfer_failed(
         file_transfer_error = True
 
     sender = _sender()
-    result = _result(tmp_path)
+    result = _archive_result(tmp_path)
     sender.send_group_file.side_effect = _TransferFailed("prepare failed")
     _patch_download(monkeypatch, result, tmp_path / "task")
 
@@ -285,11 +369,11 @@ async def test_send_jm_book_does_not_retry_when_file_transfer_failed(
 
 
 @pytest.mark.asyncio
-async def test_send_jm_book_reports_when_pdf_upload_fails(
+async def test_send_jm_book_reports_when_zip_upload_fails(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     sender = _sender()
-    result = _result(tmp_path)
+    result = _archive_result(tmp_path)
     sender.send_group_file.side_effect = RuntimeError("upload failed")
     _patch_download(monkeypatch, result, tmp_path / "task")
 
@@ -301,9 +385,9 @@ async def test_send_jm_book_reports_when_pdf_upload_fails(
         config=SimpleNamespace(),
     )
 
-    assert status.startswith("JM1114751 已发送合并转发，PDF 文件发送失败"), status
+    assert status.startswith("JM1114751 已发送合并转发，zip 文件发送失败"), status
     last = sender.send_group_message.await_args_list[-1]
-    assert "PDF 上传失败" in last.args[1]
+    assert "zip 上传失败" in last.args[1]
     assert "信息与密码如上" in last.args[1]
     # 提示写入历史：转发摘要只说「随后发送」，真正发没发出去靠这条收口
     assert last.args[2] is True
@@ -319,7 +403,7 @@ async def test_send_jm_book_upload_failure_notice_avoids_claiming_uncertain_forw
         delivery_uncertain = True
 
     sender = _sender()
-    result = _result(tmp_path)
+    result = _archive_result(tmp_path)
     sender.send_group_forward_message.side_effect = _Uncertain("timeout")
     sender.send_group_file.side_effect = RuntimeError("upload failed")
     _patch_download(monkeypatch, result, tmp_path / "task")
@@ -332,7 +416,7 @@ async def test_send_jm_book_upload_failure_notice_avoids_claiming_uncertain_forw
         config=SimpleNamespace(),
     )
 
-    assert status.startswith("JM1114751 合并转发投递结果未确认，PDF 文件发送失败"), (
+    assert status.startswith("JM1114751 合并转发投递结果未确认，zip 文件发送失败"), (
         status
     )
     notice = sender.send_group_message.await_args_list[-1].args[1]
@@ -347,7 +431,7 @@ async def test_send_jm_book_reports_fallback_status(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     sender = _sender()
-    result = _result(tmp_path)
+    result = _archive_result(tmp_path)
     sender.send_group_forward_message.side_effect = RuntimeError("forward rejected")
     _patch_download(monkeypatch, result, tmp_path / "task")
 
@@ -360,15 +444,16 @@ async def test_send_jm_book_reports_fallback_status(
     )
 
     assert "已改为普通消息发送信息与密码" in status
-    assert "PDF 文件已单独发送" in status
+    assert "zip 文件已单独发送" in status
 
 
 @pytest.mark.asyncio
-async def test_send_jm_book_skips_pdf_when_empty(
+async def test_send_jm_book_skips_file_when_no_chapter_pdf_was_built(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    """一章都没出时不发密码与文件，只发信息与状态两个节点。"""
     sender = _sender()
-    result = _result(tmp_path, status="empty")
+    result = _archive_result(tmp_path, status="empty", skipped_chapters=3)
     _patch_download(monkeypatch, result, tmp_path / "task")
 
     status = await send_jm_book(
@@ -379,19 +464,42 @@ async def test_send_jm_book_skips_pdf_when_empty(
         config=SimpleNamespace(),
     )
 
-    assert status == "JM1114751 已发送信息（PDF 未发送：没有下载到任何页面）"
+    assert "JM1114751 已发送信息" in status
+    nodes = sender.send_group_forward_message.await_args.args[1]
+    assert [node["data"]["name"] for node in nodes] == ["本子信息", "状态"]
+    assert "3 章未打包" in nodes[0]["data"]["content"]
+    sender.send_group_file.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_send_jm_book_skips_file_when_nothing_downloaded(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    sender = _sender()
+    result = _archive_result(tmp_path, status="empty")
+    _patch_download(monkeypatch, result, tmp_path / "task")
+
+    status = await send_jm_book(
+        "1114751",
+        sender=sender,
+        target_type="group",
+        target_id=20001,
+        config=SimpleNamespace(),
+    )
+
+    assert status == "JM1114751 已发送信息（文件未发送：没有下载到任何页面）"
     nodes = sender.send_group_forward_message.await_args.args[1]
     assert "没有下载到任何页面" in nodes[0]["data"]["content"]
     sender.send_group_file.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_send_jm_book_oversize_does_not_show_source_bytes_as_pdf_size(
+async def test_send_jm_book_empty_result_does_not_show_size_as_zip_size(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """预判超限时只有原图字节，信息节点不能把它写成 PDF 大小。"""
+    """没有 zip 时信息节点不能把原图字节写成 zip 大小。"""
     sender = _sender()
-    result = _result(tmp_path, status="oversize", size_bytes=88 * 1024 * 1024)
+    result = _archive_result(tmp_path, status="empty")
     _patch_download(monkeypatch, result, tmp_path / "task")
 
     await send_jm_book(
@@ -403,30 +511,7 @@ async def test_send_jm_book_oversize_does_not_show_source_bytes_as_pdf_size(
     )
 
     info = sender.send_group_forward_message.await_args.args[1][0]["data"]["content"]
-    assert "PDF:" not in info
-
-
-@pytest.mark.asyncio
-async def test_send_jm_book_skips_pdf_when_oversize(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    sender = _sender()
-    result = _result(tmp_path, status="oversize")
-    _patch_download(monkeypatch, result, tmp_path / "task")
-
-    status = await send_jm_book(
-        "1114751",
-        sender=sender,
-        target_type="group",
-        target_id=20001,
-        config=SimpleNamespace(),
-    )
-
-    assert status == "JM1114751 已发送信息（PDF 未发送：文件超过体积上限）"
-    nodes = sender.send_group_forward_message.await_args.args[1]
-    assert [node["data"]["name"] for node in nodes] == ["本子信息", "状态"]
-    assert "超过体积上限" in nodes[0]["data"]["content"]
-    sender.send_group_file.assert_not_awaited()
+    assert "zip:" not in info
 
 
 @pytest.mark.asyncio
@@ -434,7 +519,7 @@ async def test_send_jm_book_uses_private_forward(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     sender = _sender()
-    result = _result(tmp_path)
+    result = _archive_result(tmp_path)
     _patch_download(monkeypatch, result, tmp_path / "task")
 
     await send_jm_book(
@@ -469,7 +554,7 @@ def test_format_jm_book_info_lists_metadata() -> None:
 async def test_fetch_jm_book_attachment_registers_unencrypted_pdf(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    result = _result(tmp_path)
+    result = _plain_result(tmp_path)
     captured = _patch_download(monkeypatch, result, tmp_path / "task")
     record = SimpleNamespace(uid="file_jm123")
     registry = SimpleNamespace(register_local_file=AsyncMock(return_value=record))
@@ -514,7 +599,7 @@ async def test_fetch_jm_book_attachment_requires_scope_and_registry(
 async def test_fetch_jm_book_attachment_reports_oversize(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    result = _result(tmp_path, status="oversize")
+    result = _plain_result(tmp_path, status="oversize")
     captured = _patch_download(monkeypatch, result, tmp_path / "task")
     registry = SimpleNamespace(register_local_file=AsyncMock())
 
@@ -525,6 +610,6 @@ async def test_fetch_jm_book_attachment_reports_oversize(
         config=SimpleNamespace(),
     )
 
-    assert "PDF 超过体积上限" in text
+    assert "PDF 超过单章体积上限" in text
     registry.register_local_file.assert_not_awaited()
     captured["cleanup"].assert_awaited_once()

@@ -31,7 +31,7 @@ def test_jm_defaults_disable_feature(tmp_path: Path) -> None:
     assert config.jm_auto_extract_group_ids == []
     assert config.jm_auto_extract_private_ids == []
     assert config.jm_auto_extract_max_items == 1
-    assert config.jm_max_file_size == 100
+    assert config.jm_chapter_max_file_size == 100
     assert config.jm_max_chapters == 0
     assert config.jm_pdf_dpi == 150.0
     assert config.jm_image_quality == 95
@@ -48,7 +48,7 @@ def test_jm_config_clamps_invalid_values(tmp_path: Path) -> None:
             "[jm]\n"
             "auto_extract_enabled = true\n"
             "auto_extract_max_items = 99\n"
-            "max_file_size = -5\n"
+            "chapter_max_file_size = -5\n"
             "max_chapters = -1\n"
             "pdf_dpi = 0\n"
             "image_quality = 0\n"
@@ -61,7 +61,7 @@ def test_jm_config_clamps_invalid_values(tmp_path: Path) -> None:
 
     assert config.jm_auto_extract_enabled is True
     assert config.jm_auto_extract_max_items == 5
-    assert config.jm_max_file_size == 100
+    assert config.jm_chapter_max_file_size == 100
     assert config.jm_max_chapters == 0
     assert config.jm_pdf_dpi == 150.0
     assert config.jm_image_quality == 95
@@ -79,7 +79,7 @@ def test_jm_config_keeps_explicit_values(tmp_path: Path) -> None:
             "auto_extract_enabled = true\n"
             "use_proxy = true\n"
             "auto_extract_max_items = 3\n"
-            "max_file_size = 0\n"
+            "chapter_max_file_size = 0\n"
             "max_chapters = 2\n"
             "pdf_dpi = 200.0\n"
             "image_quality = 100\n"
@@ -91,7 +91,7 @@ def test_jm_config_keeps_explicit_values(tmp_path: Path) -> None:
 
     assert config.jm_use_proxy is True
     assert config.jm_auto_extract_max_items == 3
-    assert config.jm_max_file_size == 0
+    assert config.jm_chapter_max_file_size == 0
     assert config.jm_max_chapters == 2
     assert config.jm_pdf_dpi == 200.0
     assert config.jm_image_quality == 100
@@ -180,7 +180,7 @@ def test_jm_config_rejects_negative_values(tmp_path: Path) -> None:
         (
             "[jm]\n"
             "auto_extract_max_items = -3\n"
-            "max_file_size = -1\n"
+            "chapter_max_file_size = -1\n"
             "max_chapters = -9\n"
             "pdf_dpi = -150.0\n"
             "image_quality = -5\n"
@@ -191,7 +191,7 @@ def test_jm_config_rejects_negative_values(tmp_path: Path) -> None:
     )
 
     assert config.jm_auto_extract_max_items == 1
-    assert config.jm_max_file_size == 100
+    assert config.jm_chapter_max_file_size == 100
     assert config.jm_max_chapters == 0
     assert config.jm_pdf_dpi == 150.0
     assert config.jm_image_quality == 95

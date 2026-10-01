@@ -33,7 +33,7 @@ _DEFAULT_JM_IMAGE_TIMEOUT_SECONDS: float = 60.0
 _MAX_JM_IMAGE_TIMEOUT_SECONDS: float = 600.0
 _DEFAULT_JM_AUTO_EXTRACT_MAX_ITEMS: int = 1
 _MAX_JM_AUTO_EXTRACT_MAX_ITEMS: int = 5
-_DEFAULT_JM_MAX_FILE_SIZE_MB: int = 100
+_DEFAULT_JM_CHAPTER_MAX_FILE_SIZE_MB: int = 100
 _DEFAULT_JM_PDF_DPI: float = 150.0
 _DEFAULT_JM_IMAGE_QUALITY: int = 95
 _DEFAULT_JM_DOWNLOAD_CONCURRENCY: int = 8
@@ -253,11 +253,12 @@ def load_integrations(
         jm_auto_extract_max_items = _DEFAULT_JM_AUTO_EXTRACT_MAX_ITEMS
     if jm_auto_extract_max_items > _MAX_JM_AUTO_EXTRACT_MAX_ITEMS:
         jm_auto_extract_max_items = _MAX_JM_AUTO_EXTRACT_MAX_ITEMS
-    jm_max_file_size = _coerce_int(
-        _get_value(data, ("jm", "max_file_size"), None), _DEFAULT_JM_MAX_FILE_SIZE_MB
+    jm_chapter_max_file_size = _coerce_int(
+        _get_value(data, ("jm", "chapter_max_file_size"), None),
+        _DEFAULT_JM_CHAPTER_MAX_FILE_SIZE_MB,
     )
-    if jm_max_file_size < 0:
-        jm_max_file_size = _DEFAULT_JM_MAX_FILE_SIZE_MB
+    if jm_chapter_max_file_size < 0:
+        jm_chapter_max_file_size = _DEFAULT_JM_CHAPTER_MAX_FILE_SIZE_MB
     jm_max_chapters = _coerce_int(_get_value(data, ("jm", "max_chapters"), None), 0)
     if jm_max_chapters < 0:
         jm_max_chapters = 0
@@ -469,7 +470,7 @@ def load_integrations(
         "jm_auto_extract_group_ids": jm_auto_extract_group_ids,
         "jm_auto_extract_private_ids": jm_auto_extract_private_ids,
         "jm_auto_extract_max_items": jm_auto_extract_max_items,
-        "jm_max_file_size": jm_max_file_size,
+        "jm_chapter_max_file_size": jm_chapter_max_file_size,
         "jm_max_chapters": jm_max_chapters,
         "jm_pdf_dpi": jm_pdf_dpi,
         "jm_image_quality": jm_image_quality,

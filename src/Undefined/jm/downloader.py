@@ -1,13 +1,9 @@
-"""禁漫本子下载：逐章取图，再合成一个加密 PDF。
-
-jmcpy 的异步实现内部仍会同步执行图片解码与 PDF 合成（``_to_artifact`` /
-``_finalize`` 直接在协程里跑），放在事件循环里会阻塞其它消息处理，因此这里用
-同步 ``Client`` 配合 :func:`asyncio.to_thread`，线程里可以放心做 CPU 与磁盘工作。
-代价是单次任务不可取消，由 jmcpy 自己的请求超时与多端点重试兜底。
+"""禁漫本子下载：逐章取图，一章合成一份加密 PDF，再打包成一个无密码 zip。
 
 合成不走 ``jmcpy.imaging.write_pdf``，而是自己用 PyMuPDF 逐页写入，原因是：
 
-* 要把**多个章节**合进同一个 PDF——jmcpy 的下载 API 只能一章一个 PDF；
+* 每章一份 PDF 再打包成 zip——jmcpy 的下载 API 虽然也是一章一个 PDF，但它产出的
+  是「解码 + 重编码」后的成品，页尺寸由它决定；这里要自己控制页尺寸与编码次数；
 * 每页只编码一次：``download(output=PATH)`` 会先把解扰后的图重新编码一次
   （WebP/JPEG），合成时再编码第二次；这里用 ``decode=False`` 取服务端原始字节
   （无损落盘），自己解扰后只编码一次 JPEG（4:4:4，漫画的彩色描边在 4:2:0 下
@@ -17,20 +13,31 @@ jmcpy 的异步实现内部仍会同步执行图片解码与 PDF 合成（``_to_
 jmcpy ≤0.1.1 的 ``write_pdf`` 还会让追加页退回默认 72 DPI（同一份 PDF 里第一页
 5.6in 宽、其余页 11.7in 宽），该问题已在 0.1.2 修复；这里保留自建组装是为了上面
 三点，与那个 bug 无关。
+
+zip 用标准库 :mod:`zipfile` 写成、**不加密**：每个章节 PDF 各自用同一个密码做
+AES-256 加密，用户解压后逐份输入同一个密码即可。``[jm].chapter_max_file_size``
+按**单章 PDF** 判定，超限的那一章跳过（不再中止整本），其余章节照常打包。
+
+jmcpy 的异步实现内部仍会同步执行图片解码与 PDF 合成（``_to_artifact`` /
+``_finalize`` 直接在协程里跑），放在事件循环里会阻塞其它消息处理，因此这里用
+同步 ``Client`` 配合 :func:`asyncio.to_thread`，线程里可以放心做 CPU 与磁盘工作。
+代价是单次任务不可取消，由 jmcpy 自己的请求超时与多端点重试兜底。
 """
 
 from __future__ import annotations
 
-import asyncio
+from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+import asyncio
 import functools
 import io
 import logging
 import shutil
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, TypeAlias
 import uuid
+import zipfile
 
 import fitz
 from jmcpy import Book, Client, ExportFormat, Settings
@@ -57,15 +64,65 @@ _DOWNLOAD_POOL = ThreadPoolExecutor(
 _JPEG_SUBSAMPLING = 0
 #: PDF 页物理尺寸 = 像素 ÷ DPI，所有页统一用这个 DPI
 _POINTS_PER_INCH = 72.0
+#: zip 条目名与磁盘上的章节 PDF 同名：章节序号补零，解压后按文件名就是阅读顺序
+_CHAPTER_INDEX_DIGITS = 3
+#: 章节 PDF 在 zip 里的扩展名
+_PDF_SUFFIX = ".pdf"
+#: 交付物 zip 的扩展名
+_ZIP_SUFFIX = ".zip"
+
+#: 打包结果：ok=全部章节成 PDF；partial=有章节被跳过但仍出了 zip；empty=一份都没有
+JmArchiveStatus: TypeAlias = Literal["ok", "partial", "empty"]
+#: 单份 PDF 结果：ok=可用；oversize=超过单章体积上限；empty=没有可写入的页面
+JmPlainStatus: TypeAlias = Literal["ok", "oversize", "empty"]
 
 
 @dataclass(frozen=True, slots=True)
-class JmDownload:
-    """一次本子下载的结果。"""
+class ChapterPdfInfo:
+    """一份章节 PDF 的基本信息（体积取 zip 内的字节数）。"""
 
-    #: ok=PDF 可用；oversize=超过体积上限；empty=没有下到任何页面
-    status: Literal["ok", "oversize", "empty"]
+    order: int
+    chapter_id: int
+    title: str
+    page_count: int
+    size_bytes: int
+
+
+@dataclass(frozen=True, slots=True)
+class JmChapterArchive:
+    """自动提取路径的下载结果：每章一份加密 PDF + 一个无密码 zip。"""
+
+    status: JmArchiveStatus
     book: Book
+    #: 没有可打包的章节时为 ``None``
+    zip_path: Path | None
+    #: zip 大小；``None`` 表示还没有 zip
+    size_bytes: int | None
+    #: 实际写进 zip 的页数合计
+    page_count: int
+    #: 本子声明的章节总数（单章本子为 1）
+    chapter_count: int
+    #: 成功下载的章节来源数（含被体积上限跳过、最终没进 zip 的章节）
+    downloaded_chapters: int
+    #: 下载失败的页面数（jmcpy 逐页收集，不打断整章）
+    failed_pages: int
+    #: 没有进 zip 的章节数（超过单章体积上限、PDF 为空或该章页面全部解码失败）
+    skipped_chapters: int
+    #: 已进 zip 的章节，按阅读顺序
+    pdfs: tuple[ChapterPdfInfo, ...] = field(default=())
+
+    @property
+    def ok(self) -> bool:
+        return self.status != "empty" and self.zip_path is not None
+
+
+@dataclass(frozen=True, slots=True)
+class JmPlainDownload:
+    """``jm_book`` 工具 ``uid`` 路径的结果：一份**未加密** PDF（供 PDF 解析工具打开）。"""
+
+    status: JmPlainStatus
+    book: Book
+    #: ``oversize`` / ``empty`` 时为 ``None``
     pdf_path: Path | None
     page_count: int
     size_bytes: int | None
@@ -73,7 +130,6 @@ class JmDownload:
     chapter_count: int
     #: 本次实际下载并合并的章节数
     downloaded_chapters: int
-    #: 下载失败的页面数（jmcpy 逐页收集，不打断整章）
     failed_pages: int
 
     @property
@@ -81,24 +137,50 @@ class JmDownload:
         return self.status == "ok" and self.pdf_path is not None
 
 
-def _chapter_ids(book: Book, *, max_chapters: int) -> list[int]:
-    # 按本子内的章节序号排序，合出来的 PDF 与阅读顺序一致
+#: 两种下载结果：自动提取拿 :class:`JmChapterArchive`，``uid`` 路径拿 :class:`JmPlainDownload`
+JmDownload: TypeAlias = JmChapterArchive | JmPlainDownload
+
+
+def _ordered_chapters(book: Book, *, max_chapters: int) -> list[tuple[int, int, str]]:
+    """按本子内的章节序号排出 ``(章节号, 章节序号, 章节标题)``，顺序就是阅读顺序。
+
+    序号取自 ``ChapterBrief.order`` 而不是「第几次下载」：服务端没给图的章节会被跳过，
+    按下载次序编号会让后面的章节缺号。单章本子的章节号就是车号，序号是 1。
+    """
     ordered = sorted(book.chapters, key=lambda chapter: int(chapter.order))
-    chapter_ids = [int(chapter.chapter_id) for chapter in ordered]
-    if not chapter_ids:
-        # 单章本子的章节号就是车号
-        chapter_ids = [int(book.book_id)]
+    chapters = [
+        (int(chapter.chapter_id), int(chapter.order), str(chapter.title or ""))
+        for chapter in ordered
+    ]
+    if not chapters:
+        chapters = [(int(book.book_id), 1, "")]
     if max_chapters > 0:
-        chapter_ids = chapter_ids[:max_chapters]
-    return chapter_ids
+        chapters = chapters[:max_chapters]
+    return chapters
 
 
-def _pdf_file_name(book: Book) -> str:
+def _book_file_name(book: Book, suffix: str) -> str:
+    """交付物文件名：``JM<车号> <净化后的标题><后缀>``。"""
     title = sanitize_filename(book.title) or "漫画"
-    return f"{_BOOK_ID_PREFIX}{book.book_id} {title}.pdf"
+    return f"{_BOOK_ID_PREFIX}{book.book_id} {title}{suffix}"
 
 
-def _limit_bytes(max_file_size_mb: int) -> int | None:
+def _chapter_pdf_name(stem: str, title: str) -> str:
+    """章节 PDF 名：``<产物名主体>[ <章节标题>].pdf``。
+
+    ``stem`` 由 :func:`_download_archive_sync` 内的 ``artifact_stem`` 生成，已经保证
+    同一次下载内唯一。章节标题写在文件名里便于挑选章节；服务端没给标题时只留序号。
+    """
+    chapter_title = sanitize_filename(title)
+    return (
+        f"{stem} {chapter_title}{_PDF_SUFFIX}"
+        if chapter_title
+        else f"{stem}{_PDF_SUFFIX}"
+    )
+
+
+def _chapter_limit_bytes(max_file_size_mb: int) -> int | None:
+    """单章 PDF 上限；``None`` 表示不限。"""
     return max_file_size_mb * 1024 * 1024 if max_file_size_mb > 0 else None
 
 
@@ -121,14 +203,14 @@ class _PdfBuild:
     #: ``oversize`` / ``empty`` 时为 ``None``
     path: Path | None
     page_count: int
-    #: 成功写入的页在 PDF 里的编码字节数（``max_file_size`` 按它判定）
+    #: 成功写入的页在 PDF 里的编码字节数（单章上限按它判定）
     encoded_bytes: int
     #: 组装阶段因解码失败被跳过的页数
     failed_pages: int
 
 
 def _write_pdf(
-    pages: list[tuple[Path, Picture]],
+    pages: Sequence[tuple[Path, Picture]],
     output: Path,
     *,
     dpi: float,
@@ -136,11 +218,12 @@ def _write_pdf(
     password: str | None,
     limit_bytes: int | None,
 ) -> _PdfBuild:
-    """把页面按顺序合成一个 PDF（页尺寸统一、每页只编码一次）。
+    """把一章的页面按顺序合成一份 PDF（页尺寸统一、每页只编码一次）。
 
     ``password`` 为 ``None`` 时不加密——附件 UID 模式要交给 PDF 解析，加密会让
-    ``extract_pdf`` / ``describe_pdf_page`` 打不开。单页解码失败只跳过该页并计数，
-    不整本放弃；累计编码字节超过 ``limit_bytes`` 时提前中止（此时 PDF 未落盘）。
+    ``extract_pdf`` / ``describe_page`` 打不开。单页解码失败只跳过该页并计数，
+    不整章放弃；累计编码字节超过 ``limit_bytes`` 时提前中止（此时 PDF 未落盘），
+    由调用方决定是跳过这一章还是放弃整本。
     """
     document = fitz.open()
     page_count = 0
@@ -172,7 +255,7 @@ def _write_pdf(
             encoded_bytes += len(data)
             if limit_bytes is not None and encoded_bytes > limit_bytes:
                 logger.info(
-                    "[JM] PDF 编码后体积超过上限，提前中止: bytes=%s limit=%s",
+                    "[JM] 单章 PDF 编码后体积超过上限，跳过该章: bytes=%s limit=%s",
                     encoded_bytes,
                     limit_bytes,
                 )
@@ -202,70 +285,224 @@ def _write_pdf(
     return _PdfBuild("ok", output, page_count, encoded_bytes, failed_pages)
 
 
-def _download_sync(
+def _write_zip(parts: Sequence[tuple[str, bytes]], output: Path) -> int:
+    """把各章节 PDF 写成无密码 zip，返回 zip 字节数。
+
+    zip 本身不加密：密码在每个章节 PDF 内部，用户解压后逐份输入同一个密码。
+    """
+    with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, data in parts:
+            archive.writestr(name, data)
+    return output.stat().st_size
+
+
+@dataclass(frozen=True, slots=True)
+class _ChapterPdf:
+    """一份刚写好的章节 PDF：zip 条目名 + 字节 + 便于回报的元信息。"""
+
+    name: str
+    data: bytes
+    info: ChapterPdfInfo
+
+
+def _download_archive_sync(
     book_id: str,
     task_dir: Path,
     *,
-    password: str | None,
+    password: str,
     settings: Settings,
     max_chapters: int,
-    max_file_size_mb: int,
+    chapter_max_file_size_mb: int,
     pdf_dpi: float,
     image_quality: int,
-) -> JmDownload:
-    limit_bytes = _limit_bytes(max_file_size_mb)
+) -> JmChapterArchive:
+    """逐章下载并各出一份加密 PDF，最后打包成无密码 zip。"""
+    limit_bytes = _chapter_limit_bytes(chapter_max_file_size_mb)
+    built: list[_ChapterPdf] = []
+    used_orders: set[int] = set()
+    downloaded_chapters = 0
+    skipped_chapters = 0
+    failed_pages = 0
+    page_count = 0
+
+    def artifact_index(chapter_order: int, local_index: int, chapter_id: int) -> str:
+        """章节产物的序号（补零字符串），用于下载目录名与 zip 条目名。
+
+        优先用服务端章节序号（与阅读顺序一致）；服务端返回重复序号（异常数据）时退回
+        本次下载的局部序号，否则两条章节会撞同一个下载目录与图片文件名
+        （``overwrite=False`` 会拿旧图），也会撞同一个 zip 条目名而丢掉一份 PDF。
+        """
+        index = chapter_order
+        if index in used_orders:
+            index = local_index
+            logger.warning(
+                "[JM] 服务端返回重复章节序号，改用局部序号避免覆盖: book=%s chapter=%s order=%s → %s",
+                book_id,
+                chapter_id,
+                chapter_order,
+                index,
+            )
+        used_orders.add(index)
+        return f"{index:0{_CHAPTER_INDEX_DIGITS}d}"
+
     with Client(settings) as client:
         book = client.get_book(book_id)
         # 声明总数取本子自身的章节列表，不受 max_chapters 截断影响
         declared_chapters = len(book.chapters) or 1
-        chapter_ids = _chapter_ids(book, max_chapters=max_chapters)
-        pages: list[tuple[Path, Picture]] = []
-        failed_pages = 0
-        downloaded_chapters = 0
-        total_bytes = 0
+        chapters = _ordered_chapters(book, max_chapters=max_chapters)
 
-        for index, chapter_id in enumerate(chapter_ids, start=1):
+        for local_index, (chapter_id, chapter_order, chapter_title) in enumerate(
+            chapters, start=1
+        ):
             chapter = client.get_chapter(chapter_id)
             if not len(chapter):
                 logger.info(
                     "[JM] 章节没有图片，跳过: book=%s chapter=%s", book_id, chapter_id
                 )
                 continue
-            # 每章独立的目录：同名章节复用同名目录时，overwrite=False 会拿旧图。
+            index = artifact_index(chapter_order, local_index, chapter_id)
+            # 每章独立的目录：同名目录复用同名目录时，overwrite=False 会拿旧图。
             # decode=False 取服务端原始字节（无损），解扰与编码在写 PDF 时做一次。
             result = client.download(
                 chapter,
                 output=ExportFormat.PATH,
-                dest=task_dir / f"c{index:03d}",
+                dest=task_dir / f"c{index}",
                 decode=False,
                 concurrency=settings.concurrency,
             )
-            for item in result:
-                if item.path is not None:
-                    pages.append((item.path, item.picture))
+            pages = [
+                (item.path, item.picture) for item in result if item.path is not None
+            ]
             failed_pages += len(result.failures)
             downloaded_chapters += 1
-            total_bytes += sum(item.size or 0 for item in result)
-            if limit_bytes is not None and total_bytes > limit_bytes:
-                logger.info(
-                    "[JM] 图片总量超过体积上限，提前结束: book=%s bytes=%s limit=%sMB",
+
+            if not pages:
+                # 这一章的页面全部下载失败：计一次跳过，继续下一章
+                skipped_chapters += 1
+                logger.warning(
+                    "[JM] 章节没有可用页面，跳过: book=%s chapter=%s",
                     book_id,
-                    total_bytes,
-                    max_file_size_mb,
+                    chapter_id,
                 )
-                return JmDownload(
-                    status="oversize",
-                    book=book,
-                    pdf_path=None,
-                    page_count=len(pages),
-                    size_bytes=total_bytes,
-                    chapter_count=declared_chapters,
-                    downloaded_chapters=downloaded_chapters,
-                    failed_pages=failed_pages,
+                continue
+
+            output = task_dir / _chapter_pdf_name(
+                f"{_BOOK_ID_PREFIX}{book.book_id} {index}", chapter_title
+            )
+            build = _write_pdf(
+                pages,
+                output,
+                dpi=pdf_dpi,
+                quality=image_quality,
+                password=password,
+                limit_bytes=limit_bytes,
+            )
+            failed_pages += build.failed_pages
+            if build.status != "ok" or build.path is None:
+                # 单章超限/无可用页面只丢这一章；整本因此仍可能发出 zip
+                skipped_chapters += 1
+                logger.info(
+                    "[JM] 章节 PDF 未生成，跳过该章: book=%s chapter=%s status=%s pages=%s bytes=%s",
+                    book_id,
+                    chapter_id,
+                    build.status,
+                    build.page_count,
+                    build.encoded_bytes,
                 )
+                continue
+
+            data = build.path.read_bytes()
+            built.append(
+                _ChapterPdf(
+                    name=build.path.name,
+                    data=data,
+                    info=ChapterPdfInfo(
+                        order=chapter_order,
+                        chapter_id=chapter_id,
+                        title=chapter_title,
+                        page_count=build.page_count,
+                        size_bytes=len(data),
+                    ),
+                )
+            )
+            page_count += build.page_count
+
+        if not built:
+            return JmChapterArchive(
+                status="empty",
+                book=book,
+                zip_path=None,
+                size_bytes=None,
+                page_count=0,
+                chapter_count=declared_chapters,
+                downloaded_chapters=downloaded_chapters,
+                failed_pages=failed_pages,
+                skipped_chapters=skipped_chapters,
+            )
+
+        zip_path = task_dir / _book_file_name(book, _ZIP_SUFFIX)
+        zip_bytes = _write_zip([(item.name, item.data) for item in built], zip_path)
+        # 章节 PDF 已进 zip，删掉散落副本，任务目录里只留最终交付物
+        for item in built:
+            (task_dir / item.name).unlink(missing_ok=True)
+
+        return JmChapterArchive(
+            status="partial" if skipped_chapters else "ok",
+            book=book,
+            zip_path=zip_path,
+            size_bytes=zip_bytes,
+            page_count=page_count,
+            chapter_count=declared_chapters,
+            downloaded_chapters=downloaded_chapters,
+            failed_pages=failed_pages,
+            skipped_chapters=skipped_chapters,
+            pdfs=tuple(item.info for item in built),
+        )
+
+
+def _download_plain_sync(
+    book_id: str,
+    task_dir: Path,
+    *,
+    settings: Settings,
+    max_chapters: int,
+    chapter_max_file_size_mb: int,
+    pdf_dpi: float,
+    image_quality: int,
+) -> JmPlainDownload:
+    """把各章页面合并成**一份未加密** PDF（``jm_book`` 的 ``uid`` 路径）。"""
+    limit_bytes = _chapter_limit_bytes(chapter_max_file_size_mb)
+    with Client(settings) as client:
+        book = client.get_book(book_id)
+        # 声明总数取本子自身的章节列表，不受 max_chapters 截断影响
+        declared_chapters = len(book.chapters) or 1
+        chapters = _ordered_chapters(book, max_chapters=max_chapters)
+        pages: list[tuple[Path, Picture]] = []
+        failed_pages = 0
+        downloaded_chapters = 0
+
+        for chapter_id, chapter_order, _title in chapters:
+            chapter = client.get_chapter(chapter_id)
+            if not len(chapter):
+                logger.info(
+                    "[JM] 章节没有图片，跳过: book=%s chapter=%s", book_id, chapter_id
+                )
+                continue
+            result = client.download(
+                chapter,
+                output=ExportFormat.PATH,
+                dest=task_dir / f"c{chapter_order:0{_CHAPTER_INDEX_DIGITS}d}",
+                decode=False,
+                concurrency=settings.concurrency,
+            )
+            pages.extend(
+                (item.path, item.picture) for item in result if item.path is not None
+            )
+            failed_pages += len(result.failures)
+            downloaded_chapters += 1
 
         if not pages:
-            return JmDownload(
+            return JmPlainDownload(
                 status="empty",
                 book=book,
                 pdf_path=None,
@@ -278,10 +515,10 @@ def _download_sync(
 
         build = _write_pdf(
             pages,
-            task_dir / _pdf_file_name(book),
+            task_dir / _book_file_name(book, _PDF_SUFFIX),
             dpi=pdf_dpi,
             quality=image_quality,
-            password=password,
+            password=None,
             limit_bytes=limit_bytes,
         )
         failed_pages += build.failed_pages
@@ -293,7 +530,7 @@ def _download_sync(
                 build.page_count,
                 build.encoded_bytes,
             )
-            return JmDownload(
+            return JmPlainDownload(
                 status=build.status,
                 book=book,
                 pdf_path=None,
@@ -304,7 +541,7 @@ def _download_sync(
                 failed_pages=failed_pages,
             )
 
-        return JmDownload(
+        return JmPlainDownload(
             status="ok",
             book=book,
             pdf_path=build.path,
@@ -326,34 +563,38 @@ async def fetch_book(book_id: str, *, config: Any) -> Book:
     return await asyncio.to_thread(_fetch_book_sync, book_id, build_settings(config))
 
 
-async def download_book_pdf(
+async def download_book(
     book_id: str,
     *,
     config: Any,
     password: str | None = None,
 ) -> tuple[JmDownload, Path]:
-    """下载整本并合成 PDF，返回 ``(结果, 任务目录)``。
+    """下载整本，返回 ``(结果, 任务目录)``。
 
-    ``password`` 给出时用 AES-256 加密（自动提取用），``None`` 时输出未加密 PDF
-    （附件 UID 模式用，便于 PDF 解析）。调用方负责在发送或登记完成后清理任务目录
+    ``password`` 给出时每章各出一份 AES-256 加密 PDF，并打包成**无密码** zip
+    （自动提取用）；``None`` 时所有章节合成一份**未加密** PDF（``uid`` 模式用，
+    便于 PDF 解析）。调用方负责在发送或登记完成后清理任务目录
     （``cleanup_download_path``）；本函数抛异常或被取消时自己清理，不留残留目录。
     """
     task_dir = ensure_dir(_JM_DOWNLOAD_DIR / uuid.uuid4().hex)
     loop = asyncio.get_running_loop()
-    future = loop.run_in_executor(
-        _DOWNLOAD_POOL,
-        functools.partial(
-            _download_sync,
-            book_id,
-            task_dir,
-            password=password,
-            settings=build_settings(config),
-            max_chapters=int(getattr(config, "jm_max_chapters", 0)),
-            max_file_size_mb=int(getattr(config, "jm_max_file_size", 100)),
-            pdf_dpi=float(getattr(config, "jm_pdf_dpi", 150.0)),
-            image_quality=int(getattr(config, "jm_image_quality", 95)),
+    options: dict[str, Any] = {
+        "settings": build_settings(config),
+        "max_chapters": int(getattr(config, "jm_max_chapters", 0)),
+        "chapter_max_file_size_mb": int(
+            getattr(config, "jm_chapter_max_file_size", 100)
         ),
-    )
+        "pdf_dpi": float(getattr(config, "jm_pdf_dpi", 150.0)),
+        "image_quality": int(getattr(config, "jm_image_quality", 95)),
+    }
+    download: Callable[[], JmDownload]
+    if password is None:
+        download = functools.partial(_download_plain_sync, book_id, task_dir, **options)
+    else:
+        download = functools.partial(
+            _download_archive_sync, book_id, task_dir, password=password, **options
+        )
+    future: asyncio.Future[JmDownload] = loop.run_in_executor(_DOWNLOAD_POOL, download)
     try:
         # shield：协程被取消时不要把线程一起取消——同步下载停不下来，强行删目录
         # 只会被后续写入重新创建，所以等它跑完再清理

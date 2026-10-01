@@ -247,7 +247,7 @@ class Config:
     jm_auto_extract_group_ids: list[int]
     jm_auto_extract_private_ids: list[int]
     jm_auto_extract_max_items: int
-    jm_max_file_size: int
+    jm_chapter_max_file_size: int
     jm_max_chapters: int
     jm_pdf_dpi: float
     jm_image_quality: int
