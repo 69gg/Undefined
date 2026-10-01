@@ -1,3 +1,15 @@
+## v3.18.2 禁漫列表查询工具
+
+本版本给 `info_agent` 新增 `jm_search` 工具：AI 可以直接查询禁漫本子列表（关键词检索 / 分类浏览 / 日周月排行），拿到车号后再由主 AI 的 `jm_book` 取详情或 PDF；工具本身只查列表，不下载也不发送。
+
+- 新增 `jm_search` 工具（`src/Undefined/skills/agents/info_agent/tools/jm_search/`）与领域层 `src/Undefined/jm/searcher.py`：`mode=search` 关键词检索、`mode=browse` 分类浏览（不需要关键词）、`mode=ranking` 日/周/月排行，三种模式共用 `genre` 大分类与 `page` 翻页；返回车号（`JM<数字>`）、标题、作者、分类与更新时间，`n` 默认 5、上限 20。
+- 筛选参数：`target`（站内/作品/作者/标签/角色）、`sort`（最新/观看/图片/点赞/评分/评论）、`time_range`（`all`/`day`/`week`/`month`，`mode=ranking` 时表示日榜/周榜/月榜，`all` 等同 jmcpy 默认的周榜）、`genre`（同人/单行本/短篇/汉漫/美漫/3D/英译站等）与 `sub_genre`（中文/日文/CG 等）；副分类必须与 `genre` 同时给出，且只有网页端接口支持，网页端被反爬拦截时直接返回失败原因。
+- 参数校验与提示：`mode=search` 必须提供 `msg`（至少 2 个字，纯数字车号会直接定位到该本子），`mode=browse` / `ranking` 带关键词会被拦下并提示改用 `mode=search`；`ranking` 固定按观看数排序，显式传其它 `sort` 时提示改用 `browse`；非法枚举值回显可选值。
+- 结果表头写明模式与生效筛选（如 `🏆 禁漫日榜（同人 / CG）`）；分类页与排行榜不返回总数，这类结果只提示「需要更多结果时可用 page=N+1 继续」，只有确实知道总页数时才说「还有更多」。
+- 工具仅 `info_agent` 可见（不带 `callable.json`），域层通过 `skills/shared.py` 桥接；查询复用 `[jm]` 的代理、`request_timeout` 与 `session_dir`，且**不受** `[jm].auto_extract_enabled` 影响——该开关只约束自动提取管线。
+
+---
+
 ## v3.18.1 JM 本子文件改到转发外发送
 
 本版本修复禁漫自动提取的加密 PDF 在合并转发节点里下载失败的问题：转发退回「本子信息 / 解密密码」两个节点，PDF 改为转发之后单独发一条文件消息。
