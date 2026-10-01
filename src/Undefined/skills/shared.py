@@ -58,4 +58,75 @@ def parse_positive_int(
     return parsed, None
 
 
-__all__ = ["parse_positive_int", "private_access_error"]
+def jm_normalize_book_id(value: str) -> str | None:
+    """把车号 / ``JM<数字>`` / 禁漫链接归一化成纯数字车号（失败返回 `None`）。"""
+    from Undefined.jm.parser import normalize_jm_id
+
+    return normalize_jm_id(value)
+
+
+def jm_scope_key(context: dict[str, Any]) -> str:
+    """当前会话的附件作用域：优先取上下文里已解析的 ``scope_key``。"""
+    scope_key = str(context.get("scope_key") or "").strip()
+    if scope_key:
+        return scope_key
+    from Undefined.attachments import scope_from_context
+
+    return scope_from_context(context) or ""
+
+
+async def jm_book_info_text(book_id: str, *, config: Any) -> str:
+    """只取本子详情（不下载），返回可直接给用户/模型的文本。"""
+    from Undefined.jm.downloader import fetch_book
+    from Undefined.jm.sender import format_jm_book_info
+
+    return format_jm_book_info(await fetch_book(book_id, config=config))
+
+
+async def jm_book_attachment_text(
+    book_id: str,
+    *,
+    registry: Any,
+    scope_key: str,
+    config: Any,
+) -> str:
+    """下载整本并注册为未加密 PDF 附件 UID，返回概要文本。"""
+    from Undefined.jm.sender import fetch_jm_book_attachment
+
+    return await fetch_jm_book_attachment(
+        book_id=book_id,
+        attachment_registry=registry,
+        scope_key=scope_key,
+        config=config,
+    )
+
+
+async def jm_send_book(
+    book_id: str,
+    *,
+    sender: Any,
+    target_type: str,
+    target_id: int,
+    config: Any,
+) -> str:
+    """下载整本并发送「信息 / 密码 / PDF」三节点合并转发。"""
+    from Undefined.jm.sender import send_jm_book as _send_jm_book
+
+    return await _send_jm_book(
+        book_id,
+        sender=sender,
+        target_type=target_type,  # type: ignore[arg-type]
+        target_id=target_id,
+        config=config,
+    )
+
+
+__all__ = [
+    "jm_book_attachment_text",
+    "jm_book_info_text",
+    "jm_normalize_book_id",
+    "jm_scope_key",
+    "jm_send_book",
+    "parse_positive_int",
+    "private_access_error",
+]

@@ -24,6 +24,7 @@ src/Undefined/
 │   └── job_queue.py # 有序文件队列、阶段回队、检查点与遗留任务恢复（梗库共用）
 ├── config/        # 配置系统（parsers/ 域解析 + load_sections/ 分段加载 + loader shim）
 ├── handlers/      # OneBot 消息分流（message_flow / poke / repeat / auto_extract）
+├── jm/            # 禁漫（JM / 18comic）车号解析、整本 PDF 下载合成与合并转发
 ├── onebot/        # OneBot WebSocket 客户端
 ├── skills/        # 技能插件核心目录 (存放所有的工具与智能体)
 │   ├── tools/           # 基础原子的工具 (独立的功能单元，如读写文件、网络请求等)
@@ -31,7 +32,7 @@ src/Undefined/
 │   │   └── cognitive/   # 认知记忆主动暴露工具 (search_events, get_profile 等)
 │   ├── agents/          # 智能体 (含 runner/ 通用循环子包)
 │   ├── commands/        # 中心化斜杠指令系统 (实现如 /help, /stats, /admin 等平台功能)
-│   ├── pipelines/     # 自动提取管线 (bilibili / bilibili_opus / arxiv / github 等)
+│   ├── pipelines/     # 自动提取管线 (bilibili / bilibili_opus / arxiv / github / jm 等)
 │   └── anthropic_skills/# Anthropic 协议集成的外部 Skills (兼容 SKILL.md 格式)
 ├── api/           # Management API + Runtime API
 │   ├── routes/    # 路由子模块 (chat, tools, naga/, system, memes, memory, cognitive, health)

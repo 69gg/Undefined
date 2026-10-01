@@ -76,7 +76,7 @@ Undefined 搭载了基于 ChromaDB 向量数据库的后台认知系统，无需
 
 ### `file_analysis_agent` — 文件分析助手
 
-支持对代码、PDF、Word、Excel 等多种格式文件进行解析与分析。用户可以直接发送文件，也可以提供附件 UID、URL、arXiv ID/URL、Bilibili BV/AV/URL 或抖音链接/aweme_id。
+支持对代码、PDF、Word、Excel 等多种格式文件进行解析与分析。用户可以直接发送文件，也可以提供附件 UID、URL、arXiv ID/URL、Bilibili BV/AV/URL、抖音链接/aweme_id 或禁漫车号/链接。
 
 **子工具**：`download_file`、`extract_pdf`、`describe_pdf_page`、`extract_docx`、`extract_xlsx`、`analyze_code`、`analyze_multimodal`
 
@@ -372,6 +372,7 @@ QQ/NapCat 在 `sendMsg` 阶段返回超时并不等于消息未送达：服务�
 | `bilibili_opus` | 发送哔哩哔哩图文（opus）合并转发、返回正文图片附件 UID、获取图文信息，或按字数区间 / 关键词读取正文文字（支持动态 ID、图文链接、b23.tv 短链） |
 | `douyin_video` | 发送抖音视频、返回视频附件 UID，或只获取视频信息（支持短链、长链、aweme_id） |
 | `arxiv_paper` | 发送 arXiv 论文 PDF、返回 PDF 附件 UID，或只获取论文信息（支持 arXiv ID、链接） |
+| `jm_book` | 发送禁漫（JM）本子合并转发、返回未加密 PDF 附件 UID，或只获取本子信息（支持 `JM350234`、裸车号、禁漫链接） |
 | `fetch_image_uid` | 将指定 URL 的图片下载并转换为系统内部 uid |
 | `task_progress` | 向用户发送长任务的阶段性进度通知 |
 | `changelog_query` | 查询系统内置版本更新日志 |

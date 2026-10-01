@@ -89,6 +89,7 @@ def test_proxy_switches_default_false_and_legacy_global_ignored(
     assert cfg.douyin_use_proxy is False
     assert cfg.arxiv_use_proxy is False
     assert cfg.github_use_proxy is False
+    assert cfg.jm_use_proxy is False
     assert cfg.api.tool_invoke_callback_use_proxy is False
     assert cfg.naga.use_proxy is False
     assert cfg.chat_model.use_proxy is False
@@ -121,6 +122,7 @@ def test_proxy_switches_parse_per_feature_and_per_model(
             "douyin": {"use_proxy": True},
             "arxiv": {"use_proxy": True},
             "github": {"use_proxy": True},
+            "jm": {"use_proxy": True},
             "api": {"tool_invoke_callback_use_proxy": True},
             "naga": {"use_proxy": True},
         }
@@ -224,6 +226,7 @@ def test_proxy_switches_parse_per_feature_and_per_model(
     assert cfg.douyin_use_proxy is True
     assert cfg.arxiv_use_proxy is True
     assert cfg.github_use_proxy is True
+    assert cfg.jm_use_proxy is True
     assert cfg.api.tool_invoke_callback_use_proxy is True
     assert cfg.naga.use_proxy is True
     assert cfg.chat_model.use_proxy is True
@@ -252,6 +255,7 @@ def test_scoped_proxy_env_vars_enable_scoped_switches(
     _clear_proxy_env(monkeypatch)
     monkeypatch.setenv("SEARCH_USE_PROXY", "true")
     monkeypatch.setenv("GITHUB_USE_PROXY", "true")
+    monkeypatch.setenv("JM_USE_PROXY", "true")
     monkeypatch.setenv("CHAT_MODEL_USE_PROXY", "true")
     monkeypatch.setenv("IMAGE_GEN_MODEL_USE_PROXY", "true")
 
@@ -259,6 +263,7 @@ def test_scoped_proxy_env_vars_enable_scoped_switches(
 
     assert cfg.search_use_proxy is True
     assert cfg.github_use_proxy is True
+    assert cfg.jm_use_proxy is True
     assert cfg.chat_model.use_proxy is True
     assert cfg.models_image_gen.use_proxy is True
     assert cfg.render_use_proxy is False

@@ -34,9 +34,11 @@ def build_pipeline_context(
         "extract_douyin_ids": handler._extract_douyin_ids,
         "extract_arxiv_ids": handler._extract_arxiv_ids,
         "extract_github_repo_ids": handler._extract_github_repo_ids,
+        "extract_jm_ids": handler._extract_jm_ids,
         "handle_bilibili_extract": handler._handle_bilibili_extract,
         "handle_bilibili_opus_extract": handler._handle_bilibili_opus_extract,
         "handle_douyin_extract": handler._handle_douyin_extract,
         "handle_arxiv_extract": handler._handle_arxiv_extract,
         "handle_github_extract": handler._handle_github_extract,
+        "handle_jm_extract": handler._handle_jm_extract,
     }

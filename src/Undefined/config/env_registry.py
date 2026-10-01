@@ -72,6 +72,7 @@ ENV_REGISTRY: Final[dict[tuple[str, ...], str]] = {
     ("history", "max_records"): "HISTORY_MAX_RECORDS",
     ("image_gen", "use_proxy"): "IMAGE_GEN_USE_PROXY",
     ("image_gen", "provider"): "IMAGE_GEN_PROVIDER",
+    ("jm", "use_proxy"): "JM_USE_PROXY",
     ("logging", "backup_count"): "LOG_BACKUP_COUNT",
     ("logging", "file_path"): "LOG_FILE_PATH",
     ("logging", "level"): "LOG_LEVEL",

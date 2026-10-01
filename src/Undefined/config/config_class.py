@@ -241,6 +241,20 @@ class Config:
     github_auto_extract_group_ids: list[int]
     github_auto_extract_private_ids: list[int]
     github_auto_extract_max_items: int
+    # JM（禁漫）自动提取
+    jm_use_proxy: bool
+    jm_auto_extract_enabled: bool
+    jm_auto_extract_group_ids: list[int]
+    jm_auto_extract_private_ids: list[int]
+    jm_auto_extract_max_items: int
+    jm_max_file_size: int
+    jm_max_chapters: int
+    jm_pdf_dpi: float
+    jm_image_quality: int
+    jm_download_concurrency: int
+    jm_request_timeout: float
+    jm_image_timeout: float
+    jm_session_dir: str
     # 认知记忆
     cognitive: CognitiveConfig
     # 表情包库
@@ -321,6 +335,16 @@ class Config:
         init=False,
         repr=False,
     )
+    _jm_group_ids_set: set[int] = dataclass_field(
+        default_factory=set,
+        init=False,
+        repr=False,
+    )
+    _jm_private_ids_set: set[int] = dataclass_field(
+        default_factory=set,
+        init=False,
+        repr=False,
+    )
 
     def __post_init__(self) -> None:
         self._refresh_runtime_sets()
@@ -358,6 +382,10 @@ class Config:
         }
         self._github_private_ids_set = {
             int(item) for item in self.github_auto_extract_private_ids
+        }
+        self._jm_group_ids_set = {int(item) for item in self.jm_auto_extract_group_ids}
+        self._jm_private_ids_set = {
+            int(item) for item in self.jm_auto_extract_private_ids
         }
 
     @classmethod
@@ -551,6 +579,18 @@ class Config:
         """私聊是否允许 GitHub 仓库自动提取。"""
         if self._github_private_ids_set:
             return int(user_id) in self._github_private_ids_set
+        return self.is_private_allowed(user_id)
+
+    def is_jm_auto_extract_allowed_group(self, group_id: int) -> bool:
+        """群聊是否允许 JM 自动提取。"""
+        if self._jm_group_ids_set:
+            return int(group_id) in self._jm_group_ids_set
+        return self.is_group_allowed(group_id)
+
+    def is_jm_auto_extract_allowed_private(self, user_id: int) -> bool:
+        """私聊是否允许 JM 自动提取。"""
+        if self._jm_private_ids_set:
+            return int(user_id) in self._jm_private_ids_set
         return self.is_private_allowed(user_id)
 
     def should_process_group_message(self, is_at_bot: bool) -> bool:

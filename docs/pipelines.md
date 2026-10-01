@@ -1,6 +1,6 @@
 # 自动处理管线开发指南
 
-自动处理管线位于 `src/Undefined/skills/pipelines/`，用于在普通消息进入 AI 自动回复前执行自动提取，例如 Bilibili 视频、Bilibili 图文（opus）、抖音视频、arXiv 论文和 GitHub 仓库卡片。斜杠命令优先级高于自动处理管线，命中命令后不会继续触发自动提取或 AI 回复。
+自动处理管线位于 `src/Undefined/skills/pipelines/`，用于在普通消息进入 AI 自动回复前执行自动提取，例如 Bilibili 视频、Bilibili 图文（opus）、抖音视频、arXiv 论文、GitHub 仓库卡片和禁漫（JM）本子。斜杠命令优先级高于自动处理管线，命中命令后不会继续触发自动提取或 AI 回复。
 
 `MessageHandler` 启动时会通过异步初始化在线程中加载管线配置和 handler 模块，避免目录扫描、`config.json` 读取和模块导入阻塞事件循环；注册 OneBot 消息回调前会等待首次加载完成，后续热重载也在线程中执行。
 
@@ -48,6 +48,29 @@ Bilibili 图文管线命中 `bilibili.com/opus/<id>`、`t.bilibili.com/<id>`、`
 
 管线只在 `auto_extract_enabled` 与 `opus_enabled` 同时为真、且会话命中白名单时生效；与视频管线相互独立，同一条消息同时包含 BV 号与图文链接时两条管线各自发送。
 
+## 内置 JM（禁漫）管线
+
+JM 管线命中 `JM` 前缀加 5–8 位车号（`JM1114751`、`jm 1114751`、`jm:1114751`）或主机名含 `18comic` / `jmcomic` 的链接（`/album/<id>`、`/photo/<id>`、`?id=<id>`）后，发送一次外层合并转发，节点顺序固定：
+
+1. `本子信息`：车号与标题、作者、章节数、标签、观看/点赞、页数、PDF 大小、简介预览，末行是可直接复制的 `JM<车号>`（不带站点链接）；
+2. `解密密码`：每次随机生成的 8 位 PDF 打开密码；
+3. `PDF`：本地合成好的加密 PDF（群聊下会作为真正的群文件上传）。
+
+PDF 随转发一起上传，节点里的文件可以直接下载（已用 14MB 的 PDF 实测）；群聊下 NapCat 会把它作为群文件上传（`isGroupFile`、`busid=102`，元素里带 `fileId` / `fileMd5` / `fileSha1`），所以同一个 PDF 也会出现在群文件列表里。文件只发一次，不额外发独立文件消息；只有转发本身发送失败时才退化为「信息 + 密码 + 独立文件消息」。
+
+多章节本子按章节顺序全部下载（`[jm].max_chapters` 可限制），再合成为一个 AES-256 加密 PDF。裸数字不触发，避免群号、时间戳等误报；`xxjm1234567` 这类前缀也不触发。
+
+失败语义：
+
+- 转发被拒时退化为两条普通消息（信息、密码）+ 独立文件消息（这种兜底情况下文件没有别的入口）。密码始终不会写进历史摘要。
+- 下载量或 PDF 体积超过 `[jm].max_file_size`（原始图片累计预判 + 组装时按编码后字节复核）、以及没有下到任何页面时，只发信息与状态两个节点，不发密码与文件。
+
+PDF 合成没有走 `jmcpy.imaging.write_pdf`，而是自己用 PyMuPDF 逐页写入：jmcpy 的下载 API 一章只能产出一个 PDF，而这里要把多个章节合进同一个文件；同时 PATH 输出会先把解扰后的图重新编码一次、合成时再编码第二次，这里改为 `decode=False` 取服务端原始字节（无损落盘）、自己解扰、每页只编码一次 JPEG（`[jm].image_quality`，色度 4:4:4）后直接作为 PDF 图像数据，并按 `[jm].pdf_dpi` 统一页尺寸、做 AES-256 加密。页像素始终不做缩放，画质上限由站点源图自身分辨率决定。（jmcpy ≤0.1.1 的 `write_pdf` 另有「追加页退回 72 DPI、同文档页尺寸不一致」的问题，已在 0.1.2 修复；页内色度采样从 0.1.3 起默认也是 4:4:4。本管线依赖 `jmcpy>=0.1.3`。）
+
+AI 侧另有 `jm_book` 工具（`src/Undefined/skills/tools/jm_book/`），与 `arxiv_paper` 同构：`send` 等价自动提取，`uid` 只注册未加密 PDF 附件 UID（共享给 `file_analysis_agent`），`info` 只取详情。
+
+实现说明：图片解码与 PDF 合成是同步 CPU 工作，下载整体在 `asyncio.to_thread` 中通过 jmcpy 的同步客户端执行，不阻塞事件循环；单次任务不可取消，由 `[jm].request_timeout` / `image_timeout` 与 jmcpy 的多端点重试兜底。PDF 在内存中合成后写盘，因此 `[jm].max_file_size` 只是近似内存上限（预判按源图字节、复核按编码后字节，JPEG 重编码可能更大）。下载跑在模块专用的线程池（上限 2 个并发本子）里，不占用事件循环默认执行器；单页解码失败只跳过该页并计入「下载失败 N 页」，不会让整本失败；任务目录在成功、超限、空结果与异常四条路径上都会清理；协程被取消时线程仍在写盘，改为等它跑完再删，避免残留原图或未加密 PDF。
+
 ## 目录结构
 
 ```text
@@ -68,7 +91,10 @@ src/Undefined/skills/pipelines/
 ├── arxiv/
 │   ├── config.json
 │   └── handler.py
-└── github/
+├── github/
+│   ├── config.json
+│   └── handler.py
+└── jm/
     ├── config.json
     └── handler.py
 ```
