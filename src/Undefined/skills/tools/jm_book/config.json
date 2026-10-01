@@ -2,7 +2,7 @@
     "type": "function",
     "function": {
         "name": "jm_book",
-        "description": "处理禁漫（JM / 18comic）本子。默认下载整本，发送信息与密码的合并转发并单独发送加密 PDF 文件；可设置 output_mode=uid 只注册 PDF 附件 UID，或 output_mode=info 只获取本子信息。支持 JM350234、350234 或禁漫链接。",
+        "description": "处理禁漫（JM / 18comic）本子。默认下载整本，每章一份加密 PDF 打包成无密码 zip，发送「本子信息 / 解密密码」合并转发并单独发送 zip 文件；可设置 output_mode=uid 只注册未加密 PDF 附件 UID，或 output_mode=info 只获取本子信息。支持 JM350234、350234 或禁漫链接。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -22,7 +22,7 @@
                 "output_mode": {
                     "type": "string",
                     "enum": ["send", "uid", "info"],
-                    "description": "输出模式：send（默认，下载整本、发送「信息 / 解密密码」合并转发并单独发送加密 PDF 文件）、uid（只下载并注册未加密 PDF 附件 UID，不发送消息）、info（只返回本子信息，不下载不发送）"
+                    "description": "输出模式：send（默认，下载整本、每章一份加密 PDF 打包成 zip，发送「信息 / 解密密码」合并转发并单独发送 zip 文件）、uid（只下载并注册未加密 PDF 附件 UID，不发送消息）、info（只返回本子信息，不下载不发送）"
                 }
             },
             "required": ["book_id"]

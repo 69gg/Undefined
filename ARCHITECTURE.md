@@ -861,7 +861,7 @@ description: 从 PDF 文件中提取文本和表格，填写表单。当用户�
 | **Bilibili** | `bilibili.auto_extract_enabled`, `bilibili.cookie`, `bilibili.prefer_quality` | B站视频自动提取与下载 |
 | **arXiv** | `arxiv.auto_extract_enabled`, `arxiv.max_file_size`, `arxiv.auto_extract_max_items` | arXiv 论文自动提取、搜索与 PDF 发送 |
 | **GitHub** | `github.auto_extract_enabled`, `github.request_timeout_seconds`, `github.request_retries`, `github.auto_extract_max_items` | GitHub public 仓库自动提取与图片卡片发送 |
-| **JM（禁漫）** | `jm.auto_extract_enabled`, `jm.max_file_size`, `jm.max_chapters`, `jm.auto_extract_max_items` | JM 车号自动提取、整本加密 PDF 与合并转发 |
+| **JM（禁漫）** | `jm.auto_extract_enabled`, `jm.chapter_max_file_size`, `jm.max_chapters`, `jm.auto_extract_max_items` | JM 车号自动提取、一章一份加密 PDF 打包 zip 与合并转发 |
 | **思考链** | `*.thinking_enabled` | 思维链支持 |
 | **思维链兼容** | `*.thinking_tool_call_compat` | 思维链 + 工具调用兼容 |
 | **WebUI** | `webui.url`, `webui.port`, `webui.password` | 配置控制台 |

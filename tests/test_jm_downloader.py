@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from pathlib import Path
+from collections.abc import Sequence
+import re
 from types import SimpleNamespace
-from typing import Any, Literal
+from typing import Any, Literal, TypeAlias
+import zipfile
+from pathlib import Path
 
 import asyncio
 
@@ -15,12 +18,24 @@ from PIL import Image
 
 import Undefined.jm.client as jm_client
 import Undefined.jm.downloader as jm_downloader
-from Undefined.jm.downloader import JmDownload, download_book_pdf
+from Undefined.jm.downloader import (
+    JmChapterArchive,
+    JmDownload,
+    JmPlainDownload,
+    download_book,
+)
+
+#: ``(章节号, 章节序号[, 章节标题])``，测试里用来描述一个本子的章节表
+ChapterSpec: TypeAlias = tuple[int, int] | tuple[int, int, str]
+
+#: 章节文件名里的三位序号（``JM<车号> <序号>[ <标题>].pdf``；整本 PDF 名没有序号）
+_CHAPTER_INDEX_RE = re.compile(r"^JM\d{6,} (\d{3})(?: |\.)")
 
 
 class _FakeChapter:
-    def __init__(self, chapter_id: int, pages: int) -> None:
+    def __init__(self, chapter_id: int, pages: int, *, title: str = "") -> None:
         self.chapter_id = chapter_id
+        self.title = title
         self.pictures = tuple(f"{index:05d}.webp" for index in range(1, pages + 1))
 
     def __len__(self) -> int:
@@ -56,14 +71,22 @@ def _fake_picture(path: Path) -> Any:
     )
 
 
-def _fake_book(chapter_ids: list[tuple[int, int]]) -> Any:
+def _fake_book(
+    chapters: Sequence[ChapterSpec],
+    *,
+    title: str = "测试 本子/标题",
+) -> Any:
+    entries = []
+    for item in chapters:
+        chapter_id, order = item[0], item[1]
+        chapter_title = item[2] if len(item) > 2 else ""
+        entries.append(
+            SimpleNamespace(chapter_id=chapter_id, order=order, title=chapter_title)
+        )
     return SimpleNamespace(
         book_id=1114751,
-        title="测试 本子/标题",
-        chapters=tuple(
-            SimpleNamespace(chapter_id=chapter_id, order=order)
-            for chapter_id, order in chapter_ids
-        ),
+        title=title,
+        chapters=tuple(entries),
     )
 
 
@@ -73,11 +96,17 @@ class _FakeClient:
     instances: list["_FakeClient"] = []
 
     def __init__(
-        self, settings: Any, *, chapter_ids: list[tuple[int, int]], page_size: int
+        self,
+        settings: Any,
+        *,
+        chapters: Sequence[ChapterSpec],
+        page_size: int,
+        book_title: str,
     ) -> None:
         self.settings = settings
-        self.chapter_ids = chapter_ids
+        self.chapters = chapters
         self.page_size = page_size
+        self.book_title = book_title
         self.downloads: list[dict[str, Any]] = []
         _FakeClient.instances.append(self)
 
@@ -89,7 +118,7 @@ class _FakeClient:
 
     def get_book(self, book_id: str) -> Any:
         self.book_id = book_id
-        return _fake_book(self.chapter_ids)
+        return _fake_book(self.chapters, title=self.book_title)
 
     def get_chapter(self, chapter_id: int) -> _FakeChapter:
         self.chapter_id = chapter_id
@@ -132,17 +161,44 @@ def _patch_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
 def _install_client(
     monkeypatch: pytest.MonkeyPatch,
     *,
-    chapter_ids: list[tuple[int, int]],
+    chapters: Sequence[ChapterSpec],
     page_size: int = 10,
+    book_title: str = "测试 本子/标题",
 ) -> None:
     def _factory(settings: Any) -> _FakeClient:
-        return _FakeClient(settings, chapter_ids=chapter_ids, page_size=page_size)
+        return _FakeClient(
+            settings,
+            chapters=chapters,
+            page_size=page_size,
+            book_title=book_title,
+        )
 
     monkeypatch.setattr(jm_downloader, "Client", _factory)
 
 
-def _capture_write_pdf(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
-    captured: dict[str, Any] = {}
+def _write_stub_pdf(output: Path, pages: list[tuple[Path, Picture]]) -> None:
+    """替身 PDF：页数与传入页面一致，内容留空（只为验证结构，不解码图片）。"""
+    document = fitz.open()
+    for _ in pages:
+        document.new_page(width=100, height=150)
+    document.save(str(output), garbage=3, deflate=True)
+    document.close()
+
+
+def _capture_write_pdf(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    oversize_orders: set[int] | None = None,
+    empty_orders: set[int] | None = None,
+) -> dict[str, Any]:
+    """替换 ``_write_pdf``：按输出名记录每章参数，可指定某些章节超限/无页。
+
+    ``oversize_orders`` / ``empty_orders`` 按**章节序号**（文件名里的三位数）生效，
+    与真实实现一致：超限不落盘并返回 oversize。
+    """
+    captured: dict[str, Any] = {"calls": []}
+    oversize = oversize_orders or set()
+    empty = empty_orders or set()
 
     def _write_pdf(
         pages: Any,
@@ -153,16 +209,29 @@ def _capture_write_pdf(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         password: str | None,
         limit_bytes: int | None,
     ) -> Any:
-        captured["pages"] = list(pages)
-        captured["sources"] = [path for path, _picture in pages]
-        captured["dpi"] = dpi
-        captured["quality"] = quality
-        captured["password"] = password
-        captured["limit_bytes"] = limit_bytes
+        page_list = list(pages)
         output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_bytes(b"%PDF-1.4")
+        # 章节序号写在文件名里；整本 PDF（uid 路径）没有序号，超限判定按 1 处理
+        match = _CHAPTER_INDEX_RE.search(output.name)
+        index = int(match.group(1)) if match else 1
+        captured["calls"].append(
+            {
+                "output": output,
+                "pages": page_list,
+                "sources": [path for path, _picture in page_list],
+                "dpi": dpi,
+                "quality": quality,
+                "password": password,
+                "limit_bytes": limit_bytes,
+            }
+        )
+        if index in oversize:
+            return jm_downloader._PdfBuild("oversize", None, len(page_list), 1234, 0)
+        if index in empty:
+            return jm_downloader._PdfBuild("empty", None, 0, 0, len(page_list))
+        _write_stub_pdf(output, page_list)
         return jm_downloader._PdfBuild(
-            "ok", output, len(captured["pages"]), output.stat().st_size, 0
+            "ok", output, len(page_list), output.stat().st_size, 0
         )
 
     monkeypatch.setattr(jm_downloader, "_write_pdf", _write_pdf)
@@ -176,7 +245,7 @@ def _config(**overrides: Any) -> Any:
         "jm_image_timeout": 60.0,
         "jm_download_concurrency": 4,
         "jm_max_chapters": 0,
-        "jm_max_file_size": 100,
+        "jm_chapter_max_file_size": 100,
         "jm_pdf_dpi": 150.0,
         "jm_image_quality": 95,
     }
@@ -184,33 +253,70 @@ def _config(**overrides: Any) -> Any:
     return SimpleNamespace(**base)
 
 
+def _archive(result: JmDownload) -> JmChapterArchive:
+    assert isinstance(result, JmChapterArchive), result
+    return result
+
+
+def _plain(result: JmDownload) -> JmPlainDownload:
+    assert isinstance(result, JmPlainDownload), result
+    return result
+
+
+def _zip_entries(zip_path: Path) -> list[str]:
+    with zipfile.ZipFile(zip_path) as archive:
+        return archive.namelist()
+
+
 @pytest.mark.asyncio
-async def test_download_book_pdf_merges_all_chapters_in_order(
+async def test_download_book_writes_one_pdf_per_chapter_into_zip(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _install_client(monkeypatch, chapter_ids=[(111, 1), (222, 2)])
+    _install_client(
+        monkeypatch,
+        chapters=[(111, 1, "序章"), (222, 2)],
+    )
     captured = _capture_write_pdf(monkeypatch)
 
-    result, task_dir = await download_book_pdf(
+    result, task_dir = await download_book(
         "1114751", config=_config(), password="Ab3xK9Qm"
     )
+    archive = _archive(result)
 
-    assert result.status == "ok"
-    assert result.chapter_count == 2
-    assert result.downloaded_chapters == 2
-    assert result.page_count == 4
-    assert result.pdf_path is not None
-    assert result.pdf_path.name == "JM1114751 测试 本子_标题.pdf"
-    assert result.pdf_path.parent == task_dir
-    # 页序 = 章节顺序 × 章节内页序，且每章写入独立目录
-    assert [path.name for path in captured["sources"]] == [
-        "00001.webp",
-        "00002.webp",
+    assert archive.status == "ok"
+    assert archive.chapter_count == 2
+    assert archive.downloaded_chapters == 2
+    assert archive.skipped_chapters == 0
+    assert archive.page_count == 4
+    assert archive.zip_path is not None
+    assert archive.zip_path.name == "JM1114751 测试 本子_标题.zip"
+    assert archive.zip_path.parent == task_dir
+    assert archive.size_bytes == archive.zip_path.stat().st_size
+    # 每章一份 PDF：序号补零，有标题的带标题；空标题只留序号
+    assert _zip_entries(archive.zip_path) == [
+        "JM1114751 001 序章.pdf",
+        "JM1114751 002.pdf",
+    ]
+    assert [(pdf.order, pdf.title, pdf.page_count) for pdf in archive.pdfs] == [
+        (1, "序章", 2),
+        (2, "", 2),
+    ]
+    # 每个章节 PDF 单独写盘，页序 = 章节顺序 × 章节内页序
+    assert [call["output"].name for call in captured["calls"]] == [
+        "JM1114751 001 序章.pdf",
+        "JM1114751 002.pdf",
+    ]
+    assert [path.name for path in captured["calls"][0]["sources"]] == [
         "00001.webp",
         "00002.webp",
     ]
-    assert captured["password"] == "Ab3xK9Qm"
-    assert captured["dpi"] == 150.0
+    assert all(call["password"] == "Ab3xK9Qm" for call in captured["calls"])
+    assert all(call["dpi"] == 150.0 for call in captured["calls"])
+    assert all(call["limit_bytes"] == 100 * 1024 * 1024 for call in captured["calls"])
+    # 章节 PDF 已进 zip，任务目录里只留最终交付物
+    assert sorted(path.name for path in task_dir.glob("*") if path.is_file()) == [
+        "JM1114751 测试 本子_标题.zip"
+    ]
     client = _FakeClient.instances[0]
     assert [item["chapter_id"] for item in client.downloads] == [111, 222]
     assert client.downloads[0]["dest"] != client.downloads[1]["dest"]
@@ -220,95 +326,206 @@ async def test_download_book_pdf_merges_all_chapters_in_order(
 
 
 @pytest.mark.asyncio
-async def test_download_book_pdf_sorts_chapters_by_order(
+async def test_download_book_sorts_chapters_by_order(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # 服务端返回顺序不可信：按 order 排序后合出的 PDF 才是阅读顺序
-    _install_client(monkeypatch, chapter_ids=[(111, 2), (222, 1)])
+    # 服务端返回顺序不可信：按 order 排序后 zip 条目才是阅读顺序
+    _install_client(monkeypatch, chapters=[(111, 2), (222, 1)])
     captured = _capture_write_pdf(monkeypatch)
 
-    result, _ = await download_book_pdf(
-        "1114751", config=_config(), password="Ab3xK9Qm"
-    )
+    result, _ = await download_book("1114751", config=_config(), password="Ab3xK9Qm")
+    archive = _archive(result)
 
-    assert result.status == "ok"
+    assert archive.status == "ok"
     assert [item["chapter_id"] for item in _FakeClient.instances[0].downloads] == [
         222,
         111,
     ]
-    assert [path.parent.name for path in captured["sources"]] == [
+    # 章节序号跟着阅读顺序走，与章节号无关
+    assert [call["output"].name for call in captured["calls"]] == [
+        "JM1114751 001.pdf",
+        "JM1114751 002.pdf",
+    ]
+    assert [pdf.chapter_id for pdf in archive.pdfs] == [222, 111]
+    assert [path.parent.name for path in captured["calls"][0]["sources"]] == [
         "c001",
         "c001",
+    ]
+    assert [path.parent.name for path in captured["calls"][1]["sources"]] == [
         "c002",
         "c002",
     ]
 
 
 @pytest.mark.asyncio
-async def test_download_book_pdf_falls_back_to_book_id_for_single_chapter(
+async def test_download_book_falls_back_to_book_id_for_single_chapter(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _install_client(monkeypatch, chapter_ids=[])
-    _capture_write_pdf(monkeypatch)
+    _install_client(monkeypatch, chapters=[])
+    captured = _capture_write_pdf(monkeypatch)
 
-    result, _ = await download_book_pdf(
-        "1114751", config=_config(), password="Ab3xK9Qm"
-    )
+    result, _ = await download_book("1114751", config=_config(), password="Ab3xK9Qm")
+    archive = _archive(result)
 
-    assert result.status == "ok"
-    assert result.chapter_count == 1
+    assert archive.status == "ok"
+    assert archive.chapter_count == 1
     assert _FakeClient.instances[0].downloads[0]["chapter_id"] == 1114751
+    assert _zip_entries(archive.zip_path) == ["JM1114751 001.pdf"]  # type: ignore[arg-type]
+    assert len(captured["calls"]) == 1
 
 
 @pytest.mark.asyncio
-async def test_download_book_pdf_skips_empty_chapters_and_honours_max_chapters(
+async def test_download_book_skips_empty_chapters_and_honours_max_chapters(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _install_client(monkeypatch, chapter_ids=[(999, 1), (111, 2), (222, 3)])
+    _install_client(monkeypatch, chapters=[(999, 1), (111, 2), (222, 3)])
     _capture_write_pdf(monkeypatch)
 
-    result, _ = await download_book_pdf(
+    result, _ = await download_book(
         "1114751", config=_config(jm_max_chapters=2), password="Ab3xK9Qm"
     )
+    archive = _archive(result)
 
     # 只取前两章，其中一章没有图片
-    assert result.chapter_count == 3
-    assert result.downloaded_chapters == 1
-    assert result.page_count == 2
+    assert archive.chapter_count == 3
+    assert archive.downloaded_chapters == 1
+    assert archive.skipped_chapters == 0, "服务端没给图的章节不算「被跳过」"
+    assert archive.page_count == 2
     assert [item["chapter_id"] for item in _FakeClient.instances[0].downloads] == [111]
+    # 序号取自服务端章节序号：被跳过的第 1 章仍占号，所以留下的是 002
+    assert _zip_entries(archive.zip_path) == ["JM1114751 002.pdf"]  # type: ignore[arg-type]
 
 
 @pytest.mark.asyncio
-async def test_download_book_pdf_stops_when_images_exceed_limit(
+async def test_download_book_skips_oversized_chapter_and_keeps_the_rest(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _install_client(monkeypatch, chapter_ids=[(111, 1), (222, 2)], page_size=600_000)
-    captured = _capture_write_pdf(monkeypatch)
+    """单章超限只丢那一章：其余章节照常打包，状态是 partial。"""
+    _install_client(monkeypatch, chapters=[(111, 1), (222, 2), (333, 3)])
+    captured = _capture_write_pdf(monkeypatch, oversize_orders={2})
 
-    result, _ = await download_book_pdf(
-        "1114751", config=_config(jm_max_file_size=1), password="Ab3xK9Qm"
+    result, _ = await download_book(
+        "1114751", config=_config(jm_chapter_max_file_size=1), password="Ab3xK9Qm"
     )
+    archive = _archive(result)
 
-    assert result.status == "oversize"
-    assert result.pdf_path is None
-    assert captured == {}
-    assert len(_FakeClient.instances[0].downloads) == 1
+    assert archive.status == "partial"
+    assert archive.ok
+    assert archive.skipped_chapters == 1
+    assert archive.downloaded_chapters == 3
+    assert archive.page_count == 4
+    assert len(captured["calls"]) == 3
+    assert _zip_entries(archive.zip_path) == [  # type: ignore[arg-type]
+        "JM1114751 001.pdf",
+        "JM1114751 003.pdf",
+    ]
+    assert [pdf.order for pdf in archive.pdfs] == [1, 3]
 
 
 @pytest.mark.asyncio
-async def test_download_book_pdf_reports_empty_result(
+async def test_download_book_skips_chapter_whose_pages_all_failed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _install_client(monkeypatch, chapter_ids=[(999, 1)])
+    _install_client(monkeypatch, chapters=[(111, 1), (222, 2)])
+    _capture_write_pdf(monkeypatch, empty_orders={2})
+
+    result, _ = await download_book("1114751", config=_config(), password="Ab3xK9Qm")
+    archive = _archive(result)
+
+    assert archive.status == "partial"
+    assert archive.skipped_chapters == 1
+    assert _zip_entries(archive.zip_path) == ["JM1114751 001.pdf"]  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_download_book_reports_empty_when_no_chapter_makes_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """所有章节都超限时不出 zip：交给上层只发信息节点。"""
+    _install_client(monkeypatch, chapters=[(111, 1), (222, 2)])
+    _capture_write_pdf(monkeypatch, oversize_orders={1, 2})
+
+    result, task_dir = await download_book(
+        "1114751", config=_config(jm_chapter_max_file_size=1), password="Ab3xK9Qm"
+    )
+    archive = _archive(result)
+
+    assert archive.status == "empty"
+    assert not archive.ok
+    assert archive.zip_path is None
+    assert archive.size_bytes is None
+    assert archive.page_count == 0
+    assert archive.skipped_chapters == 2
+    assert list(task_dir.glob("*.zip")) == []
+
+
+@pytest.mark.asyncio
+async def test_download_book_reports_empty_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_client(monkeypatch, chapters=[(999, 1)])
     captured = _capture_write_pdf(monkeypatch)
 
-    result, _ = await download_book_pdf(
+    result, task_dir = await download_book(
         "1114751", config=_config(), password="Ab3xK9Qm"
     )
+    archive = _archive(result)
 
-    assert result.status == "empty"
-    assert result.pdf_path is None
-    assert captured == {}
+    assert archive.status == "empty"
+    assert archive.zip_path is None
+    assert captured["calls"] == []
+    assert list(task_dir.glob("*")) == []
+
+
+def test_chapter_limit_bytes_follows_config() -> None:
+    assert jm_downloader._chapter_limit_bytes(0) is None
+    assert jm_downloader._chapter_limit_bytes(2) == 2 * 1024 * 1024
+
+
+@pytest.mark.asyncio
+async def test_download_book_merges_into_plain_pdf_without_password(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """uid 路径维持现状：所有章节合成一份未加密 PDF，不产生 zip。"""
+    _install_client(monkeypatch, chapters=[(111, 1), (222, 2)])
+    captured = _capture_write_pdf(monkeypatch)
+
+    result, task_dir = await download_book("1114751", config=_config(), password=None)
+    plain = _plain(result)
+
+    assert plain.status == "ok"
+    assert plain.ok
+    assert plain.chapter_count == 2
+    assert plain.downloaded_chapters == 2
+    assert plain.page_count == 4
+    assert plain.pdf_path is not None
+    assert plain.pdf_path.name == "JM1114751 测试 本子_标题.pdf"
+    assert len(captured["calls"]) == 1
+    assert captured["calls"][0]["password"] is None
+    assert [path.name for path in captured["calls"][0]["sources"]] == [
+        "00001.webp",
+        "00002.webp",
+        "00001.webp",
+        "00002.webp",
+    ]
+    assert list(task_dir.glob("*.zip")) == []
+
+
+@pytest.mark.asyncio
+async def test_download_book_plain_reports_oversize(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_client(monkeypatch, chapters=[(111, 1), (222, 2)])
+    _capture_write_pdf(monkeypatch, oversize_orders={1})
+
+    result, _ = await download_book(
+        "1114751", config=_config(jm_chapter_max_file_size=1), password=None
+    )
+    plain = _plain(result)
+
+    assert plain.status == "oversize"
+    assert plain.pdf_path is None
+    assert not plain.ok
 
 
 def test_build_settings_maps_config(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -498,28 +715,44 @@ def test_write_pdf_reports_empty_when_every_page_fails(tmp_path: Path) -> None:
     assert build.failed_pages == 1
 
 
+def test_write_zip_has_no_password_and_keeps_entry_order(tmp_path: Path) -> None:
+    zip_path = tmp_path / "book.zip"
+
+    size = jm_downloader._write_zip(
+        [("JM1 001.pdf", b"%PDF-1.4 first"), ("JM1 002 a.pdf", b"%PDF-1.4 second")],
+        zip_path,
+    )
+
+    assert size == zip_path.stat().st_size
+    with zipfile.ZipFile(zip_path) as archive:
+        assert archive.namelist() == ["JM1 001.pdf", "JM1 002 a.pdf"]
+        # zip 不加密：没有密码位，条目可以直接读
+        assert all(not info.flag_bits & 0x1 for info in archive.infolist())
+        assert archive.read("JM1 001.pdf") == b"%PDF-1.4 first"
+
+
 @pytest.mark.asyncio
-async def test_download_book_pdf_cleans_up_when_download_raises(
+async def test_download_book_cleans_up_when_download_raises(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     def _boom(*_args: Any, **_kwargs: Any) -> Any:
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(jm_downloader, "_download_sync", _boom)
+    monkeypatch.setattr(jm_downloader, "_download_archive_sync", _boom)
 
     with pytest.raises(RuntimeError, match="boom"):
-        await download_book_pdf("1114751", config=_config(), password="Ab3xK9Qm")
+        await download_book("1114751", config=_config(), password="Ab3xK9Qm")
 
     leftovers = list((tmp_path / "jm").glob("*"))
     assert leftovers == [], f"异常路径不得留下任务目录: {leftovers}"
 
 
 @pytest.mark.asyncio
-async def test_download_book_pdf_counts_failed_pages(
+async def test_download_book_counts_failed_pages(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # 每章 2 页，其中 1 页下载失败：失败数应汇总到 JmDownload.failed_pages
-    _install_client(monkeypatch, chapter_ids=[(111, 1)])
+    # 每章 2 页，其中 1 页下载失败：失败数应汇总到 failed_pages
+    _install_client(monkeypatch, chapters=[(111, 1)])
     _capture_write_pdf(monkeypatch)
 
     original_download = _FakeClient.download
@@ -531,16 +764,15 @@ async def test_download_book_pdf_counts_failed_pages(
 
     monkeypatch.setattr(_FakeClient, "download", _download_with_failure)
 
-    result, _ = await download_book_pdf(
-        "1114751", config=_config(), password="Ab3xK9Qm"
-    )
+    result, _ = await download_book("1114751", config=_config(), password="Ab3xK9Qm")
+    archive = _archive(result)
 
-    assert result.status == "ok"
-    assert result.failed_pages == 1
+    assert archive.status == "ok"
+    assert archive.failed_pages == 1
 
 
 @pytest.mark.asyncio
-async def test_download_book_pdf_cleans_up_after_cancellation(
+async def test_download_book_cleans_up_after_cancellation(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """取消后线程仍在写盘：必须等它结束再清理，不留残留原图/未加密 PDF。"""
@@ -552,21 +784,22 @@ async def test_download_book_pdf_cleans_up_after_cancellation(
     def _slow(*_args: Any, **_kwargs: Any) -> Any:
         started.set()
         release.wait(10)
-        return JmDownload(
-            status="ok",
+        return JmChapterArchive(
+            status="empty",
             book=Book(book_id=1114751, title="测试本子"),
-            pdf_path=None,
+            zip_path=None,
+            size_bytes=None,
             page_count=0,
-            size_bytes=0,
             chapter_count=1,
             downloaded_chapters=0,
             failed_pages=0,
+            skipped_chapters=0,
         )
 
-    monkeypatch.setattr(jm_downloader, "_download_sync", _slow)
+    monkeypatch.setattr(jm_downloader, "_download_archive_sync", _slow)
 
     task = asyncio.create_task(
-        download_book_pdf("1114751", config=_config(), password=None)
+        download_book("1114751", config=_config(), password="Ab3xK9Qm")
     )
     assert await asyncio.to_thread(started.wait, 10), "下载线程没能启动"
     task.cancel()

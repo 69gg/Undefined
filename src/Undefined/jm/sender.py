@@ -1,8 +1,9 @@
 """禁漫的合并转发发送与附件交付。
 
-自动提取先发「本子信息 + PDF 解密密码」两节点合并转发，随后把本地合成的加密 PDF
-作为独立文件消息单独发出：转发节点里的文件在 QQ 客户端下载会失败，所以文件不进转发。
-工具侧另有两条路：``format_jm_book_info`` 只输出详情（不下载），
+自动提取先发「本子信息 + 解密密码」两节点合并转发，随后把**一章一份加密 PDF 的
+zip** 作为独立文件消息单独发出：转发节点里的文件在 QQ 客户端下载会失败，所以文件
+不进转发。zip 本身不加密，密码在每个章节 PDF 内部，同一个密码适用于 zip 里所有
+PDF。工具侧另有两条路：``format_jm_book_info`` 只输出详情（不下载），
 ``fetch_jm_book_attachment`` 下载整本并把**未加密** PDF 注册为附件 UID（不发送），
 供 ``file_analysis_agent`` 继续解析。密码始终不会写进历史。
 """
@@ -17,9 +18,10 @@ from typing import TYPE_CHECKING, Any, Literal
 from jmcpy import Book
 
 from Undefined.jm.downloader import (
-    JmDownload,
+    JmChapterArchive,
+    JmPlainDownload,
     cleanup_download_path,
-    download_book_pdf,
+    download_book,
 )
 
 if TYPE_CHECKING:
@@ -72,7 +74,15 @@ def _preview(text: str | None, limit: int = _DESCRIPTION_PREVIEW_CHARS) -> str:
     return normalized[:limit].rstrip() + "..."
 
 
-def build_info_text(result: JmDownload, *, note: str = "") -> str:
+def _build_stats_line(result: JmChapterArchive) -> str:
+    """「页数 | zip 大小」一行；还没有 zip 时只报页数。"""
+    summary = f"页数: {result.page_count}"
+    if result.size_bytes is None:
+        return summary
+    return f"{summary} | zip: {_format_size(result.size_bytes)}"
+
+
+def build_info_text(result: JmChapterArchive, *, note: str = "") -> str:
     """信息节点（也是历史摘要的来源）的正文。"""
     book: Book = result.book
     lines = [f"「JM{book.book_id} {book.title or '未知标题'}」"]
@@ -80,7 +90,7 @@ def build_info_text(result: JmDownload, *, note: str = "") -> str:
     if book.authors:
         lines.append(f"作者: {', '.join(book.authors)}")
     lines.append(
-        f"章节: {result.chapter_count} 章（本次合并 {result.downloaded_chapters} 章）"
+        f"章节: {result.chapter_count} 章（本次出 {len(result.pdfs)} 份 PDF，每章一份）"
     )
     if book.tags:
         lines.append(f"标签: {'、'.join(book.tags[:_MAX_TAGS])}")
@@ -93,10 +103,12 @@ def build_info_text(result: JmDownload, *, note: str = "") -> str:
     if stats:
         lines.append(" | ".join(stats))
 
-    summary = f"页数: {result.page_count}"
-    if result.pdf_path is not None and result.size_bytes is not None:
-        summary += f" | PDF: {_format_size(result.size_bytes)}"
-    lines.append(summary)
+    lines.append(_build_stats_line(result))
+    if result.skipped_chapters:
+        # 少了哪几章必须写在用户能看到的地方，不能静默少发
+        lines.append(
+            f"{result.skipped_chapters} 章未打包（超过单章体积上限或没有可用页面）"
+        )
     if result.failed_pages:
         lines.append(f"下载失败 {result.failed_pages} 页")
     if note:
@@ -112,7 +124,12 @@ def build_info_text(result: JmDownload, *, note: str = "") -> str:
 
 
 def build_password_text(password: str) -> str:
-    return f"PDF 解密密码（{len(password)} 位）：{password}"
+    """密码节点正文。
+
+    写明密码适用于 zip 内所有 PDF——用户先解压再逐个打开，不写清楚容易以为
+    zip 本身要密码。
+    """
+    return f"zip 内所有 PDF 的解密密码（{len(password)} 位）：{password}"
 
 
 def build_forward_nodes(
@@ -123,14 +140,14 @@ def build_forward_nodes(
 ) -> list[dict[str, Any]]:
     """构建合并转发节点：信息 +（密码或状态）。
 
-    PDF 不放进转发：转发节点里的文件在 QQ 客户端下载会失败，改由 :func:`_send_result`
+    文件不放进转发：转发节点里的文件在 QQ 客户端下载会失败，改由 :func:`_send_result`
     在转发之后单独发一条文件消息（2026-10-01 实测，同一份文件独立发送可正常下载）。
     """
     if not password:
-        # 没有可发送的 PDF 时用状态说明替代密码节点
+        # 没有可发送的文件时用状态说明替代密码节点
         return [
             _node(info_text, name="本子信息"),
-            _node(status_text or "PDF 未发送", name="状态"),
+            _node(status_text or "文件未发送", name="状态"),
         ]
     return [
         _node(info_text, name="本子信息"),
@@ -138,7 +155,7 @@ def build_forward_nodes(
     ]
 
 
-def build_history_message(result: JmDownload) -> str:
+def build_history_message(result: JmChapterArchive) -> str:
     """历史摘要：只写可复述的信息，不含 PDF 密码。"""
     book = result.book
     lines = [
@@ -150,10 +167,11 @@ def build_history_message(result: JmDownload) -> str:
         # 这条摘要随转发写入，此时文件还没上传：不能提前声称已发送。
         # 上传成功时 send_group_file 会自己补一条「[文件] … 」历史，失败时补提示。
         lines.append(
-            f"PDF: 加密文件随后单独发送（{_format_size(result.size_bytes)}，密码见转发节点）"
+            f"zip: 加密 PDF（每章一份，共 {len(result.pdfs)} 份）随后单独发送"
+            f"（{_format_size(result.size_bytes)}，密码见转发节点）"
         )
     else:
-        lines.append("PDF: 未发送")
+        lines.append("zip: 未发送")
     lines.append(build_album_url(book.book_id))
     return "\n".join(lines)
 
@@ -185,7 +203,7 @@ def format_jm_book_info(book: Book) -> str:
 
 
 def _build_uid_message(
-    result: JmDownload,
+    result: JmPlainDownload,
     *,
     uid: str,
     file_name: str,
@@ -223,20 +241,24 @@ async def fetch_jm_book_attachment(
     if not str(scope_key or "").strip():
         return "无法确定附件作用域，不能注册禁漫本子 PDF"
 
-    result, task_dir = await download_book_pdf(book_id, config=config, password=None)
+    result, task_dir = await download_book(book_id, config=config, password=None)
     try:
+        if not isinstance(result, JmPlainDownload):
+            # 没给密码时不可能拿到归档结果，这里只作类型收口
+            return f"未能获取禁漫本子 PDF：内部状态异常｜JM{book_id}"
         if not result.ok or result.pdf_path is None:
             reason = (
-                f"PDF 超过体积上限（已下载 {result.page_count} 页）"
+                "PDF 超过单章体积上限"
                 if result.status == "oversize"
                 else "没有下载到任何页面"
             )
             return f"未能获取禁漫本子 PDF：{reason}｜JM{book_id}"
+        pdf_path = result.pdf_path
         record = await attachment_registry.register_local_file(
             scope_key,
-            result.pdf_path,
+            pdf_path,
             kind="file",
-            display_name=result.pdf_path.name,
+            display_name=pdf_path.name,
             source_kind="jm_book",
             source_ref=build_album_url(result.book.book_id),
             segment_data={
@@ -246,9 +268,7 @@ async def fetch_jm_book_attachment(
                 "chapters": result.chapter_count,
             },
         )
-        return _build_uid_message(
-            result, uid=str(record.uid), file_name=result.pdf_path.name
-        )
+        return _build_uid_message(result, uid=str(record.uid), file_name=pdf_path.name)
     finally:
         await cleanup_download_path(task_dir)
 
@@ -334,17 +354,17 @@ async def _send_result(
     book_id: str,
     info_text: str,
     password: str,
-    pdf_path: Path,
+    zip_path: Path,
     history_message: str,
 ) -> str:
-    """发送「信息 + 密码」合并转发，再单独发送 PDF 文件，返回可记录的真实投递状态。
+    """发送「信息 + 密码」合并转发，再单独发送 zip 文件，返回可记录的真实投递状态。
 
     文件不进转发：转发节点里的文件在 QQ 客户端下载会失败，独立文件消息才下得动。
     转发被协议端**明确拒绝**时降级为两条普通消息（信息 / 密码）。投递结果未确认
     （``delivery_uncertain`` / ``file_transfer_error``）时不能降级重发信息与密码——
     转发可能已经送达；但文件是另一条消息、此前从未发出，必须继续单独发送，否则用户
     整本下载白跑。文件自身投递结果未确认时同样不重发，直接上抛调用方；普通失败时补
-    一条写入历史的「PDF 上传失败」提示，转发投递未确认时提示不声称信息与密码已送达。
+    一条写入历史的「文件上传失败」提示，转发投递未确认时提示不声称信息与密码已送达。
     """
     nodes = build_forward_nodes(info_text, password=password)
     forward_status = _FORWARD_SENT
@@ -355,7 +375,7 @@ async def _send_result(
     except Exception as exc:
         if _is_fatal_delivery_error(exc):
             logger.error(
-                "[JM] 合并转发投递结果未确认，不重发信息与密码，继续单独发送 PDF: book=%s",
+                "[JM] 合并转发投递结果未确认，不重发信息与密码，继续单独发送 zip: book=%s",
                 book_id,
             )
             forward_status = _FORWARD_UNCERTAIN
@@ -382,23 +402,23 @@ async def _send_result(
 
     try:
         await _send_file(
-            sender, target_type, target_id, str(pdf_path), str(pdf_path.name)
+            sender, target_type, target_id, str(zip_path), str(zip_path.name)
         )
     except Exception as file_exc:
         if _is_fatal_delivery_error(file_exc):
             logger.error("[JM] 文件投递结果未确认，不重发: book=%s", book_id)
             raise
-        logger.exception("[JM] PDF 文件发送失败: book=%s", book_id)
+        logger.exception("[JM] zip 文件发送失败: book=%s", book_id)
         # 转发投递未确认时不能声称「信息与密码如上」——转发可能压根没送达
         notice = (
-            "PDF 上传失败，本次没有发送文件（合并转发投递结果未确认，信息与密码可能没有送达）。"
+            "zip 上传失败，本次没有发送文件（合并转发投递结果未确认，信息与密码可能没有送达）。"
             if forward_status == _FORWARD_UNCERTAIN
-            else "PDF 上传失败，本次没有发送文件（信息与密码如上）。"
+            else "zip 上传失败，本次没有发送文件（信息与密码如上）。"
         )
         # 写进历史：转发摘要只说「随后发送」，真正发没发出去靠这条记录收口
         await _send_text(sender, target_type, target_id, notice)
-        return f"{forward_status}，PDF 文件发送失败"
-    return f"{forward_status}，PDF 文件已单独发送"
+        return f"{forward_status}，zip 文件发送失败"
+    return f"{forward_status}，zip 文件已单独发送"
 
 
 async def send_jm_book(
@@ -409,19 +429,22 @@ async def send_jm_book(
     target_id: int,
     config: Any,
 ) -> str:
-    """下载整本，发送「信息 + 密码」合并转发，再单独发送加密 PDF 文件。"""
+    """下载整本，发送「信息 + 密码」合并转发，再单独发送「一章一份 PDF」的 zip。"""
     password = generate_pdf_password()
-    result, task_dir = await download_book_pdf(
-        book_id, config=config, password=password
-    )
+    result, task_dir = await download_book(book_id, config=config, password=password)
     try:
+        if not isinstance(result, JmChapterArchive):
+            # 给了密码就必须拿到归档结果，这里只作类型收口
+            logger.error("[JM] 下载结果不是章节归档: book=%s", book_id)
+            return f"JM{book_id} 下载结果异常，未发送任何文件"
+
         history_message = build_history_message(result)
-        pdf_path = result.pdf_path
-        if not result.ok or pdf_path is None:
+        if not result.ok:
+            # 没有出任何章节 PDF：只发信息与状态两节点，不发密码与文件
             note = (
-                "PDF 未发送：文件超过体积上限"
-                if result.status == "oversize"
-                else "PDF 未发送：没有下载到任何页面"
+                "文件未发送：单章都超过体积上限"
+                if result.status == "empty" and result.skipped_chapters
+                else "文件未发送：没有下载到任何页面"
             )
             info_text = build_info_text(result, note=note)
             nodes = build_forward_nodes(info_text, status_text=note)
@@ -449,6 +472,8 @@ async def send_jm_book(
                 )
             return f"JM{book_id} 已发送信息（{note}）"
 
+        zip_path = result.zip_path
+        assert zip_path is not None  # result.ok 已经保证有 zip
         status = await _send_result(
             sender,
             target_type,
@@ -456,12 +481,12 @@ async def send_jm_book(
             book_id=book_id,
             info_text=build_info_text(result),
             password=password,
-            pdf_path=pdf_path,
+            zip_path=zip_path,
             history_message=history_message,
         )
         return (
             f"JM{book_id} {status}"
-            f"（{result.downloaded_chapters} 章 / {result.page_count} 页 / "
+            f"（{len(result.pdfs)} 章 / {result.page_count} 页 / "
             f"{_format_size(result.size_bytes)}）"
         )
     finally:
