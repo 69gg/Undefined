@@ -9,6 +9,7 @@
 - 发送结构固定为三个节点：本子信息（车号、标题、作者、章节数、标签、观看/点赞、页数、大小、简介预览，末行是可直接复制的 `JM<车号>`，不再输出站点链接）、PDF 解密密码（每次随机生成 8 位，字母表去掉 `0/O/1/l/I` 等形近字符）、PDF 文件（本地合成后随转发上传，群聊下成为真正的群文件）。密码只出现在转发节点中，写入历史的摘要只说「密码见转发节点」，后续 AI 轮次不会复述密码。
 - PDF 只放在转发里，不额外发独立文件消息：文件在本地合成后随转发上传，群聊下 NapCat 会把它作为群文件上传（`isGroupFile`、`busid=102`），元素里带 `fileId` / `fileMd5` / `fileSha1`，节点里的文件可以直接下载，同一个 PDF 因此也会出现在群文件列表里。只有转发本身发送失败时才退化为「信息 + 密码两条普通消息 + 独立文件消息」，那种情况下文件没有别的入口。
 - 体积与失败语义：下载量超过 `[jm].max_file_size`（先按各章节原始图片累计预判、合成后再复核 PDF 实际大小；该上限同时约束内存占用，PDF 在内存中合成后写盘）或没有下到任何页面时，只发信息与状态两个节点，不发密码与文件；车号不存在或接口不可用时发送一行 `JM 提取失败：<原因>` 并记录异常类型与堆栈。
+- 新增 `jm_book` 工具（`src/Undefined/skills/tools/jm_book/`，与 `arxiv_paper` 同构）：`output_mode=send`（默认，等价自动提取）、`uid`（只下载并注册**未加密** PDF 附件 UID，不发送消息，供 `file_analysis_agent` 用 `extract_pdf` / `describe_pdf_page` 解析）、`info`（只返回标题/作者/章节/标签/观看点赞/简介与链接，不下载）；`callable.json` 把它共享给 `file_analysis_agent`，后者提示词里加了「车号/链接 → 先 `jm_book(output_mode="uid")`」的规则。
 - 新增 `[jm]` 配置段：`auto_extract_enabled`（默认 `false`）、`use_proxy`、`auto_extract_group_ids` / `auto_extract_private_ids`（空时跟随全局 access）、`auto_extract_max_items`（默认 1，上限 5）、`max_file_size`、`max_chapters`、`pdf_dpi`、`image_quality`、`download_concurrency`、`request_timeout`、`image_timeout`、`session_dir`（jmcpy 配置目录，可复用已保存的登录态）；`[jm].use_proxy` 支持环境变量 `JM_USE_PROXY`。
 - 图片解码与 PDF 合成是同步 CPU 工作，下载整体通过 `asyncio.to_thread` 使用 jmcpy 的同步客户端执行，不阻塞事件循环；单次任务不可取消，由 `[jm].request_timeout` / `image_timeout` 与 jmcpy 的多端点重试兜底。
 

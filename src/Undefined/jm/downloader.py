@@ -109,9 +109,13 @@ def _write_pdf(
     *,
     dpi: float,
     quality: int,
-    password: str,
+    password: str | None,
 ) -> Path:
-    """把页面按顺序合成一个加密 PDF（页尺寸统一、每页只编码一次）。"""
+    """把页面按顺序合成一个 PDF（页尺寸统一、每页只编码一次）。
+
+    ``password`` 为 ``None`` 时不加密——附件 UID 模式要交给 PDF 解析，加密会让
+    ``extract_pdf`` / ``describe_pdf_page`` 打不开。
+    """
     document = fitz.open()
     try:
         for page_path, picture in pages:
@@ -130,14 +134,17 @@ def _write_pdf(
             )
             # MuPDF 对 JPEG 流做 DCT 直通：上面这一次编码就是 PDF 里的最终数据
             page.insert_image(page.rect, stream=buffer.getvalue())
-        document.save(
-            str(output),
-            encryption=fitz.PDF_ENCRYPT_AES_256,
-            user_pw=password,
-            owner_pw=password,
-            garbage=3,
-            deflate=True,
-        )
+        if password is None:
+            document.save(str(output), garbage=3, deflate=True)
+        else:
+            document.save(
+                str(output),
+                encryption=fitz.PDF_ENCRYPT_AES_256,
+                user_pw=password,
+                owner_pw=password,
+                garbage=3,
+                deflate=True,
+            )
     finally:
         document.close()
     return output
@@ -147,7 +154,7 @@ def _download_sync(
     book_id: str,
     task_dir: Path,
     *,
-    password: str,
+    password: str | None,
     settings: Settings,
     max_chapters: int,
     max_file_size_mb: int,
@@ -246,15 +253,27 @@ def _download_sync(
         )
 
 
+def _fetch_book_sync(book_id: str, settings: Settings) -> Book:
+    with Client(settings) as client:
+        return client.get_book(book_id)
+
+
+async def fetch_book(book_id: str, *, config: Any) -> Book:
+    """只取本子详情，不下载任何图片（线程里跑，不阻塞事件循环）。"""
+    return await asyncio.to_thread(_fetch_book_sync, book_id, build_settings(config))
+
+
 async def download_book_pdf(
     book_id: str,
     *,
     config: Any,
-    password: str,
+    password: str | None = None,
 ) -> tuple[JmDownload, Path]:
-    """下载整本并合成加密 PDF，返回 ``(结果, 任务目录)``。
+    """下载整本并合成 PDF，返回 ``(结果, 任务目录)``。
 
-    调用方负责在发送完成后清理任务目录（``cleanup_download_path``）。
+    ``password`` 给出时用 AES-256 加密（自动提取用），``None`` 时输出未加密 PDF
+    （附件 UID 模式用，便于 PDF 解析）。调用方负责在发送或登记完成后清理任务目录
+    （``cleanup_download_path``）。
     """
     task_dir = ensure_dir(_JM_DOWNLOAD_DIR / uuid.uuid4().hex)
     result = await asyncio.to_thread(

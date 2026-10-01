@@ -118,4 +118,5 @@ def test_pipeline_registry_loads_expected_pipelines() -> None:
         "bilibili_opus",
         "douyin",
         "github",
+        "jm",
     }

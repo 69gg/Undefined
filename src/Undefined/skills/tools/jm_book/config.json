@@ -1,0 +1,31 @@
+{
+    "type": "function",
+    "function": {
+        "name": "jm_book",
+        "description": "处理禁漫（JM / 18comic）本子。默认下载整本并通过合并转发发送；可设置 output_mode=uid 只注册 PDF 附件 UID，或 output_mode=info 只获取本子信息。支持 JM350234、350234 或禁漫链接。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "book_id": {
+                    "type": "string",
+                    "description": "本子车号：如 JM350234、350234 或 https://18comic.vip/album/350234"
+                },
+                "target_type": {
+                    "type": "string",
+                    "enum": ["group", "private"],
+                    "description": "可选。目标会话类型"
+                },
+                "target_id": {
+                    "type": "integer",
+                    "description": "可选。目标会话 ID"
+                },
+                "output_mode": {
+                    "type": "string",
+                    "enum": ["send", "uid", "info"],
+                    "description": "输出模式：send（默认，下载整本并发送「信息 / 解密密码 / PDF」三节点合并转发）、uid（只下载并注册未加密 PDF 附件 UID，不发送消息）、info（只返回本子信息，不下载不发送）"
+                }
+            },
+            "required": ["book_id"]
+        }
+    }
+}

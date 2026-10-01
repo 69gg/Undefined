@@ -1,8 +1,9 @@
-"""禁漫自动提取的合并转发发送。
+"""禁漫的合并转发发送与附件交付。
 
-一次发送固定三个节点：本子信息、PDF 解密密码、PDF 文件。QQ 对合并转发节点内
-的 ``file`` 段支持并不确定，因此三节点发送失败时自动退化为「两节点转发（信息 +
-密码）+ 单独 PDF 文件消息」，密码始终不会写进历史。
+自动提取一次发送三个节点：本子信息、PDF 解密密码、PDF 文件（本地合成后随转发上传）。
+工具侧另有两条路：``format_jm_book_info`` 只输出详情（不下载），
+``fetch_jm_book_attachment`` 下载整本并把**未加密** PDF 注册为附件 UID（不发送），
+供 ``file_analysis_agent`` 继续解析。密码始终不会写进历史。
 """
 
 from __future__ import annotations
@@ -172,6 +173,106 @@ def build_history_message(result: JmDownload) -> str:
         lines.append("PDF: 未发送")
     lines.append(build_album_url(book.book_id))
     return "\n".join(lines)
+
+
+def format_jm_book_info(book: Book, *, description_preview_chars: int = 0) -> str:
+    """本子详情的文本形式（工具 ``output_mode=info`` 用，不下载任何图片）。"""
+    limit = (
+        description_preview_chars
+        if description_preview_chars > 0
+        else _DESCRIPTION_PREVIEW_CHARS
+    )
+    lines = [f"「JM{book.book_id} {book.title or '未知标题'}」"]
+    if book.authors:
+        lines.append(f"作者: {', '.join(book.authors)}")
+    lines.append(f"章节: {len(book.chapters) or 1} 章")
+    if book.tags:
+        lines.append(f"标签: {'、'.join(book.tags[:_MAX_TAGS])}")
+    stats: list[str] = []
+    if book.views is not None:
+        stats.append(f"观看 {book.views}")
+    if book.likes is not None:
+        stats.append(f"点赞 {book.likes}")
+    if book.comment_count is not None:
+        stats.append(f"评论 {book.comment_count}")
+    if stats:
+        lines.append(" | ".join(stats))
+
+    description = _preview(book.description, limit)
+    if description and description != book.title:
+        lines.extend(["---", description])
+
+    lines.extend(["---", f"车号: JM{book.book_id}", build_album_url(book.book_id)])
+    return "\n".join(lines)
+
+
+def _build_uid_message(
+    result: JmDownload,
+    *,
+    uid: str,
+    file_name: str,
+) -> str:
+    book = result.book
+    lines = [
+        f"已获取禁漫本子 PDF：「{book.title or '未知标题'}」",
+        f"车号: JM{book.book_id}",
+        f"章节: {result.chapter_count} 章 | 页数: {result.page_count}",
+        f'PDF: <attachment uid="{uid}"/>',
+    ]
+    if file_name:
+        lines.append(f"文件名: {file_name}")
+    if result.size_bytes is not None:
+        lines.append(f"大小: {_format_size(result.size_bytes)}")
+    lines.append("说明: 该 PDF 未加密，可直接解析")
+    lines.append(build_album_url(book.book_id))
+    return "\n".join(lines)
+
+
+async def fetch_jm_book_attachment(
+    *,
+    book_id: str,
+    attachment_registry: Any,
+    scope_key: str,
+    config: Any,
+) -> str:
+    """下载整本并注册为附件 UID（工具 ``output_mode=uid``，不发送消息）。
+
+    输出**未加密** PDF：这条路的用途是把文件交给 ``file_analysis_agent`` 解析，
+    加密会让 ``extract_pdf`` / ``describe_pdf_page`` 打不开。
+    """
+    if attachment_registry is None:
+        return "缺少必要的运行时组件（attachment_registry）"
+    if not str(scope_key or "").strip():
+        return "无法确定附件作用域，不能注册禁漫本子 PDF"
+
+    result, task_dir = await download_book_pdf(book_id, config=config, password=None)
+    try:
+        if not result.ok or result.pdf_path is None:
+            reason = (
+                f"PDF 超过体积上限（已下载 {result.page_count} 页）"
+                if result.status == "oversize"
+                else "没有下载到任何页面"
+            )
+            return f"未能获取禁漫本子 PDF：{reason}｜JM{book_id}"
+        record = await attachment_registry.register_local_file(
+            scope_key,
+            result.pdf_path,
+            kind="file",
+            display_name=result.pdf_path.name,
+            source_kind="jm_book",
+            source_ref=build_album_url(result.book.book_id),
+            segment_data={
+                "book_id": result.book.book_id,
+                "title": result.book.title,
+                "page_count": result.page_count,
+                "chapters": result.chapter_count,
+            },
+        )
+        return _build_uid_message(
+            result, uid=str(record.uid), file_name=result.pdf_path.name
+        )
+    finally:
+        await cleanup_download_path(task_dir)
 
 
 async def _send_forward(

@@ -222,3 +222,80 @@ async def test_send_jm_book_uses_private_forward(
     sender.send_private_forward_message.assert_awaited_once()
     sender.send_group_forward_message.assert_not_awaited()
     assert sender.send_private_forward_message.await_args.args[0] == 30001
+
+
+def test_format_jm_book_info_lists_metadata() -> None:
+    text = jm_sender.format_jm_book_info(_book())
+
+    assert "「JM1114751 测试本子」" in text
+    assert "作者: 作者A, 作者B" in text
+    assert "章节: 1 章" in text
+    assert "标签: 标签1、标签2" in text
+    assert "观看 3456 | 点赞 12" in text
+    assert "车号: JM1114751" in text
+    assert "18comic.vip/album/1114751" in text
+
+
+@pytest.mark.asyncio
+async def test_fetch_jm_book_attachment_registers_unencrypted_pdf(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    result = _result(tmp_path)
+    captured = _patch_download(monkeypatch, result, tmp_path / "task")
+    record = SimpleNamespace(uid="file_jm123")
+    registry = SimpleNamespace(register_local_file=AsyncMock(return_value=record))
+
+    text = await jm_sender.fetch_jm_book_attachment(
+        book_id="1114751",
+        attachment_registry=registry,
+        scope_key="group:20001",
+        config=SimpleNamespace(),
+    )
+
+    # uid 模式必须输出未加密 PDF，否则 PDF 解析工具打不开
+    assert captured["password"] is None
+    register_args = registry.register_local_file.await_args
+    assert register_args.args[0] == "group:20001"
+    assert register_args.kwargs["kind"] == "file"
+    assert register_args.kwargs["source_kind"] == "jm_book"
+    assert 'PDF: <attachment uid="file_jm123"/>' in text
+    assert "该 PDF 未加密" in text
+    captured["cleanup"].assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_fetch_jm_book_attachment_requires_scope_and_registry(
+    tmp_path: Path,
+) -> None:
+    assert "attachment_registry" in await jm_sender.fetch_jm_book_attachment(
+        book_id="1114751",
+        attachment_registry=None,
+        scope_key="group:20001",
+        config=SimpleNamespace(),
+    )
+    assert "作用域" in await jm_sender.fetch_jm_book_attachment(
+        book_id="1114751",
+        attachment_registry=SimpleNamespace(register_local_file=AsyncMock()),
+        scope_key="  ",
+        config=SimpleNamespace(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_fetch_jm_book_attachment_reports_oversize(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    result = _result(tmp_path, status="oversize")
+    captured = _patch_download(monkeypatch, result, tmp_path / "task")
+    registry = SimpleNamespace(register_local_file=AsyncMock())
+
+    text = await jm_sender.fetch_jm_book_attachment(
+        book_id="1114751",
+        attachment_registry=registry,
+        scope_key="group:20001",
+        config=SimpleNamespace(),
+    )
+
+    assert "PDF 超过体积上限" in text
+    registry.register_local_file.assert_not_awaited()
+    captured["cleanup"].assert_awaited_once()

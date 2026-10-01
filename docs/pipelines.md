@@ -67,6 +67,8 @@ PDF 随转发一起上传，节点里的文件可以直接下载（已用 14MB �
 
 PDF 合成没有走 `jmcpy.imaging.write_pdf`，而是自己用 PyMuPDF 逐页写入：jmcpy 的下载 API 一章只能产出一个 PDF，而这里要把多个章节合进同一个文件；同时 PATH 输出会先把解扰后的图重新编码一次、合成时再编码第二次，这里改为 `decode=False` 取服务端原始字节（无损落盘）、自己解扰、每页只编码一次 JPEG（`[jm].image_quality`，色度 4:4:4）后直接作为 PDF 图像数据，并按 `[jm].pdf_dpi` 统一页尺寸、做 AES-256 加密。页像素始终不做缩放，画质上限由站点源图自身分辨率决定。（jmcpy ≤0.1.1 的 `write_pdf` 另有「追加页退回 72 DPI、同文档页尺寸不一致」的问题，已在 0.1.2 修复；页内色度采样从 0.1.3 起默认也是 4:4:4。本管线依赖 `jmcpy>=0.1.3`。）
 
+AI 侧另有 `jm_book` 工具（`src/Undefined/skills/tools/jm_book/`），与 `arxiv_paper` 同构：`send` 等价自动提取，`uid` 只注册未加密 PDF 附件 UID（共享给 `file_analysis_agent`），`info` 只取详情。
+
 实现说明：图片解码与 PDF 合成是同步 CPU 工作，下载整体在 `asyncio.to_thread` 中通过 jmcpy 的同步客户端执行，不阻塞事件循环；单次任务不可取消，由 `[jm].request_timeout` / `image_timeout` 与 jmcpy 的多端点重试兜底。PDF 在内存中合成后写盘，因此 `[jm].max_file_size` 同时也是内存占用上限。
 
 ## 目录结构
