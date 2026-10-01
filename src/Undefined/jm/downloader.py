@@ -165,12 +165,12 @@ def _book_file_name(book: Book, suffix: str) -> str:
     return f"{_BOOK_ID_PREFIX}{book.book_id} {title}{suffix}"
 
 
-def _chapter_pdf_name(book: Book, order: int, title: str) -> str:
-    """章节 PDF 名：``JM<车号> <章节序号>[ <章节标题>].pdf``。
+def _chapter_pdf_name(stem: str, title: str) -> str:
+    """章节 PDF 名：``<产物名主体>[ <章节标题>].pdf``。
 
-    章节标题写在文件名里便于挑选章节；服务端没给标题时只留序号，不再重复本子标题。
+    ``stem`` 由 :func:`_download_archive_sync` 内的 ``artifact_stem`` 生成，已经保证
+    同一次下载内唯一。章节标题写在文件名里便于挑选章节；服务端没给标题时只留序号。
     """
-    stem = f"{_BOOK_ID_PREFIX}{book.book_id} {order:0{_CHAPTER_INDEX_DIGITS}d}"
     chapter_title = sanitize_filename(title)
     return (
         f"{stem} {chapter_title}{_PDF_SUFFIX}"
@@ -319,10 +319,31 @@ def _download_archive_sync(
     """逐章下载并各出一份加密 PDF，最后打包成无密码 zip。"""
     limit_bytes = _chapter_limit_bytes(chapter_max_file_size_mb)
     built: list[_ChapterPdf] = []
+    used_orders: set[int] = set()
     downloaded_chapters = 0
     skipped_chapters = 0
     failed_pages = 0
     page_count = 0
+
+    def artifact_index(chapter_order: int, local_index: int, chapter_id: int) -> str:
+        """章节产物的序号（补零字符串），用于下载目录名与 zip 条目名。
+
+        优先用服务端章节序号（与阅读顺序一致）；服务端返回重复序号（异常数据）时退回
+        本次下载的局部序号，否则两条章节会撞同一个下载目录与图片文件名
+        （``overwrite=False`` 会拿旧图），也会撞同一个 zip 条目名而丢掉一份 PDF。
+        """
+        index = chapter_order
+        if index in used_orders:
+            index = local_index
+            logger.warning(
+                "[JM] 服务端返回重复章节序号，改用局部序号避免覆盖: book=%s chapter=%s order=%s → %s",
+                book_id,
+                chapter_id,
+                chapter_order,
+                index,
+            )
+        used_orders.add(index)
+        return f"{index:0{_CHAPTER_INDEX_DIGITS}d}"
 
     with Client(settings) as client:
         book = client.get_book(book_id)
@@ -330,19 +351,22 @@ def _download_archive_sync(
         declared_chapters = len(book.chapters) or 1
         chapters = _ordered_chapters(book, max_chapters=max_chapters)
 
-        for chapter_id, chapter_order, chapter_title in chapters:
+        for local_index, (chapter_id, chapter_order, chapter_title) in enumerate(
+            chapters, start=1
+        ):
             chapter = client.get_chapter(chapter_id)
             if not len(chapter):
                 logger.info(
                     "[JM] 章节没有图片，跳过: book=%s chapter=%s", book_id, chapter_id
                 )
                 continue
-            # 每章独立的目录：同名章节复用同名目录时，overwrite=False 会拿旧图。
+            index = artifact_index(chapter_order, local_index, chapter_id)
+            # 每章独立的目录：同名目录复用同名目录时，overwrite=False 会拿旧图。
             # decode=False 取服务端原始字节（无损），解扰与编码在写 PDF 时做一次。
             result = client.download(
                 chapter,
                 output=ExportFormat.PATH,
-                dest=task_dir / f"c{chapter_order:0{_CHAPTER_INDEX_DIGITS}d}",
+                dest=task_dir / f"c{index}",
                 decode=False,
                 concurrency=settings.concurrency,
             )
@@ -362,7 +386,9 @@ def _download_archive_sync(
                 )
                 continue
 
-            output = task_dir / _chapter_pdf_name(book, chapter_order, chapter_title)
+            output = task_dir / _chapter_pdf_name(
+                f"{_BOOK_ID_PREFIX}{book.book_id} {index}", chapter_title
+            )
             build = _write_pdf(
                 pages,
                 output,

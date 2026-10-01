@@ -75,11 +75,15 @@ def _fake_book(
     chapters: Sequence[ChapterSpec],
     *,
     title: str = "测试 本子/标题",
+    duplicate_orders: bool = False,
 ) -> Any:
     entries = []
     for item in chapters:
         chapter_id, order = item[0], item[1]
         chapter_title = item[2] if len(item) > 2 else ""
+        if duplicate_orders:
+            # 服务端异常数据：两条章节都报同一个序号
+            order = 1
         entries.append(
             SimpleNamespace(chapter_id=chapter_id, order=order, title=chapter_title)
         )
@@ -102,11 +106,13 @@ class _FakeClient:
         chapters: Sequence[ChapterSpec],
         page_size: int,
         book_title: str,
+        duplicate_orders: bool = False,
     ) -> None:
         self.settings = settings
         self.chapters = chapters
         self.page_size = page_size
         self.book_title = book_title
+        self.duplicate_orders = duplicate_orders
         self.downloads: list[dict[str, Any]] = []
         _FakeClient.instances.append(self)
 
@@ -118,7 +124,11 @@ class _FakeClient:
 
     def get_book(self, book_id: str) -> Any:
         self.book_id = book_id
-        return _fake_book(self.chapters, title=self.book_title)
+        return _fake_book(
+            self.chapters,
+            title=self.book_title,
+            duplicate_orders=self.duplicate_orders,
+        )
 
     def get_chapter(self, chapter_id: int) -> _FakeChapter:
         self.chapter_id = chapter_id
@@ -164,6 +174,7 @@ def _install_client(
     chapters: Sequence[ChapterSpec],
     page_size: int = 10,
     book_title: str = "测试 本子/标题",
+    duplicate_orders: bool = False,
 ) -> None:
     def _factory(settings: Any) -> _FakeClient:
         return _FakeClient(
@@ -171,6 +182,7 @@ def _install_client(
             chapters=chapters,
             page_size=page_size,
             book_title=book_title,
+            duplicate_orders=duplicate_orders,
         )
 
     monkeypatch.setattr(jm_downloader, "Client", _factory)
@@ -420,6 +432,51 @@ async def test_download_book_skips_oversized_chapter_and_keeps_the_rest(
         "JM1114751 003.pdf",
     ]
     assert [pdf.order for pdf in archive.pdfs] == [1, 3]
+
+
+@pytest.mark.asyncio
+async def test_download_book_keeps_every_chapter_when_orders_collide(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """服务端返回重复章节序号时不能互相覆盖：目录名与 zip 条目名都必须唯一。"""
+    _install_client(
+        monkeypatch,
+        chapters=[(111, 1, "序章"), (222, 2, "序章"), (333, 3)],
+        duplicate_orders=True,
+    )
+    _capture_write_pdf(monkeypatch)
+
+    result, task_dir = await download_book(
+        "1114751", config=_config(), password="Ab3xK9Qm"
+    )
+    archive = _archive(result)
+
+    # 三章都出 PDF，没有一份被同名覆盖掉
+    assert archive.status == "ok"
+    assert archive.page_count == 6
+    assert len(archive.pdfs) == 3
+    assert [item["dest"].name for item in _FakeClient.instances[0].downloads] == [
+        "c001",
+        "c002",
+        "c003",
+    ]
+    zip_path = archive.zip_path
+    assert zip_path is not None
+    assert sorted(_zip_entries(zip_path)) == [
+        "JM1114751 001 序章.pdf",
+        "JM1114751 002 序章.pdf",
+        "JM1114751 003.pdf",
+    ]
+    # zip 条目确实有三份不同的 PDF 内容，各自页数正确
+    with zipfile.ZipFile(zip_path) as archive_file:
+        assert sorted(
+            fitz.open(stream=archive_file.read(name), filetype="pdf").page_count
+            for name in archive_file.namelist()
+        ) == [2, 2, 2]
+    # 报告里保留服务端原始序号（重复），只有产物名做了去重
+    assert [pdf.order for pdf in archive.pdfs] == [1, 1, 1]
+    assert [pdf.chapter_id for pdf in archive.pdfs] == [111, 222, 333]
+    assert sorted(path.name for path in task_dir.glob("*.pdf")) == []
 
 
 @pytest.mark.asyncio
