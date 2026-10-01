@@ -31,7 +31,7 @@ _DEFAULT_BOT_UIN = "10000"
 PASSWORD_LENGTH = 8
 #: 去掉形近字符（0/O、1/l/I），方便在手机上输入
 _PASSWORD_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
-#: 公开站点车号链接（仅用于信息节点展示）
+#: 公开站点车号链接（仅用于历史摘要，信息节点展示的是 ``JM<车号>``）
 _ALBUM_URL_TEMPLATE = "https://18comic.vip/album/{book_id}"
 _DESCRIPTION_PREVIEW_CHARS = 200
 _MAX_TAGS = 10
@@ -104,7 +104,8 @@ def build_info_text(result: JmDownload, *, note: str = "") -> str:
     if description and description != book.title:
         lines.extend(["---", description])
 
-    lines.extend(["---", build_album_url(book.book_id)])
+    # 末尾给可复制的车号而不是站点链接：QQ 里点不开，车号还能直接再触发一次提取
+    lines.extend(["---", f"JM{book.book_id}"])
     return "\n".join(lines)
 
 

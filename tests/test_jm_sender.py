@@ -112,8 +112,12 @@ async def test_send_jm_book_sends_forward_then_file(
     assert file_segment["type"] == "file"
     assert file_segment["data"]["file"] == f"file://{pdf_path.resolve()}"
     assert file_segment["data"]["name"] == pdf_path.name
-    assert "JM1114751" in nodes[0]["data"]["content"]
-    assert "测试本子" in nodes[0]["data"]["content"]
+    info_text = nodes[0]["data"]["content"]
+    assert "JM1114751" in info_text
+    assert "测试本子" in info_text
+    # 末尾展示可复制的车号，不再放站点链接
+    assert info_text.strip().endswith("JM1114751")
+    assert "18comic" not in info_text
     assert f"：{captured['password']}" in nodes[1]["data"]["content"]
     assert len(captured["password"]) == 8
     # 文件只在转发里：不外发独立文件消息
