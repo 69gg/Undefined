@@ -53,13 +53,22 @@ def _result(
 
 
 def _sender() -> Any:
+    order: list[str] = []
+
+    def _record(name: str) -> AsyncMock:
+        async def _side_effect(*args: Any, **kwargs: Any) -> None:
+            order.append(name)
+
+        return AsyncMock(side_effect=_side_effect)
+
     return SimpleNamespace(
-        send_group_message=AsyncMock(),
-        send_private_message=AsyncMock(),
-        send_group_forward_message=AsyncMock(),
-        send_private_forward_message=AsyncMock(),
-        send_group_file=AsyncMock(),
-        send_private_file=AsyncMock(),
+        order=order,
+        send_group_message=_record("group_message"),
+        send_private_message=_record("private_message"),
+        send_group_forward_message=_record("group_forward"),
+        send_private_forward_message=_record("private_forward"),
+        send_group_file=_record("group_file"),
+        send_private_file=_record("private_file"),
     )
 
 
@@ -93,7 +102,7 @@ def test_generate_pdf_password_uses_safe_eight_char_alphabet() -> None:
 
 
 @pytest.mark.asyncio
-async def test_send_jm_book_sends_forward_only(
+async def test_send_jm_book_sends_forward_then_standalone_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     sender = _sender()
@@ -108,17 +117,14 @@ async def test_send_jm_book_sends_forward_only(
         config=SimpleNamespace(),
     )
 
-    assert status.startswith("JM1114751 已发送合并转发与 PDF 文件")
+    assert status.startswith("JM1114751 已发送合并转发，PDF 文件已单独发送")
     pdf_path = result.pdf_path
     assert pdf_path is not None
     args = sender.send_group_forward_message.await_args
     nodes = args.args[1]
-    # 需求要求 PDF 节点留在转发里；可下载的入口是紧随其后的独立文件消息
-    assert [node["data"]["name"] for node in nodes] == ["本子信息", "解密密码", "PDF"]
-    file_segment = nodes[2]["data"]["content"][0]
-    assert file_segment["type"] == "file"
-    assert file_segment["data"]["file"] == f"file://{pdf_path.resolve()}"
-    assert file_segment["data"]["name"] == pdf_path.name
+    # 文件不进转发：转发节点里的文件在 QQ 客户端下载会失败
+    assert [node["data"]["name"] for node in nodes] == ["本子信息", "解密密码"]
+    assert all(isinstance(node["data"]["content"], str) for node in nodes)
     info_text = nodes[0]["data"]["content"]
     assert "JM1114751" in info_text
     assert "测试本子" in info_text
@@ -127,40 +133,20 @@ async def test_send_jm_book_sends_forward_only(
     assert "18comic" not in info_text
     assert f"：{captured['password']}" in nodes[1]["data"]["content"]
     assert len(captured["password"]) == 8
-    # 文件只在转发里：不外发独立文件消息
-    sender.send_group_file.assert_not_awaited()
-    # 历史摘要不含密码，只说明密码在转发节点里
+    # 可下载的入口是转发之后那条独立文件消息
+    sender.send_group_file.assert_awaited_once_with(20001, str(pdf_path), pdf_path.name)
+    assert sender.order == ["group_forward", "group_file"]
+    # 历史摘要不含密码，只说明密码在转发节点里；文件还没上传，不能提前声称已发送
     history_message = args.kwargs["history_message"]
     assert captured["password"] not in history_message
     assert "密码见转发节点" in history_message
+    assert "随后单独发送" in history_message
+    assert "已单独发送" not in history_message
     captured["cleanup"].assert_awaited_once_with(tmp_path / "task")
 
 
 @pytest.mark.asyncio
-async def test_send_jm_book_falls_back_to_file_message_when_forward_fails(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    sender = _sender()
-    result = _result(tmp_path)
-    sender.send_group_forward_message.side_effect = RuntimeError("forward rejected")
-    _patch_download(monkeypatch, result, tmp_path / "task")
-
-    await send_jm_book(
-        "1114751",
-        sender=sender,
-        target_type="group",
-        target_id=20001,
-        config=SimpleNamespace(),
-    )
-
-    # 转发本身发不出去时才退化为独立文件消息，否则用户拿不到 PDF
-    pdf_path = result.pdf_path
-    assert pdf_path is not None
-    sender.send_group_file.assert_awaited_once_with(20001, str(pdf_path), pdf_path.name)
-
-
-@pytest.mark.asyncio
-async def test_send_jm_book_falls_back_to_plain_messages(
+async def test_send_jm_book_falls_back_to_plain_messages_then_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     sender = _sender()
@@ -176,7 +162,8 @@ async def test_send_jm_book_falls_back_to_plain_messages(
         config=SimpleNamespace(),
     )
 
-    assert sender.send_group_message.await_count == 2
+    # 转发发不出去时才退化为两条普通消息，文件照旧单独发送
+    assert sender.order == ["group_message", "group_message", "group_file"]
     password_call = sender.send_group_message.await_args_list[1]
     assert captured["password"] in password_call.args[1]
     # 普通消息兜底时历史里同样不留密码
@@ -184,14 +171,16 @@ async def test_send_jm_book_falls_back_to_plain_messages(
         history_message = call.kwargs["history_message"]
         assert history_message is not None
         assert captured["password"] not in history_message
-    sender.send_group_file.assert_awaited_once()
+    pdf_path = result.pdf_path
+    assert pdf_path is not None
+    sender.send_group_file.assert_awaited_once_with(20001, str(pdf_path), pdf_path.name)
 
 
 @pytest.mark.asyncio
-async def test_send_jm_book_does_not_retry_when_delivery_is_uncertain(
+async def test_send_jm_book_keeps_sending_file_when_forward_is_uncertain(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """投递结果未确认时绝不能降级重发（仓库约定）。"""
+    """转发投递结果未确认时不降级重发，但独立文件消息此前从未发出，必须照发。"""
 
     class _Uncertain(RuntimeError):
         delivery_uncertain = True
@@ -199,6 +188,62 @@ async def test_send_jm_book_does_not_retry_when_delivery_is_uncertain(
     sender = _sender()
     result = _result(tmp_path)
     sender.send_group_forward_message.side_effect = _Uncertain("timeout")
+    _patch_download(monkeypatch, result, tmp_path / "task")
+
+    status = await send_jm_book(
+        "1114751",
+        sender=sender,
+        target_type="group",
+        target_id=20001,
+        config=SimpleNamespace(),
+    )
+
+    # 转发可能已经送达，绝不重发转发或信息/密码
+    assert sender.send_group_forward_message.await_count == 1
+    sender.send_group_message.assert_not_awaited()
+    # 文件丢在这里等于整本下载白跑
+    sender.send_group_file.assert_awaited_once()
+    assert "合并转发投递结果未确认" in status
+    assert "PDF 文件已单独发送" in status
+
+
+@pytest.mark.asyncio
+async def test_send_jm_book_does_not_resend_when_forward_transfer_failed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    class _TransferFailed(RuntimeError):
+        file_transfer_error = True
+
+    sender = _sender()
+    result = _result(tmp_path)
+    sender.send_group_forward_message.side_effect = _TransferFailed("prepare failed")
+    _patch_download(monkeypatch, result, tmp_path / "task")
+
+    status = await send_jm_book(
+        "1114751",
+        sender=sender,
+        target_type="group",
+        target_id=20001,
+        config=SimpleNamespace(),
+    )
+
+    sender.send_group_message.assert_not_awaited()
+    sender.send_group_file.assert_awaited_once()
+    assert "合并转发投递结果未确认" in status
+
+
+@pytest.mark.asyncio
+async def test_send_jm_book_does_not_retry_when_file_delivery_is_uncertain(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """文件自身投递结果未确认时同样不重发（仓库约定），也不补发任何提示。"""
+
+    class _Uncertain(RuntimeError):
+        delivery_uncertain = True
+
+    sender = _sender()
+    result = _result(tmp_path)
+    sender.send_group_file.side_effect = _Uncertain("timeout")
     _patch_download(monkeypatch, result, tmp_path / "task")
 
     with pytest.raises(_Uncertain):
@@ -210,8 +255,8 @@ async def test_send_jm_book_does_not_retry_when_delivery_is_uncertain(
             config=SimpleNamespace(),
         )
 
+    assert sender.send_group_file.await_count == 1
     sender.send_group_message.assert_not_awaited()
-    sender.send_group_file.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -223,7 +268,7 @@ async def test_send_jm_book_does_not_retry_when_file_transfer_failed(
 
     sender = _sender()
     result = _result(tmp_path)
-    sender.send_group_forward_message.side_effect = _TransferFailed("prepare failed")
+    sender.send_group_file.side_effect = _TransferFailed("prepare failed")
     _patch_download(monkeypatch, result, tmp_path / "task")
 
     with pytest.raises(_TransferFailed):
@@ -235,17 +280,16 @@ async def test_send_jm_book_does_not_retry_when_file_transfer_failed(
             config=SimpleNamespace(),
         )
 
+    assert sender.send_group_file.await_count == 1
     sender.send_group_message.assert_not_awaited()
-    sender.send_group_file.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_send_jm_book_reports_when_pdf_upload_also_fails(
+async def test_send_jm_book_reports_when_pdf_upload_fails(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     sender = _sender()
     result = _result(tmp_path)
-    sender.send_group_forward_message.side_effect = RuntimeError("forward rejected")
     sender.send_group_file.side_effect = RuntimeError("upload failed")
     _patch_download(monkeypatch, result, tmp_path / "task")
 
@@ -257,11 +301,45 @@ async def test_send_jm_book_reports_when_pdf_upload_also_fails(
         config=SimpleNamespace(),
     )
 
-    assert status.startswith("JM1114751 合并转发与 PDF 文件均发送失败"), status
+    assert status.startswith("JM1114751 已发送合并转发，PDF 文件发送失败"), status
     last = sender.send_group_message.await_args_list[-1]
     assert "PDF 上传失败" in last.args[1]
-    # 提示消息不写历史（避免第三条重复摘要）：auto_history 是第三个位置参数
-    assert last.args[2] is False
+    assert "信息与密码如上" in last.args[1]
+    # 提示写入历史：转发摘要只说「随后发送」，真正发没发出去靠这条收口
+    assert last.args[2] is True
+
+
+@pytest.mark.asyncio
+async def test_send_jm_book_upload_failure_notice_avoids_claiming_uncertain_forward(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """转发投递未确认 + 文件也失败时，提示不能说「信息与密码如上」。"""
+
+    class _Uncertain(RuntimeError):
+        delivery_uncertain = True
+
+    sender = _sender()
+    result = _result(tmp_path)
+    sender.send_group_forward_message.side_effect = _Uncertain("timeout")
+    sender.send_group_file.side_effect = RuntimeError("upload failed")
+    _patch_download(monkeypatch, result, tmp_path / "task")
+
+    status = await send_jm_book(
+        "1114751",
+        sender=sender,
+        target_type="group",
+        target_id=20001,
+        config=SimpleNamespace(),
+    )
+
+    assert status.startswith("JM1114751 合并转发投递结果未确认，PDF 文件发送失败"), (
+        status
+    )
+    notice = sender.send_group_message.await_args_list[-1].args[1]
+    assert "投递结果未确认" in notice
+    assert "信息与密码如上" not in notice
+    # 转发本身不重发，这里只发一条提示
+    assert sender.send_group_message.await_count == 1
 
 
 @pytest.mark.asyncio
@@ -282,7 +360,7 @@ async def test_send_jm_book_reports_fallback_status(
     )
 
     assert "已改为普通消息发送信息与密码" in status
-    assert "补发独立 PDF 文件" in status
+    assert "PDF 文件已单独发送" in status
 
 
 @pytest.mark.asyncio
@@ -370,6 +448,9 @@ async def test_send_jm_book_uses_private_forward(
     sender.send_private_forward_message.assert_awaited_once()
     sender.send_group_forward_message.assert_not_awaited()
     assert sender.send_private_forward_message.await_args.args[0] == 30001
+    # 私聊同样单独发文件，而不是把文件塞进转发
+    sender.send_private_file.assert_awaited_once()
+    sender.send_group_file.assert_not_awaited()
 
 
 def test_format_jm_book_info_lists_metadata() -> None:

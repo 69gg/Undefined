@@ -1,6 +1,7 @@
 """禁漫的合并转发发送与附件交付。
 
-自动提取一次发送三个节点：本子信息、PDF 解密密码、PDF 文件（本地合成后随转发上传）。
+自动提取先发「本子信息 + PDF 解密密码」两节点合并转发，随后把本地合成的加密 PDF
+作为独立文件消息单独发出：转发节点里的文件在 QQ 客户端下载会失败，所以文件不进转发。
 工具侧另有两条路：``format_jm_book_info`` 只输出详情（不下载），
 ``fetch_jm_book_attachment`` 下载整本并把**未加密** PDF 注册为附件 UID（不发送），
 供 ``file_analysis_agent`` 继续解析。密码始终不会写进历史。
@@ -117,19 +118,16 @@ def build_password_text(password: str) -> str:
 def build_forward_nodes(
     info_text: str,
     *,
-    pdf_path: Path | None = None,
     password: str = "",
     status_text: str = "",
 ) -> list[dict[str, Any]]:
-    """构建合并转发节点：信息 / 密码或状态 / PDF 文件。
+    """构建合并转发节点：信息 +（密码或状态）。
 
-    PDF 是本地合成好的真实文件，随转发一起上传：群聊下 NapCat 会把它作为群文件上传
-    （``isGroupFile``、``busid=102``，元素里带 ``fileId`` / ``fileMd5`` / ``fileSha1``），
-    因此同一个 PDF 也会出现在群文件列表里，转发节点里的文件可以直接下载
-    （2026-10-01 用 14MB PDF 实测通过）。文件只发一次，不另外发独立文件消息。
+    PDF 不放进转发：转发节点里的文件在 QQ 客户端下载会失败，改由 :func:`_send_result`
+    在转发之后单独发一条文件消息（2026-10-01 实测，同一份文件独立发送可正常下载）。
     """
-    if pdf_path is None:
-        # 没有可发送的 PDF 时用状态说明替代密码与文件节点
+    if not password:
+        # 没有可发送的 PDF 时用状态说明替代密码节点
         return [
             _node(info_text, name="本子信息"),
             _node(status_text or "PDF 未发送", name="状态"),
@@ -137,18 +135,6 @@ def build_forward_nodes(
     return [
         _node(info_text, name="本子信息"),
         _node(build_password_text(password), name="解密密码"),
-        _node(
-            [
-                {
-                    "type": "file",
-                    "data": {
-                        "file": f"file://{pdf_path.resolve()}",
-                        "name": pdf_path.name,
-                    },
-                }
-            ],
-            name="PDF",
-        ),
     ]
 
 
@@ -161,8 +147,10 @@ def build_history_message(result: JmDownload) -> str:
         f"章节: {result.chapter_count} 章 | 页数: {result.page_count}",
     ]
     if result.ok:
+        # 这条摘要随转发写入，此时文件还没上传：不能提前声称已发送。
+        # 上传成功时 send_group_file 会自己补一条「[文件] … 」历史，失败时补提示。
         lines.append(
-            f"PDF: 已发送加密文件（{_format_size(result.size_bytes)}，密码见转发节点）"
+            f"PDF: 加密文件随后单独发送（{_format_size(result.size_bytes)}，密码见转发节点）"
         )
     else:
         lines.append("PDF: 未发送")
@@ -332,6 +320,12 @@ def _is_fatal_delivery_error(exc: BaseException) -> bool:
     )
 
 
+#: 转发投递结果的三态，既进日志也拼进返回值
+_FORWARD_SENT = "已发送合并转发"
+_FORWARD_REJECTED = "合并转发被拒，已改为普通消息发送信息与密码"
+_FORWARD_UNCERTAIN = "合并转发投递结果未确认"
+
+
 async def _send_result(
     sender: "MessageSender",
     target_type: Literal["group", "private"],
@@ -343,57 +337,68 @@ async def _send_result(
     pdf_path: Path,
     history_message: str,
 ) -> str:
-    """发送「信息 + 密码 + PDF」三节点合并转发，返回可记录的真实投递状态。
+    """发送「信息 + 密码」合并转发，再单独发送 PDF 文件，返回可记录的真实投递状态。
 
-    文件只在转发里，不再额外发独立文件消息。群聊下这次上传会让 PDF 同时出现在群的
-    文件列表里（``busid=102``），那是 QQ 自己的行为，不是我们单独发出去的。
-    投递未确认 / 文件传输错误一律上抛，只有协议端**明确拒绝**才降级重发；降级时
-    文件没有别的入口，必须补发一条独立文件消息，否则用户拿不到 PDF。
+    文件不进转发：转发节点里的文件在 QQ 客户端下载会失败，独立文件消息才下得动。
+    转发被协议端**明确拒绝**时降级为两条普通消息（信息 / 密码）。投递结果未确认
+    （``delivery_uncertain`` / ``file_transfer_error``）时不能降级重发信息与密码——
+    转发可能已经送达；但文件是另一条消息、此前从未发出，必须继续单独发送，否则用户
+    整本下载白跑。文件自身投递结果未确认时同样不重发，直接上抛调用方；普通失败时补
+    一条写入历史的「PDF 上传失败」提示，转发投递未确认时提示不声称信息与密码已送达。
     """
-    nodes = build_forward_nodes(info_text, pdf_path=pdf_path, password=password)
+    nodes = build_forward_nodes(info_text, password=password)
+    forward_status = _FORWARD_SENT
     try:
         await _send_forward(
             sender, target_type, target_id, nodes, history_message=history_message
         )
     except Exception as exc:
         if _is_fatal_delivery_error(exc):
-            logger.error("[JM] 合并转发投递结果未确认，不重发: book=%s", book_id)
-            raise
-        logger.exception("[JM] 合并转发失败，回退为普通消息 + 文件: book=%s", book_id)
-        # 历史里不留密码：历史摘要与用户可见正文分开；密码消息只记「已单独发送」
-        await _send_text(
-            sender,
-            target_type,
-            target_id,
-            info_text,
-            history_message=history_message,
-        )
-        await _send_text(
-            sender,
-            target_type,
-            target_id,
-            build_password_text(password),
-            history_message="[JM] PDF 解密密码已单独发送",
-        )
-        try:
-            await _send_file(
-                sender, target_type, target_id, str(pdf_path), str(pdf_path.name)
+            logger.error(
+                "[JM] 合并转发投递结果未确认，不重发信息与密码，继续单独发送 PDF: book=%s",
+                book_id,
             )
-        except Exception as file_exc:
-            if _is_fatal_delivery_error(file_exc):
-                logger.error("[JM] 文件投递结果未确认，不重发: book=%s", book_id)
-                raise
-            logger.exception("[JM] 降级后的 PDF 文件发送失败: book=%s", book_id)
+            forward_status = _FORWARD_UNCERTAIN
+        else:
+            logger.exception(
+                "[JM] 合并转发失败，回退为普通消息发送信息与密码: book=%s", book_id
+            )
+            forward_status = _FORWARD_REJECTED
+            # 历史里不留密码：历史摘要与用户可见正文分开；密码消息只记「已单独发送」
             await _send_text(
                 sender,
                 target_type,
                 target_id,
-                "PDF 上传失败，本次没有发送文件（信息与密码如上）。",
-                auto_history=False,
+                info_text,
+                history_message=history_message,
             )
-            return "合并转发与 PDF 文件均发送失败，已改为普通消息发送信息与密码"
-        return "合并转发被拒，已改为普通消息发送信息与密码，并补发独立 PDF 文件"
-    return "已发送合并转发与 PDF 文件"
+            await _send_text(
+                sender,
+                target_type,
+                target_id,
+                build_password_text(password),
+                history_message="[JM] PDF 解密密码已单独发送",
+            )
+
+    try:
+        await _send_file(
+            sender, target_type, target_id, str(pdf_path), str(pdf_path.name)
+        )
+    except Exception as file_exc:
+        if _is_fatal_delivery_error(file_exc):
+            logger.error("[JM] 文件投递结果未确认，不重发: book=%s", book_id)
+            raise
+        logger.exception("[JM] PDF 文件发送失败: book=%s", book_id)
+        # 转发投递未确认时不能声称「信息与密码如上」——转发可能压根没送达
+        notice = (
+            "PDF 上传失败，本次没有发送文件（合并转发投递结果未确认，信息与密码可能没有送达）。"
+            if forward_status == _FORWARD_UNCERTAIN
+            else "PDF 上传失败，本次没有发送文件（信息与密码如上）。"
+        )
+        # 写进历史：转发摘要只说「随后发送」，真正发没发出去靠这条记录收口
+        await _send_text(sender, target_type, target_id, notice)
+        return f"{forward_status}，PDF 文件发送失败"
+    return f"{forward_status}，PDF 文件已单独发送"
 
 
 async def send_jm_book(
@@ -404,7 +409,7 @@ async def send_jm_book(
     target_id: int,
     config: Any,
 ) -> str:
-    """下载整本并发送合并转发，返回可记录的状态说明。"""
+    """下载整本，发送「信息 + 密码」合并转发，再单独发送加密 PDF 文件。"""
     password = generate_pdf_password()
     result, task_dir = await download_book_pdf(
         book_id, config=config, password=password
