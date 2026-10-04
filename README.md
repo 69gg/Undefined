@@ -30,6 +30,8 @@
 
 ---
 
+> 🎬 **[观看 Undefined 宣传片](https://www.bilibili.com/video/BV1XjYe6KEGN)**（Bilibili）
+
 > 🚀 **开始使用 Undefined**：从[快速开始](#-快速开始)了解部署步骤、首次配置和可选客户端的下载方式。
 
 ## ⚡ 核心特性
