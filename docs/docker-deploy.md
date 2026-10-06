@@ -251,6 +251,8 @@ uv run deploy up --pull always
 | `deploy/backup/` | 部署工具修改 `config.toml` 前的备份 |
 | `deploy/searxng/`、`deploy/firecrawl/`、`deploy/lxmusic2api/` | 已选服务的配置，以及音乐服务的音源、数据和下载文件 |
 
+每次实际修改已有 `config.toml` 前，部署工具会保存独立备份，文件名为 `config_<UTC时间戳>_<唯一后缀>.toml`。同一秒内的多次更新也会保留各次修改前的内容；命令输出会显示本次备份的完整路径。配置无变更或 `--dry-run` 时不创建备份。
+
 备份时保存 `config.toml`、`deploy/` 和你使用的自定义目录。Firecrawl 等服务还使用 Docker 命名卷，备份这些服务时需另行备份对应卷；仅复制 `deploy/` 不能保存全部数据库数据。
 
 普通停止使用 `uv run deploy down` 即可。**`down --volumes` 会删除 Compose 管理的数据卷；`down --purge` 还会删除整个 `deploy/`，包括登录态、凭据、配置备份和容器模式下的 Bot 数据，不可恢复。**
