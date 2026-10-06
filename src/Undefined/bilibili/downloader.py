@@ -13,6 +13,7 @@ from Undefined.bilibili.api_client import BilibiliApiClient
 from Undefined.bilibili.download_core import QUALITY_MAP as QUALITY_MAP
 from Undefined.bilibili.download_core import download_video as download_video_core
 from Undefined.bilibili.models import VideoInfo as VideoInfo
+from Undefined.utils import io
 from Undefined.utils.paths import DOWNLOAD_CACHE_DIR, ensure_dir
 
 logger = logging.getLogger(__name__)
@@ -114,13 +115,15 @@ async def download_video(
     work_dir = ensure_dir(output_dir / uuid.uuid4().hex)
 
     try:
-        downloaded_path, video_info, actual_qn = await asyncio.to_thread(
-            partial(
-                _download_video_sync,
-                bvid,
-                work_dir=work_dir,
-                cookie=cookie,
-                prefer_quality=prefer_quality,
+        downloaded_path, video_info, actual_qn = await io.run_cancellation_safe(
+            asyncio.to_thread(
+                partial(
+                    _download_video_sync,
+                    bvid,
+                    work_dir=work_dir,
+                    cookie=cookie,
+                    prefer_quality=prefer_quality,
+                )
             )
         )
 
@@ -131,8 +134,9 @@ async def download_video(
             actual_qn,
         )
         return downloaded_path, video_info, actual_qn
-    except Exception:
-        _cleanup_dir(work_dir)
+    except BaseException:
+        # 下载线程已收敛，取消/失败时在释放所有权前清理，避免线程稍后重建产物。
+        await io.run_cancellation_safe(asyncio.to_thread(_cleanup_dir, work_dir))
         raise
 
 
