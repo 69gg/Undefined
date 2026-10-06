@@ -117,6 +117,33 @@ def test_final_message_reuses_streaming_node() -> None:
     assert [node["contentTexts"] for node in _user_nodes(result)] == [["hi"]]
 
 
+@pytest.mark.parametrize("status", ["done", "error", "cancelled"])
+def test_terminal_job_keeps_polling_until_history_is_finalized(status: str) -> None:
+    result = run_scenario(f"history_finalization_{status}")
+    assert result["beforeFinalization"] == {
+        "disabled": True,
+        "jobPosts": 1,
+        "historyReads": 1,
+    }
+    assert result["afterFinalization"]["disabled"] is False
+    assert result["afterFinalization"]["historyReads"] == 2
+    assert result["afterFinalization"]["botTexts"] == ["persisted answer"]
+    assert result["jobPosts"] == 2
+    assert result["eventRequests"] >= 2
+
+
+def test_history_refresh_keeps_send_locked_until_success_and_retries_failure() -> None:
+    result = run_scenario("history_finalization_slow_history")
+    assert result["slowHistory"] == {
+        "whilePending": {"disabled": True, "jobPosts": 1, "historyAttempts": 1},
+        "afterFailure": {"disabled": True, "jobPosts": 1, "historyAttempts": 2},
+    }
+    assert result["afterFinalization"]["disabled"] is False
+    assert result["afterFinalization"]["historyReads"] == 2
+    assert result["afterFinalization"]["botTexts"] == ["persisted answer"]
+    assert result["jobPosts"] == 2
+
+
 # --------------------------------------------------------------------------- #
 # 工具生命周期
 # --------------------------------------------------------------------------- #

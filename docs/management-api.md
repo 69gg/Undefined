@@ -355,7 +355,7 @@ WebUI 内嵌聊天渲染 `<attachment uid="..."/>` / `<pic uid="..."/>` 图片�
 - 校验：
   - `conversation_id` 不一致时返回 `404`，避免跨会话误续接。
 - 响应：
-  - 默认 JSON：持久事件、当前顶层 `stage` 快照、当前 `agent_stage` 快照、`current_tool_calls` 和耗时字段。
+  - 默认 JSON：持久事件、当前顶层 `stage` 快照、当前 `agent_stage` 快照、`current_tool_calls`、耗时字段和 `job.history_finalized`。`done` / `error` / `cancelled` 终态可能先于历史收尾发布；WebUI 保留发送锁并继续轮询，直到 `history_finalized=true` 后刷新权威历史，刷新成功才释放任务；刷新失败时保留发送锁并通过现有轮询重试。
   - SSE：事件帧和 keep-alive 由 Runtime 透传。
 
 ```json

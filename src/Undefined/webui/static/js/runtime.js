@@ -28,6 +28,7 @@
         chatHistoryCursor: null,
         chatHistoryHasMore: false,
         chatHistoryLoading: false,
+        chatHistoryFinalization: null,
         chatTopLoadSuppressedUntil: 0,
         chatAutoScroll: true,
         // 视图是否仍「钉」在底部。用户主动往上翻时置 false：此时不能再自动滚到底
@@ -5119,7 +5120,7 @@
 
     async function loadChatHistory(
         force = false,
-        { resumeActiveJob = true } = {},
+        { resumeActiveJob = true, expectedJobId = "" } = {},
     ) {
         if (!currentChatConversationId()) {
             await loadChatConversations();
@@ -5132,6 +5133,7 @@
             return;
         }
         runtimeState.chatHistoryLoading = true;
+        const conversationId = currentChatConversationId();
         const res = await api(
             chatUrl("/api/runtime/chat/history", { limit: 50 }),
         );
@@ -5139,6 +5141,13 @@
         if (!res.ok || (data && data.error)) {
             runtimeState.chatHistoryLoading = false;
             throw new Error(buildRequestError(res, data));
+        }
+        if (
+            conversationId !== currentChatConversationId() ||
+            (expectedJobId && runtimeState.activeJobId !== expectedJobId)
+        ) {
+            runtimeState.chatHistoryLoading = false;
+            return;
         }
 
         clearChatMessages();
@@ -5208,6 +5217,48 @@
         }
     }
 
+    async function finishChatJob(payload = {}) {
+        // 终态事件先于历史落盘发布：保留 job 和轮询，直到 Runtime 确认收尾完成。
+        if (payload.history_finalized === false) {
+            runtimeState.chatBusy = true;
+            syncChatBusyControls();
+            return;
+        }
+        const jobId = runtimeState.activeJobId;
+        if (payload.history_finalized === true) {
+            let finalization = runtimeState.chatHistoryFinalization;
+            if (!finalization || finalization.jobId !== jobId) {
+                finalization = {
+                    jobId,
+                    promise: loadChatHistory(true, {
+                        resumeActiveJob: false,
+                        expectedJobId: jobId,
+                    }),
+                };
+                runtimeState.chatHistoryFinalization = finalization;
+            }
+            try {
+                await finalization.promise;
+            } catch (_error) {
+                // 历史刷新失败仍保留发送锁，现有 job 轮询会再次尝试收尾。
+                return;
+            } finally {
+                if (runtimeState.chatHistoryFinalization === finalization) {
+                    runtimeState.chatHistoryFinalization = null;
+                }
+            }
+            if (runtimeState.activeJobId !== jobId) return;
+        }
+        stopChatPolling();
+        runtimeState.activeJobId = null;
+        runtimeState.activeJobConversationId = "";
+        runtimeState.chatBusy = false;
+        setButtonLoading(get("btnRuntimeChatSend"), false);
+        syncChatBusyControls();
+        syncChatMessageActions();
+        loadChatConversations({ selectFirst: false }).catch(() => {});
+    }
+
     function applyChatEvent(event, payload, seq = 0) {
         if (seq)
             runtimeState.lastEventSeq = Math.max(
@@ -5241,14 +5292,7 @@
                 (event === "done" || event === "error") &&
                 (!eventJobId || eventJobId === runtimeState.activeJobId)
             ) {
-                stopChatPolling();
-                runtimeState.activeJobId = null;
-                runtimeState.activeJobConversationId = "";
-                runtimeState.chatBusy = false;
-                setButtonLoading(get("btnRuntimeChatSend"), false);
-                syncChatBusyControls();
-                syncChatMessageActions();
-                loadChatConversations({ selectFirst: false }).catch(() => {});
+                finishChatJob(payload || {});
             }
             return;
         }
@@ -5296,7 +5340,6 @@
             return;
         }
         if (event === "done") {
-            stopChatPolling();
             if (
                 payload &&
                 payload.reply &&
@@ -5317,27 +5360,15 @@
                 }
             }
             finalizeActiveChatMessage(payload || {});
-            runtimeState.activeJobId = null;
-            runtimeState.activeJobConversationId = "";
-            runtimeState.chatBusy = false;
             runtimeState.chatHistoryLoaded = true;
-            setButtonLoading(get("btnRuntimeChatSend"), false);
-            syncChatBusyControls();
-            syncChatMessageActions();
-            loadChatConversations({ selectFirst: false }).catch(() => {});
+            finishChatJob(payload || {});
             return;
         }
         if (event === "error") {
-            stopChatPolling();
             const item = findActiveChatMessage(eventJobId);
             finalizeActiveChatMessage();
             removeEmptyChatMessage(item);
-            runtimeState.activeJobId = null;
-            runtimeState.activeJobConversationId = "";
-            runtimeState.chatBusy = false;
-            setButtonLoading(get("btnRuntimeChatSend"), false);
-            syncChatBusyControls();
-            syncChatMessageActions();
+            finishChatJob(payload || {});
             const message = String(
                 payload && (payload.error || payload.message)
                     ? payload.error || payload.message
@@ -5357,22 +5388,28 @@
 
     function applyChatEventsPayload(data, jobId) {
         const events = data && Array.isArray(data.events) ? data.events : [];
+        const job = data && data.job ? data.job : null;
         events
             .filter((entry) => entry && typeof entry === "object")
             .sort((a, b) => Number(a.seq || 0) - Number(b.seq || 0))
             .forEach((entry) => {
                 applyChatEvent(
                     String(entry.event || ""),
-                    entry.payload || {},
+                    ["done", "error"].includes(String(entry.event || "")) && job
+                        ? {
+                              ...(entry.payload || {}),
+                              history_finalized: job.history_finalized,
+                          }
+                        : entry.payload || {},
                     Number(entry.seq || 0),
                 );
             });
-        const job = data && data.job ? data.job : null;
         applyChatJobSnapshot(job, jobId);
         if (
             job &&
             runtimeState.activeJobId === jobId &&
-            ["done", "error", "cancelled"].includes(String(job.status || ""))
+            ["done", "error", "cancelled"].includes(String(job.status || "")) &&
+            job.history_finalized !== false
         ) {
             applyChatEvent(
                 job.status === "done" ? "done" : "error",
@@ -5383,6 +5420,7 @@
                           job_id: job.job_id || jobId,
                           conversation_id: job.conversation_id || "",
                           duration_ms: job.duration_ms,
+                          history_finalized: job.history_finalized,
                       },
                 Number(job.last_seq || runtimeState.lastEventSeq),
             );
@@ -5391,6 +5429,8 @@
 
     function applyChatJobSnapshot(job, jobId) {
         if (!job || runtimeState.activeJobId !== jobId) return;
+        const status = String(job.status || "");
+        if (["done", "error", "cancelled"].includes(status)) return;
         const jobConversationId = String(job.conversation_id || "").trim();
         if (
             jobConversationId &&
@@ -5400,7 +5440,6 @@
         }
         const item = ensureStreamingMessage(jobId);
         if (!item) return;
-        const status = String(job.status || "");
         if (!["done", "error", "cancelled"].includes(status)) {
             const stage = String(job.current_stage || "").trim();
             if (stage) {
@@ -5616,6 +5655,7 @@
                             runtimeState.activeJobConversationId ||
                             currentChatConversationId(),
                         duration_ms: data && data.duration_ms,
+                        history_finalized: data && data.history_finalized,
                     },
                     Number(data && data.last_seq ? data.last_seq : 0),
                 );

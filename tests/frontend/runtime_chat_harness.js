@@ -2756,6 +2756,125 @@ SCENARIOS.workflow_tool_args_json_round_trip = async (env) => {
     };
 };
 
+async function jobWaitsForHistoryFinalization(env, status, controlledHistory = false) {
+    const { window, setRoutes } = env;
+    let jobPosts = 0;
+    let historyFinalized = false;
+    let historyReads = 0;
+    let firstEventBatch = true;
+    let historyAttempts = 0;
+    let resolveHistory = null;
+    let rejectHistory = null;
+    const snapshot = () => ({
+        job_id: "job-finalizing",
+        conversation_id: "conv-1",
+        status,
+        last_seq: 2,
+        history_finalized: historyFinalized,
+        reply: "answer",
+        error: status === "done" ? "" : status,
+    });
+    setRoutes([
+        {
+            match: "/chat/conversations",
+            reply: () => ({ body: {
+                conversations: [{ id: "conv-1", title: "t" }],
+                active_job: jobPosts === 1 && !historyFinalized ? snapshot() : null,
+            } }),
+        },
+        {
+            match: "/chat/history",
+            reply: () => {
+                historyReads += 1;
+                return { body: {
+                    items: historyFinalized ? [{ role: "bot", content: "persisted answer" }] : [],
+                    has_more: false,
+                    next_before: null,
+                } };
+            },
+        },
+        { match: "/chat/jobs/active", reply: { body: { job: null } } },
+        {
+            match: "/jobs/job-finalizing/events",
+            reply: () => {
+                const events = firstEventBatch ? [
+                    { seq: 1, event: "message", payload: { job_id: "job-finalizing", conversation_id: "conv-1", content: "answer" } },
+                    { seq: 2, event: status === "done" ? "done" : "error", payload: { job_id: "job-finalizing", conversation_id: "conv-1", reply: "answer", error: status } },
+                ] : [];
+                firstEventBatch = false;
+                return { body: { events, job: snapshot() } };
+            },
+        },
+        {
+            match: "/jobs/job-next/events",
+            reply: { body: { events: [], job: { job_id: "job-next", conversation_id: "conv-1", status: "running" } } },
+        },
+        {
+            match: "/chat/jobs",
+            reply: () => {
+                jobPosts += 1;
+                return { body: { job_id: jobPosts === 1 ? "job-finalizing" : "job-next", conversation_id: "conv-1" } };
+            },
+        },
+    ]);
+    if (controlledHistory) {
+        const fetch = window.fetch;
+        window.fetch = (url, options) => {
+            if (historyFinalized && String(url).includes("/chat/history")) {
+                historyAttempts += 1;
+                return new Promise((resolve, reject) => {
+                    resolveHistory = () => fetch(url, options).then(resolve, reject);
+                    rejectHistory = reject;
+                });
+            }
+            return fetch(url, options);
+        };
+    }
+    window.RuntimeController.init();
+    await window.RuntimeController.loadChatHistory(true);
+    const input = window.document.getElementById("runtimeChatInput");
+    const button = window.document.getElementById("btnRuntimeChatSend");
+    input.value = "first";
+    button.click();
+    await tick();
+    input.value = "second";
+    button.click();
+    await tick();
+    const beforeFinalization = { disabled: button.disabled, jobPosts, historyReads };
+    historyFinalized = true;
+    await settle(650);
+    let slowHistory = null;
+    if (controlledHistory) {
+        button.click();
+        await tick();
+        const whilePending = { disabled: button.disabled, jobPosts, historyAttempts };
+        rejectHistory(new Error("temporary history refresh failure"));
+        await tick();
+        await settle(650);
+        button.click();
+        await tick();
+        const afterFailure = { disabled: button.disabled, jobPosts, historyAttempts };
+        resolveHistory();
+        await tick();
+        slowHistory = { whilePending, afterFailure };
+    }
+    const afterFinalization = { disabled: button.disabled, historyReads, botTexts: botNodes(window).map((node) => node.contentText) };
+    button.click();
+    await tick();
+    return {
+        beforeFinalization,
+        afterFinalization,
+        jobPosts,
+        eventRequests: env.requests.filter((url) => url.includes("/jobs/job-finalizing/events")).length,
+        slowHistory,
+    };
+}
+SCENARIOS.history_finalization_slow_history = (env) => jobWaitsForHistoryFinalization(env, "done", true);
+
+for (const status of ["done", "error", "cancelled"]) {
+    SCENARIOS[`history_finalization_${status}`] = (env) => jobWaitsForHistoryFinalization(env, status);
+}
+
 async function main() {
     const args = parseArgs(process.argv.slice(2));
     if (!args.scenario) throw new Error("缺少 --scenario");
