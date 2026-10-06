@@ -3188,6 +3188,103 @@ for (const loading of ["initial", "forced"]) {
     }
 }
 
+async function staleActiveJobResume(env, returnToSameConversation, outcome) {
+    const { window, setRoutes, response } = env;
+    const currentJob = {
+        job_id: "current-A", conversation_id: "A", status: "running",
+    };
+    setRoutes([
+        {
+            match: "/chat/conversations",
+            reply: { body: {
+                conversations: [{ id: "A", title: "A" }, { id: "B", title: "B" }],
+                active_job: null,
+            } },
+        },
+        {
+            match: "/chat/history",
+            reply: (url) => ({ body: {
+                items: [{ role: "bot", content: url.includes("conversation_id=B") ? "B-history" : "A-history" }],
+                has_more: false, next_before: null,
+            } }),
+        },
+        {
+            match: "/chat/jobs/active",
+            reply: (url) => ({ body: {
+                job: returnToSameConversation && url.includes("conversation_id=A") ? currentJob : null,
+            } }),
+        },
+        {
+            match: "/jobs/current-A/events",
+            reply: (url) => {
+                const after = Number(new URL(url, window.location.href).searchParams.get("after"));
+                return { body: { job: currentJob, events: [
+                    { seq: 1, event: "meta", payload: currentJob },
+                    { seq: 2, event: "message", payload: { ...currentJob, content: "current-live" } },
+                ].filter((event) => event.seq > after) } };
+            },
+        },
+        {
+            match: "/jobs/obsolete-A/events",
+            reply: { body: { job: { job_id: "obsolete-A", conversation_id: "A", status: "running" }, events: [] } },
+        },
+    ]);
+    const fetch = window.fetch;
+    let pending;
+    const resumeUrls = [];
+    window.fetch = (url, options) => {
+        if (String(url).includes("/chat/jobs/active")) {
+            resumeUrls.push(String(url));
+            if (!pending && String(url).includes("conversation_id=A")) {
+                return new Promise((resolve, reject) => { pending = { resolve, reject }; });
+            }
+        }
+        return fetch(url, options);
+    };
+    window.RuntimeController.init();
+    const initialLoad = window.RuntimeController.loadChatHistory(true);
+    await tick();
+    if (!pending) throw new Error("initial A resume request was not dispatched");
+    window.document.querySelector('[data-conversation-select="B"]').click();
+    await tick();
+    if (returnToSameConversation) {
+        window.document.querySelector('[data-conversation-select="A"]').click();
+        await tick();
+    }
+    const snapshot = () => ({
+        title: textOf(window, "runtimeChatCurrentTitle"),
+        nodes: chatNodes(window).map((node) => ({ text: node.contentText, job: node.jobId })),
+        disabled: window.document.getElementById("btnRuntimeChatSend").disabled,
+        cancelIds: Array.from(window.document.querySelectorAll("[data-cancel-job]"))
+            .filter((element) => !element.hidden).map((element) => element.dataset.cancelJob),
+    });
+    const beforeLate = snapshot();
+    const resumeCountBeforeLate = resumeUrls.length;
+    if (outcome === "failure") {
+        pending.reject(new Error("obsolete resume failure"));
+    } else {
+        pending.resolve(response(200, {
+            job: outcome === "empty" ? null : { job_id: "obsolete-A", conversation_id: "A", status: "running" },
+        }));
+    }
+    await initialLoad;
+    await tick();
+    const afterLate = snapshot();
+    if (outcome === "failure") await settle(1100);
+    return {
+        beforeLate, afterLate, afterRetryWindow: snapshot(),
+        resumeCountBeforeLate, resumeCountAfterLate: resumeUrls.length,
+        obsoletePolls: env.requests.filter((url) => url.includes("/jobs/obsolete-A/events")),
+    };
+}
+
+for (const target of ["other", "same"]) {
+    for (const outcome of ["running", "empty", "failure"]) {
+        SCENARIOS[`stale_active_job_resume_${target}_${outcome}`] = (env) =>
+            staleActiveJobResume(env, target === "same", outcome);
+    }
+}
+
 async function main() {
     const args = parseArgs(process.argv.slice(2));
     if (!args.scenario) throw new Error("缺少 --scenario");

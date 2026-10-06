@@ -693,6 +693,26 @@ def test_auto_scroll_toggle_persists_preference() -> None:
 # --------------------------------------------------------------------------- #
 
 
+@pytest.mark.parametrize("target", ["other", "same"])
+@pytest.mark.parametrize("outcome", ["running", "empty", "failure"])
+def test_late_active_job_resume_cannot_replace_current_conversation_or_job(
+    target: str, outcome: str
+) -> None:
+    result = run_scenario(f"stale_active_job_resume_{target}_{outcome}")
+
+    before = result["beforeLate"]
+    assert before["title"] == ("A" if target == "same" else "B"), result
+    assert before["nodes"][0]["text"] == (
+        "A-history" if target == "same" else "B-history"
+    ), result
+    assert before["disabled"] is (target == "same"), result
+    assert before["cancelIds"] == (["current-A"] if target == "same" else []), result
+    assert result["afterLate"] == before, result
+    assert result["afterRetryWindow"] == before, result
+    assert result["resumeCountAfterLate"] == result["resumeCountBeforeLate"], result
+    assert result["obsoletePolls"] == [], result
+
+
 @pytest.mark.parametrize("outcome", ["events", "done", "failure"])
 def test_late_old_job_poll_cannot_replace_or_stop_new_job(outcome: str) -> None:
     result = run_scenario(f"stale_job_poll_{outcome}")
