@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import tempfile
+import threading
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -252,3 +254,72 @@ def test_shared_directory_requires_both_paths(
     with pytest.raises(ValueError, match="必须同时配置"):
         python_handler._create_execution_dirs()
     assert not (tmp_path / "shared").exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("shared_directory", (False, True))
+async def test_cancel_during_directory_creation_waits_and_removes_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    shared_directory: bool,
+) -> None:
+    started = threading.Event()
+    release = threading.Event()
+    created_dirs: list[Path] = []
+    real_mkdtemp = tempfile.mkdtemp
+
+    def controlled_mkdtemp(prefix: str, dir: str | Path | None = None) -> str:
+        name = real_mkdtemp(prefix=prefix, dir=dir if dir is not None else tmp_path)
+        path = Path(name)
+        (path / "created.txt").write_text(
+            "created before cancellation", encoding="utf-8"
+        )
+        created_dirs.append(path)
+        started.set()
+        if not release.wait(5):
+            raise RuntimeError("test did not release directory creation")
+        return name
+
+    if shared_directory:
+        root = tmp_path / "shared"
+        monkeypatch.setenv(python_handler.SHARED_LOCAL_DIR_ENV, str(root))
+        monkeypatch.setenv(python_handler.SHARED_HOST_DIR_ENV, str(root))
+    else:
+        monkeypatch.delenv(python_handler.SHARED_LOCAL_DIR_ENV, raising=False)
+        monkeypatch.delenv(python_handler.SHARED_HOST_DIR_ENV, raising=False)
+    monkeypatch.setattr(tempfile, "mkdtemp", controlled_mkdtemp)
+    docker = AsyncMock(
+        side_effect=AssertionError("cancelled creation must not run Docker")
+    )
+    monkeypatch.setattr(python_handler, "_run_docker_command", docker)
+
+    task = asyncio.create_task(
+        python_handler.execute({"code": "print('cancelled')"}, {})
+    )
+    try:
+        assert await asyncio.to_thread(started.wait, 5), (
+            "directory creation did not start"
+        )
+        assert len(created_dirs) == 1
+        assert (created_dirs[0] / "created.txt").is_file()
+
+        task.cancel()
+        await asyncio.sleep(0)
+        assert not task.done(), "cancellation must wait for directory ownership"
+        assert created_dirs[0].is_dir()
+        docker.assert_not_awaited()
+
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=5)
+
+        assert task.cancelled()
+        assert not created_dirs[0].exists()
+        assert not list(tmp_path.rglob("pyinterp_*"))
+        docker.assert_not_awaited()
+    finally:
+        release.set()
+        if not task.done():
+            task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task

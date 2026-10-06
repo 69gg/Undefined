@@ -7,12 +7,22 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from collections.abc import Coroutine
+from typing import TYPE_CHECKING, Any, TypeVar
 
 if TYPE_CHECKING:
     from jmcpy import Genre, SearchTarget, SortBy, SubGenre, TimeRange
 
     from Undefined.jm.searcher import JmListingMode
+
+_ResultT = TypeVar("_ResultT")
+
+
+async def run_cancellation_safe(operation: Coroutine[Any, Any, _ResultT]) -> _ResultT:
+    """复用公共 IO 的取消保护，等待临界区结束后再传播取消。"""
+    from Undefined.utils.io import run_cancellation_safe as run_io_cancellation_safe
+
+    return await run_io_cancellation_safe(operation)
 
 
 def private_access_error(

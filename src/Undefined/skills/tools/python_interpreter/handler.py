@@ -8,6 +8,8 @@ import time
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict
 
+from Undefined.skills.shared import run_cancellation_safe
+
 logger = logging.getLogger(__name__)
 
 # Docker 执行配置
@@ -197,9 +199,17 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     execution_dir: str | None = None
     defer_cleanup = False
 
-    try:
+    async def prepare_execution_dirs() -> tuple[str, str]:
+        nonlocal execution_dir
         local_tmpdir, docker_tmpdir = await asyncio.to_thread(_create_execution_dirs)
+        # 在线程完成后、取消传播前记录所有权，finally 才能清掉创建中的目录。
         execution_dir = local_tmpdir
+        return local_tmpdir, docker_tmpdir
+
+    try:
+        local_tmpdir, docker_tmpdir = await run_cancellation_safe(
+            prepare_execution_dirs()
+        )
         for fpath in send_files:
             if _resolve_output_host_path(fpath, local_tmpdir) is None:
                 return f"错误: 输出文件路径必须位于容器 /tmp 目录内: '{fpath}'"
@@ -287,7 +297,9 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             if defer_cleanup:
                 _schedule_output_dir_cleanup(execution_dir)
             else:
-                await asyncio.to_thread(shutil.rmtree, execution_dir, True)
+                await run_cancellation_safe(
+                    asyncio.to_thread(shutil.rmtree, execution_dir, True)
+                )
 
 
 async def _send_output_files(
