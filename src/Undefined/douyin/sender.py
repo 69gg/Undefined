@@ -237,6 +237,10 @@ async def send_douyin_video(
         return f"已发送抖音合并转发「{video_info.title}」"
     except Exception as exc:
         logger.exception("[Douyin] 处理视频失败: %s", video_id)
+        if getattr(exc, "delivery_uncertain", False) or getattr(
+            exc, "file_transfer_error", False
+        ):
+            raise
         video_info, error = await _recover_video_info_after_failure(
             video_id,
             video_info,

@@ -10,6 +10,8 @@ import pytest
 import Undefined.douyin.sender as douyin_sender
 from Undefined.attachments import AttachmentRegistry
 from Undefined.douyin.models import DouyinVideoInfo
+from Undefined.onebot.client import OneBotDeliveryUncertainError
+from Undefined.onebot.file_errors import FileTransferError
 
 
 def _video_info() -> DouyinVideoInfo:
@@ -23,6 +25,44 @@ def _video_info() -> DouyinVideoInfo:
         share_url="https://www.iesdouyin.com/share/video/7312345678901234567/",
         play_token="token-123",
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error",
+    [
+        OneBotDeliveryUncertainError("send_forward_msg", "timeout"),
+        FileTransferError("stream", "prepare failed"),
+    ],
+)
+async def test_send_douyin_video_does_not_fallback_after_delivery_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    error: RuntimeError,
+) -> None:
+    video_path = tmp_path / "douyin.mp4"
+    video_path.write_bytes(b"video")
+    send_mock = AsyncMock(side_effect=error)
+    sender: Any = SimpleNamespace(send_group_forward_message=send_mock)
+    monkeypatch.setattr(
+        douyin_sender,
+        "download_video",
+        AsyncMock(return_value=(video_path, _video_info(), "1080p", 5)),
+    )
+    cleanup_mock = AsyncMock()
+    monkeypatch.setattr(douyin_sender, "cleanup_path", cleanup_mock)
+    recover_mock = AsyncMock()
+    monkeypatch.setattr(douyin_sender, "get_video_info", recover_mock)
+
+    with pytest.raises(type(error)) as caught:
+        await douyin_sender.send_douyin_video(
+            _video_info().aweme_id, sender, "group", 123456
+        )
+
+    assert caught.value is error
+    send_mock.assert_awaited_once()
+    recover_mock.assert_not_awaited()
+    cleanup_mock.assert_awaited_once_with(video_path)
 
 
 @pytest.mark.asyncio
