@@ -4,6 +4,7 @@ import {
 	useCallback,
 	useContext,
 	useEffect,
+	useLayoutEffect,
 	useMemo,
 } from "react";
 import type { RuntimeClient } from "../runtime-client/types";
@@ -15,6 +16,8 @@ export type LoadedAttachmentBlob = {
 
 type AttachmentImageContextValue = {
 	loadAttachmentBlob: (uid: string) => Promise<LoadedAttachmentBlob | null>;
+	retainAttachmentBlob: (uid: string) => () => void;
+	retainBlobUrl: (url: string) => (() => void) | undefined;
 };
 
 const AttachmentImageContext =
@@ -27,7 +30,7 @@ export type AttachmentImageProviderProps = {
 	client: Pick<RuntimeClient, "previewAttachment">;
 	/** 按 Runtime URL 隔离 UID 缓存，保持消费组件与 DOM 的生命周期。 */
 	runtimeUrl?: string | null;
-	/** blob 缓存上限，超出按 LRU 淘汰并 revoke。默认 60。 */
+	/** blob 缓存目标上限；超出时仅淘汰无消费者的 LRU 项。默认 60。 */
 	maxCacheSize?: number;
 	children: ReactNode;
 };
@@ -42,8 +45,8 @@ export type AttachmentImageProviderProps = {
  * - LRU 缓存 uid→blobUrl：缩略图/正文图/全屏大图复用同一 blob，避免重复拉取。
  * - inflight 去重：同一 UID 并发请求只发一次。
  * - blob URL 归本 Provider 所有：消费组件**不**自行 revoke（缩略图与大图共享同一
- *   URL，组件卸载即 revoke 会让仍打开的大图破图），仅在 LRU 淘汰、切换 Runtime
- *   或 Provider 卸载时 revoke。
+ *   URL，组件卸载即 revoke 会让仍打开的大图破图）。消费者持有引用期间跳过
+ *   LRU 淘汰；切换 Runtime 或 Provider 卸载时统一 revoke。
  */
 export function AttachmentImageProvider({
 	client,
@@ -56,9 +59,46 @@ export function AttachmentImageProvider({
 			runtimeUrl,
 			cache: new Map<string, LoadedAttachmentBlob>(),
 			inflight: new Map<string, Promise<LoadedAttachmentBlob | null>>(),
+			consumers: new Map<string, number>(),
 			generation: 0,
 		}),
 		[runtimeUrl],
+	);
+
+	const evictUnused = useCallback(() => {
+		for (const [uid, loaded] of scope.cache) {
+			if (scope.cache.size <= maxCacheSize) break;
+			if (scope.consumers.has(uid)) continue;
+			scope.cache.delete(uid);
+			URL.revokeObjectURL(loaded.url);
+		}
+	}, [maxCacheSize, scope]);
+
+	const retainAttachmentBlob = useCallback(
+		(uid: string): (() => void) => {
+			const generation = scope.generation;
+			scope.consumers.set(uid, (scope.consumers.get(uid) ?? 0) + 1);
+			let released = false;
+			return () => {
+				if (released || generation !== scope.generation) return;
+				released = true;
+				const remaining = (scope.consumers.get(uid) ?? 1) - 1;
+				if (remaining > 0) scope.consumers.set(uid, remaining);
+				else scope.consumers.delete(uid);
+				evictUnused();
+			};
+		},
+		[scope, evictUnused],
+	);
+
+	const retainBlobUrl = useCallback(
+		(url: string): (() => void) | undefined => {
+			for (const [uid, loaded] of scope.cache) {
+				if (loaded.url === url) return retainAttachmentBlob(uid);
+			}
+			return undefined;
+		},
+		[scope, retainAttachmentBlob],
 	);
 
 	const loadAttachmentBlob = useCallback(
@@ -93,14 +133,7 @@ export function AttachmentImageProvider({
 						mediaType,
 					};
 					cache.set(uid, loaded);
-					// 超上限淘汰最旧（队首）并 revoke
-					while (cache.size > maxCacheSize) {
-						const oldestKey = cache.keys().next().value;
-						if (oldestKey === undefined) break;
-						const victim = cache.get(oldestKey);
-						cache.delete(oldestKey);
-						if (victim) URL.revokeObjectURL(victim.url);
-					}
+					evictUnused();
 					return loaded;
 				} catch {
 					return null;
@@ -112,7 +145,7 @@ export function AttachmentImageProvider({
 			inflight.set(uid, promise);
 			return promise;
 		},
-		[client, maxCacheSize, scope],
+		[client, evictUnused, scope],
 	);
 
 	// 切换 Runtime 或卸载时释放全部 blob URL，拒绝旧作用域迟到的响应。
@@ -121,6 +154,7 @@ export function AttachmentImageProvider({
 		return () => {
 			scope.generation += 1;
 			inflight.clear();
+			scope.consumers.clear();
 			for (const { url } of cache.values()) {
 				URL.revokeObjectURL(url);
 			}
@@ -129,8 +163,8 @@ export function AttachmentImageProvider({
 	}, [scope]);
 
 	const value = useMemo<AttachmentImageContextValue>(
-		() => ({ loadAttachmentBlob }),
-		[loadAttachmentBlob],
+		() => ({ loadAttachmentBlob, retainAttachmentBlob, retainBlobUrl }),
+		[loadAttachmentBlob, retainAttachmentBlob, retainBlobUrl],
 	);
 
 	return (
@@ -151,4 +185,13 @@ export function useAttachmentImage(): AttachmentImageContextValue {
 		);
 	}
 	return value;
+}
+
+/** 大图独立持有 Provider 的 URL；外部图片和无 Provider 的查看器无需持有。 */
+export function useRetainedAttachmentBlobUrl(url: string | null): void {
+	const value = useContext(AttachmentImageContext);
+	// 在被动 effect 释放缩略图前接管引用，支持同次渲染中移除源缩略图。
+	useLayoutEffect(() => {
+		if (url) return value?.retainBlobUrl(url);
+	}, [value, url]);
 }

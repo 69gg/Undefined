@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ImageViewerState } from "../chat-store/types";
 import { useTranslation } from "../i18n";
+import { useRetainedAttachmentBlobUrl } from "../rendering/AttachmentImageContext";
 
 export type ImageViewerModalProps = {
 	imageViewer: ImageViewerState | null;
@@ -15,6 +16,7 @@ export function ImageViewerModal({
 	const previousActiveElementRef = useRef<HTMLElement | null>(null);
 	const [zoom, setZoom] = useState(1);
 	const [rotation, setRotation] = useState(0);
+	useRetainedAttachmentBlobUrl(imageViewer?.open ? imageViewer.src : null);
 
 	useEffect(() => {
 		if (imageViewer?.open) {
