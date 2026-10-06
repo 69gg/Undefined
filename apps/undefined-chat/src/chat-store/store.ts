@@ -676,6 +676,8 @@ export function createChatStore({
 	let runtimeUrl: string | null = null;
 	let runtimeGeneration = 0;
 	let runtimeSuspended = false;
+	const draftRevisionsByConversation = new Map<string, number>();
+	let draftRevision = 0;
 	const listeners = new Set<() => void>();
 	const subscriptionsByJob = new Map<string, string>();
 	const fallbackTimersByJob = new Map<string, ReturnType<typeof setTimeout>>();
@@ -698,6 +700,11 @@ export function createChatStore({
 	}
 
 	function dispatch(action: ChatAction): void {
+		if (action.type === "draft/set") {
+			draftRevisionsByConversation.set(action.conversationId, ++draftRevision);
+		} else if (action.type === "conversation/remove") {
+			draftRevisionsByConversation.delete(action.conversationId);
+		}
 		state = chatReducer(state, action);
 		// 自动滚动偏好在状态更新后持久化（reducer 保持纯函数，副作用集中在此）
 		if (action.type === "autoScroll/set") {
@@ -727,6 +734,7 @@ export function createChatStore({
 		clearNativeSubscriptions();
 		sendInFlight = false;
 		lastCommandsFetchedAt = 0;
+		draftRevisionsByConversation.clear();
 		state = {
 			...createInitialChatState(),
 			autoScrollEnabled: state.autoScrollEnabled,
@@ -1201,7 +1209,8 @@ export function createChatStore({
 			dispatch({ type: "send/error", error: "error.conversationRunning" });
 			return;
 		}
-		const text = (state.draftsByConversation[conversationId] ?? "").trim();
+		const draft = state.draftsByConversation[conversationId] ?? "";
+		const text = draft.trim();
 		const attachments = state.attachmentsByConversation[conversationId] ?? [];
 		if (
 			attachments.some((item) => ["queued", "uploading"].includes(item.status))
@@ -1244,6 +1253,10 @@ export function createChatStore({
 		dispatch({ type: "draft/set", conversationId, draft: "" });
 		dispatch({ type: "attachments/set", conversationId, attachments: [] });
 		dispatch({ type: "references/set", conversationId, references: [] });
+		const clearedDraftRevision =
+			draftRevisionsByConversation.get(conversationId);
+		const clearedAttachments = state.attachmentsByConversation[conversationId];
+		const clearedReferences = state.referencesByConversation[conversationId];
 
 		const input: SendMessageInput = {
 			conversationId,
@@ -1262,7 +1275,7 @@ export function createChatStore({
 			await startStreamForJob(job);
 		} catch (err) {
 			if (generation !== runtimeGeneration) return;
-			// 发送失败：移除乐观用户消息并恢复草稿/附件/引用
+			// 发送失败：移除乐观消息，仅恢复发送后未再次编辑的字段。
 			const currentHistory = state.historyByConversation[conversationId];
 			if (currentHistory) {
 				dispatch({
@@ -1276,9 +1289,22 @@ export function createChatStore({
 					total: Math.max(0, currentHistory.total - 1),
 				});
 			}
-			dispatch({ type: "draft/set", conversationId, draft: text });
-			dispatch({ type: "attachments/set", conversationId, attachments });
-			dispatch({ type: "references/set", conversationId, references });
+			if (
+				draftRevisionsByConversation.get(conversationId) ===
+				clearedDraftRevision
+			) {
+				dispatch({ type: "draft/set", conversationId, draft });
+			}
+			if (
+				state.attachmentsByConversation[conversationId] === clearedAttachments
+			) {
+				dispatch({ type: "attachments/set", conversationId, attachments });
+			}
+			if (
+				state.referencesByConversation[conversationId] === clearedReferences
+			) {
+				dispatch({ type: "references/set", conversationId, references });
+			}
 			dispatch({ type: "send/error", error: errorMessage(err) });
 		} finally {
 			if (generation === runtimeGeneration) sendInFlight = false;
