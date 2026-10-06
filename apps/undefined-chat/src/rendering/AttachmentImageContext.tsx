@@ -5,7 +5,6 @@ import {
 	useContext,
 	useEffect,
 	useMemo,
-	useRef,
 } from "react";
 import type { RuntimeClient } from "../runtime-client/types";
 
@@ -26,6 +25,8 @@ const DEFAULT_MAX_CACHE_SIZE = 60;
 export type AttachmentImageProviderProps = {
 	/** 仅依赖 previewAttachment，便于测试以最小桩注入 */
 	client: Pick<RuntimeClient, "previewAttachment">;
+	/** 按 Runtime URL 隔离 UID 缓存，保持消费组件与 DOM 的生命周期。 */
+	runtimeUrl?: string | null;
 	/** blob 缓存上限，超出按 LRU 淘汰并 revoke。默认 60。 */
 	maxCacheSize?: number;
 	children: ReactNode;
@@ -41,23 +42,28 @@ export type AttachmentImageProviderProps = {
  * - LRU 缓存 uid→blobUrl：缩略图/正文图/全屏大图复用同一 blob，避免重复拉取。
  * - inflight 去重：同一 UID 并发请求只发一次。
  * - blob URL 归本 Provider 所有：消费组件**不**自行 revoke（缩略图与大图共享同一
- *   URL，组件卸载即 revoke 会让仍打开的大图破图），仅在 LRU 淘汰或 Provider 卸载
- *   时 revoke。
+ *   URL，组件卸载即 revoke 会让仍打开的大图破图），仅在 LRU 淘汰、切换 Runtime
+ *   或 Provider 卸载时 revoke。
  */
 export function AttachmentImageProvider({
 	client,
+	runtimeUrl,
 	maxCacheSize = DEFAULT_MAX_CACHE_SIZE,
 	children,
 }: AttachmentImageProviderProps) {
-	const cacheRef = useRef<Map<string, LoadedAttachmentBlob>>(new Map());
-	const inflightRef = useRef<Map<string, Promise<LoadedAttachmentBlob | null>>>(
-		new Map(),
+	const scope = useMemo(
+		() => ({
+			runtimeUrl,
+			cache: new Map<string, LoadedAttachmentBlob>(),
+			inflight: new Map<string, Promise<LoadedAttachmentBlob | null>>(),
+			generation: 0,
+		}),
+		[runtimeUrl],
 	);
 
 	const loadAttachmentBlob = useCallback(
 		(uid: string): Promise<LoadedAttachmentBlob | null> => {
-			const cache = cacheRef.current;
-			const inflight = inflightRef.current;
+			const { cache, inflight } = scope;
 
 			const cached = cache.get(uid);
 			if (cached) {
@@ -71,8 +77,10 @@ export function AttachmentImageProvider({
 			if (pending) return pending;
 
 			const promise = (async (): Promise<LoadedAttachmentBlob | null> => {
+				const generation = scope.generation;
 				try {
 					const result = await client.previewAttachment({ attachmentId: uid });
+					if (generation !== scope.generation) return null;
 					if (!result.ok || result.bytes.length === 0) {
 						return null;
 					}
@@ -97,26 +105,28 @@ export function AttachmentImageProvider({
 				} catch {
 					return null;
 				} finally {
-					inflight.delete(uid);
+					if (generation === scope.generation) inflight.delete(uid);
 				}
 			})();
 
 			inflight.set(uid, promise);
 			return promise;
 		},
-		[client, maxCacheSize],
+		[client, maxCacheSize, scope],
 	);
 
-	// Provider 卸载时释放全部 blob URL
+	// 切换 Runtime 或卸载时释放全部 blob URL，拒绝旧作用域迟到的响应。
 	useEffect(() => {
-		const cache = cacheRef.current;
+		const { cache, inflight } = scope;
 		return () => {
+			scope.generation += 1;
+			inflight.clear();
 			for (const { url } of cache.values()) {
 				URL.revokeObjectURL(url);
 			}
 			cache.clear();
 		};
-	}, []);
+	}, [scope]);
 
 	const value = useMemo<AttachmentImageContextValue>(
 		() => ({ loadAttachmentBlob }),

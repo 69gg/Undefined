@@ -50,6 +50,8 @@ Undefined Chat 不持久化权威聊天数据。以下内容都以 Runtime 返�
 
 本地只保存 UI 相关状态，例如当前会话、草稿、事件游标、窗口布局、连接档案和是否允许不安全存储降级。刷新、重启或换端之后，客户端必须重新从 Runtime 恢复会话和任务状态。
 
+连接到不同 Runtime 时，会清理旧实例的草稿、附件 UID、消息引用、历史、任务和图片预览缓存，并丢弃旧实例迟到的请求或订阅通知，避免相同会话 ID 造成跨实例误发送。同一 Runtime 的重连及 Android 恢复保留编辑状态和 UI 偏好；自动滚动、平台与布局偏好在切换实例时也保留。
+
 ## 连接与事件
 
 Runtime 请求必须由 Tauri command 拼接到已配置 origin 下，避免 React 传入任意 URL 后绕过目标主机限制。React 不直接持有 API Key；受保护请求由 Rust 侧注入 `X-Undefined-API-Key`。

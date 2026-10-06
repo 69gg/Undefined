@@ -1,5 +1,6 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import {
+	act,
 	fireEvent,
 	render,
 	screen,
@@ -12,6 +13,10 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { App } from "./App";
 import { LanguageProvider, LOCALE_STORAGE_KEY } from "./i18n";
 import { createTauriRuntimeClient } from "./runtime-client/tauri";
+import type {
+	AttachmentPreviewResult,
+	RuntimeConfig,
+} from "./runtime-client/types";
 import { conversation, historyItem, runtimeClientStub } from "./test-fixtures";
 
 vi.mock("./runtime-client/tauri", () => ({
@@ -28,6 +33,14 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
  */
 function renderApp(ui: ReactElement = <App />) {
 	return render(<LanguageProvider>{ui}</LanguageProvider>);
+}
+
+async function connectRuntime(runtimeUrl: string): Promise<void> {
+	fireEvent.keyDown(window, { key: ",", ctrlKey: true });
+	await userEvent.clear(screen.getByLabelText("Runtime URL"));
+	await userEvent.type(screen.getByLabelText("Runtime URL"), runtimeUrl);
+	await userEvent.click(screen.getByRole("button", { name: "保存并连接" }));
+	await screen.findByText(runtimeUrl);
 }
 
 describe("App", () => {
@@ -423,6 +436,104 @@ describe("App", () => {
 				filePath: "/tmp/trace.log",
 			});
 		});
+	});
+
+	test("ignores a file picker opened on the previous Runtime", async () => {
+		let resolvePicker!: (path: string) => void;
+		vi.mocked(open).mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					resolvePicker = resolve;
+				}),
+		);
+		let config: RuntimeConfig = {
+			runtimeUrl: "http://runtime-a.test",
+			hasApiKey: true,
+		};
+		const client = runtimeClientStub({
+			getRuntimeConfig: vi.fn(async () => config),
+			saveRuntimeConfig: vi.fn(async (runtimeUrl) => {
+				config = { ...config, runtimeUrl };
+				return config;
+			}),
+		});
+		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
+		renderApp();
+		await screen.findByLabelText("消息输入");
+		await userEvent.click(screen.getByRole("button", { name: "添加附件" }));
+		await connectRuntime("http://runtime-b.test");
+		await waitFor(() => {
+			expect(client.getHistory).toHaveBeenCalledTimes(2);
+		});
+		resolvePicker("/tmp/runtime-a-private.txt");
+		await waitFor(() => {
+			expect(screen.getByLabelText("消息输入")).toHaveValue("");
+		});
+		expect(client.uploadAttachment).not.toHaveBeenCalled();
+	});
+
+	test("ignores a direct attachment preview returned from the previous Runtime", async () => {
+		let resolvePreview!: (result: AttachmentPreviewResult) => void;
+		let config: RuntimeConfig = {
+			runtimeUrl: "http://runtime-a.test",
+			hasApiKey: true,
+		};
+		const client = runtimeClientStub();
+		const getHistory = client.getHistory;
+		client.getRuntimeConfig = vi.fn(async () => config);
+		client.saveRuntimeConfig = vi.fn(async (runtimeUrl) => {
+			config = { ...config, runtimeUrl };
+			return config;
+		});
+		client.getHistory = vi.fn(async (request) => ({
+			...(await getHistory(request)),
+			items:
+				config.runtimeUrl === "http://runtime-a.test"
+					? [
+							historyItem({
+								attachments: [
+									{
+										id: "pic_a",
+										name: "private-a.png",
+										kind: "image",
+										mediaType: "image/png",
+										size: 20 * 1024 * 1024,
+										downloadUrl: "/api/v1/chat/attachments/pic_a",
+										previewUrl: "/api/v1/chat/attachments/pic_a/preview",
+										discarded: false,
+									},
+								],
+							}),
+						]
+					: [],
+		}));
+		client.previewAttachment = vi.fn(
+			() =>
+				new Promise<AttachmentPreviewResult>((resolve) => {
+					resolvePreview = resolve;
+				}),
+		);
+		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
+		const createSpy = vi.spyOn(URL, "createObjectURL");
+		renderApp();
+		await screen.findByText("private-a.png");
+		await userEvent.click(screen.getByRole("button", { name: "预览" }));
+		await connectRuntime("http://runtime-b.test");
+		await waitFor(() => {
+			expect(screen.queryByText("private-a.png")).toBeNull();
+		});
+		await act(async () => {
+			resolvePreview({
+				status: 200,
+				ok: true,
+				mediaType: "image/png",
+				bytes: [1, 2, 3, 4],
+				body: null,
+			});
+		});
+		expect(screen.queryByRole("dialog", { name: "图片查看器" })).toBeNull();
+		expect(createSpy).not.toHaveBeenCalled();
+		createSpy.mockRestore();
 	});
 
 	test("uses native attachment bridges for timeline actions", async () => {

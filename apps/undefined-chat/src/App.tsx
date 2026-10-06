@@ -129,7 +129,7 @@ export function App() {
 	): Promise<void> {
 		setSetupError(null);
 		try {
-			await client.saveRuntimeConfig(url);
+			const config = await client.saveRuntimeConfig(url);
 			if (allowInsecure) {
 				await client.confirmInsecureStorageFallback();
 			}
@@ -138,7 +138,7 @@ export function App() {
 				await client.saveApiKey(apiKey);
 			}
 			setIsSettingsOpen(false);
-			await store.bootstrap();
+			await store.bootstrap({ runtimeUrl: config.runtimeUrl });
 		} catch (err) {
 			setSetupError(err instanceof Error ? err.message : String(err));
 		}
@@ -165,10 +165,12 @@ export function App() {
 	}
 
 	async function previewAttachment(attachment: Attachment): Promise<void> {
+		const runtimeConfig = store.getSnapshot().runtimeConfig;
 		try {
 			const result = await client.previewAttachment({
 				attachmentId: attachment.id,
 			});
+			if (store.getSnapshot().runtimeConfig !== runtimeConfig) return;
 			if (!result.ok || result.bytes.length === 0) {
 				window.alert(result.body ?? t("attachment.previewFailed"));
 				return;
@@ -188,11 +190,13 @@ export function App() {
 			window.open(url, "_blank", "noopener,noreferrer");
 			window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
 		} catch (err) {
+			if (store.getSnapshot().runtimeConfig !== runtimeConfig) return;
 			window.alert(err instanceof Error ? err.message : String(err));
 		}
 	}
 
 	async function addAttachment(conversationId: string): Promise<void> {
+		const runtimeConfig = store.getSnapshot().runtimeConfig;
 		try {
 			const selected = await open({
 				multiple: false,
@@ -201,10 +205,12 @@ export function App() {
 				pickerMode: "document",
 				fileAccessMode: "copy",
 			});
+			if (store.getSnapshot().runtimeConfig !== runtimeConfig) return;
 			if (typeof selected === "string") {
 				await store.addAttachmentPath(conversationId, selected);
 			}
 		} catch (err) {
+			if (store.getSnapshot().runtimeConfig !== runtimeConfig) return;
 			window.alert(err instanceof Error ? err.message : String(err));
 		}
 	}
@@ -215,7 +221,9 @@ export function App() {
 			return;
 		}
 		// 尚无会话：先自动创建再把示例填入草稿
+		const runtimeConfig = store.getSnapshot().runtimeConfig;
 		void store.createConversation().then(() => {
+			if (store.getSnapshot().runtimeConfig !== runtimeConfig) return;
 			const conversationId = store.getSnapshot().selectedConversationId;
 			if (conversationId) {
 				store.updateDraft(conversationId, prompt);
@@ -293,7 +301,7 @@ export function App() {
 				previewImageUrlRef.current = null;
 			}
 		};
-	}, []);
+	}, [state.runtimeConfig?.runtimeUrl]);
 
 	useEffect(() => {
 		if (!isMobile || !isMobileSidebarActive) {
@@ -460,7 +468,10 @@ export function App() {
 	]);
 
 	return (
-		<AttachmentImageProvider client={client}>
+		<AttachmentImageProvider
+			client={client}
+			runtimeUrl={state.runtimeConfig?.runtimeUrl}
+		>
 			<main className="chat-app">
 				{/* 移动端侧边栏背景遮罩 */}
 				<div
