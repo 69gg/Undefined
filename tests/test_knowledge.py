@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from chromadb.errors import NotFoundError
 from Undefined.knowledge.chunker import chunk_lines
 from Undefined.knowledge.embedder import Embedder
@@ -444,8 +446,93 @@ async def test_embed_replaces_changed_file_chunks(tmp_path: Path) -> None:
         added = await manager.embed_knowledge_base("kb1")
 
     assert added == 1
-    store.delete_by_source.assert_awaited_once_with("texts/doc.txt")
+    store.delete_by_source.assert_not_awaited()
+    assert store.add_chunks.await_args.kwargs["replace_source"] is True
     assert "texts/doc.txt" in json.loads(manifest_path.read_text("utf-8"))
+
+
+@pytest.mark.parametrize("failure", ["read", "embed", "upsert"])
+async def test_failed_reindex_keeps_real_old_chunks_and_retries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    manager, embedder = _make_manager(tmp_path)
+    kb_dir = _make_kb(tmp_path, "kb1", {"doc.txt": "new contents"})
+    source_path = kb_dir / "texts/doc.txt"
+    manifest_path = kb_dir / ".manifest.json"
+    manifest_path.write_text('{"texts/doc.txt":"outdated"}', "utf-8")
+    store = manager._get_store("kb1")
+    await store.add_chunks(
+        ["old contents"], [[0.1, 0.2]], {"source": "texts/doc.txt", "kb": "kb1"}
+    )
+    original_read = Path.read_text
+
+    def unreadable(path: Path, *args: Any, **kwargs: Any) -> str:
+        if path == source_path:
+            raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid")
+        return original_read(path, *args, **kwargs)
+
+    def failed_upsert(**kwargs: Any) -> None:
+        raise RuntimeError("upsert failed")
+
+    with monkeypatch.context() as failure_patch:
+        if failure == "read":
+            failure_patch.setattr(Path, "read_text", unreadable)
+        elif failure == "embed":
+            failure_patch.setattr(
+                embedder,
+                "embed",
+                AsyncMock(side_effect=TimeoutError("embedding failed")),
+            )
+        else:
+            failure_patch.setattr(store._collection, "upsert", failed_upsert)
+        if failure == "read":
+            assert await manager.embed_knowledge_base("kb1") == 0
+        else:
+            with pytest.raises((TimeoutError, RuntimeError), match="failed"):
+                await manager.embed_knowledge_base("kb1")
+        assert store._collection.get(where={"source": "texts/doc.txt"})[
+            "documents"
+        ] == ["old contents"]
+        assert json.loads(manifest_path.read_text("utf-8")) == {
+            "texts/doc.txt": "outdated"
+        }
+
+    assert await manager.embed_knowledge_base("kb1") == 1
+    assert store._collection.get(where={"source": "texts/doc.txt"})["documents"] == [
+        "new contents"
+    ]
+    assert json.loads(manifest_path.read_text("utf-8"))["texts/doc.txt"] != "outdated"
+
+
+async def test_source_replacement_removes_stale_chunks_only_after_success(
+    tmp_path: Path,
+) -> None:
+    store = KnowledgeStore("knowledge_test", tmp_path / "chroma")
+    await store.add_chunks(
+        ["keep", "remove"], [[0.1, 0.2], [0.2, 0.3]], {"source": "a.txt"}
+    )
+    await store.add_chunks(["remove"], [[0.2, 0.3]], {"source": "b.txt"})
+
+    assert (
+        await store.add_chunks(
+            ["keep"], [[0.3, 0.4]], {"source": "a.txt"}, replace_source=True
+        )
+        == 1
+    )
+    assert store._collection.get(where={"source": "a.txt"})["documents"] == ["keep"]
+    assert store._collection.get(where={"source": "b.txt"})["documents"] == ["remove"]
+
+
+async def test_empty_file_update_removes_real_previous_chunks(tmp_path: Path) -> None:
+    manager, embedder = _make_manager(tmp_path)
+    kb_dir = _make_kb(tmp_path, "kb1", {"doc.txt": "   \n"})
+    store = manager._get_store("kb1")
+    await store.add_chunks(["old"], [[0.1, 0.2]], {"source": "texts/doc.txt"})
+
+    assert await manager.embed_knowledge_base("kb1") == 0
+    assert not store._collection.get(where={"source": "texts/doc.txt"})["ids"]
+    assert "texts/doc.txt" in json.loads((kb_dir / ".manifest.json").read_text("utf-8"))
+    embedder.embed.assert_not_awaited()
 
 
 async def test_semantic_search_missing_kb_does_not_create_store(tmp_path: Path) -> None:
