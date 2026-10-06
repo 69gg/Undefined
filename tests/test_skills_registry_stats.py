@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any
+from pathlib import Path
 
 import pytest
 
@@ -165,3 +166,47 @@ async def test_registry_strict_execution_preserves_cancellation() -> None:
 
     with pytest.raises(asyncio.CancelledError):
         await task
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["success", "failure", "cancelled"])
+async def test_inflight_execution_keeps_stats_after_skill_removed(
+    tmp_path: Path,
+    outcome: str,
+) -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def handler(args: dict[str, Any], context: dict[str, Any]) -> str:
+        _ = args, context
+        started.set()
+        await release.wait()
+        if outcome == "failure":
+            raise RuntimeError("handler failure")
+        return "completed"
+
+    registry = BaseRegistry(base_dir=tmp_path, kind="tool", timeout_seconds=0)
+    registry.register_external_item("removed", _schema("removed"), handler)
+    stats = registry.get_stats()["removed"]
+    task = asyncio.create_task(registry.execute_strict("removed", {}, {}))
+    await started.wait()
+    await registry._reload_items()
+    assert "removed" not in registry.get_stats()
+
+    if outcome == "cancelled":
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert stats.last_error == "cancelled"
+    else:
+        release.set()
+        if outcome == "failure":
+            with pytest.raises(RuntimeError, match="handler failure"):
+                await task
+            assert stats.last_error == "handler failure"
+        else:
+            assert await task == "completed"
+            assert stats.success == 1
+    assert stats.count == 1
+    assert stats.failure == (0 if outcome == "success" else 1)
+    assert await registry.execute("removed", {}, {}) == "未找到项目: removed"

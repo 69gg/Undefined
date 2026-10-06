@@ -490,6 +490,8 @@ class BaseRegistry:
         args = parse_tool_arguments(args, logger=logger, tool_name=name)
         async with self._items_lock:
             item = self._items.get(name)
+            if item is not None:
+                stats = self._stats.setdefault(name, SkillStats())
 
         if not item:
             if logger.isEnabledFor(logging.INFO) and self.kind in {
@@ -547,7 +549,7 @@ class BaseRegistry:
                 result = await self._execute_with_timeout(handler, args, context)
                 duration = time.monotonic() - start_time
 
-                self._stats[name].record_success(duration)
+                stats.record_success(duration)
                 self._log_event(
                     "execute", name, status="success", duration_ms=int(duration * 1000)
                 )
@@ -558,7 +560,7 @@ class BaseRegistry:
 
         except RegistryExecutionTimeoutError:
             duration = time.monotonic() - start_time
-            self._stats[name].record_failure(duration, "timeout")
+            stats.record_failure(duration, "timeout")
             self._log_event(
                 "execute", name, status="timeout", duration_ms=int(duration * 1000)
             )
@@ -569,7 +571,7 @@ class BaseRegistry:
 
         except asyncio.CancelledError:
             duration = time.monotonic() - start_time
-            self._stats[name].record_failure(duration, "cancelled")
+            stats.record_failure(duration, "cancelled")
             self._log_event(
                 "execute", name, status="cancelled", duration_ms=int(duration * 1000)
             )
@@ -580,7 +582,7 @@ class BaseRegistry:
 
         except Exception as e:
             duration = time.monotonic() - start_time
-            self._stats[name].record_failure(duration, str(e))
+            stats.record_failure(duration, str(e))
             logger.exception(f"[执行异常] {name}")
             self._log_event(
                 "execute", name, status="error", duration_ms=int(duration * 1000)
