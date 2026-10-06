@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 import logging
 from typing import Any
 from uuid import uuid4
@@ -27,6 +28,19 @@ from Undefined.services.queue_manager import (
 from Undefined.ai.client.setup import ClientSetupMixin
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(slots=True)
+class QueuedLLMCallState:
+    """Share caller cancellation with queued retries and the active model task."""
+
+    cancelled: bool = False
+    task: asyncio.Task[dict[str, Any]] | None = None
+
+    def cancel(self) -> None:
+        self.cancelled = True
+        if self.task is not None and not self.task.done():
+            self.task.cancel()
 
 
 class ClientQueueMixin(ClientSetupMixin):
@@ -107,6 +121,7 @@ class ClientQueueMixin(ClientSetupMixin):
             )
         request_id = uuid4().hex
         event: asyncio.Event = asyncio.Event()
+        call_state = QueuedLLMCallState()
         # 挂起表：QueueManager 回调 set_llm_call_result 时唤醒等待方
         self._pending_llm_calls[request_id] = (event, None)
         model_name = getattr(model_config, "model_name", "default")
@@ -121,6 +136,7 @@ class ClientQueueMixin(ClientSetupMixin):
             "max_tokens": effective_max_tokens,
             "transport_state": transport_state,
             "skip_prefetch_tools": skip_prefetch_tools,
+            "_llm_call_state": call_state,
         }
         ctx = RequestContext.current()
         if ctx is not None:
@@ -168,6 +184,7 @@ class ClientQueueMixin(ClientSetupMixin):
                 )
                 raise
         finally:
+            call_state.cancel()
             entry = self._pending_llm_calls.pop(request_id, None)
         _, result = entry if entry is not None else (None, None)
         if isinstance(result, Exception):

@@ -149,6 +149,7 @@ allow_cancel_after_send = false
 - `flush_all()` 在关停时设置 shutdown 标记，循环遍历所有桶执行等价 T1 路径，并 `await` 所有未完成的 flush task；若收尾过程中又出现新桶，会继续清空直到没有 pending bucket。shutdown 之后的新消息直接发车，不再开缓冲桶。
 - `MessageHandler.close()` 的顺序是：停止自动管线热重载 → `message_batcher.flush_all()` → `queue_manager.drain()` 等待已入队/在途回复自然收敛 → `queue_manager.stop()` → flush 历史落盘。
 - coordinator 在 `execute_reply` 入口调用 `register_inflight(scope, sender_id, task, ctx)`，在 `finally` 调 `unregister_inflight(...)`；`asyncio.CancelledError` 被识别为 "投机抢占"，仅记录信息日志且不重试。
+- 主调用取消或等待超时会同步取消其 LLM 子请求：尚未执行或正在等待重试的子请求会跳过模型调用，已执行的模型任务会收到取消。已经发到上游的请求无法撤回，但不会继续排队重试或产生无人消费的新调用。
 
 ### 兼容回退
 

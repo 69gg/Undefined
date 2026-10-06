@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING, Any, cast
 
 from Undefined.ai.queue_budget import resolve_effective_retry_count
+from Undefined.ai.client.queue import QueuedLLMCallState
 from Undefined.services.queue_manager import QUEUE_LANE_BACKGROUND
 from Undefined.utils.resources import read_text_resource
 
@@ -149,12 +151,18 @@ class BackgroundMixin:
         retry_count = int(request.get("_retry_count", 0) or 0)
         queue_lane = str(request.get("_queue_lane") or QUEUE_LANE_BACKGROUND)
         call_type = str(request.get("call_type", "background") or "background")
+        call_state = request.get("_llm_call_state")
+        if isinstance(call_state, QueuedLLMCallState) and call_state.cancelled:
+            logger.info(
+                "[queued_llm_cancelled] 跳过已取消的调用: request_id=%s", request_id
+            )
+            return
         try:
             max_tokens_raw = request.get("max_tokens")
             if max_tokens_raw is None:
                 max_tokens_raw = getattr(request["model_config"], "max_tokens", 4096)
             max_tokens = int(max_tokens_raw) if max_tokens_raw is not None else 4096
-            result = await self.ai.request_model(
+            model_call = self.ai.request_model(
                 model_config=request["model_config"],
                 messages=request["messages"],
                 tools=request.get("tools"),
@@ -164,6 +172,14 @@ class BackgroundMixin:
                 transport_state=request.get("transport_state"),
                 skip_prefetch_tools=bool(request.get("skip_prefetch_tools", False)),
             )
+            if isinstance(call_state, QueuedLLMCallState):
+                call_state.task = asyncio.create_task(model_call)
+                try:
+                    result = await call_state.task
+                finally:
+                    call_state.task = None
+            else:
+                result = await model_call
             self.ai.set_llm_call_result(request_id, result)
             if retry_count > 0:
                 logger.info(
