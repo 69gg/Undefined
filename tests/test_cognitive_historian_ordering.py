@@ -22,7 +22,7 @@ from Undefined.cognitive.historian.scheduling import (
 from Undefined.cognitive.job_queue import JobQueue, QueuedJob
 from Undefined.cognitive.profile_storage import ProfileStorage
 from Undefined.cognitive.service import CognitiveService
-from Undefined.utils.io import write_json
+from Undefined.utils.io import read_json, write_json
 
 
 def make_job(label: str, *keys: EntityKey) -> dict[str, Any]:
@@ -401,6 +401,115 @@ async def test_vector_failure_retries_current_file_before_follower(
 
 
 @pytest.mark.asyncio
+async def test_profile_vector_failure_then_model_skip_repairs_index_before_completion(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    h = harness(tmp_path)
+    key = ("user", "1")
+    h.vectors.profile_failures = 1
+    h.vectors.profiles["user:1"] = "OLD INDEX"
+    submit = h.ai.submit_background_llm_call
+    write = h.storage.write_profile
+    writes: list[str] = []
+
+    async def skip_updated_profile(**kwargs: Any) -> dict[str, Any]:
+        if "profile A" in str(kwargs["messages"][0]["content"]):
+            h.ai.skips.add("A")
+        return await submit(**kwargs)
+
+    async def record_write(entity_type: str, entity_id: str, content: str) -> None:
+        writes.append(content)
+        await write(entity_type, entity_id, content)
+
+    monkeypatch.setattr(h.ai, "submit_background_llm_call", skip_updated_profile)
+    monkeypatch.setattr(h.storage, "write_profile", record_write)
+    await h.queue.enqueue(make_job("A", key))
+    async with running(h):
+        await drained(h)
+    assert len(h.ai.calls) == 2
+    assert "profile A" in h.ai.calls[1][2]
+    assert len(writes) == 1
+    assert (await h.storage.read_profile(*key)) == writes[0]
+    assert "profile A" in h.vectors.profiles["user:1"]
+    assert "evaluation" in h.vectors.profiles["user:1"]
+    assert "roast" in h.vectors.profiles["user:1"]
+    assert h.queue.snapshot()["failed"] == 0
+
+
+@pytest.mark.asyncio
+async def test_skip_after_process_restart_repairs_persisted_profile_index(
+    tmp_path: Path,
+) -> None:
+    h = harness(tmp_path)
+    key = ("user", "1")
+    first = await h.queue.enqueue(make_job("A", key))
+    claimed = await h.queue.claim(first)
+    assert claimed is not None
+    await h.worker._process_job_with_retry(*claimed)
+    h.vectors.profile_failures = 1
+    claimed = await h.queue.claim(first)
+    assert claimed is not None
+    await h.worker._process_job_with_retry(
+        *claimed, target={"entity_type": key[0], "entity_id": key[1]}
+    )
+    written = await h.storage.read_profile(*key)
+    assert written is not None and "profile A" in written
+    assert h.queue.snapshot()["pending"] == 1
+
+    resumed = harness(tmp_path)
+    resumed.ai.skips.add("A")
+    resumed.vectors.profiles["user:1"] = "OLD INDEX"
+    async with running(resumed):
+        await drained(resumed)
+    assert len(resumed.ai.calls) == 1
+    assert not resumed.worker.rewrites
+    assert (await resumed.storage.read_profile(*key)) == written
+    assert "profile A" in resumed.vectors.profiles["user:1"]
+    assert resumed.queue.snapshot()["failed"] == 0
+
+
+@pytest.mark.asyncio
+async def test_skip_index_failure_does_not_confirm_target_complete(
+    tmp_path: Path,
+) -> None:
+    h = harness(tmp_path, retries=1)
+    key = ("user", "1")
+    await h.storage.write_profile(*key, "legacy profile")
+    h.ai.skips.add("A")
+    h.vectors.profiles["user:1"] = "OLD INDEX"
+    h.vectors.profile_failures = 2
+    first = await h.queue.enqueue(make_job("A", key))
+    async with running(h):
+        await drained(h)
+    assert len(h.ai.calls) == 2
+    assert h.queue.snapshot()["failed"] == 1
+    failed_path = Path(h.queue.snapshot()["paths"]["failed"]) / f"{first}.json"
+    failed_data = await read_json(failed_path)
+    assert isinstance(failed_data, dict)
+    assert not HistorianProgress.from_job(failed_data).completed_targets
+    assert h.vectors.profiles["user:1"] == "OLD INDEX"
+    assert (await h.storage.read_profile(*key)) == "legacy profile"
+
+
+@pytest.mark.asyncio
+async def test_later_skip_repairs_profile_left_by_failed_predecessor(
+    tmp_path: Path,
+) -> None:
+    h = harness(tmp_path, retries=0)
+    key = ("user", "1")
+    h.vectors.profile_failures = 1
+    h.ai.skips.add("B")
+    await h.queue.enqueue(make_job("A", key))
+    await h.queue.enqueue(make_job("B", key))
+    async with running(h):
+        await drained(h)
+    assert [label for label, _, _ in h.ai.calls] == ["A", "B"]
+    assert h.queue.snapshot()["failed"] == 1
+    assert "profile A" in h.ai.calls[1][2]
+    assert "profile A" in h.vectors.profiles["user:1"]
+
+
+@pytest.mark.asyncio
 async def test_terminal_vector_failure_does_not_rollback_existing_file(
     tmp_path: Path,
 ) -> None:
@@ -607,7 +716,9 @@ async def test_cancelling_worker_does_not_wait_for_model(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("stage", ["file", "vector", "checkpoint", "skip_checkpoint"])
+@pytest.mark.parametrize(
+    "stage", ["file", "vector", "checkpoint", "skip_checkpoint", "skip_vector"]
+)
 async def test_cancellation_waits_for_profile_commit_before_release(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stage: str
 ) -> None:
@@ -633,9 +744,12 @@ async def test_cancellation_waits_for_profile_commit_before_release(
 
     if stage == "file":
         monkeypatch.setattr(h.storage, "write_profile", blocked_write)
-    elif stage == "vector":
+    elif stage in {"vector", "skip_vector"}:
         h.vectors.profile_gate = gate
         started = h.vectors.profile_started
+        if stage == "skip_vector":
+            await h.storage.write_profile(*key, "legacy profile")
+            h.ai.skips.add("A")
     else:
         monkeypatch.setattr(h.queue, "checkpoint", blocked_checkpoint)
         if stage == "skip_checkpoint":
@@ -669,6 +783,8 @@ async def test_cancellation_waits_for_profile_commit_before_release(
     assert h.worker.rewrites["A"] == 1
     if stage == "skip_checkpoint":
         assert h.ai.calls[-1][2] == "（暂无侧写）"
+    elif stage == "skip_vector":
+        assert h.ai.calls[-1][2] == "legacy profile"
     else:
         assert "profile A" in h.ai.calls[-1][2]
 
