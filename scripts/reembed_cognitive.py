@@ -106,7 +106,7 @@ def _parse_args() -> argparse.Namespace:
         "--db-path",
         type=str,
         default=None,
-        help="ChromaDB 路径（默认读取 config.toml 中的 cognitive.vector_store_path）",
+        help="ChromaDB 路径（默认读取 config.toml 中的 cognitive.vector_store.path）",
     )
     parser.add_argument(
         "-v",

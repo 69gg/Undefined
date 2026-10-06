@@ -64,7 +64,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--db-path",
         default="",
-        help="ChromaDB 目录（默认读取 config.toml 中的 cognitive.vector_store_path）",
+        help="ChromaDB 目录（默认读取 config.toml 中的 cognitive.vector_store.path）",
     )
     parser.add_argument(
         "--entity-type",
@@ -81,7 +81,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--profiles-path",
         default="",
-        help="侧写目录（默认读取 config.toml 中的 cognitive.profiles_path）",
+        help="侧写目录（默认读取 config.toml 中的 cognitive.profile.path）",
     )
     parser.add_argument(
         "--dry-run",

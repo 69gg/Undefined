@@ -122,7 +122,7 @@ uv run python scripts/restore_profile.py sync --entity-type user --entity-id 123
 
 `restore` 默认恢复 Markdown、把当前内容另存为历史快照，并使用当前 cognitive 嵌入配置更新 `cognitive_profiles` 中该实体的检索正文与向量。`sync` 只从当前 Markdown 补同步检索，不创建快照。模型请求失败时文件保持原状；向量写入失败时命令报错，已恢复文件保留，可修复错误后重跑 `sync`，无需依赖可能已被清理的旧快照。文件与向量库没有跨存储事务，实际恢复/同步前需停止机器人和其他写入进程，成功后再启动。
 
-`--dry-run` 展示文件内容、检索正文与路径，不打开 Chroma、不调用模型、不写盘。目录默认来自 `cognitive.profiles_path` 与 `cognitive.vector_store_path`；操作独立副本时同时传入 `--profiles-path` 和 `--db-path`。实际恢复/同步会调用嵌入 API，可能记录 token 用量。若新模型维度不同于现有库，先完成全库重嵌入再恢复/同步单个侧写。
+`--dry-run` 展示文件内容、检索正文与路径，不打开 Chroma、不调用模型、不写盘。目录默认来自 TOML 配置的 `cognitive.profile.path` 与 `cognitive.vector_store.path`；操作独立副本时同时传入 `--profiles-path` 和 `--db-path`。实际恢复/同步会调用嵌入 API，可能记录 token 用量。若新模型维度不同于现有库，先完成全库重嵌入再恢复/同步单个侧写。
 
 ### release_notes.py — 发布版本校验与 Release notes 生成
 
