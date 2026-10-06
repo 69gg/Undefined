@@ -1770,6 +1770,11 @@ class AddressBoundSender:
         self._sender = sender
         self._address = address
 
+    @property
+    def delivery_address(self) -> DeliveryAddress:
+        """当前私聊的物理投递地址；其他目标仍按原发送器路由。"""
+        return self._address
+
     def __getattr__(self, name: str) -> Any:
         return getattr(self._sender, name)
 

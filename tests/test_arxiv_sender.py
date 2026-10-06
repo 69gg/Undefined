@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock
 
 import pytest
@@ -12,6 +12,9 @@ from Undefined.arxiv.downloader import PaperDownloadResult
 from Undefined.arxiv.models import PaperInfo
 from Undefined.arxiv.sender import send_arxiv_paper
 import Undefined.arxiv.sender as arxiv_sender
+from Undefined.handlers.auto_extract import AutoExtractMixin
+from Undefined.utils.message_targets import DeliveryAddress
+from Undefined.utils.sender import AddressBoundSender, MessageSender
 
 
 @pytest.fixture(autouse=True)
@@ -41,6 +44,142 @@ def _sender() -> Any:
         send_group_file=AsyncMock(),
         send_private_file=AsyncMock(),
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("overlap", [False, True])
+@pytest.mark.parametrize("first_channel", ["qq", "wechat"])
+async def test_auto_extract_deduplicates_per_physical_delivery_address(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    overlap: bool,
+    first_channel: str,
+) -> None:
+    started = {"qq": asyncio.Event(), "wechat": asyncio.Event()}
+    release = asyncio.Event()
+    if not overlap:
+        release.set()
+
+    async def qq_send(
+        _user_id: int, _message: list[dict[str, Any]], **_: Any
+    ) -> dict[str, Any]:
+        started["qq"].set()
+        await release.wait()
+        return {"data": {"message_id": 11}}
+
+    async def wechat_send(*_: Any, **__: Any) -> str:
+        started["wechat"].set()
+        await release.wait()
+        return "wechat-11"
+
+    onebot: Any = SimpleNamespace(send_private_message=AsyncMock(side_effect=qq_send))
+    weixin = SimpleNamespace(send_text=AsyncMock(side_effect=wechat_send))
+    history: Any = SimpleNamespace(add_private_message=AsyncMock())
+    config: Any = SimpleNamespace(
+        is_private_allowed=lambda _: True,
+        arxiv_auto_extract_max_items=1,
+        arxiv_max_file_size=100,
+        arxiv_author_preview_limit=20,
+        arxiv_summary_preview_chars=1000,
+    )
+    sender = MessageSender(onebot, history, bot_qq=999, config=config)
+    sender.set_weixin_service(weixin)
+    senders: dict[str, Any] = {
+        "qq": sender,
+        "wechat": AddressBoundSender(sender, DeliveryAddress("wechat", 12345678)),
+    }
+    handler = AutoExtractMixin.__new__(AutoExtractMixin)
+    handler.config = config
+    handler.sender = sender
+    monkeypatch.setattr(
+        arxiv_sender, "get_paper_info", AsyncMock(return_value=_paper_info())
+    )
+    monkeypatch.setattr(
+        arxiv_sender,
+        "download_paper_pdf",
+        AsyncMock(return_value=(PaperDownloadResult(None, None, "failed"), tmp_path)),
+    )
+    monkeypatch.setattr(arxiv_sender, "cleanup_download_path", AsyncMock())
+
+    async def extract(channel: str) -> None:
+        await handler._handle_arxiv_extract(
+            12345678, ["2501.01234"], "private", senders[channel]
+        )
+
+    second_channel = "wechat" if first_channel == "qq" else "qq"
+    tasks: list[asyncio.Task[None]] = []
+    try:
+        tasks.append(asyncio.create_task(extract(first_channel)))
+        await asyncio.wait_for(started[first_channel].wait(), timeout=1)
+        if not overlap:
+            await tasks[0]
+        tasks.append(asyncio.create_task(extract(second_channel)))
+        await asyncio.wait_for(started[second_channel].wait(), timeout=1)
+        if overlap:
+            # 两端各有自己的在途发送，同路由的追随者仍应复用。
+            tasks.extend(asyncio.create_task(extract(channel)) for channel in senders)
+            await asyncio.sleep(0)
+            assert all(not task.done() for task in tasks)
+    finally:
+        release.set()
+        await asyncio.gather(*tasks)
+
+    await extract("qq")
+    await extract("wechat")
+    assert onebot.send_private_message.await_count == 1
+    assert weixin.send_text.await_count == 1
+    assert history.add_private_message.await_count == 2
+    assert set(arxiv_sender._RECENT_SENDS) == {
+        ("qq", 12345678, "2501.01234"),
+        ("wechat", 12345678, "2501.01234"),
+    }
+    assert not arxiv_sender._INFLIGHT_SENDS
+
+
+@pytest.mark.asyncio
+async def test_bound_sender_other_target_keeps_qq_deduplication(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    onebot: Any = SimpleNamespace(
+        send_private_message=AsyncMock(return_value={"data": {"message_id": 11}})
+    )
+    history: Any = SimpleNamespace(add_private_message=AsyncMock())
+    config: Any = SimpleNamespace(is_private_allowed=lambda _: True)
+    sender = MessageSender(
+        onebot,
+        history,
+        bot_qq=999,
+        config=config,
+    )
+    weixin = SimpleNamespace(send_text=AsyncMock())
+    sender.set_weixin_service(weixin)
+    bound_sender = AddressBoundSender(sender, DeliveryAddress("wechat", 12345678))
+    monkeypatch.setattr(
+        arxiv_sender, "get_paper_info", AsyncMock(return_value=_paper_info())
+    )
+    monkeypatch.setattr(
+        arxiv_sender,
+        "download_paper_pdf",
+        AsyncMock(
+            return_value=(PaperDownloadResult(None, None, "failed"), Path("unused"))
+        ),
+    )
+    monkeypatch.setattr(arxiv_sender, "cleanup_download_path", AsyncMock())
+    options: dict[str, Any] = {
+        "paper_id": "2501.01234",
+        "target_type": "private",
+        "target_id": 87654321,
+        "max_file_size": 100,
+        "author_preview_limit": 20,
+        "summary_preview_chars": 1000,
+    }
+    await send_arxiv_paper(sender=cast(Any, bound_sender), **options)
+    result = await send_arxiv_paper(sender=sender, **options)
+
+    assert "近期已发送过" in result
+    onebot.send_private_message.assert_awaited_once()
+    weixin.send_text.assert_not_awaited()
+    assert set(arxiv_sender._RECENT_SENDS) == {("qq", 87654321, "2501.01234")}
 
 
 @pytest.mark.asyncio

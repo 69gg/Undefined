@@ -1092,6 +1092,7 @@ api_key = "replace-with-your-key"
 - 命中 `arxiv.org/abs/...`、`arxiv.org/pdf/...` 或 `arXiv:<id>` 时直接触发。
 - 裸新式编号仅在消息中同时出现 `arxiv` 关键词时触发，避免误判普通数字串。
 - PDF 下载或上传失败时不会额外发送失败提示，只保留论文信息消息。
+- 同一论文按物理投递地址去重：同一地址的并发请求复用在途发送，发送完成后一小时内跳过重复请求。`qq:<QQ号>`、`wechat:<QQ号>` 和 `group:<群号>` 独立计数；同一逻辑 QQ 在 QQ 和微信请求论文时，两端都能收到。
 - 自动提取仍默认发送论文信息与 PDF；若用户要求分析 arXiv 论文内容，`file_analysis_agent` 会通过 `arxiv_paper(output_mode=uid)` 获取 PDF 附件 UID 后再分析；只需标题、作者、摘要和链接等元信息时可使用 `arxiv_paper(output_mode=info)`。
 
 ---
