@@ -56,6 +56,8 @@ Undefined Chat 不持久化权威聊天数据。以下内容都以 Runtime 返�
 
 Runtime 请求必须由 Tauri command 拼接到已配置 origin 下，避免 React 传入任意 URL 后绕过目标主机限制。React 不直接持有 API Key；受保护请求由 Rust 侧注入 `X-Undefined-API-Key`。
 
+保存连接配置时会暂停 Runtime 请求及任务订阅。URL 保存后，密钥或降级确认失败会恢复先前 URL（首次配置则清除新 URL）；客户端显示原生端实际保存的目标，并保持不可发送的配置界面，要求重新输入密钥后连接。恢复 URL 失败时也保持此限制；原生配置无法读取时保留最后确认的目标并继续禁用请求。不会用旧会话界面操作新目标，或假定失败的密钥写入一定没有副作用。
+
 事件策略：
 
 - 默认使用 SSE 订阅 job events。

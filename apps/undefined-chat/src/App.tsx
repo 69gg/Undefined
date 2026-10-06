@@ -29,7 +29,7 @@ import {
 } from "./platform/PlatformContext";
 import { AttachmentImageProvider } from "./rendering/AttachmentImageContext";
 import { createTauriRuntimeClient } from "./runtime-client/tauri";
-import type { Attachment } from "./runtime-client/types";
+import type { Attachment, RuntimeConfig } from "./runtime-client/types";
 import { useTheme } from "./theme/use-theme";
 import { isImageAttachment } from "./utils/attachment";
 
@@ -89,6 +89,11 @@ export function App() {
 		: null;
 
 	const [setupError, setSetupError] = useState<string | null>(null);
+	const [isConnecting, setIsConnecting] = useState(false);
+	const [connectionRecoveryGeneration, setConnectionRecoveryGeneration] =
+		useState(0);
+	const connectionRecoveryRequired = connectionRecoveryGeneration > 0;
+	const connectionUpdateInFlightRef = useRef(false);
 
 	const needsSetup =
 		!state.runtimeConfig?.runtimeUrl || !state.runtimeConfig.hasApiKey;
@@ -127,9 +132,18 @@ export function App() {
 		apiKey: string,
 		allowInsecure: boolean,
 	): Promise<void> {
+		if (connectionUpdateInFlightRef.current) return;
+		connectionUpdateInFlightRef.current = true;
+		setIsConnecting(true);
 		setSetupError(null);
+		let previousConfig: RuntimeConfig | null = null;
+		let savedConfig: RuntimeConfig | null = null;
+		let writeStarted = false;
 		try {
-			const config = await client.saveRuntimeConfig(url);
+			previousConfig = await client.getRuntimeConfig();
+			store.suspendRuntime();
+			writeStarted = true;
+			savedConfig = await client.saveRuntimeConfig(url);
 			if (allowInsecure) {
 				await client.confirmInsecureStorageFallback();
 			}
@@ -137,10 +151,50 @@ export function App() {
 			if (apiKey) {
 				await client.saveApiKey(apiKey);
 			}
+			await store.bootstrap({
+				runtimeUrl: savedConfig.runtimeUrl,
+				resumeSuspended: true,
+			});
+			if (store.getSnapshot().error) {
+				setSetupError(store.getSnapshot().error);
+				store.suspendRuntime(savedConfig);
+				setConnectionRecoveryGeneration((generation) => generation + 1);
+				return;
+			}
+			setConnectionRecoveryGeneration(0);
 			setIsSettingsOpen(false);
-			await store.bootstrap({ runtimeUrl: config.runtimeUrl });
 		} catch (err) {
-			setSetupError(err instanceof Error ? err.message : String(err));
+			let detail = err instanceof Error ? err.message : String(err);
+			if (writeStarted) {
+				try {
+					if (previousConfig) {
+						await client.saveRuntimeConfig(previousConfig.runtimeUrl);
+					} else {
+						await client.clearRuntimeConfig();
+					}
+				} catch (rollbackError) {
+					detail = t("setup.error.rollbackFailed", {
+						error: detail,
+						rollbackError:
+							rollbackError instanceof Error
+								? rollbackError.message
+								: String(rollbackError),
+					});
+				}
+				let actualConfig = savedConfig ?? previousConfig;
+				try {
+					actualConfig = await client.getRuntimeConfig();
+				} catch {
+					// 无法读取时保留最后一次成功保存的目标，仍禁止 Runtime 请求。
+				}
+				store.suspendRuntime(actualConfig);
+				setConnectionRecoveryGeneration((generation) => generation + 1);
+				detail = t("setup.error.reconfigure", { error: detail });
+			}
+			setSetupError(detail);
+		} finally {
+			connectionUpdateInFlightRef.current = false;
+			setIsConnecting(false);
 		}
 	}
 
@@ -231,7 +285,7 @@ export function App() {
 		});
 	}
 
-	const showModal = needsSetup || isSettingsOpen;
+	const showModal = needsSetup || isSettingsOpen || connectionRecoveryRequired;
 
 	const closeMobileSidebar = useCallback((): void => {
 		setIsMobileSidebarActive(false);
@@ -607,13 +661,20 @@ export function App() {
 						{/* 模态框 / 配置面板：统一 ConnectionSetup（首次连接 / 运行期修改两种模式） */}
 						{showModal ? (
 							<ConnectionSetup
-								mode={needsSetup ? "setup" : "settings"}
+								key={connectionRecoveryGeneration}
+								mode={
+									needsSetup || connectionRecoveryRequired
+										? "setup"
+										: "settings"
+								}
 								currentUrl={state.runtimeConfig?.runtimeUrl}
 								onConnect={(url, apiKey, allowInsecure) => {
 									void handleConnect(url, apiKey, allowInsecure);
 								}}
 								onClose={
-									needsSetup ? undefined : () => setIsSettingsOpen(false)
+									needsSetup || isConnecting || connectionRecoveryRequired
+										? undefined
+										: () => setIsSettingsOpen(false)
 								}
 								error={setupError}
 							>
@@ -699,7 +760,13 @@ export function App() {
 									: []
 							}
 							commandSuggestions={state.commands}
-							disabled={isJobRunning(activeJob)}
+							disabled={
+								isJobRunning(activeJob) ||
+								isConnecting ||
+								connectionRecoveryRequired ||
+								state.bootstrapping ||
+								state.connectionState === "disconnected"
+							}
 							draft={
 								selectedConversationId
 									? (state.draftsByConversation[selectedConversationId] ?? "")

@@ -17,6 +17,23 @@ describe("createTauriRuntimeClient", () => {
 		vi.resetAllMocks();
 	});
 
+	test("clears the persisted target through the registered Native command", async () => {
+		vi.mocked(invoke).mockResolvedValueOnce(undefined);
+		await createTauriRuntimeClient().clearRuntimeConfig();
+		expect(invoke).toHaveBeenCalledWith("clear_runtime_config");
+	});
+
+	test("does not persist a URL if the API key status request rejects", async () => {
+		vi.mocked(invoke).mockRejectedValueOnce(
+			new Error("key status unavailable"),
+		);
+		await expect(
+			createTauriRuntimeClient().saveRuntimeConfig("http://runtime-b.test"),
+		).rejects.toThrow("key status unavailable");
+		expect(invoke).toHaveBeenCalledTimes(1);
+		expect(invoke).toHaveBeenCalledWith("load_api_key_status");
+	});
+
 	test("normalizes conversation and active job responses from Tauri commands", async () => {
 		vi.mocked(invoke).mockResolvedValueOnce({
 			status: 200,

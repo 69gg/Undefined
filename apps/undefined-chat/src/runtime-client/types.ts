@@ -293,6 +293,7 @@ export type EventStreamSubscription = {
 export type RuntimeClient = {
 	getRuntimeConfig: () => Promise<RuntimeConfig | null>;
 	saveRuntimeConfig: (runtimeUrl: string) => Promise<RuntimeConfig>;
+	clearRuntimeConfig: () => Promise<void>;
 	saveApiKey: (apiKey: string) => Promise<ApiKeyStatus>;
 	confirmInsecureStorageFallback: () => Promise<ApiKeyStatus>;
 	loadApiKeyStatus: () => Promise<ApiKeyStatus>;

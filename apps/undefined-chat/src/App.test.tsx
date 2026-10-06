@@ -165,12 +165,14 @@ describe("App", () => {
 	test("saves initial Runtime config and API key before reconnecting", async () => {
 		const client = runtimeClientStub({
 			getRuntimeConfig: vi
-				.fn()
+				.fn(
+					async (): Promise<RuntimeConfig | null> => ({
+						runtimeUrl: "http://127.0.0.1:8788",
+						hasApiKey: true,
+					}),
+				)
 				.mockResolvedValueOnce(null)
-				.mockResolvedValueOnce({
-					runtimeUrl: "http://127.0.0.1:8788",
-					hasApiKey: true,
-				}),
+				.mockResolvedValueOnce(null),
 		});
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
@@ -195,12 +197,14 @@ describe("App", () => {
 	test("requires an explicit opt-in before confirming insecure API key storage fallback", async () => {
 		const client = runtimeClientStub({
 			getRuntimeConfig: vi
-				.fn()
+				.fn(
+					async (): Promise<RuntimeConfig | null> => ({
+						runtimeUrl: "http://127.0.0.1:8788",
+						hasApiKey: true,
+					}),
+				)
 				.mockResolvedValueOnce(null)
-				.mockResolvedValueOnce({
-					runtimeUrl: "http://127.0.0.1:8788",
-					hasApiKey: true,
-				}),
+				.mockResolvedValueOnce(null),
 		});
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
@@ -230,6 +234,137 @@ describe("App", () => {
 
 		expect(client.createConversation).toHaveBeenCalledOnce();
 		expect(await screen.findByRole("button", { name: /新会话/ })).toBeTruthy();
+	});
+
+	test("restores the previous Native target and blocks sending after key storage fails", async () => {
+		let nativeConfig: RuntimeConfig = {
+			runtimeUrl: "http://runtime-a.test",
+			hasApiKey: true,
+		};
+		const client = runtimeClientStub({
+			getRuntimeConfig: vi.fn(async () => nativeConfig),
+			saveRuntimeConfig: vi.fn(async (runtimeUrl) => {
+				nativeConfig = { ...nativeConfig, runtimeUrl };
+				return nativeConfig;
+			}),
+			saveApiKey: vi.fn(async () => {
+				throw new Error("keyring denied");
+			}),
+		});
+		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
+		renderApp();
+		await screen.findByLabelText("消息输入");
+		await userEvent.type(screen.getByLabelText("消息输入"), "A draft");
+		fireEvent.keyDown(window, { key: ",", ctrlKey: true });
+		await userEvent.type(screen.getByLabelText("API Key"), "B-key");
+		await userEvent.clear(screen.getByLabelText("Runtime URL"));
+		await userEvent.type(
+			screen.getByLabelText("Runtime URL"),
+			"http://runtime-b.test",
+		);
+		await userEvent.click(screen.getByRole("button", { name: "保存并连接" }));
+		await screen.findByText(/keyring denied/);
+		expect(nativeConfig.runtimeUrl).toBe("http://runtime-a.test");
+		expect(client.saveRuntimeConfig).toHaveBeenLastCalledWith(
+			"http://runtime-a.test",
+		);
+		expect(screen.getByLabelText("Runtime URL")).toHaveValue(
+			"http://runtime-a.test",
+		);
+		expect(screen.getByLabelText("消息输入")).toHaveValue("A draft");
+		expect(screen.getByLabelText("消息输入")).toBeDisabled();
+		fireEvent.keyDown(window, { key: "Escape" });
+		expect(screen.getByLabelText("Runtime URL")).toBeInTheDocument();
+		expect(client.sendMessage).not.toHaveBeenCalled();
+		expect(client.listConversations).toHaveBeenCalledTimes(1);
+		// 恢复界面不能留空沿用未知状态的密钥；明确重新保存后才解除暂停。
+		await userEvent.click(screen.getByRole("button", { name: "保存并连接" }));
+		expect(await screen.findByText("请输入 API Key")).toBeInTheDocument();
+		client.saveApiKey = vi.fn(async () => client.loadApiKeyStatus());
+		await userEvent.type(screen.getByLabelText("API Key"), "A-key");
+		await userEvent.click(screen.getByRole("button", { name: "保存并连接" }));
+		await waitFor(() => {
+			expect(screen.queryByLabelText("Runtime URL")).toBeNull();
+			expect(screen.getByLabelText("消息输入")).toBeEnabled();
+		});
+		expect(screen.getByLabelText("消息输入")).toHaveValue("A draft");
+		await userEvent.click(screen.getByRole("button", { name: "发送" }));
+		expect(client.sendMessage).toHaveBeenCalledWith({
+			conversationId: "default",
+			message: { text: "A draft", attachmentIds: [], references: [] },
+		});
+	});
+
+	test("clears a first configuration after key storage fails", async () => {
+		let nativeConfig: RuntimeConfig | null = null;
+		const client = runtimeClientStub({
+			getRuntimeConfig: vi.fn(async () => nativeConfig),
+			saveRuntimeConfig: vi.fn(async (runtimeUrl) => {
+				nativeConfig = { runtimeUrl, hasApiKey: false };
+				return nativeConfig;
+			}),
+			clearRuntimeConfig: vi.fn(async () => {
+				nativeConfig = null;
+			}),
+			saveApiKey: vi.fn(async () => {
+				throw new Error("keyring denied");
+			}),
+		});
+		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
+		renderApp();
+		await screen.findByLabelText("Runtime URL");
+		await userEvent.type(screen.getByLabelText("API Key"), "B-key");
+		await userEvent.click(screen.getByRole("button", { name: "保存并连接" }));
+		await screen.findByText(/keyring denied/);
+		expect(nativeConfig).toBeNull();
+		expect(client.clearRuntimeConfig).toHaveBeenCalledOnce();
+		expect(client.listConversations).not.toHaveBeenCalled();
+		expect(screen.getByLabelText("消息输入")).toBeDisabled();
+	});
+
+	test("shows the actual Native target and requires recovery if URL rollback fails", async () => {
+		let nativeConfig: RuntimeConfig = {
+			runtimeUrl: "http://runtime-a.test",
+			hasApiKey: true,
+		};
+		const client = runtimeClientStub({
+			getRuntimeConfig: vi.fn(async () => nativeConfig),
+			saveRuntimeConfig: vi.fn(async (runtimeUrl) => {
+				if (runtimeUrl === "http://runtime-a.test") {
+					throw new Error("restore denied");
+				}
+				nativeConfig = { ...nativeConfig, runtimeUrl };
+				return nativeConfig;
+			}),
+			saveApiKey: vi.fn(async () => {
+				// 模拟底层已经更新密钥但回执失败；客户端不得推断旧密钥仍安全。
+				nativeConfig = { ...nativeConfig, hasApiKey: true };
+				throw new Error("key write receipt failed");
+			}),
+		});
+		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
+		renderApp();
+		await screen.findByLabelText("消息输入");
+		await userEvent.type(screen.getByLabelText("消息输入"), "private A draft");
+		fireEvent.keyDown(window, { key: ",", ctrlKey: true });
+		await userEvent.type(screen.getByLabelText("API Key"), "B-key");
+		await userEvent.clear(screen.getByLabelText("Runtime URL"));
+		await userEvent.type(
+			screen.getByLabelText("Runtime URL"),
+			"http://runtime-b.test",
+		);
+		await userEvent.click(screen.getByRole("button", { name: "保存并连接" }));
+		await screen.findByText(/restore denied/);
+		expect(nativeConfig.runtimeUrl).toBe("http://runtime-b.test");
+		expect(screen.getByLabelText("Runtime URL")).toHaveValue(
+			"http://runtime-b.test",
+		);
+		expect(screen.getByLabelText("消息输入")).toHaveValue("");
+		expect(screen.getByLabelText("消息输入")).toBeDisabled();
+		fireEvent.keyDown(window, { key: "Escape" });
+		expect(screen.getByLabelText("API Key")).toBeInTheDocument();
+		expect(client.sendMessage).not.toHaveBeenCalled();
+		expect(client.listConversations).toHaveBeenCalledTimes(1);
 	});
 
 	test("opens and closes the mobile conversation drawer with accessible state", async () => {

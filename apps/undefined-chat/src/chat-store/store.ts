@@ -1,6 +1,7 @@
 import type {
 	HistoryItem,
 	RuntimeClient,
+	RuntimeConfig,
 	RuntimeSseEvent,
 	RuntimeSseStatus,
 	SendMessageInput,
@@ -29,7 +30,9 @@ export type ChatStore = {
 		runtimeUrl?: string;
 		preserveSelectionId?: string;
 		resuming?: boolean;
+		resumeSuspended?: boolean;
 	}) => Promise<void>;
+	suspendRuntime: (runtimeConfig?: RuntimeConfig | null) => void;
 	refreshCommandsIfStale: () => Promise<void>;
 	createConversation: (title?: string) => Promise<void>;
 	deleteConversation: (conversationId: string) => Promise<void>;
@@ -672,6 +675,7 @@ export function createChatStore({
 	let state = createInitialChatState();
 	let runtimeUrl: string | null = null;
 	let runtimeGeneration = 0;
+	let runtimeSuspended = false;
 	const listeners = new Set<() => void>();
 	const subscriptionsByJob = new Map<string, string>();
 	const fallbackTimersByJob = new Map<string, ReturnType<typeof setTimeout>>();
@@ -731,7 +735,27 @@ export function createChatStore({
 		};
 	}
 
+	function suspendRuntime(runtimeConfig = state.runtimeConfig): void {
+		if (runtimeConfig?.runtimeUrl && runtimeConfig.runtimeUrl !== runtimeUrl) {
+			resetRuntimeScope(runtimeConfig.runtimeUrl);
+		} else {
+			runtimeGeneration += 1;
+			clearNativeSubscriptions();
+			sendInFlight = false;
+		}
+		runtimeSuspended = true;
+		inFlightBootstrap = null;
+		state = {
+			...state,
+			runtimeConfig,
+			bootstrapping: false,
+			connectionState: "disconnected",
+		};
+		emit();
+	}
+
 	async function loadHistory(conversationId: string): Promise<void> {
+		if (runtimeSuspended) return;
 		const generation = runtimeGeneration;
 		dispatch({ type: "history/loading", conversationId });
 		try {
@@ -760,6 +784,7 @@ export function createChatStore({
 	}
 
 	async function startStreamForJob(job: ChatJob): Promise<void> {
+		if (runtimeSuspended) return;
 		const generation = runtimeGeneration;
 		if (subscriptionsByJob.has(job.jobId)) {
 			return;
@@ -926,13 +951,14 @@ export function createChatStore({
 		resuming = false,
 	): Promise<void> {
 		let generation = runtimeGeneration;
+		let runtimeConfig: RuntimeConfig | null = null;
 		dispatch({ type: "bootstrap/start" });
 		// Android 切后台返回等续接场景：标记为 resuming，连接成功后由后续状态覆盖
 		if (resuming) {
 			dispatch({ type: "connection/set", connectionState: "resuming" });
 		}
 		try {
-			const runtimeConfig = await client.getRuntimeConfig();
+			runtimeConfig = await client.getRuntimeConfig();
 			if (generation !== runtimeGeneration) return;
 			if (
 				runtimeConfig?.runtimeUrl &&
@@ -960,6 +986,7 @@ export function createChatStore({
 				]);
 			if (generation !== runtimeGeneration) return;
 			lastCommandsFetchedAt = Date.now();
+			runtimeSuspended = false;
 			// 仅选取真实存在于会话列表中的会话：defaultConversationId 是后端常量
 			// （legacy-system-42），未必对应已存在的会话，盲目用它会触发 getHistory 404
 			const conversationIds = new Set(
@@ -1017,7 +1044,11 @@ export function createChatStore({
 			}
 		} catch (err) {
 			if (generation !== runtimeGeneration) return;
-			dispatch({ type: "bootstrap/error", error: errorMessage(err) });
+			dispatch({
+				type: "bootstrap/error",
+				runtimeConfig,
+				error: errorMessage(err),
+			});
 		}
 	}
 
@@ -1025,7 +1056,9 @@ export function createChatStore({
 		runtimeUrl?: string;
 		preserveSelectionId?: string;
 		resuming?: boolean;
+		resumeSuspended?: boolean;
 	}): Promise<void> {
+		if (runtimeSuspended && !opts?.resumeSuspended) return;
 		if (opts?.runtimeUrl && opts.runtimeUrl !== runtimeUrl) {
 			resetRuntimeScope(opts.runtimeUrl);
 			inFlightBootstrap = null;
@@ -1049,6 +1082,7 @@ export function createChatStore({
 	 * 使 Skills 热重载新增的命令可见。未连接或未配置时跳过。
 	 */
 	async function refreshCommandsIfStale(): Promise<void> {
+		if (runtimeSuspended) return;
 		const generation = runtimeGeneration;
 		if (!state.runtimeConfig?.hasApiKey || state.bootstrapping) {
 			return;
@@ -1067,6 +1101,7 @@ export function createChatStore({
 	}
 
 	async function createConversation(title?: string): Promise<void> {
+		if (runtimeSuspended) return;
 		const generation = runtimeGeneration;
 		dispatch({ type: "conversation/creating", creating: true });
 		try {
@@ -1085,6 +1120,7 @@ export function createChatStore({
 	}
 
 	async function deleteConversation(conversationId: string): Promise<void> {
+		if (runtimeSuspended) return;
 		const generation = runtimeGeneration;
 		const wasSelected = state.selectedConversationId === conversationId;
 		const nextSelectedId = wasSelected
@@ -1112,6 +1148,7 @@ export function createChatStore({
 		conversationId: string,
 		newTitle: string,
 	): Promise<void> {
+		if (runtimeSuspended) return;
 		const generation = runtimeGeneration;
 		try {
 			await client.renameConversation(conversationId, newTitle);
@@ -1133,6 +1170,7 @@ export function createChatStore({
 	}
 
 	async function selectConversation(conversationId: string): Promise<void> {
+		if (runtimeSuspended) return;
 		if (state.selectedConversationId === conversationId) {
 			return;
 		}
@@ -1147,6 +1185,7 @@ export function createChatStore({
 	}
 
 	async function sendSelectedMessage(): Promise<void> {
+		if (runtimeSuspended) return;
 		const generation = runtimeGeneration;
 		// in-flight 锁：从点击到 job 建立期间阻止重复发送，
 		// 避免快速双击重复插入乐观消息 / 重复请求后端
@@ -1247,6 +1286,7 @@ export function createChatStore({
 	}
 
 	async function cancelJob(jobId: string): Promise<void> {
+		if (runtimeSuspended) return;
 		const generation = runtimeGeneration;
 		const conversationId = state.jobConversationById[jobId];
 		if (!conversationId) {
@@ -1286,6 +1326,7 @@ export function createChatStore({
 		conversationId: string,
 		filePath: string,
 	): Promise<void> {
+		if (runtimeSuspended) return;
 		const generation = runtimeGeneration;
 		const trimmed = filePath.trim();
 		if (!trimmed) {
@@ -1635,6 +1676,7 @@ export function createChatStore({
 	}
 
 	async function loadMoreHistory(conversationId: string): Promise<void> {
+		if (runtimeSuspended) return;
 		const generation = runtimeGeneration;
 		const historyState = state.historyByConversation[conversationId];
 		if (!historyState?.hasMore || historyState.loading) {
@@ -1673,6 +1715,7 @@ export function createChatStore({
 
 	return {
 		bootstrap,
+		suspendRuntime,
 		refreshCommandsIfStale,
 		createConversation,
 		deleteConversation,

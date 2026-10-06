@@ -464,17 +464,20 @@ export function createTauriRuntimeClient(): RuntimeClient {
 		},
 
 		async saveRuntimeConfig(runtimeUrl: string): Promise<RuntimeConfig> {
-			const [config, apiKeyStatus] = await Promise.all([
-				invoke("save_runtime_config", {
-					input: { runtimeUrl },
-				}),
-				this.loadApiKeyStatus(),
-			]);
+			// 先确认密钥状态可读取，避免并行读取失败时 URL 已保存却丢失回执。
+			const apiKeyStatus = await this.loadApiKeyStatus();
+			const config = await invoke("save_runtime_config", {
+				input: { runtimeUrl },
+			});
 			const normalized = normalizeRuntimeConfig(config, apiKeyStatus);
 			if (!normalized) {
 				throw new Error("Runtime config response did not include runtimeUrl");
 			}
 			return normalized;
+		},
+
+		async clearRuntimeConfig(): Promise<void> {
+			await invoke("clear_runtime_config");
 		},
 
 		async saveApiKey(apiKey: string): Promise<ApiKeyStatus> {

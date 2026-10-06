@@ -153,6 +153,7 @@ export function runtimeClientStub(
 			runtimeUrl,
 			hasApiKey: true,
 		})),
+		clearRuntimeConfig: vi.fn(async () => undefined),
 		saveApiKey: vi.fn(async () => apiKeyStatus),
 		confirmInsecureStorageFallback: vi.fn(async () => ({
 			...apiKeyStatus,
