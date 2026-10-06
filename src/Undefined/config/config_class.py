@@ -394,15 +394,16 @@ class Config:
         from .build_config import build_config
 
         _load_env()  # 先加载 .env，供 _get_value 环境变量回退
-        data = load_toml_data(config_path, strict=strict)
-        return build_config(data, strict=strict, config_path=config_path)
+        # strict 只控制必填项校验，损坏的文件始终不能当作空配置应用。
+        data = load_toml_data(config_path, strict=True)
+        return build_config(data, strict=strict, include_local_admins=True)
 
     @classmethod
     def from_mapping(cls, data: dict[str, Any], *, strict: bool = True) -> "Config":
         """从内存 mapping 构建配置（无 TOML 文件）。"""
         from .build_config import build_config
 
-        return build_config(data, strict=strict, config_path=None)
+        return build_config(data, strict=strict)
 
     @classmethod
     def builder(cls) -> "ConfigBuilder":
@@ -742,4 +743,4 @@ class ConfigBuilder:
         # TOML-style nested overrides for simple top-level keys only
         for key, value in self._overrides.items():
             data[key] = value
-        return build_config(data, strict=strict, config_path=None)
+        return build_config(data, strict=strict)

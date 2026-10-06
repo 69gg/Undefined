@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from .coercers import _coerce_bool, _coerce_int, _coerce_str, _normalize_str, _get_value
 
@@ -36,7 +36,11 @@ class WebUISettings:
 def load_webui_settings(config_path: Optional[Path] = None) -> WebUISettings:
     from .loader import load_toml_data  # lazy to avoid circular
 
-    data = load_toml_data(config_path)
+    return parse_webui_settings(load_toml_data(config_path))
+
+
+def parse_webui_settings(data: dict[str, Any]) -> WebUISettings:
+    """从已解析的配置构建 WebUI 设置，不再读取文件。"""
     config_exists = bool(data)
     url_value = _get_value(data, ("webui", "url"), None)
     port_value = _get_value(data, ("webui", "port"), None)

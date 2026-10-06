@@ -107,9 +107,11 @@ OneBot 内部时间解析提供两种约定：`parse_message_time(message)` 在�
 Python 显式 mapping / override  >  config.toml  >  环境变量  >  代码默认值
 ```
 
-- `Config.from_mapping()` / `Config.builder()`：**不读取** `config.toml`，适合测试与无文件部署。
+- `Config.from_mapping()` / `Config.builder()`：**不读取** `config.toml`、`config.local.json` 或 `.env`，适合测试与无文件部署；`[webui]` 与其余字段一样使用传入 mapping，显式超级管理员仍自动加入管理员列表。
 - `Config.load()`：从指定或 CWD 下的 `config.toml` 加载（CLI 路径）。
 - 环境变量仅在 TOML / mapping **未提供**对应项时兜底；详见 [配置详解 — 环境变量兜底](configuration.md#8-环境变量兜底迁移建议)。
+
+`Config.load(strict=False)` 只放宽必填项校验，文件的 TOML 语法、编码或读取错误仍会抛出 `ValueError`。`ConfigManager.reload()` 加载失败时保留原配置；订阅者应用失败会记录日志并保留变更，下次重载相同内容也会再次通知。运行时热更新应用函数会在完成其余同步步骤后汇报失败，后台失败同样会进入重试。
 
 ### `Config.from_mapping`
 

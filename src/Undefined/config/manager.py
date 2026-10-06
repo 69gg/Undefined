@@ -24,6 +24,7 @@ class ConfigManager:
         self._watch_stop: asyncio.Event | None = None
         self._last_snapshot: dict[str, tuple[int, int]] = {}
         self._reload_lock = asyncio.Lock()
+        self._pending_changes: dict[str, tuple[Any, Any]] = {}
 
     def load(self, strict: bool = True) -> Config:
         if self._config is None:
@@ -33,16 +34,32 @@ class ConfigManager:
     def replace(self, config: Config) -> None:
         """替换缓存的配置实例（库嵌入 ``set_config`` 注入时使用）。"""
         self._config = config
+        self._pending_changes.clear()
 
     def reload(self, strict: bool = False) -> dict[str, tuple[Any, Any]]:
         if self._config is None:
             self._config = Config.load(config_path=self.config_path, strict=strict)
             return {}
+        if not self.config_path.is_file():
+            raise FileNotFoundError(f"配置文件不存在，保留当前配置: {self.config_path}")
         new_config = Config.load(config_path=self.config_path, strict=strict)
-        changes = self._config.update_from(new_config)
+        changes = dict(self._pending_changes)
+        changes.update(self._config.update_from(new_config))
+        self._pending_changes.clear()
         if changes:
             self._notify(changes)
         return changes
+
+    def retry_failed_update(self, changes: dict[str, tuple[Any, Any]]) -> None:
+        """保留未应用的变更，下次保存时重试；忽略已被新配置取代的异步失败。"""
+        if self._config is None:
+            return
+        for key, change in changes.items():
+            current: Any = self._config
+            for part in key.split("."):
+                current = getattr(current, part, None)
+            if current == change[1]:
+                self._pending_changes[key] = change
 
     def subscribe(self, callback: ConfigChangeCallback) -> None:
         self._callbacks.append(callback)
@@ -128,6 +145,7 @@ class ConfigManager:
             try:
                 callback(config, changes)
             except Exception:
+                self.retry_failed_update(changes)
                 name = getattr(callback, "__qualname__", repr(callback))
                 failed.append(name)
                 logger.error("[配置] 热更新回调执行失败: %s", name, exc_info=True)

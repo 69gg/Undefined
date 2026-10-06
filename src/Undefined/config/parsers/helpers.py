@@ -22,9 +22,11 @@ logger = logging.getLogger(__name__)
 
 
 # 合并多来源配置
-def _merge_admins(superadmin_qq: int, admin_qqs: list[int]) -> tuple[int, list[int]]:
+def _merge_admins(
+    superadmin_qq: int, admin_qqs: list[int], *, include_local_admins: bool = True
+) -> tuple[int, list[int]]:
     # admins.json 与 config.toml 的 admin_qq 合并，去重后超管必在列表中
-    local_admins = load_local_admins()
+    local_admins = load_local_admins() if include_local_admins else []
     all_admins = list(set(admin_qqs + local_admins))
     if superadmin_qq and superadmin_qq not in all_admins:
         all_admins.append(superadmin_qq)

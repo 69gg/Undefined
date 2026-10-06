@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 
-from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .config_class import Config
@@ -28,7 +27,7 @@ def build_config(
     data: dict[str, Any],
     *,
     strict: bool = True,
-    config_path: Optional[Path] = None,
+    include_local_admins: bool = False,
 ) -> "Config":
     """从已解析的 TOML mapping 构建 Config。"""
     from .config_class import Config
@@ -42,7 +41,9 @@ def build_config(
 
     # 合并 config.toml 与本地 admins.json，超管始终纳入 admin 列表
     superadmin_qq, admin_qqs = _merge_admins(
-        superadmin_qq=ctx["superadmin_qq"], admin_qqs=ctx["admin_qqs"]
+        superadmin_qq=ctx["superadmin_qq"],
+        admin_qqs=ctx["admin_qqs"],
+        include_local_admins=include_local_admins,
     )
     ctx["superadmin_qq"] = superadmin_qq
     ctx["admin_qqs"] = admin_qqs
@@ -52,6 +53,6 @@ def build_config(
     ctx.update(load_network(data))
     ctx.update(load_integrations(data))
     # domains 含 WebUI/API/认知/合并器等子域，放最后以便前面模型段已就绪
-    ctx.update(load_domains(data, config_path=config_path))
+    ctx.update(load_domains(data))
     load_finalize(ctx, strict=strict)  # strict 时校验必填项并打 debug 摘要
     return Config(**ctx)
