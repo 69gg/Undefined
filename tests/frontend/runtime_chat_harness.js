@@ -3392,6 +3392,184 @@ for (const outcome of ["success", "network_error", "api_error", "typing", "saved
     SCENARIOS[`config_autosave_${outcome}`] = (env) => configAutoSave(env, outcome);
 }
 
+function workflowEditorFixture(env) {
+    const { window, response } = env;
+    const tasks = ["A", "B"].map((id) => ({
+        task_id: id, task_name: `${id}-original`, enabled: true,
+        nodes: [{ id: "start", type: "start", kind: "message", channels: ["group"] }],
+        edges: [], ui: { positions: {}, zoom: 1, pan: { x: 40, y: 40 } },
+    }));
+    const pendingSaves = [];
+    const validations = [];
+    let deferredValidation = null;
+    let deferredList = null;
+    let deferNextList = false;
+    let deferNextValidation = false;
+    let currentIssues = [];
+    const pages = [];
+    window.document.getElementById("scheduleListView").getBoundingClientRect = () => ({ top: 0 });
+    window.document.getElementById("scheduleEditorView").getBoundingClientRect = () => ({ top: 1000 });
+    const scroller = window.document.getElementById("schedulePages");
+    scroller.getBoundingClientRect = () => ({ top: 0 });
+    scroller.scrollTo = ({ top }) => pages.push(top === 1000 ? "editor" : "list");
+    window.fetch = (url, options = {}) => {
+        const endpoint = String(url);
+        const method = options.method || "GET";
+        if (endpoint.endsWith("/automations/catalog")) {
+            return Promise.resolve(response(200, { node_type_meta: [], presets: [] }));
+        }
+        if (endpoint.endsWith("/automations/validate")) {
+            validations.push(JSON.parse(options.body));
+            if (deferNextValidation) {
+                deferNextValidation = false;
+                return new Promise((resolve, reject) => { deferredValidation = { resolve, reject }; });
+            }
+            return Promise.resolve(response(200, { issues: currentIssues }));
+        }
+        if (["POST", "PATCH"].includes(method)) {
+            return new Promise((resolve, reject) => {
+                pendingSaves.push({ url: endpoint, method, payload: JSON.parse(options.body), resolve, reject });
+            });
+        }
+        if (endpoint.endsWith("/automations")) {
+            if (deferNextList) {
+                deferNextList = false;
+                return new Promise((resolve) => { deferredList = resolve; });
+            }
+            return Promise.resolve(response(200, { items: tasks }));
+        }
+        throw new Error(`unexpected workflow request: ${method} ${endpoint}`);
+    };
+    window.confirm = () => true;
+    window.SchedulesController.init();
+    const input = window.document.getElementById("wfTaskName");
+    return {
+        pendingSaves, validations, pages, input,
+        open(id) { window.document.querySelector(`[data-task-id="${id}"]`).click(); },
+        edit(value, commit = true) {
+            input.value = value;
+            input.dispatchEvent(new window.Event("input", { bubbles: true }));
+            if (commit) input.dispatchEvent(new window.Event("change", { bubbles: true }));
+        },
+        save() { window.document.getElementById("btnWfSave").click(); },
+        finishSave(index) {
+            const request = pendingSaves[index];
+            const id = request.method === "POST" ? "created" : request.url.split("/").at(-1);
+            const task = { ...tasks.find((item) => item.task_id === id), ...request.payload, task_id: id };
+            const existing = tasks.findIndex((item) => item.task_id === id);
+            if (existing >= 0) tasks[existing] = task;
+            else tasks.push(task);
+            request.resolve(response(200, { task }));
+        },
+        failSave(index) { pendingSaves[index].reject(new Error("obsolete save failure")); },
+        deferList() { deferNextList = true; },
+        finishList() {
+            if (!deferredList) throw new Error("list refresh was not dispatched");
+            deferredList(response(200, { items: tasks }));
+        },
+        deferValidation() { deferNextValidation = true; },
+        setIssues(issues) { currentIssues = issues; },
+        finishValidation(outcome) {
+            if (!deferredValidation) throw new Error("validation was not dispatched");
+            if (outcome === "failure") deferredValidation.reject(new Error("obsolete validation failure"));
+            else deferredValidation.resolve(response(200, { issues: [
+                { path: "nodes", message: "obsolete issue one" },
+                { path: "edges", message: "obsolete issue two" },
+            ] }));
+        },
+        snapshot() {
+            const graph = JSON.parse(window.document.getElementById("wfGraphJson").value);
+            return {
+                input: input.value, graphName: graph.task_name,
+                id: window.document.getElementById("wfTaskId").value,
+                idDisabled: window.document.getElementById("wfTaskId").disabled,
+                dirty: window.document.getElementById("tab-schedules").classList.contains("is-dirty"),
+                page: pages.at(-1), status: textOf(window, "wfEditorStatus"),
+                issueBadge: textOf(window, "wfIssueBadge"),
+            };
+        },
+    };
+}
+
+async function workflowEditorSave(env, target) {
+    const fixture = workflowEditorFixture(env);
+    const { window } = env;
+    await window.SchedulesController.refresh();
+    if (target === "new") {
+        window.document.getElementById("btnSchedulesNew").click();
+        window.document.querySelector('[data-preset-id=""]').click();
+    } else fixture.open("A");
+    await tick();
+    fixture.edit("first-edit");
+    fixture.save();
+    await tick();
+    if (!fixture.pendingSaves.length) throw new Error("save was not dispatched");
+    if (target.startsWith("switch") || target.startsWith("same")) {
+        fixture.open("B");
+        await tick();
+        if (target.startsWith("same")) {
+            fixture.open("A");
+            await tick();
+        }
+    } else if (target === "typing") {
+        fixture.input.focus();
+        fixture.edit("later-edit", false);
+    } else if (target !== "normal" && target !== "refresh") fixture.edit("later-edit");
+    if (target === "refresh") fixture.deferList();
+    const beforeResponse = fixture.snapshot();
+    if (target.endsWith("_failure")) fixture.failSave(0);
+    else fixture.finishSave(0);
+    await tick();
+    if (target === "refresh") {
+        fixture.edit("later-edit");
+        fixture.finishList();
+        await tick();
+    }
+    const afterResponse = fixture.snapshot();
+    if (target === "typing") {
+        fixture.input.blur();
+        fixture.input.dispatchEvent(new window.Event("change", { bubbles: true }));
+    }
+    let secondSave = null;
+    if (["edited", "new", "typing", "refresh"].includes(target)) {
+        fixture.save();
+        await tick();
+        const request = fixture.pendingSaves[1];
+        if (!request) throw new Error("second save was not dispatched");
+        secondSave = { url: request.url, method: request.method, name: request.payload.task_name };
+        fixture.finishSave(1);
+        await tick();
+    }
+    return { beforeResponse, afterResponse, final: fixture.snapshot(), secondSave,
+        firstSave: { method: fixture.pendingSaves[0].method, name: fixture.pendingSaves[0].payload.task_name } };
+}
+
+for (const target of ["normal", "edited", "switch", "same", "switch_failure", "same_failure", "new", "typing", "refresh"]) {
+    SCENARIOS[`workflow_editor_save_${target}`] = (env) => workflowEditorSave(env, target);
+}
+
+for (const target of ["switch", "edit"]) {
+    for (const outcome of ["response", "failure"]) {
+        SCENARIOS[`workflow_editor_validation_${target}_${outcome}`] = async (env) => {
+            const fixture = workflowEditorFixture(env);
+            await env.window.SchedulesController.refresh();
+            fixture.deferValidation();
+            fixture.open("A");
+            await tick();
+            if (target === "switch") {
+                fixture.setIssues([{ path: "nodes", message: "current B issue" }]);
+                fixture.open("B");
+                await tick();
+            } else fixture.edit("current-edit");
+            const beforeResponse = fixture.snapshot();
+            fixture.finishValidation(outcome);
+            await tick();
+            fixture.edit(target === "switch" ? "B-current-edit" : "current-edit");
+            return { beforeResponse, afterResponse: fixture.snapshot() };
+        };
+    }
+}
+
 async function main() {
     const args = parseArgs(process.argv.slice(2));
     if (!args.scenario) throw new Error("缺少 --scenario");
@@ -3405,6 +3583,8 @@ async function main() {
     const env = createEnv(root, {
         scripts: args.scenario.startsWith("config_autosave_")
             ? ["config-form.js"]
+            : args.scenario.startsWith("workflow_editor_")
+              ? ["workflow-graph.js", "workflow-canvas.js", "workflow-inspector.js", "schedules.js"]
             : [],
     });
     const result = await scenario(env);

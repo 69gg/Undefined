@@ -21,6 +21,8 @@
         canvas: null,
         inspector: null,
         savedSnapshot: "",
+        editorGeneration: 0,
+        editorRevision: 0,
         issues: [],
         page: "list",
         editorInView: false,
@@ -122,6 +124,15 @@
     function confirmLeave() {
         if (!scheduleState.editing || !scheduleState.dirty) return true;
         return window.confirm(t("schedules.confirm_leave"));
+    }
+
+    function isCurrentEditor(generation, revision) {
+        return (
+            scheduleState.editing &&
+            scheduleState.editorGeneration === generation &&
+            (revision === undefined ||
+                scheduleState.editorRevision === revision)
+        );
     }
 
     function paletteGroups() {
@@ -352,7 +363,16 @@
     function ensureGraph(task) {
         if (!scheduleState.graph) {
             scheduleState.graph = G.createGraph(task);
+            let previousSnapshot = snapshotOf(scheduleState.graph.payload());
             scheduleState.graph.subscribe(() => {
+                const snapshot = snapshotOf(scheduleState.graph.payload());
+                if (snapshot !== previousSnapshot) {
+                    previousSnapshot = snapshot;
+                    scheduleState.editorRevision += 1;
+                    if (scheduleState.editing) {
+                        setEditorStatus(t("schedules.draft"));
+                    }
+                }
                 if (scheduleState.editing) syncEditorChrome();
             });
             scheduleState.canvas = window.WorkflowCanvas.createCanvas(
@@ -430,7 +450,9 @@
                     !scheduleState.editing || !scheduleState.draftNew;
                 return;
             }
-            node.disabled = !scheduleState.editing;
+            node.disabled =
+                !scheduleState.editing ||
+                (id === "btnWfSave" && scheduleState.busy);
         });
         const del = get("btnWfDelete");
         if (del) {
@@ -448,6 +470,7 @@
 
     function openDraft(task) {
         if (!confirmLeave()) return;
+        scheduleState.editorGeneration += 1;
         scheduleState.draftNew = true;
         scheduleState.selectedId = "";
         scheduleState.issues = [];
@@ -480,6 +503,7 @@
         );
         if (!task) return;
         if (!confirmLeave()) return;
+        scheduleState.editorGeneration += 1;
         scheduleState.draftNew = false;
         scheduleState.selectedId = taskId;
         scheduleState.issues = [];
@@ -499,6 +523,7 @@
 
     function closeEditor() {
         if (!confirmLeave()) return;
+        scheduleState.editorGeneration += 1;
         setEditing(false);
         scheduleState.dirty = false;
         writeTaskQuery("");
@@ -516,6 +541,8 @@
 
     async function validateDraft() {
         if (!scheduleState.graph) return;
+        const generation = scheduleState.editorGeneration;
+        const revision = scheduleState.editorRevision;
         try {
             const response = await api("/api/runtime/automations/validate", {
                 method: "POST",
@@ -523,11 +550,13 @@
                 body: JSON.stringify(scheduleState.graph.payload()),
             });
             const body = await parseJsonSafe(response);
+            if (!isCurrentEditor(generation, revision)) return;
             scheduleState.issues = Array.isArray(body?.issues)
                 ? body.issues
                 : [];
             syncEditorChrome();
         } catch (_error) {
+            if (!isCurrentEditor(generation, revision)) return;
             scheduleState.issues = [];
         }
     }
@@ -592,6 +621,8 @@
 
     async function save() {
         if (!scheduleState.graph || scheduleState.busy) return;
+        const generation = scheduleState.editorGeneration;
+        const revision = scheduleState.editorRevision;
         try {
             const payload = scheduleState.graph.payload();
             const taskId = scheduleState.draftNew
@@ -611,23 +642,38 @@
             );
             const body = await parseJsonSafe(response);
             if (!response.ok) throw new Error(requestError(response, body));
-            setEditorStatus(t("schedules.saved"), "success");
             showToast(t("schedules.saved"), "success");
-            scheduleState.draftNew = false;
-            scheduleState.selectedId = body.task?.task_id || taskId;
-            if (body.task) {
-                ensureGraph(body.task);
+            const unchanged = isCurrentEditor(generation, revision);
+            let savedRevision = null;
+            if (isCurrentEditor(generation)) {
+                scheduleState.draftNew = false;
+                scheduleState.selectedId = body.task?.task_id || taskId;
+                if (unchanged && body.task) ensureGraph(body.task);
                 scheduleState.savedSnapshot = snapshotOf(
-                    scheduleState.graph.payload(),
+                    unchanged
+                        ? scheduleState.graph.payload()
+                        : G.createGraph(body.task || payload).payload(),
+                );
+                syncEditorChrome();
+                writeTaskQuery(scheduleState.selectedId);
+                setEditorStatus(
+                    t(unchanged ? "schedules.saved" : "schedules.draft"),
+                    unchanged ? "success" : "",
+                );
+                savedRevision = scheduleState.editorRevision;
+            }
+            await refresh({ force: true, skipOpenFromQuery: true });
+            if (unchanged && savedRevision !== null) {
+                window.requestAnimationFrame(() =>
+                    window.requestAnimationFrame(() => {
+                        if (isCurrentEditor(generation, savedRevision)) {
+                            showSchedulePage("list");
+                        }
+                    }),
                 );
             }
-            scheduleState.dirty = false;
-            writeTaskQuery(scheduleState.selectedId);
-            await refresh({ force: true, skipOpenFromQuery: true });
-            window.requestAnimationFrame(() =>
-                window.requestAnimationFrame(() => showSchedulePage("list")),
-            );
         } catch (error) {
+            if (!isCurrentEditor(generation)) return;
             setEditorStatus(
                 `${t("schedules.save_failed")}: ${error.message || error}`,
                 "error",
@@ -752,6 +798,10 @@
     }
 
     function bindEvents() {
+        get("scheduleEditorView")?.addEventListener("input", () => {
+            scheduleState.editorRevision += 1;
+            if (scheduleState.editing) setEditorStatus(t("schedules.draft"));
+        });
         get("btnSchedulesRefresh")?.addEventListener("click", refresh);
         get("btnSchedulesNew")?.addEventListener("click", showPresetDialog);
         get("btnPresetClose")?.addEventListener("click", hidePresetDialog);
