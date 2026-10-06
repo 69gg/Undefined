@@ -144,12 +144,6 @@ class CognitiveService:
                 updated_markdown = _serialize_profile_markdown(
                     frontmatter, summary, evaluation=evaluation, roast=roast
                 )
-                await self._profile_storage.write_profile(
-                    normalized_entity_type,
-                    normalized_entity_id,
-                    updated_markdown,
-                )
-
                 profile_doc, profile_metadata = _build_profile_vector_payload(
                     entity_type=normalized_entity_type,
                     entity_id=normalized_entity_id,
@@ -165,6 +159,13 @@ class CognitiveService:
                     profile_doc,
                     profile_metadata,
                     priority=CHROMA_PRIORITY_FOREGROUND,
+                )
+                # 文件中的名称决定是否需要重试；索引成功后再提交名称，避免
+                # 一次向量写入失败后，被「名称未变化」永久跳过（重启后也一样）。
+                await self._profile_storage.write_profile(
+                    normalized_entity_type,
+                    normalized_entity_id,
+                    updated_markdown,
                 )
                 logger.info(
                     "[认知服务] 已刷新侧写展示名: entity_type=%s entity_id=%s old=%s new=%s",

@@ -862,6 +862,95 @@ updated_at: "2026-04-01T00:00:00"
     assert vector_store.last_upsert_profile is None
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("entity_type", ["user", "group"])
+async def test_sync_profile_display_name_retries_after_vector_failure(
+    entity_type: str,
+) -> None:
+    existing_profile = "---\nname: 旧名称\ntags: []\n---\n既有侧写内容\n"
+
+    class FailingOnceVectorStore(_FakeVectorStore):
+        attempts: int = 0
+
+        async def upsert_profile(
+            self,
+            profile_id: str,
+            document: str,
+            metadata: dict[str, Any],
+            **kwargs: Any,
+        ) -> None:
+            self.attempts += 1
+            if self.attempts == 1:
+                raise RuntimeError("temporary vector failure")
+            await super().upsert_profile(profile_id, document, metadata, **kwargs)
+
+    vectors = FailingOnceVectorStore()
+    storage = _FakeProfileStorage(existing_profile)
+    service = CognitiveService(
+        lambda: SimpleNamespace(enabled=True), vectors, _FakeJobQueue(), storage
+    )
+    with pytest.raises(RuntimeError, match="temporary vector failure"):
+        await service.sync_profile_display_name(
+            entity_type=entity_type, entity_id="12345", preferred_name="新名称"
+        )
+    assert storage.profile == existing_profile
+    assert storage.last_write is None
+
+    # 重建服务模拟重启：重试不能依赖进程内的脏标记。
+    service = CognitiveService(
+        lambda: SimpleNamespace(enabled=True), vectors, _FakeJobQueue(), storage
+    )
+    assert await service.sync_profile_display_name(
+        entity_type=entity_type, entity_id="12345", preferred_name="新名称"
+    )
+    assert vectors.attempts == 2
+    assert vectors.last_upsert_profile is not None
+    assert vectors.last_upsert_profile[2]["name"] == "新名称"
+    assert storage.profile is not None
+    assert "name: 新名称" in storage.profile
+    assert "既有侧写内容" in storage.profile
+    assert not await service.sync_profile_display_name(
+        entity_type=entity_type, entity_id="12345", preferred_name="新名称"
+    )
+    assert vectors.attempts == 2
+
+
+@pytest.mark.asyncio
+async def test_sync_profile_display_name_retries_after_file_failure() -> None:
+    existing_profile = "---\nname: 旧名称\ntags: []\n---\n既有侧写内容\n"
+
+    class FailingOnceStorage(_FakeProfileStorage):
+        attempts: int = 0
+
+        async def write_profile(
+            self, entity_type: str, entity_id: str, content: str
+        ) -> None:
+            self.attempts += 1
+            if self.attempts == 1:
+                raise OSError("temporary file failure")
+            await super().write_profile(entity_type, entity_id, content)
+
+    vectors = _FakeVectorStore()
+    storage = FailingOnceStorage(existing_profile)
+    service = CognitiveService(
+        lambda: SimpleNamespace(enabled=True), vectors, _FakeJobQueue(), storage
+    )
+    with pytest.raises(OSError, match="temporary file failure"):
+        await service.sync_profile_display_name(
+            entity_type="user", entity_id="12345", preferred_name="新名称"
+        )
+    assert storage.profile == existing_profile
+    assert await service.sync_profile_display_name(
+        entity_type="user", entity_id="12345", preferred_name="新名称"
+    )
+    assert storage.attempts == 2
+    assert storage.profile is not None
+    assert "name: 新名称" in storage.profile
+    assert "既有侧写内容" in storage.profile
+    assert vectors.last_upsert_profile is not None
+    assert vectors.last_upsert_profile[2]["name"] == "新名称"
+
+
 def test_parse_profile_markdown_old_two_part_has_empty_evaluation() -> None:
     from Undefined.cognitive.service.helpers import _parse_profile_markdown
 
