@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from concurrent.futures import ThreadPoolExecutor
 import re
+import threading
 from types import SimpleNamespace
 from typing import Any, Literal, TypeAlias
 import zipfile
@@ -956,3 +958,37 @@ async def test_download_book_cleans_up_after_cancellation(
             break
         await asyncio.sleep(0.05)
     assert list((tmp_path / "jm").glob("*")) == [], "取消后必须清掉任务目录"
+
+
+def test_cancelled_download_cleans_up_after_event_loop_closes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    started = threading.Event()
+    release = threading.Event()
+    pool = ThreadPoolExecutor(max_workers=1)
+    monkeypatch.setattr(jm_downloader, "_DOWNLOAD_POOL", pool)
+
+    def download(book_id: str, task_dir: Path, **options: Any) -> Any:
+        started.set()
+        assert release.wait(5)
+        (task_dir / "raw-page.jpg").write_bytes(b"temporary original")
+        return SimpleNamespace()
+
+    monkeypatch.setattr(jm_downloader, "_download_plain_sync", download)
+
+    async def cancel_download() -> None:
+        task = asyncio.create_task(download_book("1114751", config=_config()))
+        assert await asyncio.to_thread(started.wait, 5)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert list((tmp_path / "jm").glob("*"))
+
+    try:
+        asyncio.run(cancel_download())
+        # 专用下载线程在 loop 关闭后才写入原图并完成。
+        release.set()
+    finally:
+        release.set()
+        pool.shutdown(wait=True)
+    assert list((tmp_path / "jm").glob("*")) == []

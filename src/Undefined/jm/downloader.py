@@ -27,7 +27,7 @@ jmcpy 的异步实现内部仍会同步执行图片解码与 PDF 合成（``_to_
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Sequence
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 import asyncio
 import functools
@@ -596,17 +596,18 @@ async def download_book(
         download = functools.partial(
             _download_archive_sync, book_id, task_dir, password=password, **options
         )
-    future: asyncio.Future[JmDownload] = loop.run_in_executor(_DOWNLOAD_POOL, download)
+    worker_future: Future[JmDownload] = _DOWNLOAD_POOL.submit(download)
+    future = asyncio.wrap_future(worker_future, loop=loop)
     try:
         # shield：协程被取消时不要把线程一起取消——同步下载停不下来，强行删目录
         # 只会被后续写入重新创建，所以等它跑完再清理
         result = await asyncio.shield(future)
     except BaseException:
-        if future.done():
+        if worker_future.done():
             # 异常路径下调用方拿不到 task_dir，必须在这里清掉已下载的原图
             await cleanup_download_dir(task_dir)
         else:
-            _cleanup_when_finished(future, task_dir, loop=loop)
+            _cleanup_when_finished(worker_future, task_dir, loop=loop)
         raise
     return result, task_dir
 
@@ -616,14 +617,14 @@ def _remove_dir_now(path: Path) -> None:
 
 
 def _cleanup_when_finished(
-    future: "asyncio.Future[JmDownload]",
+    future: Future[JmDownload],
     task_dir: Path,
     *,
     loop: asyncio.AbstractEventLoop,
 ) -> None:
     """线程仍在写盘时，等它结束后再删任务目录（取消/超时路径）。"""
 
-    def _on_done(_future: "asyncio.Future[JmDownload]") -> None:
+    def _on_done(_future: Future[JmDownload]) -> None:
         try:
             loop.run_in_executor(None, _remove_dir_now, task_dir)
         except RuntimeError:

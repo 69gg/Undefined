@@ -1158,7 +1158,7 @@ api_key = "replace-with-your-key"
 - 车号不存在、接口不可用时发送一行 `JM 提取失败：<原因>`，日志记录异常类型与堆栈；车号与链接混排时按原文顺序取第一个，分享卡片结构异常只跳过该段。
 - 除了自动提取，`jm_book` 工具让 AI 也能按需处理车号：`output_mode=send`（默认，等价自动提取）、`uid`（只下载并**把所有章节合成一份未加密 PDF** 注册为附件 UID，交给 `file_analysis_agent` 用 `extract_pdf` / `describe_pdf_page` 解析，不发送消息、不打包 zip）、`info`（只返回本子信息，不下载）。
 - `info_agent` 的 `jm_search` 工具查询本子列表，`mode` 三种：`search`（关键词检索，可用 `target` 限定站内/作品/作者/标签/角色，也可直接输入纯数字车号）、`browse`（按分类浏览，不需要关键词）与 `ranking`（日/周/月排行，用 `time_range` 选日榜/周榜/月榜，固定按观看数排序）。三种模式共用 `genre` 大分类、`page` 翻页与 `n`（默认 5、上限 20）；`search` / `browse` 另支持 `sort`（最新/观看/图片/点赞/评分/评论）与 `time_range` 时间范围；`sub_genre` 副分类必须与 `genre` 同时给出，且只有网页端接口支持，网页端被反爬拦截时会直接返回失败原因。只返回车号、标题、作者、分类与更新时间，不下载也不发送。查询复用同一份 `[jm]` 配置（代理、`request_timeout`、`session_dir`），且**不受** `auto_extract_enabled` 影响——该开关只约束自动提取管线。
-- jmcpy 的 HTTP 请求是异步的，但图片解码与 PDF 合成是同步 CPU 工作；这些步骤在线程中执行，不阻塞事件循环。副作用是单次自动提取不可取消，由 `request_timeout` / `image_timeout` 与 jmcpy 的多端点重试兜底。
+- 图片下载、解码与 PDF 合成在专用线程池执行，不阻塞事件循环。取消提取会结束等待，但不会强停仍在写盘的同步线程；线程结束后清理本次任务目录，即使 Bot 的事件循环已经关闭也会清理，避免残留原图或未加密 PDF。下载本身由 `request_timeout` / `image_timeout` 与 jmcpy 的多端点重试收敛。
 - 默认不登录即可使用；需要在 jmcpy 中登录（例如访问账号可见内容）时，用 jmcpy 自己的方式保存会话，再把 `session_dir` 指向同一配置目录，或在 `session_dir` 留空时设置 `JMCPY_HOME`。目录值会去除首尾空白，显式 `session_dir` 优先于环境变量。
 - 请遵守所在地法律法规与目标站点服务条款，只处理你有权获取的内容。
 
