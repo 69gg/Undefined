@@ -1,11 +1,13 @@
 """程序入口"""
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import signal
 import time
 import sys
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -39,6 +41,10 @@ from Undefined.utils.paths import (
 
 from Undefined.render import close_browser as close_render_browser
 from Undefined.utils.render_cache import close_render_cache
+
+if TYPE_CHECKING:
+    from Undefined.cognitive import HistorianWorker
+    from Undefined.memes import MemeWorker
 
 
 def ensure_runtime_dirs() -> None:
@@ -528,14 +534,12 @@ async def main() -> None:
                 await weixin_service.stop()
             except Exception:
                 logger.exception("[清理] WeixinService stop 失败")
-        try:
-            await handler.close()
-        except Exception:
-            logger.exception("[清理] MessageHandler close 失败")
-        if meme_worker is not None:
-            await meme_worker.stop()
-        if historian_worker:
-            await historian_worker.stop()
+        await _close_message_workers(
+            handler,
+            meme_worker=meme_worker,
+            historian_worker=historian_worker,
+            logger=logger,
+        )
         await onebot.disconnect()
         await ai.close()
         if retrieval_registry is not None:
@@ -545,6 +549,24 @@ async def main() -> None:
         await close_render_cache()
         shutdown_guard.restore()
         logger.info("[退出] 机器人已停止运行")
+
+
+async def _close_message_workers(
+    handler: MessageHandler,
+    *,
+    meme_worker: MemeWorker | None,
+    historian_worker: HistorianWorker | None,
+    logger: logging.Logger,
+) -> None:
+    """先收敛仍会提交模型调用的 worker，再由 handler 排空并关闭队列。"""
+    if meme_worker is not None:
+        await meme_worker.stop()
+    if historian_worker is not None:
+        await historian_worker.stop()
+    try:
+        await handler.close()
+    except Exception:
+        logger.exception("[清理] MessageHandler close 失败")
 
 
 class ShutdownSignalGuard:

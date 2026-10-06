@@ -156,7 +156,7 @@ uv run Undefined-webui
 
 #### 优雅停机
 
-`SIGINT`（Ctrl+C）与 `SIGTERM` 都会触发同一套优雅停机流程：停止 OneBot 连接、关闭 Runtime API 与微信服务、停止史官 / memes worker、断开连接、关闭 AI 客户端与检索运行时、停止配置热重载并释放渲染资源。容器、systemd、supervisor 等默认以 `SIGTERM` 停止进程，无需额外配置；请避免使用 `SIGKILL`（`docker kill -s KILL`），否则会跳过全部落盘清理。
+`SIGINT`（Ctrl+C）与 `SIGTERM` 都会触发同一套优雅停机流程：停止 OneBot 连接、关闭 Runtime API 与微信服务、停止史官 / memes worker，再由消息处理器排空并关闭 AI 队列、落盘历史，最后断开连接、关闭 AI 客户端与检索运行时、停止配置热重载并释放渲染资源。等待 worker 收尾期间模型队列保持可用，史官在向量写入后继续提交侧写模型请求也能完成；消息处理器收尾时新落盘的认知任务留待下次启动处理。容器、systemd、supervisor 等默认以 `SIGTERM` 停止进程，无需额外配置；请避免使用 `SIGKILL`（`docker kill -s KILL`），否则会跳过全部落盘清理。
 
 #### 自动启动选项
 
