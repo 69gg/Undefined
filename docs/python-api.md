@@ -113,6 +113,8 @@ Python 显式 mapping / override  >  config.toml  >  环境变量  >  代码默�
 
 `Config.load(strict=False)` 只放宽必填项校验，文件的 TOML 语法、编码或读取错误仍会抛出 `ValueError`。`ConfigManager.reload()` 加载失败时保留原配置；订阅者应用失败会记录日志并保留变更，下次重载相同内容也会再次通知。运行时热更新应用函数会在完成其余同步步骤后汇报失败，后台失败同样会进入重试。
 
+`WebUISettings.from_config(config, config_exists=...)` 从已验证的 Config 构建设置，不读文件；运行中的 WebUI 使用该入口刷新同一次重载的快照。`config_exists` 表示这份快照是否来自现存配置；显式或隐式的 `changeme` 都会标记为默认密码模式，禁止登录。独立 `load_webui_settings()` 保留首次启动的宽松解析和初始化默认值，不应拿它替代已验证的运行时快照。
+
 ### `Config.from_mapping`
 
 从内存 dict 构建配置，结构与 `config.toml` 一致：

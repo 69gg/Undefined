@@ -1207,9 +1207,12 @@ api_key = "replace-with-your-key"
 | `check_updates` | `true` | 打开 WebUI 时是否在后台检查 GitHub 正式 Release |
 
 关键行为：
-- 默认密码 `changeme` 禁止登录，必须先修改。
+
+- 默认密码 `changeme` 禁止登录，必须先修改；显式写入 `password = "changeme"` 也保持默认密码模式。
 - 未配置或为空时，会回退默认密码并标记为”默认密码模式”。
-- `webui.url/port/password/autostart_bot` 修改需重启 WebUI 进程（机器人主进程中也属于重启生效类）。
+- `webui.url` / `webui.port` 修改需重启 WebUI 进程，以重新绑定监听地址和端口。
+- `webui.password` 在配置成功加载后立即刷新 Management 的登录密码，无需重启 WebUI。
+- `webui.autostart_bot` 控制下一次 WebUI 启动时是否自动启动机器人；修改不会立即启动或停止当前机器人进程。
 - `check_updates` 支持热更新；关闭后只停止页面打开时的自动检查，概览页仍可手动检查。
 - `autostart_bot=true` 时，运行 `uv run Undefined-webui` 会自动拉起 bot 进程，无需手动点击启动按钮；与 WebUI 更新重启后的自动恢复机制（`pending_bot_autostart` marker）互不冲突。
 - `uv run deploy up` 在 `container` 与 `host` 模式下都会写入 `autostart_bot = false`；部署后先完成配置与 QQ 登录，再在 WebUI 点击“启动机器人”。
@@ -1439,6 +1442,7 @@ api_key = "replace-with-your-key"
 
 ### 5.2 明确“需重启”的字段
 以下变更会被记录为“需重启生效”：
+
 - `logging.level`
 - `logging.file_path`
 - `logging.max_size_mb`
@@ -1448,8 +1452,6 @@ api_key = "replace-with-your-key"
 - `onebot.token`
 - `webui.url`
 - `webui.port`
-- `webui.password`
-- `webui.autostart_bot`
 - `api.*`（`enabled/host/port/auth_key/openapi_enabled`）
 - `memes.blob_dir`
 - `memes.preview_dir`
@@ -1459,7 +1461,11 @@ api_key = "replace-with-your-key"
 - `naga.*`（`enabled/api_url/api_key/use_proxy/moderation_enabled/mode/allowed_group_ids/blocked_group_ids/allowed_private_ids/blocked_private_ids`）
 - `models.embedding` / `models.embedding.features.*` / `models.rerank`（嵌入与重排运行时在启动时构造，热更新只提示需重启）
 
+Management 的 WebUI 配置按 [§4.23](#423-webui) 的时机生效：密码和检查更新开关支持热更新，自动启动开关控制下次启动。机器人运行时日志可能仍把 `webui.password` / `webui.autostart_bot` 归为重启提示，这不表示 Management 必须重启才能使用新密码。
+
 ### 5.3 明确“会执行热应用”的字段
+
+- `webui.password` / `webui.check_updates`（Management 的登录密码与检查更新开关立即刷新）
 - `onebot.file_send_mode` / `onebot.file_send_host`（新投递读取快照；进行中投递及旧 URL 生命周期不变）
 - 模型发车间隔 / 模型名 / 模型池变更（队列间隔刷新）
 - `models.grok.model_name` / `models.grok.queue_interval_seconds`（队列间隔刷新）
@@ -1492,6 +1498,8 @@ api_key = "replace-with-your-key"
 ### 5.5 热更新失败的可见性
 
 TOML 语法错误、编码错误或读取失败会中止本次加载，热重载保留上次有效的完整配置，包括白名单、Runtime API 密钥和 WebUI 密码；已加载配置的文件被删除时也不会切换为默认值。修正文件并再次保存后会正常重载。`strict=False` 只放宽必填项校验，不允许把损坏的文件作为空配置使用。
+
+运行中的 WebUI 直接从本次已验证的 `Config` 快照刷新设置，不再次读取文件；即使文件随后被其他进程写坏或删除，也不会把密码重置为默认值。首次启动的独立 WebUI 设置加载仍允许用默认设置显示初始化页面，但默认密码始终禁止登录。
 
 热更新在共享的 `Config` 实例上逐字段就地生效，整个过程没有 `await`，同一事件循环内的读方不会在一次读取里看到“改了一半”的对象；跨 `await` 的多次读取仍可能分别落在变更前后，需要严格一致的快照时请在单次读取中取全所需字段。
 

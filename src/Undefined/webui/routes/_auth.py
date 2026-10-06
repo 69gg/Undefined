@@ -4,7 +4,7 @@ from aiohttp import web
 from aiohttp.web_response import Response
 
 from Undefined.config.loader import CONFIG_PATH, DEFAULT_WEBUI_PASSWORD
-from Undefined.config import get_config_manager, load_webui_settings
+from Undefined.config import WebUISettings, get_config_manager
 from ._shared import (
     auth_capabilities,
     routes,
@@ -260,8 +260,11 @@ async def password_handler(request: web.Request) -> Response:
     CONFIG_PATH.write_text(
         render_toml(patched, comments=load_comment_map()), encoding="utf-8"
     )
-    get_config_manager().reload()
-    request.app[SETTINGS_APP_KEY] = load_webui_settings()
+    manager = get_config_manager()
+    manager.reload()
+    request.app[SETTINGS_APP_KEY] = WebUISettings.from_config(
+        manager.load(strict=False), config_exists=True
+    )
     get_session_store(request).clear()
 
     resp = web.json_response({"success": True, "message": "Password updated"})

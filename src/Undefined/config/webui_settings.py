@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from .coercers import _coerce_bool, _coerce_int, _coerce_str, _normalize_str, _get_value
+
+if TYPE_CHECKING:
+    from .config_class import Config
 
 DEFAULT_WEBUI_URL = "127.0.0.1"
 DEFAULT_WEBUI_PORT = 8787
@@ -24,6 +27,20 @@ class WebUISettings:
     check_updates: bool
     using_default_password: bool
     config_exists: bool
+
+    @classmethod
+    def from_config(cls, config: Config, *, config_exists: bool) -> WebUISettings:
+        """从已验证的 Config 构建运行时设置，不重新读取配置文件。"""
+        password = config.webui_password or DEFAULT_WEBUI_PASSWORD
+        return cls(
+            url=config.webui_url,
+            port=config.webui_port,
+            password=password,
+            autostart_bot=config.webui_autostart_bot,
+            check_updates=config.webui_check_updates,
+            using_default_password=password == DEFAULT_WEBUI_PASSWORD,
+            config_exists=config_exists,
+        )
 
     @property
     def display_url(self) -> str:
@@ -72,6 +89,6 @@ def parse_webui_settings(data: dict[str, Any]) -> WebUISettings:
         password=password_normalized,
         autostart_bot=autostart_bot,
         check_updates=check_updates,
-        using_default_password=False,
+        using_default_password=password_normalized == DEFAULT_WEBUI_PASSWORD,
         config_exists=config_exists,
     )

@@ -8,7 +8,13 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 from aiohttp import web
 
-from Undefined.config import load_webui_settings, get_config_manager, get_config
+from Undefined.config import (
+    Config,
+    WebUISettings,
+    load_webui_settings,
+    get_config_manager,
+    get_config,
+)
 from Undefined.utils.cors import is_allowed_cors_origin, normalize_origin
 from Undefined.utils import io as async_io
 from Undefined.utils.self_update import resolve_repo_root
@@ -302,7 +308,7 @@ def create_app(*, redirect_to_config_once: bool = False) -> web.Application:
     # 一次性客户端重定向提示（由 index 处理）
     app[REDIRECT_TO_CONFIG_ONCE_APP_KEY] = redirect_to_config_once
 
-    def _on_config_change(config: Any, changes: dict[str, Any]) -> None:
+    def _on_config_change(config: Config, changes: dict[str, Any]) -> None:
         webui_keys = {
             "webui_url",
             "webui_port",
@@ -314,7 +320,10 @@ def create_app(*, redirect_to_config_once: bool = False) -> web.Application:
             changes
         ):
             logger.info("[WebUI] 检测到 WebUI 配置变更，正在热重载设置...")
-            app[SETTINGS_APP_KEY] = load_webui_settings()
+            # 本次快照已成功读取；后续外部写入不能覆盖已验证的设置。
+            app[SETTINGS_APP_KEY] = WebUISettings.from_config(
+                config, config_exists=True
+            )
 
     config_manager.subscribe(_on_config_change)
 

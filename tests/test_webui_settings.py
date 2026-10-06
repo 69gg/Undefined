@@ -7,7 +7,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from Undefined.config.webui_settings import load_webui_settings
+import pytest
+
+from Undefined.config import Config
+from Undefined.config.webui_settings import WebUISettings, load_webui_settings
 
 
 def test_load_webui_settings_with_autostart_bot_true(tmp_path: Path) -> None:
@@ -188,3 +191,41 @@ check_updates = false
     settings = load_webui_settings(config_file)
 
     assert settings.check_updates is False
+
+
+def test_load_webui_settings_explicit_default_password_stays_disabled(
+    tmp_path: Path,
+) -> None:
+    config_file = tmp_path / "config.toml"
+    config_file.write_text('[webui]\npassword="changeme"\n', encoding="utf-8")
+    settings = load_webui_settings(config_file)
+    assert settings.password == "changeme"
+    assert settings.using_default_password is True
+    assert settings.config_exists is True
+
+
+@pytest.mark.parametrize("password", ["private-password", "changeme"])
+@pytest.mark.parametrize("config_exists", [False, True])
+def test_settings_from_config_preserves_snapshot_metadata(
+    password: str, config_exists: bool
+) -> None:
+    config = Config.from_mapping(
+        {
+            "webui": {
+                "url": "::1",
+                "port": 18787,
+                "password": password,
+                "autostart_bot": True,
+                "check_updates": False,
+            }
+        },
+        strict=False,
+    )
+    settings = WebUISettings.from_config(config, config_exists=config_exists)
+    assert settings.url == "::1"
+    assert settings.port == 18787
+    assert settings.password == password
+    assert settings.autostart_bot is True
+    assert settings.check_updates is False
+    assert settings.using_default_password is (password == "changeme")
+    assert settings.config_exists is config_exists
