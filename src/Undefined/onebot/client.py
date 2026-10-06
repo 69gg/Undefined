@@ -126,6 +126,7 @@ class OneBotClient:
             Callable[[dict[str, Any]], Coroutine[Any, Any, None]] | None
         ) = None
         self._running = False
+        self._accepting_messages = True
         self._tasks: set[asyncio.Task[None]] = set()
         self.file_transport = (
             file_transport
@@ -207,6 +208,15 @@ class OneBotClient:
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+
+    def stop_accepting_messages(self) -> None:
+        """停止接收新事件，保留 API 响应接收与发送能力供已接受任务收尾。"""
+        self._accepting_messages = False
+
+    async def drain_message_tasks(self) -> None:
+        """等待已经接受的入站处理完成；调用前须关闭新消息接入。"""
+        if self._tasks:
+            await asyncio.gather(*tuple(self._tasks), return_exceptions=True)
 
     async def _call_api(
         self,
@@ -986,6 +996,9 @@ class OneBotClient:
                     f"收到未知 echo 响应: {echo_str}, 待处理: {list(self._pending_responses.keys())}"
                 )
                 return
+
+        if not self._accepting_messages:
+            return
 
         # 事件类型的消息异步处理，不阻塞接收循环
         post_type = data.get("post_type")

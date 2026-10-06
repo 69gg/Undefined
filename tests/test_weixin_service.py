@@ -239,6 +239,63 @@ def _account() -> WeixinAccount:
 
 
 @pytest.mark.asyncio
+async def test_quiesce_keeps_sending_available_until_accepted_inbound_finishes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _config(tmp_path)
+    store = WeixinStore(config.weixin)
+    await store.save_account(_account())
+    client = FakeClient()
+
+    def factory(
+        account: WeixinAccount,
+        state: UndefinedIlinkStateStore,
+        options: ClientOptions,
+    ) -> WeixinClientProtocol:
+        return client
+
+    service = WeixinService(
+        config,
+        store=store,
+        login_manager=cast(QrLoginManager, FakeLoginManager()),
+        client_factory=factory,
+    )
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def process(
+        alias: str, current_client: WeixinClientProtocol, message: InboundMessage
+    ) -> None:
+        entered.set()
+        await release.wait()
+        await service.send_text(10001, "accepted reply")
+
+    monkeypatch.setattr(service, "_process_inbound", process)
+    message = InboundMessage.from_mapping("bot-account", {"from_user_id": "peer-1"})
+    await service.start()
+    await asyncio.wait_for(client.run_started.wait(), 1)
+    task = asyncio.create_task(service._handle_inbound("primary", client, message))
+    await asyncio.wait_for(entered.wait(), 1)
+    service.stop_accepting_messages()
+    drain = asyncio.create_task(service.drain_message_tasks())
+    try:
+        await service._handle_inbound("primary", client, message)
+        await asyncio.sleep(0)
+        assert not drain.done()
+        assert not client.closed
+        release.set()
+        await asyncio.wait_for(drain, 1)
+        await task
+        assert client.sent_text == [("peer-1", "accepted reply")]
+    finally:
+        release.set()
+        await asyncio.gather(task, drain, return_exceptions=True)
+        await service.stop()
+    assert client.closed
+
+
+@pytest.mark.asyncio
 async def test_privileged_binding_requires_confirmation_before_network(
     tmp_path: Path,
 ) -> None:

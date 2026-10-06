@@ -116,6 +116,62 @@ async def test_get_head_range_tokens_source_cleanup_mode_and_actual_port(
     assert token not in caplog.text
 
 
+async def test_shutdown_blocks_api_but_keeps_url_delivery_available(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "pending.txt"
+    source.write_bytes(b"accepted media")
+    async with runtime(tmp_path) as (server, store, _, _, _):
+        server.begin_shutdown()
+        await server.drain_requests()
+        url = await store.publish(source, "127.0.0.1")
+        async with ClientSession() as http:
+            async with http.get(f"http://127.0.0.1:{store.port}/health") as response:
+                assert response.status == 503
+            async with http.get(url) as response:
+                assert response.status == 200
+                assert await response.read() == b"accepted media"
+
+
+async def test_shutdown_waits_for_accepted_runtime_request(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def health(self: RuntimeAPIServer, request: web.Request) -> web.Response:
+        entered.set()
+        await release.wait()
+        return web.json_response({"ok": True})
+
+    monkeypatch.setattr(RuntimeAPIServer, "_health_handler", health)
+    async with runtime(tmp_path) as (server, store, _, _, _):
+        async with ClientSession() as http:
+
+            async def fetch_health() -> int:
+                async with http.get(
+                    f"http://127.0.0.1:{store.port}/health"
+                ) as response:
+                    await response.read()
+                    return response.status
+
+            request = asyncio.create_task(fetch_health())
+            await asyncio.wait_for(entered.wait(), 1)
+            server.begin_shutdown()
+            drain = asyncio.create_task(server.drain_requests())
+            try:
+                await asyncio.sleep(0)
+                assert not drain.done()
+                release.set()
+                assert await asyncio.wait_for(request, 1) == 200
+                await asyncio.wait_for(drain, 1)
+                assert not server._request_tasks
+            finally:
+                release.set()
+                await asyncio.gather(request, drain, return_exceptions=True)
+
+
 async def test_tokens_are_per_file_and_ipv6_format(tmp_path: Path) -> None:
     source = tmp_path / "file"
     source.write_bytes(b"abc")

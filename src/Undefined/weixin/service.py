@@ -260,6 +260,8 @@ class WeixinService:
         self._lifecycle_lock = asyncio.Lock()
         self._running = False
         self._closed = False
+        self._accepting_messages = True
+        self._inbound_completions: set[asyncio.Future[None]] = set()
 
     def _build_client(
         self,
@@ -315,6 +317,14 @@ class WeixinService:
             self._confirmations.clear()
             self._running = False
             self._closed = True
+
+    def stop_accepting_messages(self) -> None:
+        """停止新入站消息，保持已连接帐号可发送排空中的回复。"""
+        self._accepting_messages = False
+
+    async def drain_message_tasks(self) -> None:
+        if self._inbound_completions:
+            await asyncio.gather(*tuple(self._inbound_completions))
 
     async def status(self) -> dict[str, Any]:
         accounts = await self.store.list_accounts()
@@ -853,6 +863,23 @@ class WeixinService:
             logger.debug("[微信] 关闭帐号客户端失败: alias=%s", alias, exc_info=True)
 
     async def _handle_inbound(
+        self,
+        alias: str,
+        client: WeixinClientProtocol,
+        message: InboundMessage,
+    ) -> None:
+        if not self._accepting_messages:
+            return
+        completion: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        self._inbound_completions.add(completion)
+        try:
+            await self._process_inbound(alias, client, message)
+        finally:
+            self._inbound_completions.discard(completion)
+            if not completion.done():
+                completion.set_result(None)
+
+    async def _process_inbound(
         self,
         alias: str,
         client: WeixinClientProtocol,

@@ -514,8 +514,11 @@ async def main() -> None:
             )
 
     shutdown_guard = install_shutdown_signal_handlers(logger)
+    onebot_run_task: asyncio.Task[None] | None = None
     try:
-        await _run_until_shutdown(onebot, shutdown_guard.event, logger)
+        onebot_run_task = await _run_until_shutdown(
+            onebot, shutdown_guard.event, logger
+        )
     except KeyboardInterrupt:
         # 仅在信号处理器注册全部失败（如非主线程运行）时才会走到这里；
         # 正常安装后 SIGINT 会转为停机事件，不再抛 KeyboardInterrupt
@@ -524,6 +527,59 @@ async def main() -> None:
         logger.exception("[异常] 运行期间发生未捕获的错误: %s", exc)
     finally:
         logger.info("[清理] 正在关闭机器人并释放资源...")
+        try:
+            await _close_message_runtime(
+                onebot,
+                handler,
+                runtime_api_server=runtime_api_server,
+                weixin_service=weixin_service,
+                meme_worker=meme_worker,
+                historian_worker=historian_worker,
+                logger=logger,
+            )
+        finally:
+            if onebot_run_task is not None:
+                onebot_run_task.cancel()
+                await asyncio.gather(onebot_run_task, return_exceptions=True)
+        await ai.close()
+        if retrieval_registry is not None:
+            await retrieval_registry.stop()
+        await config_manager.stop_hot_reload()
+        await close_render_browser()
+        await close_render_cache()
+        shutdown_guard.restore()
+        logger.info("[退出] 机器人已停止运行")
+
+
+async def _close_message_runtime(
+    onebot: OneBotClient,
+    handler: MessageHandler,
+    *,
+    runtime_api_server: RuntimeAPIServer | None,
+    weixin_service: WeixinService | None,
+    meme_worker: MemeWorker | None,
+    historian_worker: HistorianWorker | None,
+    logger: logging.Logger,
+) -> None:
+    """先关闭新接入并排空已接受任务，最后释放回复所依赖的传输资源。"""
+    onebot.stop_accepting_messages()
+    if weixin_service is not None:
+        weixin_service.stop_accepting_messages()
+    if runtime_api_server is not None:
+        runtime_api_server.begin_shutdown()
+    try:
+        if runtime_api_server is not None:
+            await runtime_api_server.drain_requests()
+        await onebot.drain_message_tasks()
+        if weixin_service is not None:
+            await weixin_service.drain_message_tasks()
+        await _close_message_workers(
+            handler,
+            meme_worker=meme_worker,
+            historian_worker=historian_worker,
+            logger=logger,
+        )
+    finally:
         if runtime_api_server is not None:
             try:
                 await runtime_api_server.stop()
@@ -534,21 +590,7 @@ async def main() -> None:
                 await weixin_service.stop()
             except Exception:
                 logger.exception("[清理] WeixinService stop 失败")
-        await _close_message_workers(
-            handler,
-            meme_worker=meme_worker,
-            historian_worker=historian_worker,
-            logger=logger,
-        )
         await onebot.disconnect()
-        await ai.close()
-        if retrieval_registry is not None:
-            await retrieval_registry.stop()
-        await config_manager.stop_hot_reload()
-        await close_render_browser()
-        await close_render_cache()
-        shutdown_guard.restore()
-        logger.info("[退出] 机器人已停止运行")
 
 
 async def _close_message_workers(
@@ -659,8 +701,8 @@ async def _run_until_shutdown(
     onebot: OneBotClient,
     shutdown_event: asyncio.Event,
     logger: logging.Logger,
-) -> None:
-    """运行 OneBot 连接，收到停止信号或连接任务结束时返回。"""
+) -> asyncio.Task[None]:
+    """等待停机条件；返回仍可收发的连接任务，由调用方在排空后关闭。"""
     run_task = asyncio.create_task(onebot.run_with_reconnect(), name="onebot-run")
     stop_task = asyncio.create_task(shutdown_event.wait(), name="shutdown-wait")
     try:
@@ -671,15 +713,13 @@ async def _run_until_shutdown(
         if run_task in done:
             # 连接任务自行结束：把异常抛给上层处理
             run_task.result()
-            return
+            return run_task
         logger.info("[退出] 收到停止信号 (SIGTERM/SIGINT)，正在优雅停机...")
+        return run_task
+    except BaseException:
         run_task.cancel()
-        try:
-            await run_task
-        except asyncio.CancelledError:
-            pass
-        except Exception as exc:
-            logger.warning("[退出] 停止 OneBot 连接时发生异常: %s", exc)
+        await asyncio.gather(run_task, return_exceptions=True)
+        raise
     finally:
         stop_task.cancel()
         try:

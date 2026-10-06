@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import signal
@@ -14,10 +15,12 @@ from Undefined.cognitive import HistorianWorker
 from Undefined.handlers import MessageHandler
 from Undefined.main import (
     _close_message_workers,
+    _close_message_runtime,
     _run_until_shutdown,
     install_shutdown_signal_handlers,
 )
 from Undefined.services.queue_manager import QueueManager
+from Undefined.onebot.client import OneBotClient
 
 logger = logging.getLogger("test-main-shutdown")
 
@@ -123,7 +126,7 @@ class _FailingOneBot:
 
 
 @pytest.mark.asyncio
-async def test_run_until_shutdown_cancels_onebot_on_signal() -> None:
+async def test_run_until_shutdown_keeps_onebot_alive_for_drain() -> None:
     onebot = _SlowOneBot()
     shutdown_event = asyncio.Event()
 
@@ -132,9 +135,113 @@ async def test_run_until_shutdown_cancels_onebot_on_signal() -> None:
     )
     await asyncio.sleep(0.05)
     shutdown_event.set()
-    await asyncio.wait_for(task, timeout=2)
-
+    connection = await asyncio.wait_for(task, timeout=2)
+    assert onebot.cancelled is False
+    assert not connection.done()
+    connection.cancel()
+    await asyncio.gather(connection, return_exceptions=True)
     assert onebot.cancelled is True
+
+
+class _ReplyWebSocket:
+    close_code: int | None = None
+
+    def __init__(self) -> None:
+        self.frames: asyncio.Queue[str] = asyncio.Queue()
+        self.receiving = asyncio.Event()
+        self.sent: list[dict[str, Any]] = []
+
+    async def recv(self) -> str:
+        self.receiving.set()
+        return await self.frames.get()
+
+    async def send(self, payload: str) -> None:
+        request = json.loads(payload)
+        self.sent.append(request)
+        await self.frames.put(json.dumps({"echo": request["echo"], "status": "ok"}))
+
+    async def close(self) -> None:
+        self.close_code = 1000
+        await self.frames.put("{}")
+
+
+@pytest.mark.asyncio
+async def test_shutdown_finishes_accepted_reply_before_closing_transport(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    onebot = OneBotClient("ws://isolated.invalid")
+    socket = _ReplyWebSocket()
+    onebot.ws = cast(Any, socket)
+    monkeypatch.setattr(onebot, "connect", AsyncMock())
+    shutdown = asyncio.Event()
+    wait_task = asyncio.create_task(_run_until_shutdown(onebot, shutdown, logger))
+    await asyncio.wait_for(socket.receiving.wait(), 1)
+    queue = QueueManager(ai_request_interval=0, max_retries=0)
+    reply_started = asyncio.Event()
+    release_reply = asyncio.Event()
+    order: list[str] = []
+
+    async def reply(request: dict[str, Any]) -> None:
+        reply_started.set()
+        await release_reply.wait()
+        response = await onebot.send_group_message(1, "accepted reply")
+        assert response["status"] == "ok"
+        order.append("delivered")
+
+    calls: list[str] = []
+
+    async def inbound(data: dict[str, Any]) -> None:
+        calls.append("accepted")
+        await queue.add_private_request({"type": "private_reply"})
+
+    queue.start(reply)
+    onebot.set_message_handler(inbound)
+    await onebot._dispatch_message({"post_type": "message"})
+    await asyncio.wait_for(reply_started.wait(), 1)
+    handler = MessageHandler.__new__(MessageHandler)
+    handler._background_tasks = set()
+    cast(Any, handler).pipeline_registry = SimpleNamespace(stop_hot_reload=AsyncMock())
+    cast(Any, handler).ai_coordinator = SimpleNamespace(queue_manager=queue)
+    cast(Any, handler).message_batcher = SimpleNamespace(flush_all=AsyncMock())
+
+    async def flush() -> None:
+        order.append("history")
+
+    cast(Any, handler).history_manager = SimpleNamespace(flush_pending_saves=flush)
+    shutdown.set()
+    connection = await asyncio.wait_for(wait_task, 1)
+    close_task = asyncio.create_task(
+        _close_message_runtime(
+            onebot,
+            handler,
+            runtime_api_server=None,
+            weixin_service=None,
+            meme_worker=None,
+            historian_worker=None,
+            logger=logger,
+        )
+    )
+    try:
+        await asyncio.sleep(0)
+        assert onebot._running
+        assert not close_task.done()
+        await onebot._dispatch_message({"post_type": "message"})
+        await onebot._dispatch_message(
+            {"post_type": "notice", "notice_type": "notify", "sub_type": "poke"}
+        )
+        assert calls == ["accepted"]
+        release_reply.set()
+        await asyncio.wait_for(close_task, 2)
+        await asyncio.wait_for(connection, 1)
+        assert order == ["delivered", "history"]
+        assert len(socket.sent) == 1
+        assert socket.frames.empty()
+    finally:
+        release_reply.set()
+        close_task.cancel()
+        connection.cancel()
+        await asyncio.gather(close_task, connection, return_exceptions=True)
+        await queue.stop()
 
 
 @pytest.mark.asyncio
