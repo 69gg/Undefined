@@ -1963,6 +1963,13 @@ class AddressBoundSender:
                 if not isinstance(segment, dict):
                     continue
                 segment_type = str(segment.get("type", "") or "").strip().lower()
+                if segment_type == "node":
+                    nested_units = await self._build_weixin_forward_units([segment])
+                    if nested_units:
+                        flush_text()
+                        node_units.extend(nested_units)
+                        has_content = True
+                    continue
                 if segment_type not in {
                     "text",
                     "image",

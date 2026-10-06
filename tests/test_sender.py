@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 import nturl2path
+from collections.abc import Sequence
+from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -12,6 +14,7 @@ from weixin_ilink_client import (
     ApiError,
     HttpError,
     OutboundMediaItem,
+    OutboundMessageItem,
     OutboundTextItem,
     RefMessage,
     RequestTimeoutError,
@@ -38,6 +41,7 @@ from Undefined.utils.sender import (
     _local_path_from_segment_source,
 )
 from Undefined.weixin.audio import PreparedWeixinVoice
+from Undefined.weixin.service import WeixinService, WeixinServiceError
 
 
 @pytest.fixture
@@ -1567,6 +1571,243 @@ async def test_send_wechat_forward_registers_media_and_logs_unsupported_segments
     assert history_kwargs["transport"]["address"] == "wechat:12345"
     assert isinstance(history_kwargs["transport"]["sent_at_ms"], int)
     assert "type=at" in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("multi_item_enabled", [False, True])
+async def test_send_wechat_nested_forward_preserves_text_and_media_order(
+    sender: MessageSender,
+    tmp_path: Path,
+    multi_item_enabled: bool,
+) -> None:
+    image_path = tmp_path / "nested.png"
+    voice_path = tmp_path / "nested.wav"
+    video_path = tmp_path / "nested.mp4"
+    for path in (image_path, voice_path, video_path):
+        await async_io.write_bytes(path, path.name.encode())
+    weixin_config = cast(Any, sender.config.weixin)
+    weixin_config.multi_item_messages_enabled = multi_item_enabled
+    weixin_config.multi_item_max_items = 3
+    weixin_config.media_max_size_mb = 100
+    events: list[tuple[str, str]] = []
+    prepared = PreparedWeixinVoice(content=b"silk", duration_ms=200)
+
+    async def validate_media_files(paths: Sequence[str | Path]) -> None:
+        assert list(paths) == [image_path, voice_path, video_path]
+        assert events == []
+        events.append(("prepare", "validate"))
+
+    async def prepare_voice(path: Path) -> PreparedWeixinVoice:
+        assert path == voice_path
+        assert events == [("prepare", "validate")]
+        events.append(("prepare", "voice"))
+        return prepared
+
+    async def send_text(_user_id: int, text: str, **_kwargs: Any) -> str:
+        events.append(("text", text))
+        return f"client-{len(events)}"
+
+    async def send_file(_user_id: int, path: str | Path, **kwargs: Any) -> str:
+        events.append((str(kwargs["kind"]), Path(path).name))
+        return f"client-{len(events)}"
+
+    async def send_prepared_voice(
+        _user_id: int, value: PreparedWeixinVoice, **_kwargs: Any
+    ) -> str:
+        assert value is prepared
+        events.append(("voice", voice_path.name))
+        return f"client-{len(events)}"
+
+    async def send_items(_user_id: int, items: Sequence[OutboundMessageItem]) -> str:
+        for item in items:
+            if isinstance(item, OutboundTextItem):
+                events.append(("text", item.text))
+            else:
+                events.append((str(item.kind), item.file_name))
+        return f"client-{len(events)}"
+
+    service = SimpleNamespace(
+        validate_media_files=validate_media_files,
+        prepare_voice=prepare_voice,
+        send_text=send_text,
+        send_file=send_file,
+        send_prepared_voice=send_prepared_voice,
+        send_items=send_items,
+    )
+    sender.set_weixin_service(service)
+    nodes = [
+        {
+            "type": "node",
+            "data": {
+                "name": "Parent",
+                "content": [
+                    {"type": "text", "data": {"text": "Before"}},
+                    {
+                        "type": "node",
+                        "data": {
+                            "name": "Child",
+                            "content": [
+                                {"type": "text", "data": {"text": "Child-start"}},
+                                {
+                                    "type": "image",
+                                    "data": {"file": image_path.as_uri()},
+                                },
+                                {
+                                    "type": "node",
+                                    "data": {
+                                        "name": "Grandchild",
+                                        "content": [
+                                            {
+                                                "type": "text",
+                                                "data": {"text": "Deep-start"},
+                                            },
+                                            {
+                                                "type": "record",
+                                                "data": {"file": voice_path.as_uri()},
+                                            },
+                                            {
+                                                "type": "video",
+                                                "data": {"file": video_path.as_uri()},
+                                            },
+                                            {
+                                                "type": "node",
+                                                "data": {
+                                                    "name": "Leaf",
+                                                    "content": "Leaf-text",
+                                                },
+                                            },
+                                            {
+                                                "type": "text",
+                                                "data": {"text": "Deep-end"},
+                                            },
+                                        ],
+                                    },
+                                },
+                                {"type": "text", "data": {"text": "Child-end"}},
+                            ],
+                        },
+                    },
+                    {"type": "text", "data": {"text": "After"}},
+                ],
+            },
+        },
+        {"type": "node", "data": {"name": "Last", "content": "Last-text"}},
+    ]
+    original_nodes = deepcopy(nodes)
+
+    await AddressBoundSender(
+        sender, DeliveryAddress("wechat", 12345)
+    ).send_private_forward_message(12345, nodes, history_message="Nested forward")
+
+    assert events == [
+        ("prepare", "validate"),
+        ("prepare", "voice"),
+        ("text", "**Parent**\nBefore"),
+        ("text", "**Child**\nChild-start"),
+        ("image", image_path.name),
+        ("text", "**Grandchild**\nDeep-start"),
+        ("voice", voice_path.name),
+        ("video", video_path.name),
+        ("text", "**Leaf**\nLeaf-text"),
+        ("text", "Deep-end"),
+        ("text", "Child-end"),
+        ("text", "After"),
+        ("text", ("\n" if multi_item_enabled else "") + "---\n**Last**\nLast-text"),
+    ]
+    assert nodes == original_nodes
+    cast(AsyncMock, sender.history_manager.add_private_message).assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("multi_item_enabled", [False, True])
+@pytest.mark.parametrize("failure", ["oversized", "missing", "remote", "voice"])
+async def test_send_wechat_nested_forward_preflights_all_media_before_delivery(
+    sender: MessageSender,
+    tmp_path: Path,
+    multi_item_enabled: bool,
+    failure: str,
+) -> None:
+    image_path = tmp_path / "valid.png"
+    invalid_path = tmp_path / "invalid.bin"
+    await async_io.write_bytes(image_path, b"image")
+    if failure != "missing":
+        await async_io.write_bytes(
+            invalid_path,
+            b"x" * (1024 * 1024 + 1) if failure == "oversized" else b"voice",
+        )
+    weixin_config = cast(Any, sender.config.weixin)
+    weixin_config.multi_item_messages_enabled = multi_item_enabled
+    weixin_config.media_max_size_mb = 1
+    validation_service = cast(
+        WeixinService, SimpleNamespace(weixin_config=weixin_config)
+    )
+
+    async def validate_media_files(paths: Sequence[str | Path]) -> None:
+        await WeixinService.validate_media_files(validation_service, paths)
+
+    service = SimpleNamespace(
+        validate_media_files=AsyncMock(side_effect=validate_media_files),
+        prepare_voice=AsyncMock(side_effect=WeixinServiceError("invalid voice")),
+        send_text=AsyncMock(),
+        send_file=AsyncMock(),
+        send_prepared_voice=AsyncMock(),
+        send_items=AsyncMock(),
+    )
+    sender.set_weixin_service(service)
+    invalid_source = (
+        "https://example.com/invalid.bin"
+        if failure == "remote"
+        else invalid_path.as_uri()
+    )
+    nodes = [
+        {
+            "type": "node",
+            "data": {
+                "content": [
+                    {"type": "text", "data": {"text": "Must not be sent"}},
+                    {
+                        "type": "node",
+                        "data": {
+                            "content": [
+                                {
+                                    "type": "image",
+                                    "data": {"file": image_path.as_uri()},
+                                },
+                                {
+                                    "type": "node",
+                                    "data": {
+                                        "content": [
+                                            {
+                                                "type": "record"
+                                                if failure == "voice"
+                                                else "file",
+                                                "data": {"file": invalid_source},
+                                            },
+                                        ]
+                                    },
+                                },
+                            ]
+                        },
+                    },
+                ]
+            },
+        }
+    ]
+
+    with pytest.raises((WeixinServiceError, ValueError)):
+        await AddressBoundSender(
+            sender, DeliveryAddress("wechat", 12345)
+        ).send_private_forward_message(12345, nodes, history_message="Nested forward")
+
+    service.send_text.assert_not_awaited()
+    service.send_file.assert_not_awaited()
+    service.send_prepared_voice.assert_not_awaited()
+    service.send_items.assert_not_awaited()
+    cast(AsyncMock, sender.history_manager.add_private_message).assert_not_awaited()
+    if failure in {"oversized", "voice"}:
+        service.validate_media_files.assert_awaited_once_with(
+            [image_path, invalid_path]
+        )
 
 
 @pytest.mark.asyncio

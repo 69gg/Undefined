@@ -109,6 +109,8 @@ iLink 帐号只接受登录结果声明的那个私聊来源。若收到帐号 I
 
 微信文本中的 `<`、`>`、`&` 等特殊符号和 `<attachment uid="..."/>` 附件标签应原样发送，不使用 HTML/XML 实体。微信没有 QQ 合并转发卡片的等价合同。默认情况下，Undefined 会把当前微信私聊的转发节点展开为保留原顺序的文本与媒体项目，再优先通过一个或多个 iLink `sendmessage.item_list` 请求投递；这是一种实验性多项目消息，不会生成可展开的 QQ 式转发卡片。单次项目数由 `multi_item_max_items` 限制，媒体合计仍受 `media_max_size_mb` 约束。若上游明确拒绝多项目结构，会从当前批次起自动回退为逐段发送；网络超时、会话暂停或服务端错误等结果不确定的失败不会降级重发，以免产生重复消息。设置 `multi_item_messages_enabled=false` 可直接使用逐段模式。包含本地 CQ 图片、文件、视频或音频的消息会走统一附件发送层，媒体本地路径不会作为正文发给用户。
 
+转发节点中的嵌套节点会递归展开，保留每层的发送者标题、正文以及文本和媒体的先后顺序；Bilibili 长正文分段和嵌套卡片也按这一规则发送。逐段模式与多项目模式都会在首个项目发出前校验所有层级的本地媒体，并完成全部语音准备。任一层媒体不存在、超限、使用当前不支持的远程来源或语音准备失败时，整个转发在投递前失败。
+
 媒体上传由 SDK 在 `getuploadurl` 和 CDN 上传阶段处理临时错误重试；`media_upload_attempts` 控制总尝试次数。多项目消息会先按 `media_upload_concurrency` 有界并发上传媒体，再严格按原始项目顺序组装发送请求，因此并发只缩短准备时间，不改变用户看到的顺序。
 
 Bot 层通过 `messages.send_voice(uid, address?)` 显式选择“作为语音发送”。普通 `<attachment uid="file_xxx"/>` 始终保留原始文件语义，即使扩展名是 `.wav`；`CQ:record`、`CQ:audio` 和内部明确标记为 voice 的媒体回调则发送原生语音。QQ 侧继续转换为 `CQ:record`，微信侧先用 FFmpeg 归一化为 24 kHz、16-bit、单声道 PCM，再由 `silk-python` 编码为 Tencent SILK。部署机必须能从 `PATH` 找到 `ffmpeg`；缺失、音频无效或超出 `[weixin].media_max_size_mb` 时会在任何消息段发出前失败，不会自动改成文件。
