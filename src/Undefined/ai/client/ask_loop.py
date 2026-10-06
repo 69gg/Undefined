@@ -316,6 +316,7 @@ class ClientAskLoopMixin(ClientQueueMixin):
         # 注入常用资源（用于工具执行）
         tool_context.setdefault("ai_client", self)
         tool_context.setdefault("runtime_config", self._get_runtime_config())
+        tool_context.setdefault("_task_progress", [])
         if not isinstance(
             tool_context.get(MUSIC_TRACK_STORE_CONTEXT_KEY),
             MusicTrackReferenceStore,
