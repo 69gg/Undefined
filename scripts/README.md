@@ -179,7 +179,7 @@ uv run python scripts/bump_version.py 3.6.0 --commit
 - `apps/undefined-chat/src-tauri/Cargo.lock`
 
 非 dry-run 时脚本还会执行 `uv sync`，并分别在 Console / Chat 下执行 `npm install --package-lock-only` 与 `cargo update --workspace`，保证 lock 文件和 manifest 不漂移。
-每次运行都会逐一核对所有版本文件，即使 `pyproject.toml` 已是目标版本也会补齐其余目标；非 dry-run 时仍完整执行锁文件同步。若写文件或同步依赖中途失败，修复原因后重跑同一个版本即可继续，不会因主版本已更新而跳过。锁同步实际修改的 `uv.lock`、`package-lock.json` 和 `Cargo.lock` 也会列入变更清单，`--commit` 会包含这些文件。`--dry-run` 只预览版本文件差异，不写盘或执行依赖同步。
+每次运行都会逐一核对所有版本文件，即使 `pyproject.toml` 已是目标版本也会补齐其余目标；非 dry-run 时仍完整执行锁文件同步。若写文件或同步依赖中途失败，修复原因后重跑同一个版本即可继续，不会因主版本已更新而跳过。锁同步实际修改的 `uv.lock`、`package-lock.json` 和 `Cargo.lock` 也会列入本次变更清单。`--commit` 会核对并暂存上述完整的版本管理目标与 `uv.lock`，包括上次失败前已写入的目标，即使本次没有文件写入差异也会检查；只有这些目标存在待提交差异时才创建提交，已暂存的无关文件保持暂存状态，不纳入版本提交。`--dry-run` 只预览版本文件差异，不写盘、执行依赖同步或运行 Git。
 脚本更新 JSON manifest 时只替换顶层 `version` 字段，保留现有格式，避免 Tauri 配置与 Biome 格式化规则漂移。
 
 ### prepare_tauri_android.py — 生成后 Android 修补
