@@ -44,6 +44,58 @@ def _sender() -> Any:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("cancel_owner", [True, False])
+async def test_inflight_send_cancellation_settles_waiters(
+    monkeypatch: pytest.MonkeyPatch,
+    cancel_owner: bool,
+) -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def _fake_once(**_: object) -> str:
+        started.set()
+        await release.wait()
+        return "sent"
+
+    monkeypatch.setattr(arxiv_sender, "_send_arxiv_paper_once", _fake_once)
+    options: dict[str, Any] = {
+        "paper_id": "2501.01234",
+        "sender": _sender(),
+        "target_type": "group",
+        "target_id": 123456,
+        "max_file_size": 100,
+        "author_preview_limit": 2,
+        "summary_preview_chars": 1000,
+    }
+    owner = asyncio.create_task(send_arxiv_paper(**options))
+    await started.wait()
+    follower = asyncio.create_task(send_arxiv_paper(**options))
+    await asyncio.sleep(0)
+    key = ("group", 123456, "2501.01234")
+    future = arxiv_sender._INFLIGHT_SENDS[key]
+    assert not follower.done()
+
+    cancelled_task = owner if cancel_owner else follower
+    cancelled_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await cancelled_task
+
+    if cancel_owner:
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(follower, timeout=1)
+        assert future.cancelled()
+        assert key not in arxiv_sender._RECENT_SENDS
+    else:
+        assert not future.done()
+        assert not owner.done()
+        release.set()
+        assert await asyncio.wait_for(owner, timeout=1) == "sent"
+        assert future.result() == "sent"
+        assert key in arxiv_sender._RECENT_SENDS
+    assert key not in arxiv_sender._INFLIGHT_SENDS
+
+
+@pytest.mark.asyncio
 async def test_send_arxiv_paper_sends_info_and_pdf(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

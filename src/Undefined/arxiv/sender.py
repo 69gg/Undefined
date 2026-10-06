@@ -380,6 +380,10 @@ async def send_arxiv_paper(
             summary_preview_chars=summary_preview_chars,
             context=context,
         )
+    except asyncio.CancelledError:
+        if not future.done():
+            future.cancel()
+        raise
     except Exception as exc:
         if not future.done():
             future.set_exception(exc)
