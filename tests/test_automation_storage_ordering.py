@@ -16,9 +16,9 @@ from Undefined.utils import io
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("cancel_first", [False, True])
+@pytest.mark.parametrize("cancel_when", ["none", "writing", "waiting"])
 async def test_running_task_save_cannot_restore_concurrently_deleted_task(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cancel_first: bool
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cancel_when: str
 ) -> None:
     storage = AutomationStorage(tmp_path / "automations.json", tmp_path / "legacy.json")
     service = AutomationService(
@@ -46,19 +46,26 @@ async def test_running_task_save_cannot_restore_concurrently_deleted_task(
     second: asyncio.Task[bool] | None = None
     try:
         await asyncio.wait_for(started.wait(), 1)
-        if cancel_first:
+        if cancel_when == "writing":
             first.cancel()
         second = asyncio.create_task(service.remove_task("b"))
         await asyncio.sleep(0)
         assert "b" not in service.tasks
         assert len(writes) == 1
+        if cancel_when == "waiting":
+            second.cancel()
+            await asyncio.sleep(0)
+            assert not second.done()
         release.set()
         results = await asyncio.gather(first, second, return_exceptions=True)
-        if cancel_first:
+        if cancel_when == "writing":
             assert isinstance(results[0], asyncio.CancelledError)
         else:
             assert results[0] is None
-        assert results[1] is True
+        if cancel_when == "waiting":
+            assert isinstance(results[1], asyncio.CancelledError)
+        else:
+            assert results[1] is True
         saved = json.loads(storage.path.read_text("utf-8"))
         assert set(saved) == {"a"}
         assert saved["a"]["current_executions"] == 1
