@@ -3570,6 +3570,217 @@ for (const target of ["switch", "edit"]) {
     }
 }
 
+function weixinDialogFixture(env) {
+    const { window, response } = env;
+    const endpoint = "/api/v1/management/runtime/weixin";
+    const sessions = new Map();
+    const held = new Set();
+    const pending = [];
+    const calls = [];
+    const revoked = [];
+    const blobSessions = new WeakMap();
+    let blobId = 0;
+    window.URL.createObjectURL = (blob) => `blob:fixture-qr-${blobSessions.get(blob)}-${++blobId}`;
+    window.URL.revokeObjectURL = (url) => revoked.push(url);
+    window.HTMLImageElement.prototype.decode = async () => {};
+    const defaults = (request, payload) => {
+        if (request.kind === "login") {
+            const sessionId = payload?.session_id;
+            if (!sessionId) throw new Error("login fixture needs a session_id");
+            sessions.set(sessionId, request.body);
+        }
+        if (request.kind === "cancel") sessions.delete(request.sessionId);
+        if (request.kind === "poll" && payload?.status === "confirmed") sessions.delete(request.sessionId);
+        if (request.kind === "qr") return {
+            ...response(200, {}), blob: async () => {
+                const blob = new window.Blob([`qr-${request.sessionId}`], { type: "image/png" });
+                blobSessions.set(blob, request.sessionId);
+                return blob;
+            },
+        };
+        if (request.kind === "status") return response(200, {
+            enabled: true, running: true,
+            accounts: [{ alias: "B", qq_id: 2, enabled: true, connected: true }],
+        });
+        if (request.kind === "pending" || request.kind === "audit") return response(200, { items: [] });
+        return response(200, payload || (request.kind === "poll" ? { status: "wait" } : {}));
+    };
+    window.fetch = (url, options = {}) => {
+        const route = new window.URL(String(url), window.location.href).pathname;
+        const method = options.method || "GET";
+        const login = route.match(/\/login\/([^/]+)(?:\/(qr\.png|refresh|verify))?$/);
+        let kind;
+        if (route === endpoint) kind = "status";
+        else if (route === `${endpoint}/pending`) kind = "pending";
+        else if (route === `${endpoint}/audit`) kind = "audit";
+        else if (route === `${endpoint}/login` && method === "POST") kind = "login";
+        else if (login) kind = method === "DELETE" ? "cancel" : login[2] === "qr.png" ? "qr" : login[2] || "poll";
+        else if (route.includes("/accounts/") && method === "PATCH") kind = "rebind";
+        else throw new Error(`unexpected Weixin request: ${method} ${route}`);
+        const request = { kind, url: String(url), method, sessionId: login?.[1] || "", body: options.body ? JSON.parse(options.body) : null };
+        calls.push(request);
+        if (kind === "login" || held.delete(kind)) return new Promise((resolve, reject) => {
+            pending.push({ ...request, resolve, reject, done: false });
+        });
+        return Promise.resolve(defaults(request));
+    };
+    const element = (id) => window.document.getElementById(id);
+    window.WeixinController.init();
+    return {
+        calls, sessions, revoked,
+        hold(kind) { held.add(kind); },
+        finish(kind, payload, sessionId = "") {
+            const request = pending.find((item) => !item.done && item.kind === kind && (!sessionId || item.sessionId === sessionId));
+            if (!request) throw new Error(`no pending ${kind} ${sessionId}`);
+            request.done = true;
+            request.resolve(defaults(request, payload));
+        },
+        fail(kind, sessionId = "", confirmation = false) {
+            const request = pending.find((item) => !item.done && item.kind === kind && (!sessionId || item.sessionId === sessionId));
+            if (!request) throw new Error(`no pending ${kind} ${sessionId}`);
+            request.done = true;
+            if (confirmation) request.resolve(response(409, { requires_confirmation: true, confirmation_token: "obsolete-token", error: "obsolete confirmation" }));
+            else request.reject(new Error(`obsolete ${kind} failure`));
+        },
+        open(alias = "A", qqId = "1") {
+            element("btnWeixinBind").click();
+            element("weixinAliasInput").value = alias;
+            element("weixinQqInput").value = qqId;
+        },
+        rebind() { window.document.querySelector('[data-weixin-action="rebind"][data-alias="B"]').click(); },
+        submit() { element("btnWeixinBindingSubmit").click(); },
+        close() { element("btnWeixinDialogClose").click(); },
+        refresh() { element("btnWeixinQrRefresh").click(); },
+        verify() {
+            element("weixinVerifyInput").value = "123456";
+            element("weixinVerifyForm").querySelector('button[type="submit"]').click();
+        },
+        snapshot() {
+            return {
+                hidden: element("weixinDialogBackdrop").hidden,
+                alias: element("weixinAliasInput").value,
+                bindingHidden: element("weixinBindingForm").hidden,
+                qrHidden: element("weixinQrStep").hidden,
+                qrSrc: element("weixinQrImage").getAttribute("src"),
+                qrFrame: element("weixinQrFrame").dataset.state,
+                qrState: textOf(window, "weixinQrState"),
+                qrMessage: textOf(window, "weixinQrMessage"),
+                dialogStatus: textOf(window, "weixinDialogStatus"),
+                confirmationHidden: element("weixinConfirmationPanel").hidden,
+                submitDisabled: element("btnWeixinBindingSubmit").disabled,
+                verifyHidden: element("weixinVerifyForm").hidden,
+                overflow: window.document.body.style.overflow,
+            };
+        },
+    };
+}
+
+async function staleWeixinDialogRequest(env, kind, outcome) {
+    const { window } = env;
+    const fixture = weixinDialogFixture(env);
+    await window.WeixinController.loadAll(true);
+    if (kind === "rebind") fixture.rebind();
+    else fixture.open();
+    if (kind !== "login") fixture.hold(kind);
+    if (kind === "rebind") fixture.submit();
+    else {
+        fixture.submit();
+        await tick();
+        if (kind !== "login") {
+            fixture.finish("login", { session_id: "old-A" });
+            await tick();
+            if (kind === "poll") await settle(250);
+            if (kind === "refresh") fixture.refresh();
+            if (kind === "verify") {
+                fixture.hold("poll");
+                await settle(250);
+                fixture.finish("poll", { status: "need_verifycode" }, "old-A");
+                await tick();
+                fixture.verify();
+            }
+        }
+    }
+    await tick();
+    fixture.close();
+    await tick();
+    const closed = fixture.snapshot();
+    fixture.open("C", "3");
+    fixture.submit();
+    await tick();
+    if (kind === "qr" || kind === "poll") {
+        fixture.hold("poll");
+        fixture.finish("login", { session_id: "new-C" });
+        await tick();
+        if (kind === "poll") await settle(250);
+    }
+    const beforeLate = fixture.snapshot();
+    if (outcome === "failure" || outcome === "confirmation") fixture.fail(kind, kind === "login" || kind === "rebind" ? "" : "old-A", outcome === "confirmation");
+    else fixture.finish(kind, kind === "login" ? { session_id: "old-A" } : kind === "poll" ? { status: outcome === "confirmed" ? "confirmed" : "wait", message: "obsolete poll" } : {}, kind === "login" || kind === "rebind" ? "" : "old-A");
+    await tick();
+    const afterLate = fixture.snapshot();
+    if (kind === "poll") {
+        fixture.finish("poll", { status: "need_verifycode", message: "current C verification" }, "new-C");
+        await tick();
+    } else if (kind !== "qr") {
+        fixture.finish("login", { session_id: "new-C" });
+        await tick();
+    }
+    return { closed, beforeLate, afterLate, current: fixture.snapshot(),
+        sessions: Array.from(fixture.sessions.entries()), revoked: fixture.revoked,
+        calls: fixture.calls.map(({ kind: requestKind, sessionId, body }) => ({ kind: requestKind, sessionId, body })) };
+}
+
+for (const kind of ["login", "qr", "poll", "refresh", "verify", "rebind"]) {
+    for (const outcome of kind === "login" ? ["success", "failure", "confirmation"] : kind === "poll" ? ["success", "failure", "confirmed"] : ["success", "failure"]) {
+        SCENARIOS[`weixin_dialog_late_${kind}_${outcome}`] = (env) => staleWeixinDialogRequest(env, kind, outcome);
+    }
+}
+
+SCENARIOS.weixin_dialog_slow_cancel = async (env) => {
+    const fixture = weixinDialogFixture(env);
+    await env.window.WeixinController.loadAll(true);
+    fixture.open(); fixture.submit(); await tick();
+    fixture.finish("login", { session_id: "old-A" }); await tick();
+    fixture.hold("cancel"); fixture.close(); await tick();
+    const closed = fixture.snapshot();
+    fixture.open("C", "3"); fixture.submit(); await tick();
+    fixture.finish("login", { session_id: "new-C" }); await tick();
+    const beforeLate = fixture.snapshot();
+    fixture.finish("cancel", {}, "old-A"); await tick();
+    return { closed, beforeLate, afterLate: fixture.snapshot(), sessions: Array.from(fixture.sessions.keys()) };
+};
+
+SCENARIOS.weixin_dialog_replace_cancels_existing = async (env) => {
+    const fixture = weixinDialogFixture(env);
+    await env.window.WeixinController.loadAll(true);
+    fixture.open(); fixture.submit(); await tick();
+    fixture.finish("login", { session_id: "old-A" }); await tick();
+    fixture.rebind(); await tick();
+    return { current: fixture.snapshot(), sessions: Array.from(fixture.sessions.keys()), revoked: fixture.revoked,
+        cancelIds: fixture.calls.filter((item) => item.kind === "cancel").map((item) => item.sessionId) };
+};
+
+for (const boundary of ["load", "timer", "normal"]) {
+    SCENARIOS[`weixin_dialog_confirmed_${boundary}`] = async (env) => {
+        const fixture = weixinDialogFixture(env);
+        await env.window.WeixinController.loadAll(true);
+        env.window.document.getElementById("btnWeixinBind").focus();
+        fixture.open(); fixture.hold("poll"); fixture.submit(); await tick();
+        fixture.finish("login", { session_id: "old-A" }); await tick(); await settle(250);
+        if (boundary === "load") fixture.hold("status");
+        fixture.finish("poll", { status: "confirmed" }, "old-A"); await tick();
+        if (boundary !== "normal") {
+            fixture.close(); await tick(); fixture.open("C", "3"); fixture.submit(); await tick();
+        }
+        const beforeLate = fixture.snapshot();
+        if (boundary === "load") { fixture.finish("status"); await tick(); }
+        await settle(550);
+        const afterLate = fixture.snapshot();
+        if (boundary !== "normal") { fixture.finish("login", { session_id: "new-C" }); await tick(); }
+        return { beforeLate, afterLate, current: fixture.snapshot(), focus: env.window.document.activeElement?.id || "" };
+    };
+}
+
 async function main() {
     const args = parseArgs(process.argv.slice(2));
     if (!args.scenario) throw new Error("缺少 --scenario");
@@ -3585,6 +3796,8 @@ async function main() {
             ? ["config-form.js"]
             : args.scenario.startsWith("workflow_editor_")
               ? ["workflow-graph.js", "workflow-canvas.js", "workflow-inspector.js", "schedules.js"]
+              : args.scenario.startsWith("weixin_dialog_")
+                ? ["weixin.js"]
             : [],
     });
     const result = await scenario(env);
