@@ -229,3 +229,27 @@ def test_settings_from_config_preserves_snapshot_metadata(
     assert settings.check_updates is False
     assert settings.using_default_password is (password == "changeme")
     assert settings.config_exists is config_exists
+
+
+@pytest.mark.parametrize("timeout", [0, 30, 600])
+def test_stop_timeout_uses_config_snapshot(timeout: int) -> None:
+    config = Config.from_mapping(
+        {"webui": {"stop_timeout_seconds": timeout}}, strict=False
+    )
+    settings = WebUISettings.from_config(config, config_exists=True)
+    assert settings.stop_timeout_seconds == timeout
+
+
+def test_stop_timeout_environment_fallback_and_toml_precedence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("WEBUI_STOP_TIMEOUT_SECONDS", "120")
+    config = Config.from_mapping({}, strict=False)
+    assert config.webui_stop_timeout_seconds == 120
+    config = Config.from_mapping({"webui": {"stop_timeout_seconds": 0}}, strict=False)
+    assert config.webui_stop_timeout_seconds == 0
+
+
+def test_negative_stop_timeout_uses_unlimited_default() -> None:
+    config = Config.from_mapping({"webui": {"stop_timeout_seconds": -1}}, strict=False)
+    assert config.webui_stop_timeout_seconds == 0

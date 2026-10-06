@@ -1,4 +1,5 @@
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass
 import logging
 import os
@@ -8,6 +9,7 @@ import sys
 import time
 import secrets
 from typing import Any
+from Undefined.config.webui_settings import DEFAULT_WEBUI_STOP_TIMEOUT_SECONDS
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +120,9 @@ class SessionStore:
 
 
 class BotProcessController:
-    def __init__(self) -> None:
+    def __init__(
+        self, *, stop_timeout_getter: Callable[[], float] | None = None
+    ) -> None:
         self._process: asyncio.subprocess.Process | None = None
         self._started_at: float | None = None
         self._lock = asyncio.Lock()
@@ -127,6 +131,9 @@ class BotProcessController:
         self._start_new_session = not self._is_windows
         self._creationflags = 0
         self._ctrl_break_signal: int | None = None
+        self._stop_timeout_getter = stop_timeout_getter or (
+            lambda: DEFAULT_WEBUI_STOP_TIMEOUT_SECONDS
+        )
         if self._is_windows:
             self._creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
             self._ctrl_break_signal = getattr(signal, "CTRL_BREAK_EVENT", None)
@@ -193,6 +200,7 @@ class BotProcessController:
                 return self.status()
             logger.info("[WebUI] 停止机器人进程: pid=%s", self._process.pid)
             process = self._process
+            stop_timeout = self._stop_timeout_getter()
             try:
                 if self._start_new_session and process.pid:
                     try:
@@ -211,7 +219,10 @@ class BotProcessController:
                     process.terminate()
 
                 try:
-                    await asyncio.wait_for(process.wait(), timeout=5)
+                    await asyncio.wait_for(
+                        process.wait(),
+                        timeout=stop_timeout if stop_timeout > 0 else None,
+                    )
                 except asyncio.TimeoutError:
                     logger.warning("[WebUI] 机器人进程未及时退出，强制终止")
                     if self._start_new_session and process.pid:

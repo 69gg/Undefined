@@ -298,12 +298,14 @@ def create_app(*, redirect_to_config_once: bool = False) -> web.Application:
     )
 
     # 初始化核心组件
-    app[BOT_APP_KEY] = BotProcessController()
     app[SESSION_STORE_APP_KEY] = SessionStore()
 
     # 配置 WebUI 设置热重载
     config_manager = get_config_manager()
     app[SETTINGS_APP_KEY] = load_webui_settings()
+    app[BOT_APP_KEY] = BotProcessController(
+        stop_timeout_getter=lambda: app[SETTINGS_APP_KEY].stop_timeout_seconds
+    )
 
     # 一次性客户端重定向提示（由 index 处理）
     app[REDIRECT_TO_CONFIG_ONCE_APP_KEY] = redirect_to_config_once
@@ -315,6 +317,7 @@ def create_app(*, redirect_to_config_once: bool = False) -> web.Application:
             "webui_password",
             "webui_autostart_bot",
             "webui_check_updates",
+            "webui_stop_timeout_seconds",
         }
         if any(key.startswith("webui.") for key in changes) or webui_keys.intersection(
             changes

@@ -154,6 +154,7 @@ class Config:
     webui_password: str
     webui_autostart_bot: bool
     webui_check_updates: bool
+    webui_stop_timeout_seconds: int
     api: APIConfig
     weixin: WeixinConfig
     # Code Delivery Agent

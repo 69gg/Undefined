@@ -44,6 +44,7 @@ _GENERATION_MODEL_ENV_REGISTRY: Final[dict[tuple[str, ...], str]] = {
 
 # TOML 路径 → 环境变量名；供 _get_value 在 TOML 缺省时回退，以及文档/工具生成
 ENV_REGISTRY: Final[dict[tuple[str, ...], str]] = {
+    ("webui", "stop_timeout_seconds"): "WEBUI_STOP_TIMEOUT_SECONDS",
     **_GENERATION_MODEL_ENV_REGISTRY,
     ("access", "allowed_group_ids"): "ALLOWED_GROUP_IDS",
     ("access", "allowed_private_ids"): "ALLOWED_PRIVATE_IDS",

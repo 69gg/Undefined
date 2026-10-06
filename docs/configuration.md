@@ -1205,6 +1205,7 @@ api_key = "replace-with-your-key"
 | `password` | `changeme` | WebUI 登录密码 |
 | `autostart_bot` | `false` | WebUI 启动时是否自动启动机器人进程 |
 | `check_updates` | `true` | 打开 WebUI 时是否在后台检查 GitHub 正式 Release |
+| `stop_timeout_seconds` | `0` | 停止 Bot 的收尾期限（秒）；`0` 等待自然结束，正整数超时后强制终止 |
 
 关键行为：
 
@@ -1214,6 +1215,7 @@ api_key = "replace-with-your-key"
 - `webui.password` 在配置成功加载后立即刷新 Management 的登录密码，无需重启 WebUI。
 - `webui.autostart_bot` 控制下一次 WebUI 启动时是否自动启动机器人；修改不会立即启动或停止当前机器人进程。
 - `check_updates` 支持热更新；关闭后只停止页面打开时的自动检查，概览页仍可手动检查。
+- `stop_timeout_seconds` 支持热更新，下一次停止操作读取新值，进行中的停止保持开始时的期限。默认等待模型、下载、回复和历史收尾；设置正整数时需覆盖实际收尾耗时，超时强制终止可能跳过未完成的落盘。环境变量为 `WEBUI_STOP_TIMEOUT_SECONDS`，TOML 显式配置优先。
 - `autostart_bot=true` 时，运行 `uv run Undefined-webui` 会自动拉起 bot 进程，无需手动点击启动按钮；与 WebUI 更新重启后的自动恢复机制（`pending_bot_autostart` marker）互不冲突。
 - `uv run deploy up` 在 `container` 与 `host` 模式下都会写入 `autostart_bot = false`；部署后先完成配置与 QQ 登录，再在 WebUI 点击“启动机器人”。
 - 自动检查在 WebUI 鉴权成功后异步执行，失败不会阻塞或打扰页面。GitHub Release 查询在 WebUI 进程内缓存 15 分钟；同一时刻的并发检查会共享一个在途任务，查询失败时也不会逐个重试外部请求。
@@ -1465,7 +1467,7 @@ Management 的 WebUI 配置按 [§4.23](#423-webui) 的时机生效：密码和�
 
 ### 5.3 明确“会执行热应用”的字段
 
-- `webui.password` / `webui.check_updates`（Management 的登录密码与检查更新开关立即刷新）
+- `webui.password` / `webui.check_updates` / `webui.stop_timeout_seconds`（Management 的登录密码、检查更新开关与下次停止的收尾期限刷新）
 - `onebot.file_send_mode` / `onebot.file_send_host`（新投递读取快照；进行中投递及旧 URL 生命周期不变）
 - 模型发车间隔 / 模型名 / 模型池变更（队列间隔刷新）
 - `models.grok.model_name` / `models.grok.queue_interval_seconds`（队列间隔刷新）
@@ -1919,6 +1921,12 @@ TOML 语法错误、编码错误或读取失败会中止本次加载，热重载
 | TOML 路径 | 环境变量 |
 |-----------|----------|
 | `weather.api_key` | `WEATHER_API_KEY` |
+
+#### `webui`
+
+| TOML 路径 | 环境变量 |
+|-----------|----------|
+| `webui.stop_timeout_seconds` | `WEBUI_STOP_TIMEOUT_SECONDS` |
 
 #### `xxapi`
 

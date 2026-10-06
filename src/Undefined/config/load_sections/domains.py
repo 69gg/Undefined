@@ -53,6 +53,7 @@ def load_domains(data: dict[str, Any]) -> dict[str, Any]:
         "webui_password": webui_settings.password,
         "webui_autostart_bot": webui_settings.autostart_bot,
         "webui_check_updates": webui_settings.check_updates,
+        "webui_stop_timeout_seconds": webui_settings.stop_timeout_seconds,
         "api": api_config,
         "cognitive": cognitive,
         "memes": memes,

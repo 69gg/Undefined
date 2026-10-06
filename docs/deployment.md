@@ -158,6 +158,8 @@ uv run Undefined-webui
 
 `SIGINT`（Ctrl+C）与 `SIGTERM` 都会触发同一套优雅停机流程：先停止 QQ、微信与普通 Runtime API 的新接入，等待已接受的入站处理和 API 请求收尾，停止史官 / memes worker，再由消息处理器排空 AI 队列并落盘历史。排空期间保留 OneBot 响应接收、微信发送和 Runtime 文件下载能力，回复完成后才关闭传输、AI 客户端、检索运行时与渲染资源。等待 worker 收尾期间模型队列保持可用，史官在向量写入后继续提交侧写模型请求也能完成；消息处理器收尾时新落盘的认知任务留待下次启动处理。容器、systemd、supervisor 等默认以 `SIGTERM` 停止进程；其强制终止等待时间应覆盖实际模型和下载收尾耗时。请避免使用 `SIGKILL`（`docker kill -s KILL`），否则会跳过全部落盘清理。
 
+WebUI 停止 Bot 默认等待优雅收尾自然完成；如需设置强制终止期限，配置 `[webui].stop_timeout_seconds` 为正整数秒，`0` 表示不设置期限。它不改变 Docker 或 systemd 自己的停止期限，请同时给外层进程管理器留足时间。
+
 #### 自动启动选项
 
 若希望 WebUI 启动后自动拉起机器人进程，可在 `config.toml` 中设置：

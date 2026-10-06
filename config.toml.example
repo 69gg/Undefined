@@ -1685,6 +1685,9 @@ autostart_bot = false
 # zh: 每次打开 WebUI 时是否在后台检查 GitHub Release 更新。
 # en: Check GitHub Releases for updates in the background whenever WebUI is opened.
 check_updates = true
+# zh: 停止机器人时等待优雅收尾的秒数；0 等待自然结束，正整数超时后强制终止。
+# en: Graceful bot shutdown timeout in seconds; 0 waits until completion, positive values force termination after the deadline.
+stop_timeout_seconds = 0
 
 # zh: 微信 ClawBot/iLink 私聊接入。凭据与游标仅写入 state_dir，不写入本配置。
 # zh: 关闭时不会创建网络连接；二维码登录只能从管理界面显式发起。
