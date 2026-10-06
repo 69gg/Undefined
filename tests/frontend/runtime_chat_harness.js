@@ -343,6 +343,7 @@ function createEnv(root, options = {}) {
         requests,
         requestDetails,
         setRoutes,
+        response,
         scrollActivity,
         scrollTopWrites,
         eventSourceConstructions,
@@ -2873,6 +2874,144 @@ SCENARIOS.history_finalization_slow_history = (env) => jobWaitsForHistoryFinaliz
 
 for (const status of ["done", "error", "cancelled"]) {
     SCENARIOS[`history_finalization_${status}`] = (env) => jobWaitsForHistoryFinalization(env, status);
+}
+
+async function staleChatJobPoll(env, outcome) {
+    const { window, setRoutes, response } = env;
+    let jobPosts = 0;
+    let oldFinished = false;
+    let newPolls = 0;
+    const oldJob = {
+        job_id: "old",
+        conversation_id: "A",
+        status: "running",
+        last_seq: 2,
+        history_finalized: false,
+    };
+    const newJob = { ...oldJob, job_id: "new" };
+    setRoutes([
+        {
+            match: "/chat/conversations",
+            reply: { body: {
+                conversations: [{ id: "A", title: "A" }, { id: "B", title: "B" }],
+                active_job: null,
+            } },
+        },
+        {
+            match: "/chat/history",
+            reply: (url) => ({ body: {
+                items: oldFinished && url.includes("conversation_id=A")
+                    ? [{ role: "bot", content: "old-persisted" }] : [],
+                has_more: false,
+                next_before: null,
+            } }),
+        },
+        {
+            match: "/chat/jobs/active",
+            reply: (url) => ({ body: {
+                job: url.includes("conversation_id=A") && jobPosts > 0 && !oldFinished
+                    ? oldJob : null,
+            } }),
+        },
+        {
+            match: "/jobs/old/events",
+            reply: { body: { job: oldJob, events: [
+                { seq: 1, event: "meta", payload: { job_id: "old", conversation_id: "A" } },
+                { seq: 2, event: "message", payload: { job_id: "old", conversation_id: "A", content: "old-live" } },
+            ] } },
+        },
+        {
+            match: "/jobs/new/events",
+            reply: (url) => {
+                newPolls += 1;
+                const after = Number(new URL(url, window.location.href).searchParams.get("after"));
+                const events = [
+                    { seq: 1, event: "meta", payload: { job_id: "new", conversation_id: "A" } },
+                    { seq: 2, event: "message", payload: { job_id: "new", conversation_id: "A", content: "new-live" } },
+                    ...(newPolls > 1 ? [{ seq: 3, event: "message", payload: { job_id: "new", conversation_id: "A", content: "new-followup" } }] : []),
+                ].filter((event) => event.seq > after);
+                return { body: { job: newJob, events } };
+            },
+        },
+        {
+            match: "/chat/jobs",
+            reply: () => ({ body: {
+                job_id: ++jobPosts === 1 ? "old" : "new", conversation_id: "A",
+            } }),
+        },
+    ]);
+    const fetch = window.fetch;
+    const pending = [];
+    let deferOld = false;
+    window.fetch = (url, options) => {
+        if (deferOld && String(url).includes("/jobs/old/events")) {
+            return new Promise((resolve, reject) => pending.push({ url: String(url), resolve, reject }));
+        }
+        return fetch(url, options);
+    };
+    window.RuntimeController.init();
+    await window.RuntimeController.loadChatHistory(true);
+    const input = window.document.getElementById("runtimeChatInput");
+    const button = window.document.getElementById("btnRuntimeChatSend");
+    input.value = "first";
+    button.click();
+    await tick();
+    deferOld = true;
+    window.document.querySelector('[data-conversation-select="B"]').click();
+    await tick();
+    window.document.querySelector('[data-conversation-select="A"]').click();
+    await tick();
+    if (pending.length !== 2) {
+        throw new Error(`expected two overlapping old job polls, got ${pending.length}`);
+    }
+    oldFinished = true;
+    pending[0].resolve(response(200, {
+        job: { ...oldJob, status: "done", last_seq: 3, history_finalized: true },
+        events: [{ seq: 3, event: "done", payload: { job_id: "old", conversation_id: "A", reply: "old-live" } }],
+    }));
+    await tick();
+    const oldUnlocked = !button.disabled;
+    input.value = "second";
+    button.click();
+    await tick();
+    const snapshot = () => ({
+        disabled: button.disabled,
+        nodes: chatNodes(window).map((node) => ({ text: node.contentText, job: node.jobId })),
+        cancelIds: Array.from(window.document.querySelectorAll("[data-cancel-job]"))
+            .filter((element) => !element.hidden).map((element) => element.dataset.cancelJob),
+    });
+    const beforeLate = snapshot();
+    if (outcome === "failure") {
+        pending[1].reject(new Error("obsolete poll failure"));
+    } else {
+        const terminal = outcome === "done";
+        pending[1].resolve(response(200, {
+            job: terminal ? { ...oldJob, status: "done", history_finalized: true } : oldJob,
+            events: terminal ? [
+                { seq: 99, event: "done", payload: { job_id: "old", conversation_id: "A", reply: "INTRUDER" } },
+            ] : [
+                { seq: 98, event: "meta", payload: { job_id: "old", conversation_id: "A" } },
+                { seq: 99, event: "message", payload: { job_id: "old", conversation_id: "A", content: "INTRUDER" } },
+            ],
+        }));
+    }
+    await tick();
+    const afterLate = snapshot();
+    await settle(650);
+    return {
+        oldUnlocked,
+        jobPosts,
+        beforeLate,
+        afterLate,
+        newPolls,
+        allNodes: chatNodes(window),
+        nextPollUrls: env.requests.filter((url) => url.includes("/jobs/new/events")),
+        toastText: textOf(window, "toast-container"),
+    };
+}
+
+for (const outcome of ["events", "done", "failure"]) {
+    SCENARIOS[`stale_job_poll_${outcome}`] = (env) => staleChatJobPoll(env, outcome);
 }
 
 async function main() {

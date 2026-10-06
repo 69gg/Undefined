@@ -656,6 +656,23 @@ def test_auto_scroll_toggle_persists_preference() -> None:
 # --------------------------------------------------------------------------- #
 
 
+@pytest.mark.parametrize("outcome", ["events", "done", "failure"])
+def test_late_old_job_poll_cannot_replace_or_stop_new_job(outcome: str) -> None:
+    result = run_scenario(f"stale_job_poll_{outcome}")
+
+    assert result["oldUnlocked"] is True, result
+    assert result["jobPosts"] == 2, result
+    assert result["beforeLate"]["disabled"] is True, result
+    assert result["beforeLate"]["cancelIds"] == ["new"], result
+    assert result["afterLate"] == result["beforeLate"], result
+    assert result["newPolls"] >= 2, result
+    assert any("after=2&" in url for url in result["nextPollUrls"]), result
+    assert "obsolete poll failure" not in result["toastText"], result
+    bots = _bot_nodes(result)
+    assert [node["jobId"] for node in bots] == ["", "new"], bots
+    assert bots[-1]["contentTexts"] == ["new-live", "new-followup"], bots
+
+
 def test_foreign_conversation_events_are_ignored() -> None:
     """别的会话的事件不得写进当前会话的聊天区。
 

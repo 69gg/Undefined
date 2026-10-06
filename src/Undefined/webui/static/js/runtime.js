@@ -5387,6 +5387,7 @@
     }
 
     function applyChatEventsPayload(data, jobId) {
+        if (runtimeState.activeJobId !== jobId) return;
         const events = data && Array.isArray(data.events) ? data.events : [];
         const job = data && data.job ? data.job : null;
         events
@@ -5480,27 +5481,22 @@
                     format: "json",
                 }),
             ]);
+            if (runtimeState.activeJobId !== jobId) return;
             runtimeState.chatPollBackoffMs = CHAT_POLL_INTERVAL_MS;
             applyChatEventsPayload(data, jobId);
         } catch (error) {
-            if (runtimeState.activeJobId === jobId) {
-                showToast(t("runtime.chat_reconnecting"), "warning", 1800);
-                runtimeState.chatPollBackoffMs = Math.min(
-                    8000,
-                    Math.max(
-                        CHAT_POLL_INTERVAL_MS,
-                        runtimeState.chatPollBackoffMs * 1.6,
-                    ),
-                );
-            } else {
-                showToast(
-                    `${t("runtime.failed")}: ${appendRuntimeApiHint(error.message || error)}`,
-                    "error",
-                    5000,
-                );
-            }
+            if (runtimeState.activeJobId !== jobId) return;
+            showToast(t("runtime.chat_reconnecting"), "warning", 1800);
+            runtimeState.chatPollBackoffMs = Math.min(
+                8000,
+                Math.max(
+                    CHAT_POLL_INTERVAL_MS,
+                    runtimeState.chatPollBackoffMs * 1.6,
+                ),
+            );
         }
-        if (runtimeState.activeJobId !== jobId || !runtimeState.chatBusy) {
+        if (runtimeState.activeJobId !== jobId) return;
+        if (!runtimeState.chatBusy) {
             stopChatPolling();
             return;
         }
