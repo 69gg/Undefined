@@ -288,6 +288,43 @@ def test_lazy_loading_older_history_keeps_viewport_position() -> None:
     assert result["lazyLoadScrollTop"] == result["lazyLoadExpectedTop"], result
 
 
+@pytest.mark.parametrize("target", ["other", "same"])
+@pytest.mark.parametrize("outcome", ["success", "failure"])
+def test_late_history_page_cannot_modify_current_view_or_its_loading_state(
+    target: str, outcome: str
+) -> None:
+    result = run_scenario(f"stale_history_page_{target}_{outcome}")
+
+    assert result["afterLate"] == result["beforeLate"], result
+    assert result["beforeLate"]["loader"], result
+    assert result["requestsWhileCurrentPagePending"] == 2, result
+    conversation_id = "A" if target == "same" else "B"
+    current_text = f"{conversation_id}-current-{2 if target == 'same' else 1}"
+    assert result["beforeLate"]["texts"] == [current_text], result
+    assert result["afterCurrentPage"]["texts"] == [
+        f"{conversation_id}-legitimate-older",
+        current_text,
+    ], result
+    assert result["afterCurrentPage"]["loader"] == "", result
+    assert len(result["pageUrls"]) == 3, result
+    assert f"conversation_id={conversation_id}" in result["pageUrls"][-1], result
+    assert "before=3" in result["pageUrls"][-1], result
+    assert "obsolete history page failure" not in result["toastText"], result
+
+
+@pytest.mark.parametrize("loading", ["initial", "forced"])
+@pytest.mark.parametrize("failure", ["network", "parse"])
+def test_late_latest_history_failure_cannot_trigger_current_view_recovery(
+    loading: str, failure: str
+) -> None:
+    result = run_scenario(f"stale_latest_history_{loading}_{failure}")
+
+    assert result["beforeLate"]["title"] == "A", result
+    assert result["afterLate"] == result["beforeLate"], result
+    assert result["afterCurrent"]["texts"] == ["A-current-latest"], result
+    assert result["afterCurrent"]["toasts"] == 0, result
+
+
 # --------------------------------------------------------------------------- #
 # 工具块：快照去重与自动折叠
 # --------------------------------------------------------------------------- #

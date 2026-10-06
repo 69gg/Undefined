@@ -3014,6 +3014,180 @@ for (const outcome of ["events", "done", "failure"]) {
     SCENARIOS[`stale_job_poll_${outcome}`] = (env) => staleChatJobPoll(env, outcome);
 }
 
+async function staleChatHistoryPage(env, returnToSameConversation, outcome) {
+    const { window, setRoutes, response } = env;
+    const historyReads = { A: 0, B: 0 };
+    setRoutes([
+        {
+            match: "/chat/conversations",
+            reply: { body: {
+                conversations: [{ id: "A", title: "A" }, { id: "B", title: "B" }],
+                active_job: null,
+            } },
+        },
+        { match: "/chat/jobs/active", reply: { body: { job: null } } },
+        {
+            match: "/chat/history",
+            reply: (url) => {
+                const conversationId = new URL(url, window.location.href).searchParams.get("conversation_id");
+                historyReads[conversationId] += 1;
+                return { body: {
+                    conversation_id: conversationId,
+                    items: [{ role: "bot", content: `${conversationId}-current-${historyReads[conversationId]}` }],
+                    has_more: true,
+                    next_before: conversationId === "A" ? 10 : 20,
+                } };
+            },
+        },
+    ]);
+    const fetch = window.fetch;
+    const pending = [];
+    window.fetch = (url, options) => {
+        if (new URL(String(url), window.location.href).searchParams.has("before")) {
+            return new Promise((resolve, reject) => pending.push({ url: String(url), resolve, reject }));
+        }
+        return fetch(url, options);
+    };
+    window.RuntimeController.init();
+    await window.RuntimeController.loadChatHistory(true);
+    await settle(1800);
+    const log = chatLog(window);
+    const loadOlder = () => {
+        log.scrollTop = 0;
+        log.dispatchEvent(new window.Event("scroll"));
+    };
+    const snapshot = () => ({
+        texts: botNodes(window).map((node) => node.contentText),
+        title: textOf(window, "runtimeChatCurrentTitle"),
+        loader: textOf(window, "runtimeChatLoadMore"),
+        scrollTop: log.scrollTop,
+    });
+    loadOlder();
+    await tick();
+    if (pending.length !== 1) throw new Error("first conversation did not request older history");
+    window.document.querySelector('[data-conversation-select="B"]').click();
+    await tick();
+    if (returnToSameConversation) {
+        window.document.querySelector('[data-conversation-select="A"]').click();
+        await tick();
+    }
+    await settle(1800);
+    loadOlder();
+    await tick();
+    if (pending.length !== 2) throw new Error("current view did not request older history");
+    const beforeLate = snapshot();
+    if (outcome === "failure") {
+        pending[0].reject(new Error("obsolete history page failure"));
+    } else {
+        pending[0].resolve(response(200, {
+            conversation_id: "A",
+            items: [{ role: "bot", content: "A-obsolete-page" }],
+            has_more: true,
+            next_before: 7,
+        }));
+    }
+    await tick();
+    const afterLate = snapshot();
+    loadOlder();
+    await tick();
+    const requestsWhileCurrentPagePending = pending.length;
+    const target = returnToSameConversation ? "A" : "B";
+    pending[1].resolve(response(200, {
+        conversation_id: target,
+        items: [{ role: "bot", content: `${target}-legitimate-older` }],
+        has_more: true,
+        next_before: 3,
+    }));
+    await tick();
+    const afterCurrentPage = snapshot();
+    loadOlder();
+    await tick();
+    return {
+        target,
+        beforeLate,
+        afterLate,
+        requestsWhileCurrentPagePending,
+        afterCurrentPage,
+        pageUrls: pending.map((request) => request.url),
+        toastText: textOf(window, "toast-container"),
+    };
+}
+
+for (const target of ["other", "same"]) {
+    for (const outcome of ["success", "failure"]) {
+        SCENARIOS[`stale_history_page_${target}_${outcome}`] = (env) =>
+            staleChatHistoryPage(env, target === "same", outcome);
+    }
+}
+
+async function staleLatestChatHistory(env, initialLoad, failure) {
+    const { window, setRoutes, response } = env;
+    setRoutes([
+        { match: "/chat/conversations", reply: { body: {
+            conversations: [{ id: "A", title: "A" }, { id: "B", title: "B" }],
+            active_job: null,
+        } } },
+        { match: "/chat/jobs/active", reply: { body: { job: null } } },
+        { match: "/chat/history", reply: { body: {
+            items: [{ role: "bot", content: "initial history" }],
+            has_more: false, next_before: null,
+        } } },
+    ]);
+    const fetch = window.fetch;
+    const pending = [];
+    let deferA = initialLoad;
+    window.fetch = (url, options) => {
+        if (deferA && String(url).includes("/chat/history") && String(url).includes("conversation_id=A")) {
+            if (failure === "parse") {
+                return Promise.resolve({ ...response(200, {}),
+                    json: () => new Promise((resolve, reject) => pending.push({ resolve, reject })),
+                });
+            }
+            return new Promise((resolve, reject) => pending.push({ resolve, reject }));
+        }
+        return fetch(url, options);
+    };
+    window.RuntimeController.init();
+    if (initialLoad) {
+        window.__harness.setAuthenticated(true);
+        window.RuntimeController.onTabActivated("chat");
+        await tick();
+    } else {
+        await window.RuntimeController.loadChatHistory(true);
+        window.document.querySelector('[data-conversation-select="B"]').click();
+        await tick();
+        deferA = true;
+        window.document.querySelector('[data-conversation-select="A"]').click();
+        await tick();
+    }
+    window.document.querySelector('[data-conversation-select="B"]').click();
+    await tick();
+    window.document.querySelector('[data-conversation-select="A"]').click();
+    await tick();
+    if (pending.length !== 2) throw new Error(`expected two pending A latest reads, got ${pending.length}`);
+    const snapshot = () => ({
+        texts: botNodes(window).map((node) => node.contentText),
+        title: textOf(window, "runtimeChatCurrentTitle"),
+        toasts: window.document.querySelectorAll(".toast").length,
+        activeRequests: env.requests.filter((url) => url.includes("/chat/jobs/active")).length,
+    });
+    const beforeLate = snapshot();
+    pending[0].reject(new Error("obsolete latest history failure"));
+    await tick();
+    const afterLate = snapshot();
+    const body = { items: [{ role: "bot", content: "A-current-latest" }], has_more: false, next_before: null };
+    pending[1].resolve(failure === "parse" ? body : response(200, body));
+    await tick();
+    return { beforeLate, afterLate, afterCurrent: snapshot() };
+}
+
+for (const loading of ["initial", "forced"]) {
+    for (const failure of ["network", "parse"]) {
+        SCENARIOS[`stale_latest_history_${loading}_${failure}`] = (env) =>
+            staleLatestChatHistory(env, loading === "initial", failure);
+    }
+}
+
 async function main() {
     const args = parseArgs(process.argv.slice(2));
     if (!args.scenario) throw new Error("缺少 --scenario");

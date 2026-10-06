@@ -28,6 +28,7 @@
         chatHistoryCursor: null,
         chatHistoryHasMore: false,
         chatHistoryLoading: false,
+        chatHistoryRequest: null,
         chatHistoryFinalization: null,
         chatTopLoadSuppressedUntil: 0,
         chatAutoScroll: true,
@@ -2097,6 +2098,10 @@
     function clearChatMessages() {
         const log = get("runtimeChatLog");
         if (!log) return;
+        runtimeState.chatHistoryRequest = null;
+        runtimeState.chatHistoryLoading = false;
+        const loader = get("runtimeChatLoadMore");
+        if (loader) loader.textContent = "";
         clearToolCollapseTimers();
         log.innerHTML = "";
         runtimeState.streamingMessageId = null;
@@ -5058,6 +5063,7 @@
         runtimeState.chatHistoryCursor = null;
         runtimeState.chatHistoryHasMore = false;
         runtimeState.chatHistoryLoading = false;
+        runtimeState.chatHistoryRequest = null;
         runtimeState.chatTopLoadSuppressedUntil = 0;
         runtimeState.lastEventSeq = 0;
         runtimeState.streamingMessageId = null;
@@ -5133,19 +5139,27 @@
             return;
         }
         runtimeState.chatHistoryLoading = true;
-        const conversationId = currentChatConversationId();
-        const res = await api(
-            chatUrl("/api/runtime/chat/history", { limit: 50 }),
-        );
-        const data = await parseJsonSafe(res);
+        const request = { conversationId: currentChatConversationId() };
+        runtimeState.chatHistoryRequest = request;
+        let res;
+        let data;
+        try {
+            res = await api(
+                chatUrl("/api/runtime/chat/history", { limit: 50 }),
+            );
+            data = await parseJsonSafe(res);
+        } catch (error) {
+            if (!isCurrentChatHistoryRequest(request)) return;
+            runtimeState.chatHistoryLoading = false;
+            runtimeState.chatHistoryRequest = null;
+            throw error;
+        }
+        if (!isCurrentChatHistoryRequest(request)) return;
         if (!res.ok || (data && data.error)) {
             runtimeState.chatHistoryLoading = false;
             throw new Error(buildRequestError(res, data));
         }
-        if (
-            conversationId !== currentChatConversationId() ||
-            (expectedJobId && runtimeState.activeJobId !== expectedJobId)
-        ) {
+        if (expectedJobId && runtimeState.activeJobId !== expectedJobId) {
             runtimeState.chatHistoryLoading = false;
             return;
         }
@@ -5166,6 +5180,13 @@
         }
     }
 
+    function isCurrentChatHistoryRequest(request) {
+        return (
+            runtimeState.chatHistoryRequest === request &&
+            request.conversationId === currentChatConversationId()
+        );
+    }
+
     async function loadOlderChatHistory() {
         const log = get("runtimeChatLog");
         if (
@@ -5176,6 +5197,8 @@
         )
             return;
         runtimeState.chatHistoryLoading = true;
+        const request = { conversationId: currentChatConversationId() };
+        runtimeState.chatHistoryRequest = request;
         const loader = get("runtimeChatLoadMore");
         if (loader) loader.textContent = t("runtime.chat_loading_more");
         const previousHeight = log.scrollHeight;
@@ -5189,6 +5212,7 @@
                 }),
             );
             const data = await parseJsonSafe(res);
+            if (!isCurrentChatHistoryRequest(request)) return;
             if (!res.ok || (data && data.error)) {
                 throw new Error(buildRequestError(res, data));
             }
@@ -5206,14 +5230,18 @@
             runtimeState.chatHistoryHasMore = !!(data && data.has_more);
             log.scrollTop = previousTop + (log.scrollHeight - previousHeight);
         } catch (error) {
+            if (!isCurrentChatHistoryRequest(request)) return;
             showToast(
                 `${t("runtime.failed")}: ${appendRuntimeApiHint(error.message || error)}`,
                 "error",
                 5000,
             );
         } finally {
-            runtimeState.chatHistoryLoading = false;
-            if (loader) loader.textContent = "";
+            if (isCurrentChatHistoryRequest(request)) {
+                runtimeState.chatHistoryLoading = false;
+                runtimeState.chatHistoryRequest = null;
+                if (loader) loader.textContent = "";
+            }
         }
     }
 
