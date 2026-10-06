@@ -447,6 +447,8 @@ data/cognitive/
 
 更换嵌入模型（维度变化或模型升级）后，需要对向量库进行全量重嵌入。详见 [`scripts/reembed_cognitive.py`](../scripts/reembed_cognitive.py)。
 
+重嵌入读取 Chroma 中现有的检索正文，不从侧写 Markdown 重建内容。恢复历史侧写或补同步当前侧写时，使用下方的 `restore_profile.py restore` / `sync`。
+
 向量维度发生变化时脚本先把新向量写入临时 collection，全部完成并校验后才删除旧库并换名（ChromaDB 定维后无法原地改维，直接 upsert 异维向量会失败）。建议先 `--dry-run` 确认维度变化与记录数：预览在系统临时目录的完整副本上读取，源 Chroma 文件和 collection 不会被修改，也不会清理或换名遗留的临时 collection；仍会调用嵌入 API，并可能记录 token 用量。请预留副本所需的临时磁盘空间，并按以下步骤停止写入后运行。
 
 ```bash
@@ -482,13 +484,18 @@ uv run python scripts/restore_profile.py list --entity-type user --entity-id {us
 # 预览某个版本内容（不改动文件）
 uv run python scripts/restore_profile.py show --entity-type user --entity-id {user_id} --revision {timestamp}.md
 
-# 恢复该版本（先 dry-run 确认，再实际恢复）
+# 停止机器人及其他写入侧写/向量库的进程后，先预览，再恢复并同步检索
 uv run python scripts/restore_profile.py restore --entity-type user --entity-id {user_id} --revision {timestamp}.md --dry-run
 uv run python scripts/restore_profile.py restore --entity-type user --entity-id {user_id} --revision {timestamp}.md
+
+# 若向量同步失败，修复错误后从当前 Markdown 重试，不必再次恢复快照
+uv run python scripts/restore_profile.py sync --entity-type user --entity-id {user_id} --dry-run
+uv run python scripts/restore_profile.py sync --entity-type user --entity-id {user_id}
 ```
 
-恢复只改侧写 Markdown 与历史快照，不会更新 ChromaDB 中的侧写向量；若同一实体在
-`cognitive_profiles` 里有旧向量，请按[更换嵌入模型](#更换嵌入模型)的方式重嵌入侧写。
+`restore` 默认同时恢复 Markdown、保存当前内容的历史快照，并用当前 cognitive 嵌入模型同步 `cognitive_profiles` 中该实体的检索正文和向量，其他实体保持不变。检索正文沿用运行时格式，包含恢复版本中的名称、标签、评价、锐评与正文。模型调用失败时尚未恢复文件；若文件已恢复而向量写入失败，命令会报错，可用 `sync` 从当前文件补同步。文件和向量库之间没有跨存储事务，请保持机器人及其他写入进程停止，直到同步成功。
+
+`--dry-run` 只展示将恢复的内容、检索正文和两个目录，不写盘、不打开 Chroma、不调用模型。目录默认读取 `cognitive.profiles_path` 与 `cognitive.vector_store_path`；操作独立副本时同时指定 `--profiles-path` 和 `--db-path`。实际恢复/同步可能调用嵌入 API 并记录 token 用量；若已更换嵌入模型维度，请先按[更换嵌入模型](#更换嵌入模型)重建整个向量库，再恢复或同步单个侧写。
 
 **级别 3：完整移除**
 

@@ -65,6 +65,8 @@ python scripts/sync_config_template.py --stdout
 
 **原理**：ChromaDB 存储了完整的原文本（`documents`），脚本读取所有记录，用新模型重新计算向量后 upsert 覆写，metadata 保持不变。
 
+脚本不重新读取侧写 Markdown，也不用于历史侧写恢复。恢复版本或从当前 Markdown 更新检索正文与向量，请使用下方的 `restore_profile.py restore` / `sync`。
+
 **维度变化**：collection 在首次写入时定维，异维 upsert 会直接报 `InvalidArgumentError`。脚本把新向量写入临时 collection，全部写完并校验记录数后才删除旧库、把临时库换名为正式库。实际运行会清理未完成的临时库，或在正式库缺失时恢复临时库。
 
 `--dry-run` 先复制向量库到系统临时目录，仅在副本上打开 Chroma 客户端，源向量库的数据和文件均不修改。它不会创建缺失的 collection、删除残留临时库或把临时库换名；若只有临时库，会读取其中的记录预览恢复后的重嵌入。预览仍会调用嵌入 API 计算向量，并可能记录 token 用量；需要足够临时磁盘空间保存完整副本。运行前停止机器人及其他写入该库的进程，保证复制和正式迁移读取一致的数据。
@@ -107,14 +109,20 @@ uv run python scripts/restore_profile.py list --entity-type user --entity-id 123
 # 查看某个历史版本内容
 uv run python scripts/restore_profile.py show --entity-type user --entity-id 123456 --revision 20260101000000000000.md
 
-# 恢复某个历史版本（恢复前会把当前内容另存为新快照，可再次回退）
+# 停止机器人及其他写入进程后恢复，并同步该实体的检索正文与向量
 uv run python scripts/restore_profile.py restore --entity-type user --entity-id 123456 --revision 20260101000000000000.md
 
 # 仅预览，不写盘
 uv run python scripts/restore_profile.py restore --entity-type user --entity-id 123456 --revision 20260101000000000000.md --dry-run
+
+# 补同步当前 Markdown（例如恢复成功但向量写入失败后重试）
+uv run python scripts/restore_profile.py sync --entity-type user --entity-id 123456 --dry-run
+uv run python scripts/restore_profile.py sync --entity-type user --entity-id 123456
 ```
 
-**注意**：恢复只改侧写 Markdown 与历史快照，不会更新 ChromaDB 中的侧写向量；需要同步检索结果时按 `docs/cognitive-memory.md` 的说明重嵌入。
+`restore` 默认恢复 Markdown、把当前内容另存为历史快照，并使用当前 cognitive 嵌入配置更新 `cognitive_profiles` 中该实体的检索正文与向量。`sync` 只从当前 Markdown 补同步检索，不创建快照。模型请求失败时文件保持原状；向量写入失败时命令报错，已恢复文件保留，可修复错误后重跑 `sync`，无需依赖可能已被清理的旧快照。文件与向量库没有跨存储事务，实际恢复/同步前需停止机器人和其他写入进程，成功后再启动。
+
+`--dry-run` 展示文件内容、检索正文与路径，不打开 Chroma、不调用模型、不写盘。目录默认来自 `cognitive.profiles_path` 与 `cognitive.vector_store_path`；操作独立副本时同时传入 `--profiles-path` 和 `--db-path`。实际恢复/同步会调用嵌入 API，可能记录 token 用量。若新模型维度不同于现有库，先完成全库重嵌入再恢复/同步单个侧写。
 
 ### release_notes.py — 发布版本校验与 Release notes 生成
 

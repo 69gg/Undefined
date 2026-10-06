@@ -6,6 +6,7 @@ cognitive_events 和 cognitive_profiles 两个 collection 进行全量重嵌入�
 
 原理：ChromaDB 存储了完整的原文本（documents），本脚本读取所有记录，
 用新模型重新计算向量，然后通过 upsert 覆写回去。metadata 保持不变。
+它不会重新读取侧写 Markdown；历史恢复与当前文件同步使用 restore_profile.py。
 
 维度变化：ChromaDB 的 collection 在首次写入时定维，异维向量 upsert 会直接失败
 （InvalidArgumentError）。脚本会先比较新旧向量维度，检测到变化时把新向量全部
