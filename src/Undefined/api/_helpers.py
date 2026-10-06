@@ -8,7 +8,7 @@ import json
 import logging
 from contextlib import suppress
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable
 from urllib.parse import urlsplit
 
@@ -191,6 +191,7 @@ def _optional_query_param(request: web.Request, key: str) -> str | None:
 
 
 def _parse_query_time(value: str | None) -> datetime | None:
+    """统一为 UTC；旧记录及无时区查询沿用系统本地时间含义。"""
     text = str(value or "").strip()
     if not text:
         return None
@@ -198,8 +199,8 @@ def _parse_query_time(value: str | None) -> datetime | None:
     if "T" in text:
         candidates.append(text.replace("T", " "))
     for candidate in candidates:
-        with suppress(ValueError):
-            return datetime.fromisoformat(candidate)
+        with suppress(ValueError, OverflowError, OSError):
+            return datetime.fromisoformat(candidate).astimezone(timezone.utc)
     return None
 
 
