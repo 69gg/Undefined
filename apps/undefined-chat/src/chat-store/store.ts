@@ -1195,6 +1195,9 @@ export function createChatStore({
 				finishJob(jobId, conversationId);
 			}
 		} catch (err) {
+			if (state.activeJobsByConversation[conversationId]?.jobId !== jobId) {
+				return;
+			}
 			dispatch({ type: "send/error", error: errorMessage(err) });
 		}
 	}
@@ -1528,6 +1531,13 @@ export function createChatStore({
 	}
 
 	function handleRuntimeStatus(status: RuntimeSseStatus): void {
+		const conversationId = state.jobConversationById[status.jobId];
+		if (
+			!conversationId ||
+			state.activeJobsByConversation[conversationId]?.jobId !== status.jobId
+		) {
+			return;
+		}
 		if (status.status === "connected") {
 			dispatch({ type: "connection/set", connectionState: "streaming" });
 			return;
@@ -1537,12 +1547,7 @@ export function createChatStore({
 			return;
 		}
 		if (status.status === "closed") {
-			const conversationId = state.jobConversationById[status.jobId];
-			if (conversationId && state.activeJobsByConversation[conversationId]) {
-				fetchJobEventsFallback(status.jobId);
-				return;
-			}
-			dispatch({ type: "connection/set", connectionState: "connected" });
+			fetchJobEventsFallback(status.jobId);
 		}
 	}
 

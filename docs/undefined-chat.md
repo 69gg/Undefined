@@ -60,6 +60,7 @@ Runtime 请求必须由 Tauri command 拼接到已配置 origin 下，避免 Rea
 - SSE error/closed 或原生订阅建立失败时使用 `job_id + seq` 调用 JSON events fallback 补齐遗漏事件；消息已成功创建 job 后，订阅失败不会撤回用户消息或恢复已发送草稿。
 - JSON fallback 先续接增量事件，再应用 Runtime 的完整正文与阶段快照，保留已有消息/工具时间线和已结束调用，避免把快照正文再次累计。
 - 重叠 JSON 请求按 job 身份和请求代次校验；已结束、已被替换的 job 或落后于已消费事件游标的回包会被忽略，避免迟到响应覆盖下一轮任务或回退回复内容。
+- 取消请求错误和 SSE 的连接状态通知同样只作用于对应的活跃 job，旧任务的迟到通知不会改写新任务的错误或连接状态。
 - `done` / `error` / `cancelled` 事件到达后，客户端继续保留当前会话的 job 和发送锁，通过 JSON polling 等待 `history_finalized=true`，确认历史落盘后再刷新历史并清理订阅。
 - 历史分页的 `before` / `next_before` 是非负数值索引；React 与 Tauri command 使用同一数值契约，首屏不传 `before`。
 - Android 回到前台时执行 `store.bootstrap()`，刷新配置、会话、当前历史页和 active jobs，并重新建立事件订阅。

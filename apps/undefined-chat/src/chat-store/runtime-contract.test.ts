@@ -469,4 +469,108 @@ describe("Runtime job contract through the native client", () => {
 		expect(store.getSnapshot().eventCursorByJob["job-1"]).toBe(4);
 		expect(client.getHistory).toHaveBeenCalledTimes(2);
 	});
+
+	test("an old cancellation rejection cannot overwrite a new job's send error", async () => {
+		const nativeClient = createTauriRuntimeClient();
+		let rejectCancel!: (reason: Error) => void;
+		const pendingCancel = new Promise((_resolve, reject) => {
+			rejectCancel = reject;
+		});
+		vi.mocked(invoke)
+			.mockReturnValueOnce(pendingCancel)
+			.mockResolvedValueOnce({
+				status: 200,
+				ok: true,
+				body: {
+					job: runtimeJob({ status: "done", history_finalized: true }),
+					events: [],
+				},
+			});
+		const running = job();
+		const client = runtimeClientStub({
+			getActiveJobs: vi.fn(async () => ({ job: running, jobs: [running] })),
+			cancelJob: nativeClient.cancelJob,
+			fetchJobEventsJson: nativeClient.fetchJobEventsJson,
+			sendMessage: vi.fn(async () => job({ jobId: "job-new" })),
+		});
+		const store = createChatStore({ client });
+		await store.bootstrap();
+		const cancelling = store.cancelJob("job-1");
+		store.handleRuntimeStatus({
+			subscriptionId: "sub-1",
+			jobId: "job-1",
+			status: "error",
+			detail: "closed",
+		});
+		await vi.waitFor(() =>
+			expect(
+				store.getSnapshot().activeJobsByConversation.default,
+			).toBeUndefined(),
+		);
+		store.updateDraft("default", "新任务");
+		await store.sendSelectedMessage();
+		rejectCancel(new Error("old cancellation failed"));
+		await cancelling;
+		expect(store.getSnapshot().sendError).toBeNull();
+		expect(store.getSnapshot().activeJobsByConversation.default?.jobId).toBe(
+			"job-new",
+		);
+	});
+
+	test.each(["connected", "error", "closed"])(
+		"a late old SSE %s status cannot change a new job's connection state",
+		async (status) => {
+			const running = job();
+			const client = runtimeClientStub({
+				getActiveJobs: vi.fn(async () => ({ job: running, jobs: [running] })),
+				fetchJobEventsJson: vi.fn(async () => ({
+					job: job({ status: "done", historyFinalized: true }),
+					after: 0,
+					lastSeq: 0,
+					events: [],
+				})),
+				sendMessage: vi.fn(async () => job({ jobId: "job-new" })),
+			});
+			const store = createChatStore({ client });
+			await store.bootstrap();
+			store.handleRuntimeStatus({
+				subscriptionId: "sub-1",
+				jobId: "job-1",
+				status: "error",
+				detail: "closed",
+			});
+			await vi.waitFor(() =>
+				expect(
+					store.getSnapshot().activeJobsByConversation.default,
+				).toBeUndefined(),
+			);
+			store.updateDraft("default", "新任务");
+			await store.sendSelectedMessage();
+			// 活跃新任务进入正常 fallback，随后旧通知不能改变这一状态或发起额外请求。
+			const newStatus = {
+				subscriptionId: "sub-new",
+				jobId: "job-new",
+				detail: "closed",
+			};
+			store.handleRuntimeStatus({ ...newStatus, status: "connected" });
+			expect(store.getSnapshot().connectionState).toBe("streaming");
+			vi.mocked(client.fetchJobEventsJson).mockImplementationOnce(
+				() => new Promise(() => {}),
+			);
+			store.handleRuntimeStatus({ ...newStatus, status: "closed" });
+			expect(store.getSnapshot().connectionState).toBe("json_fallback");
+			const requests = vi.mocked(client.fetchJobEventsJson).mock.calls.length;
+			store.handleRuntimeStatus({
+				subscriptionId: "sub-1",
+				jobId: "job-1",
+				status,
+				detail: "late",
+			});
+			expect(store.getSnapshot().connectionState).toBe("json_fallback");
+			expect(client.fetchJobEventsJson).toHaveBeenCalledTimes(requests);
+			expect(store.getSnapshot().activeJobsByConversation.default?.jobId).toBe(
+				"job-new",
+			);
+		},
+	);
 });
