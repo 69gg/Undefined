@@ -65,7 +65,9 @@ python scripts/sync_config_template.py --stdout
 
 **原理**：ChromaDB 存储了完整的原文本（`documents`），脚本读取所有记录，用新模型重新计算向量后 upsert 覆写，metadata 保持不变。
 
-**维度变化**：collection 在首次写入时定维，异维 upsert 会直接报 `InvalidArgumentError`。脚本会先比较新旧向量维度，检测到变化时先读全量记录、再删除并重建 collection，最后按新维度写回；`--dry-run` 只提示会重建，不做任何写入。
+**维度变化**：collection 在首次写入时定维，异维 upsert 会直接报 `InvalidArgumentError`。脚本把新向量写入临时 collection，全部写完并校验记录数后才删除旧库、把临时库换名为正式库。实际运行会清理未完成的临时库，或在正式库缺失时恢复临时库。
+
+`--dry-run` 先复制向量库到系统临时目录，仅在副本上打开 Chroma 客户端，源向量库的数据和文件均不修改。它不会创建缺失的 collection、删除残留临时库或把临时库换名；若只有临时库，会读取其中的记录预览恢复后的重嵌入。预览仍会调用嵌入 API 计算向量，并可能记录 token 用量；需要足够临时磁盘空间保存完整副本。运行前停止机器人及其他写入该库的进程，保证复制和正式迁移读取一致的数据。
 
 **前置条件**：先在 `config.toml` 中将 `[models.embedding]` 更新为新模型配置。
 
@@ -82,7 +84,7 @@ uv run python scripts/reembed_cognitive.py --profiles-only
 # 自定义批大小（默认 32，降低可减小 API 压力）
 uv run python scripts/reembed_cognitive.py --batch-size 16
 
-# 模拟运行（不实际写入，用于验证配置和统计数量）
+# 模拟运行（不修改源 ChromaDB，用于验证配置和统计数量）
 uv run python scripts/reembed_cognitive.py --dry-run
 
 # 详细日志
