@@ -133,6 +133,7 @@ allow_cancel_after_send = false
   - inflight **尚未发消息** → 调 `inflight_task.cancel()`，桶回到 `TYPING`，新消息追加进去，重置 T1/T2；inflight 协程在 `RequestContext` 里清理后退出，**不写入回复历史**。
   - T2 已经把请求入队但 coordinator 还没注册 inflight → 取消旧 `BatchDispatchToken`；旧请求即使稍后被队列取出，也会在 `execute_reply` 入口跳过，新消息继续合并进重新计时的 batch。
   - inflight **已经发过消息** 且 `allow_cancel_after_send=False`（默认安全） → 不取消 inflight，**新消息开新 batch**（旧桶在 inflight 自然结束后清理）。
+  - 投机调用已经回复并完成 → 立即结束旧 batch；窗口内后续消息也会开启新 batch，不再把已回答的旧消息合并重放。此时任务已经完成，`allow_cancel_after_send` 不改变该行为。尚未回复就完成的投机仍保留原消息，允许后续补充重新合并。
 - **FINALIZING**：旧 batch 已到 T1，若此时又来新消息，直接开新桶，不阻塞旧 inflight 收尾。
 - `allow_cancel_after_send=True` 会在 inflight 已发过消息后仍取消，可能造成半截回复、重复回复或上下文撕裂，仅极端场景启用。
 

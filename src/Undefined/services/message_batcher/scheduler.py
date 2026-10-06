@@ -340,11 +340,20 @@ class MessageBatcher:
                 state.phase.value,
             )
             return
+        if (
+            state.phase is BatchPhase.SPECULATING
+            and state.inflight is not None
+            and was_message_sent(state.inflight.request_context)
+        ):
+            # 已回复且模型已结束，旧批次无需再等待 T1；完成后不能再取消，
+            # 新消息必须开新桶，不能重放旧 items（与 allow_cancel_after_send 无关）。
+            self._cancel_t1(state)
+            self._cancel_t2(state)
+            state.phase = BatchPhase.FINALIZING
+            self._buckets.pop(key, None)
         state.inflight = None
-        # 若 phase 是 SPECULATING 且 T1 已经 fire 过（FINALIZING 才 unregister），
-        # 此时 inflight 自然结束 → 桶已经在 _on_t1_timer 中弹出，无需再做事
-        # 若仍在 SPECULATING（T1 未到）：inflight 已结束但仍可能有新消息进来；
-        # 保持 SPECULATING，新消息会按 SPECULATING 分支处理（已发消息开新 batch / 未发追加）
+        # 未发回复的投机仍保留 items，后续补充消息可以重新合并；T1 已到的桶
+        # 则交给 _handle_t1 收尾，避免注销旧任务时误删后来创建的新桶。
         logger.debug(
             "[MessageBatcher] 注销 inflight 任务: scope=%s sender=%s phase=%s",
             scope,

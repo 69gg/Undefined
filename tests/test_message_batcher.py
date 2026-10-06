@@ -430,6 +430,38 @@ async def test_speculative_not_cancelled_when_already_sent_default() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("already_sent", [False, True])
+@pytest.mark.parametrize("allow_cancel_after_send", [False, True])
+async def test_completed_speculation_does_not_reprocess_answered_items(
+    already_sent: bool, allow_cancel_after_send: bool
+) -> None:
+    cfg = MessageBatcherConfig(
+        enabled=True,
+        window_seconds=100.0,
+        pre_send_seconds=50.0,
+        allow_cancel_after_send=allow_cancel_after_send,
+    )
+    rec = _Recorder()
+    batcher = MessageBatcher(cfg, rec)
+    fake_ctx = _FakeRequestContext()
+    fake_ctx.set_resource("message_sent_this_turn", already_sent)
+    try:
+        await batcher.submit(_make_item(text="m1"))
+        await batcher._handle_t2(("group:1", 100))
+        inflight = asyncio.create_task(asyncio.sleep(0))
+        batcher.register_inflight("group:1", 100, inflight, fake_ctx)
+        await inflight
+        batcher.unregister_inflight("group:1", 100, inflight)
+
+        await batcher.submit(_make_item(text="m2"))
+        await batcher.flush_sender("group:1", 100)
+        expected = [["m1"], ["m2"]] if already_sent else [["m1"], ["m1", "m2"]]
+        assert [[item.text for item in items] for items in rec.batches] == expected
+    finally:
+        await batcher.flush_all()
+
+
+@pytest.mark.asyncio
 async def test_speculative_cancelled_when_already_sent_with_allow_flag() -> None:
     """``allow_cancel_after_send=True`` 时即便已发过消息也强制取消 inflight。
 
