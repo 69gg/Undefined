@@ -257,7 +257,7 @@ class WebChatConversationStore:
     ) -> dict[str, Any]:
         conv_id = _normalize_conversation_id(conversation_id)
         async with self._get_lock(conv_id):
-            conv = self._require_conversation_locked(conv_id)
+            conv = _copy_json(self._require_conversation_locked(conv_id))
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             normalized_role = "bot" if role == "bot" else "user"
             record: dict[str, Any] = {
@@ -554,10 +554,14 @@ class WebChatConversationStore:
 
     async def _save_conversation_locked(self, conv: dict[str, Any]) -> None:
         normalized = _normalize_conversation(conv, str(conv.get("id") or uuid4().hex))
-        self._cache[str(normalized["id"])] = normalized
-        await io.write_json(
-            self._path_for(str(normalized["id"])), normalized, use_lock=True
-        )
+
+        async def commit() -> None:
+            await io.write_json(
+                self._path_for(str(normalized["id"])), normalized, use_lock=True
+            )
+            self._cache[str(normalized["id"])] = normalized
+
+        await io.run_cancellation_safe(commit())
 
     def _conversation_summary(self, conv: dict[str, Any]) -> dict[str, Any]:
         messages = _messages(conv)

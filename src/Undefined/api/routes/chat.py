@@ -379,13 +379,22 @@ class ChatJob:
         return payloads
 
 
+class ChatJobManagerClosingError(RuntimeError):
+    """Runtime 正在收尾，不能接受新的聊天任务。"""
+
+
 class ChatJobManager:
     def __init__(self, ctx: RuntimeAPIContext) -> None:
         self._ctx = ctx
         self._jobs: dict[str, ChatJob] = {}
         self._lock = asyncio.Lock()
+        self._closing = False
         self._title_schedule_lock = asyncio.Lock()
         self.conversation_store = WebChatConversationStore()
+
+    def begin_shutdown(self) -> None:
+        """立即关闭任务创建入口，已有任务由 stop 收尾。"""
+        self._closing = True
 
     async def create_job(
         self,
@@ -397,6 +406,8 @@ class ChatJobManager:
         pre_record_user_history: bool = False,
         reuse_previous_user_history: bool = False,
     ) -> ChatJob:
+        if self._closing:
+            raise ChatJobManagerClosingError("Chat service is stopping")
         await self.conversation_store.ensure_ready(self._ctx.history_manager)
         requested_conversation_id = str(conversation_id or "").strip()
         resolved_conversation_id = requested_conversation_id or _DEFAULT_CONVERSATION_ID
@@ -421,6 +432,8 @@ class ChatJobManager:
             or reuse_previous_user_history,
         )
         async with self._lock:
+            if self._closing:
+                raise ChatJobManagerClosingError("Chat service is stopping")
             if any(
                 self._job_blocks_history_mutation(existing)
                 for existing in self._jobs.values()
@@ -428,37 +441,45 @@ class ChatJobManager:
             ):
                 raise RuntimeError("Chat job is still running")
             self._jobs[job.job_id] = job
-        if pre_record_user_history:
-            await self.conversation_store.append_message(
-                resolved_conversation_id,
-                role="user",
-                text_content=text,
-                display_name=_VIRTUAL_USER_NAME,
-                user_name=_VIRTUAL_USER_NAME,
-                attachments=job.user_history_attachments or None,
-                references=job.user_history_references or None,
-            )
+            try:
+                # stop 必须等创建阶段收敛后再快照，避免漏掉稍后才启动的 task。
+                if pre_record_user_history:
+                    await self.conversation_store.append_message(
+                        resolved_conversation_id,
+                        role="user",
+                        text_content=text,
+                        display_name=_VIRTUAL_USER_NAME,
+                        user_name=_VIRTUAL_USER_NAME,
+                        attachments=job.user_history_attachments or None,
+                        references=job.user_history_references or None,
+                    )
+                await self._append_event(
+                    job,
+                    "meta",
+                    {
+                        "job_id": job.job_id,
+                        "conversation_id": job.conversation_id,
+                        "virtual_user_id": _VIRTUAL_USER_ID,
+                        "permission": "superadmin",
+                    },
+                )
+                await self._append_stage(job, "received")
+                job.task = asyncio.create_task(
+                    self._run_job(job), name=f"webchat:{job.job_id}"
+                )
+            except BaseException:
+                self._jobs.pop(job.job_id, None)
+                raise
         logger.info(
             "[RuntimeAPI][WebChat] 创建 job: job_id=%s conversation_id=%s text_len=%s",
             job.job_id,
             job.conversation_id,
             len(text),
         )
-        await self._append_event(
-            job,
-            "meta",
-            {
-                "job_id": job.job_id,
-                "conversation_id": job.conversation_id,
-                "virtual_user_id": _VIRTUAL_USER_ID,
-                "permission": "superadmin",
-            },
-        )
-        await self._append_stage(job, "received")
-        job.task = asyncio.create_task(self._run_job(job), name=f"webchat:{job.job_id}")
         return job
 
     async def stop(self) -> None:
+        self.begin_shutdown()
         async with self._lock:
             jobs = list(self._jobs.values())
         for job in jobs:
@@ -2956,6 +2977,8 @@ async def chat_handler(
             job = await job_manager.create_job(text, conversation_id)
         except KeyError:
             return _json_error("Conversation not found", status=404)
+        except ChatJobManagerClosingError as exc:
+            return _json_error(str(exc), status=503)
         except RuntimeError:
             return _json_error("Chat job is still running", status=409)
         try:
@@ -2989,6 +3012,8 @@ async def chat_handler(
         job = await job_manager.create_job(text, conversation_id)
     except KeyError:
         return _json_error("Conversation not found", status=404)
+    except ChatJobManagerClosingError as exc:
+        return _json_error(str(exc), status=503)
     except RuntimeError:
         return _json_error("Chat job is still running", status=409)
     logger.info(
@@ -3106,6 +3131,8 @@ async def chat_job_create_handler(
         return _json_error("Attachment not found", status=404)
     except ValueError as exc:
         return _json_error(str(exc), status=400)
+    except ChatJobManagerClosingError as exc:
+        return _json_error(str(exc), status=503)
     except RuntimeError:
         return _json_error("Chat job is still running", status=409)
     logger.info(

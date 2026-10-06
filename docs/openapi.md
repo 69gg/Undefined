@@ -523,6 +523,7 @@ Undefined Chat 使用同一组 Runtime Chat 端点作为权威合同。客户端
 
 - `POST /api/v1/chat/jobs`：创建后台 job。兼容旧 Body `{"message":"...","conversation_id":"..."}`，也支持结构化 Body `{"message":{"text":"...","attachment_ids":["..."],"references":[{"message_id":"...","quote":"..."}]},"conversation_id":"..."}`；`conversation_id` 可选。取消后重试最后一条纯文本用户消息时，可传 `reuse_previous_user_message: true`，Runtime 会要求最后一条可见用户历史与本次文本完全一致，并跳过重复写入用户历史。
 - WebChat job 在同一会话内 single-flight；如果目标会话已有 job 正在运行或收尾落盘，创建新 job 返回 `409`。不同会话可以并发运行。兼容的非流式 `POST /api/v1/chat` 也走同一套会话级 job 锁，只是等待完成后返回同步结果。
+- Runtime 开始停止后，新的 job 和同步／SSE 聊天请求返回 `503`；此前已进入创建阶段的历史写入会先收敛，再取消并收尾其任务。结构化消息的历史预写失败时会撤销未启动的 job，缓存与磁盘均不追加失败消息，存储恢复后可以正常重试。若取消发生在历史原子写入已提交之后，该条用户历史会保留，但不会遗留未启动的 active job。
 - 附件先通过 `POST /api/v1/chat/attachments` 以 multipart 上传并由 Runtime 返回附件 metadata；发送消息时只传 Runtime 生成的 `attachment_ids`。客户端不应把本地文件内容、下载 URL 或临时缓存路径拼入 `message.text`。
 - 引用内容通过结构化 `references` 提交。Runtime 负责把引用写入历史 metadata，并按需要生成 AI 可见上下文；客户端不把引用块拼接进最终历史作为真源。
 - `GET /api/v1/chat/jobs/active?conversation_id=<id>`：返回兼容字段 `job` 和 active `jobs[]`。不传时 `jobs[]` 包含所有运行中 WebChat job，`job` 为最新 active job；传入 `conversation_id` 时只返回目标会话的 active job。

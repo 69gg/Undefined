@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -975,6 +976,201 @@ async def test_chat_job_cancelled_error_event_is_appended_once() -> None:
         if event.event == "error" and event.payload.get("error") == "cancelled"
     ]
     assert len(cancelled_events) == 1
+
+
+@pytest.mark.asyncio
+async def test_chat_job_history_write_failure_rolls_back_creation_and_cache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    server = RuntimeAPIServer(_context(), host="127.0.0.1", port=8788)
+    manager = server._chat_job_manager
+    await manager.conversation_store.ensure_ready()
+    conversation = await manager.conversation_store.ensure_default_conversation()
+    conversation_id = str(conversation["id"])
+    history_path = manager.conversation_store._path_for(conversation_id)
+    original_disk = history_path.read_bytes()
+    original_write = async_io.write_json_sync
+    fail_once = True
+
+    def write_json(file_path: Path | str, data: Any, use_lock: bool = True) -> None:
+        nonlocal fail_once
+        if Path(file_path) == history_path and data.get("messages") and fail_once:
+            fail_once = False
+            raise OSError("history disk unavailable")
+        original_write(file_path, data, use_lock)
+
+    run_chat = AsyncMock(return_value="chat")
+    monkeypatch.setattr(async_io, "write_json_sync", write_json)
+    monkeypatch.setattr(runtime_api_chat, "run_webui_chat", run_chat)
+
+    def request() -> web.Request:
+        return cast(
+            web.Request,
+            cast(
+                Any,
+                _DummyRequest(
+                    _json={
+                        "conversation_id": conversation_id,
+                        "message": {"text": "hello"},
+                    }
+                ),
+            ),
+        )
+
+    with pytest.raises(OSError, match="history disk unavailable"):
+        await server._chat_job_create_handler(request())
+
+    assert not manager._jobs
+    assert await manager.get_active_job(conversation_id) is None
+    page = await manager.conversation_store.get_history_page(
+        conversation_id, limit=50, before=None
+    )
+    assert page.total == 0
+    assert history_path.read_bytes() == original_disk
+    run_chat.assert_not_awaited()
+
+    retry = await server._chat_job_create_handler(request())
+    assert retry.status == 202
+    job = await manager.get_job(str(json.loads(retry.text or "{}")["job_id"]))
+    assert job is not None and job.task is not None
+    await asyncio.wait_for(job.task, timeout=2)
+    page = await manager.conversation_store.get_history_page(
+        conversation_id, limit=50, before=None
+    )
+    assert [record["message"] for record in page.records] == ["hello"]
+    assert len(json.loads(history_path.read_text(encoding="utf-8"))["messages"]) == 1
+    assert await manager.clear_history_when_idle(conversation_id) == 1
+    await server.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("endpoint", ["job", "sync", "sse"])
+async def test_chat_stop_rejects_new_jobs_while_existing_job_finishes(
+    endpoint: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    started = asyncio.Event()
+    cancelling = asyncio.Event()
+    release = asyncio.Event()
+    calls: list[str] = []
+
+    async def run_chat(_ctx: Any, *, text: str, **_kwargs: Any) -> str:
+        calls.append(text)
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelling.set()
+            await release.wait()
+        return "chat"
+
+    monkeypatch.setattr(runtime_api_chat, "run_webui_chat", run_chat)
+    server = RuntimeAPIServer(_context(), host="127.0.0.1", port=8788)
+    manager = server._chat_job_manager
+    job = await manager.create_job("old")
+    other = await manager.conversation_store.create_conversation()
+    await asyncio.wait_for(started.wait(), timeout=2)
+    stopping = asyncio.create_task(server.stop())
+    try:
+        await asyncio.wait_for(cancelling.wait(), timeout=2)
+        body: dict[str, Any] = {
+            "conversation_id": str(other["id"]),
+            "message": {"text": "new"} if endpoint == "job" else "new",
+            "stream": endpoint == "sse",
+        }
+        request = cast(web.Request, cast(Any, _DummyRequest(_json=body)))
+        response: web.StreamResponse
+        if endpoint == "job":
+            response = await server._chat_job_create_handler(request)
+        else:
+            response = await server._chat_handler(request)
+        assert response.status == 503
+        assert len(manager._jobs) == 1
+        assert calls == ["old"]
+        release.set()
+        await asyncio.wait_for(stopping, timeout=2)
+        assert job.status == "cancelled"
+        assert job.done.is_set()
+        assert not await manager.has_running_job()
+        with pytest.raises(runtime_api_chat.ChatJobManagerClosingError):
+            await manager.create_job("after stop")
+    finally:
+        release.set()
+        await stopping
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancel_creation", [False, True])
+async def test_chat_stop_waits_for_in_progress_history_write(
+    cancel_creation: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    started = threading.Event()
+    release = threading.Event()
+    server = RuntimeAPIServer(_context(), host="127.0.0.1", port=8788)
+    manager = server._chat_job_manager
+    await manager.conversation_store.ensure_ready()
+    conversation = await manager.conversation_store.ensure_default_conversation()
+    conversation_id = str(conversation["id"])
+    history_path = manager.conversation_store._path_for(conversation_id)
+    original_write = async_io.write_json_sync
+
+    def controlled_write(
+        file_path: Path | str, data: Any, use_lock: bool = True
+    ) -> None:
+        if Path(file_path) == history_path and data.get("messages"):
+            started.set()
+            if not release.wait(timeout=3):
+                raise TimeoutError("history write not released")
+        original_write(file_path, data, use_lock)
+
+    async def run_chat(_ctx: Any, **_kwargs: Any) -> str:
+        await asyncio.Event().wait()
+        return "chat"
+
+    monkeypatch.setattr(async_io, "write_json_sync", controlled_write)
+    run_mock = AsyncMock(side_effect=run_chat)
+    monkeypatch.setattr(runtime_api_chat, "run_webui_chat", run_mock)
+    creation = asyncio.create_task(
+        manager.create_job("hello", conversation_id, pre_record_user_history=True)
+    )
+    stopping: asyncio.Task[None] | None = None
+    try:
+        assert await asyncio.wait_for(asyncio.to_thread(started.wait, 1), timeout=2)
+        stopping = asyncio.create_task(server.stop())
+        await asyncio.sleep(0)
+        assert manager._closing
+        with pytest.raises(runtime_api_chat.ChatJobManagerClosingError):
+            await manager.create_job("new")
+        if cancel_creation:
+            creation.cancel()
+            await asyncio.sleep(0)
+            assert not creation.done()
+        assert not stopping.done()
+        release.set()
+        if cancel_creation:
+            with pytest.raises(asyncio.CancelledError):
+                await creation
+            run_mock.assert_not_awaited()
+            assert not manager._jobs
+        else:
+            job = await creation
+            await asyncio.wait_for(stopping, timeout=2)
+            assert job.status == "cancelled"
+            assert job.done.is_set()
+            assert job.task is not None and job.task.done()
+        await asyncio.wait_for(stopping, timeout=2)
+        assert not await manager.has_running_job()
+        page = await manager.conversation_store.get_history_page(
+            conversation_id, limit=50, before=None
+        )
+        assert [record["message"] for record in page.records] == ["hello"]
+        assert (
+            len(json.loads(history_path.read_text(encoding="utf-8"))["messages"]) == 1
+        )
+    finally:
+        release.set()
+        await asyncio.gather(creation, return_exceptions=True)
+        if stopping is not None:
+            await stopping
 
 
 @pytest.mark.asyncio
