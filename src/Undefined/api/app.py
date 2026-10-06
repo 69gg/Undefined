@@ -44,6 +44,8 @@ from .routes import (
 
 logger = logging.getLogger(__name__)
 
+RUNTIME_API_CONTEXT_APP_KEY = web.AppKey("runtime_api_context", RuntimeAPIContext)
+
 
 class RuntimeAPIServer:
     def __init__(
@@ -145,7 +147,7 @@ class RuntimeAPIServer:
             return response
 
         app = web.Application(middlewares=[_auth_middleware])
-        app["runtime_api_context"] = self._context
+        app[RUNTIME_API_CONTEXT_APP_KEY] = self._context
         app.add_routes(
             [
                 web.get("/health", self._health_handler),

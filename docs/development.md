@@ -63,6 +63,8 @@ src/Undefined/
 - **Toolsets 开发专版**：[toolsets/README.md](../src/Undefined/skills/toolsets/README.md)
 - **Commands 开发专版**：[详细斜杠指令开发指南](slash-commands.md)
 
+Runtime API 和 WebUI 向 aiohttp `Application` 存储上下文等共享对象时，使用模块级 `web.AppKey` 常量并在所有读写处复用，保持类型安全并避免 `NotAppKeyWarning`。Runtime API 的应用构造回归测试会将该警告视为错误。
+
 ### CHANGELOG 维护约定
 
 - 仓库根目录的 `CHANGELOG.md` 是正式版本历史的唯一事实来源。
