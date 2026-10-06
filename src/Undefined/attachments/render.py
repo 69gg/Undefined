@@ -159,7 +159,7 @@ def _render_image_tag(
         history_parts.append(replacement)
         return False
 
-    cq_args = [f"file={image_source}"]
+    cq_args = [f"file={_escape_cq_component(image_source)}"]
     for key, value in dict(getattr(record, "segment_data", {}) or {}).items():
         cleaned_key = str(key or "").strip()
         cleaned_value = str(value or "").strip()
