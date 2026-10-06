@@ -154,6 +154,71 @@ async def test_reranker_queue_serializes() -> None:
     assert sorted(order) == ["q1", "q2", "q3"]
 
 
+@pytest.mark.parametrize("kind", ["embedding", "rerank"])
+async def test_cancelled_queued_requests_do_not_reach_provider(kind: str) -> None:
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    calls: list[str] = []
+
+    async def record_call(value: str) -> None:
+        calls.append(value)
+        if value == "first":
+            entered.set()
+            await release.wait()
+
+    async def fake_embed(config: Any, texts: list[str]) -> list[list[float]]:
+        await record_call(texts[0])
+        return [[1.0]]
+
+    async def fake_rerank(
+        model_config: Any,
+        query: str,
+        documents: list[str],
+        top_n: int | None = None,
+    ) -> list[dict[str, Any]]:
+        await record_call(query)
+        return [{"index": 0, "relevance_score": 1.0, "document": documents[0]}]
+
+    worker: Embedder | Reranker
+    if kind == "embedding":
+        worker, requester = _make_embedder()
+        requester.embed = fake_embed
+    else:
+        worker, requester = _make_reranker()
+        requester.rerank = fake_rerank
+
+    async def submit(value: str) -> Any:
+        if isinstance(worker, Embedder):
+            return await worker.embed([value])
+        return await worker.rerank(value, [value])
+
+    worker.start()
+    tasks: list[asyncio.Task[Any]] = []
+    try:
+        first = asyncio.create_task(submit("first"))
+        tasks.append(first)
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        cancelled = asyncio.create_task(submit("cancelled"))
+        tasks.append(cancelled)
+        await asyncio.sleep(0)  # 让第二个请求进入真实队列。
+        assert worker._queue.qsize() == 1
+        cancelled.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await cancelled
+        third = asyncio.create_task(submit("third"))
+        tasks.append(third)
+        release.set()
+        results = await asyncio.wait_for(asyncio.gather(first, third), timeout=2)
+        assert all(results)
+        assert calls == ["first", "third"]
+    finally:
+        release.set()
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        await worker.stop()
+
+
 # ── manager ──────────────────────────────────────────────────────────────────
 
 

@@ -194,6 +194,8 @@ chunk_size=4, chunk_overlap=1 → step=3
 
 嵌入与重排请求都通过内置队列串行发送，按各自 `queue_interval_seconds` 控制发车间隔；embedding/rerank 默认值均为 `0.0`，非正数都表示请求到达立即发车。多行文本按 `embed_batch_size` 分批，每批一次 API 调用。
 
+调用方取消仍在排队的请求时，队列会在出队时跳过该请求，不调用模型，也不消耗发车间隔；已经发给模型的请求不在这个排队取消规则内。
+
 ```
 texts → split_lines → [batch 1, batch 2, ...] → Queue → API (间隔发车)
 ```
