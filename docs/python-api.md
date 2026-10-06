@@ -297,6 +297,8 @@ server = RuntimeAPIServer(RuntimeAPIContext(...))
 | `Undefined.api` | stable | `RuntimeAPIServer`, `RuntimeAPIContext` |
 | `Undefined.mcp` | subpackage | `MCPToolRegistry`, `MCPToolSetRegistry` |
 
+`ProfileStorage` 的所有读写、历史版本和合并锁操作只接受 `user` / `group` 实体类型，以及非空的单层实体 ID（不接受路径分隔符、`.` / `..` 或 Windows 盘符）。侧写文件与历史版本解析符号链接后必须仍位于 `base_path` 内，否则抛出 `ValueError`；Runtime 的侧写查询接口将这类错误转换为 HTTP 400。
+
 ---
 
 ## 相关文档
