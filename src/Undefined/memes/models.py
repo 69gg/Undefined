@@ -30,6 +30,8 @@ class MemeRecord:
     updated_at: str = ""
     status: str = "ready"
     segment_data: dict[str, str] = field(default_factory=dict)
+    revision: int = 0
+    generation: str = ""
 
     @property
     def description(self) -> str:

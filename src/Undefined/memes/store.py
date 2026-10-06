@@ -7,6 +7,7 @@ from pathlib import Path
 import sqlite3
 import threading
 from typing import Any, Callable
+from uuid import uuid4
 
 from Undefined.memes.models import MemeRecord, MemeSourceRecord, normalize_string_list
 
@@ -78,6 +79,24 @@ def _row_to_record(row: sqlite3.Row) -> MemeRecord:
         updated_at=str(row["updated_at"] or ""),
         status=str(row["status"] or "ready"),
         segment_data=_json_loads_dict(row["segment_data_json"]),
+        revision=int(row["revision"]),
+        generation=str(row["generation"]),
+    )
+
+
+def _record_condition(
+    uid: str, expected_record: MemeRecord | None
+) -> tuple[str, list[Any]]:
+    if expected_record is None:
+        return "uid = ?", [uid]
+    return (
+        "uid = ? AND revision = ? AND generation = ? AND content_sha256 = ?",
+        [
+            uid,
+            expected_record.revision,
+            expected_record.generation,
+            expected_record.content_sha256,
+        ],
     )
 
 
@@ -138,10 +157,26 @@ class MemeStore:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     status TEXT NOT NULL DEFAULT 'ready',
-                    segment_data_json TEXT NOT NULL DEFAULT '{}'
+                    segment_data_json TEXT NOT NULL DEFAULT '{}',
+                    revision INTEGER NOT NULL DEFAULT 0,
+                    generation TEXT NOT NULL DEFAULT ''
                 )
                 """
             )
+            columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(memes)")}
+            if "revision" not in columns:
+                conn.execute(
+                    "ALTER TABLE memes ADD COLUMN revision INTEGER NOT NULL DEFAULT 0"
+                )
+            if "generation" not in columns:
+                conn.execute(
+                    "ALTER TABLE memes ADD COLUMN generation TEXT NOT NULL DEFAULT ''"
+                )
+            for row in conn.execute("SELECT uid FROM memes WHERE generation = ''"):
+                conn.execute(
+                    "UPDATE memes SET generation = ? WHERE uid = ?",
+                    (uuid4().hex, str(row[0])),
+                )
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS meme_sources (
@@ -280,8 +315,8 @@ class MemeStore:
                         file_size, width, height, is_animated, enabled, pinned,
                         auto_description, manual_description, ocr_text, tags_json,
                         aliases_json, search_text, use_count, last_used_at,
-                        created_at, updated_at, status, segment_data_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        created_at, updated_at, status, segment_data_json, generation
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(uid) DO UPDATE SET
                         content_sha256 = excluded.content_sha256,
                         blob_path = excluded.blob_path,
@@ -304,7 +339,8 @@ class MemeStore:
                         created_at = excluded.created_at,
                         updated_at = excluded.updated_at,
                         status = excluded.status,
-                        segment_data_json = excluded.segment_data_json
+                        segment_data_json = excluded.segment_data_json,
+                        revision = memes.revision + 1
                     """,
                     (
                         record.uid,
@@ -330,6 +366,7 @@ class MemeStore:
                         record.updated_at,
                         record.status,
                         _json_dumps(record.segment_data),
+                        uuid4().hex,
                     ),
                 )
                 conn.execute("DELETE FROM meme_fts WHERE uid = ?", (record.uid,))
@@ -549,7 +586,11 @@ class MemeStore:
         return await asyncio.to_thread(_run)
 
     async def update_fields(
-        self, uid: str, values: dict[str, Any]
+        self,
+        uid: str,
+        values: dict[str, Any],
+        *,
+        expected_record: MemeRecord | None = None,
     ) -> MemeRecord | None:
         await self.initialize()
         if not values:
@@ -557,9 +598,11 @@ class MemeStore:
 
         def _run() -> MemeRecord | None:
             with self._connect() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                condition, condition_params = _record_condition(uid, expected_record)
                 row = conn.execute(
-                    "SELECT * FROM memes WHERE uid = ? LIMIT 1",
-                    (uid,),
+                    f"SELECT * FROM memes WHERE {condition} LIMIT 1",
+                    tuple(condition_params),
                 ).fetchone()
                 if row is None:
                     return None
@@ -591,9 +634,10 @@ class MemeStore:
                     params.append(normalizer(raw_value))
                 if not assignments:
                     return _row_to_record(row)
-                params.append(uid)
+                assignments.append("revision = revision + 1")
+                params.extend(condition_params)
                 conn.execute(
-                    f"UPDATE memes SET {', '.join(assignments)} WHERE uid = ?",
+                    f"UPDATE memes SET {', '.join(assignments)} WHERE {condition}",
                     tuple(params),
                 )
                 search_text_row = conn.execute(
@@ -645,19 +689,23 @@ class MemeStore:
 
         return await asyncio.to_thread(_run)
 
-    async def delete(self, uid: str) -> MemeRecord | None:
+    async def delete(
+        self, uid: str, *, expected_record: MemeRecord | None = None
+    ) -> MemeRecord | None:
         await self.initialize()
 
         def _run() -> MemeRecord | None:
             with self._connect() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                condition, params = _record_condition(uid, expected_record)
                 row = conn.execute(
-                    "SELECT * FROM memes WHERE uid = ? LIMIT 1",
-                    (uid,),
+                    f"SELECT * FROM memes WHERE {condition} LIMIT 1",
+                    tuple(params),
                 ).fetchone()
                 if row is None:
                     return None
                 record = _row_to_record(row)
-                conn.execute("DELETE FROM memes WHERE uid = ?", (uid,))
+                conn.execute(f"DELETE FROM memes WHERE {condition}", tuple(params))
                 conn.execute("DELETE FROM meme_sources WHERE uid = ?", (uid,))
                 conn.execute("DELETE FROM meme_fts WHERE uid = ?", (uid,))
                 conn.commit()

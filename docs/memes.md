@@ -54,4 +54,6 @@ gif_analysis_frames = 6         # GIF 的抽帧数量
 除了在聊天中自动捕获，你还可以通过前端 WebUI 或直接调用 Management API / Runtime API 对库内表情包进行增删改查。
 包括：列出分页表情包库、删除、触发 `reanalyze`（重新判定解析）、`reindex`（强制重建向量缓存）。
 
+重分析期间仍可编辑或删除条目。模型返回后会核对编辑修订和记录身份，过期结果会被丢弃，包括旧任务的删除判定；不会覆盖人工修改、恢复已删除条目或影响同 UID 重新入库的记录。使用次数单独累加，分析保留最新计数；GIF 多帧临时文件按分析任务独立清理。最终记录与索引写入开始后，取消等待该次写入收尾。
+
 * Management API 完整接口参阅 [Management API — Runtime 代理](management-api.md#6-runtime-代理)，Runtime API 直连接口参阅 [Runtime API — 表情包库](openapi.md#表情包库)。
