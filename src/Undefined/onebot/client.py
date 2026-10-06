@@ -126,6 +126,7 @@ class OneBotClient:
             Callable[[dict[str, Any]], Coroutine[Any, Any, None]] | None
         ) = None
         self._running = False
+        self._tasks: set[asyncio.Task[None]] = set()
         self.file_transport = (
             file_transport
             if file_transport is not None
@@ -190,12 +191,22 @@ class OneBotClient:
 
     async def disconnect(self) -> None:
         """断开连接"""
-        self._running = False
-        if self.ws:
-            logger.info("[WebSocket] 正在主动断开连接...")
-            await self.ws.close()
-            self.ws = None
-            logger.info("[WebSocket] 连接已断开")
+        self.stop()
+        try:
+            if self.ws:
+                logger.info("[WebSocket] 正在主动断开连接...")
+                await self.ws.close()
+                self.ws = None
+                logger.info("[WebSocket] 连接已断开")
+        finally:
+            await self._cancel_message_tasks()
+
+    async def _cancel_message_tasks(self) -> None:
+        tasks = tuple(self._tasks)
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _call_api(
         self,
@@ -914,7 +925,7 @@ class OneBotClient:
             raise RuntimeError("WebSocket 未连接")
 
         self._running = True
-        self._tasks: set[asyncio.Task[None]] = set()
+        cancelled = False
         logger.info("[WebSocket] 消息接收循环已启动")
 
         try:
@@ -941,6 +952,9 @@ class OneBotClient:
                     break
                 except Exception as e:
                     logger.exception(f"[WebSocket] 接收消息时发生异常: {e}")
+        except asyncio.CancelledError:
+            cancelled = True
+            raise
         finally:
             self._running = False
             for future in self._pending_responses.values():
@@ -948,12 +962,9 @@ class OneBotClient:
                     future.set_exception(
                         ConnectionError("OneBot WebSocket 接收循环已停止")
                     )
-            # 等待所有后台任务完成
-            if self._tasks:
-                logger.debug(
-                    f"[WebSocket] 正在等待 {len(self._tasks)} 个异步任务完成..."
-                )
-                await asyncio.gather(*self._tasks, return_exceptions=True)
+            # 消息处理跨连接跟踪；网络断线不等待长任务，主动停止才取消收尾。
+            if cancelled or getattr(self, "_should_stop", False):
+                await self._cancel_message_tasks()
             logger.info("[WebSocket] 接收循环已停止")
 
     async def _dispatch_message(self, data: dict[str, Any]) -> None:

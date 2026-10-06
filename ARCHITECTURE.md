@@ -886,6 +886,8 @@ description: 从 PDF 文件中提取文本和表格，填写表单。当用户�
 
 微信接入由主进程独立管理，不依赖 OneBot 是否在线。`WeixinService` 先校验帐号与 peer，再把已绑定来源映射为逻辑 QQ 私聊交给 `MessageHandler`；未知来源在写历史或调用 AI 之前进入隔离存储。`DeliveryAddress` 将逻辑身份与物理通道分离：`qq:<id>` 和 `wechat:<id>` 可共享同一个用户历史、认知记忆与权限，但发送器、消息合并 scope 和 transport 元数据保持通道隔离。自动化同样持久化规范 `address`，旧 `target_type + target_id` 在加载时转换为 `group:` 或 `qq:` 地址。
 
+OneBot 消息处理任务由客户端跨连接跟踪。网络断线只结束接收循环、通知未完成的 API 请求连接失败，不等待媒体下载等处理任务即可重连；已有处理任务继续运行。主动断开、停止或取消连接任务时，会取消并等待这些处理任务收尾，避免后台任务遗留。
+
 ### "车站-列车" 队列模型
 
 针对高并发消息处理，Undefined 实现了全新的 **ModelQueue** 调度机制：
