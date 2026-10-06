@@ -280,7 +280,8 @@ class ChatJob:
             "messages": list(self.outputs),
             "current_agent_stages": self.current_agent_stage_snapshots(now),
             "current_tool_calls": self.current_tool_call_snapshots(now),
-            "history_finalized": self.history_finalized,
+            # 对外完成信号与新任务/历史修改的放行门槛一致。
+            "history_finalized": self.history_finalized and self.done.is_set(),
             "waiting_input": None,
         }
 

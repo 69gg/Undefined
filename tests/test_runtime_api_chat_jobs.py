@@ -106,6 +106,79 @@ async def _last_webchat_record(server: RuntimeAPIServer) -> dict[str, Any]:
     return cast(dict[str, Any], messages[-1])
 
 
+@pytest.mark.asyncio
+async def test_history_finalized_is_published_only_after_job_releases_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def run_chat(ctx: RuntimeAPIContext, *, text: str, send_output: Any) -> str:
+        await send_output(42, "final")
+        return "chat"
+
+    title_entered = asyncio.Event()
+    release_title = asyncio.Event()
+
+    async def schedule_title(conversation_id: str) -> None:
+        title_entered.set()
+        await release_title.wait()
+
+    server = RuntimeAPIServer(_context(), host="127.0.0.1", port=8788)
+    manager = server._chat_job_manager
+    monkeypatch.setattr(runtime_api_chat, "run_webui_chat", run_chat)
+    monkeypatch.setattr(manager, "maybe_schedule_title_generation", schedule_title)
+    job = await manager.create_job("first")
+    detail_request = cast(
+        web.Request,
+        cast(Any, _DummyRequest(match_info={"job_id": job.job_id}, query={})),
+    )
+    events_request = cast(
+        web.Request,
+        cast(
+            Any,
+            _DummyRequest(
+                match_info={"job_id": job.job_id},
+                query={"format": "json"},
+                headers={"Accept": "application/json"},
+            ),
+        ),
+    )
+    try:
+        await asyncio.wait_for(title_entered.wait(), timeout=2.0)
+        # 真实 job 已经落盘，但最终收尾仍占用会话。
+        assert job.status == "done"
+        assert job.history_finalized is True
+        assert not job.done.is_set()
+        assert await manager.has_running_job(job.conversation_id)
+        assert (await manager.snapshot(job))["history_finalized"] is False
+        response = await server._chat_job_detail_handler(detail_request)
+        assert json.loads(response.text or "{}")["history_finalized"] is False
+        events_response = await server._chat_job_events_handler(events_request)
+        assert isinstance(events_response, web.Response)
+        payload = json.loads(events_response.text or "{}")
+        assert payload["job"]["history_finalized"] is False
+        assert any(event["event"] == "done" for event in payload["events"])
+        with pytest.raises(RuntimeError, match="still running"):
+            await manager.create_job("too early", job.conversation_id)
+
+        release_title.set()
+        assert job.task is not None
+        await asyncio.wait_for(job.task, timeout=2.0)
+        assert job.done.is_set()
+        assert not await manager.has_running_job(job.conversation_id)
+        response = await server._chat_job_detail_handler(detail_request)
+        assert json.loads(response.text or "{}")["history_finalized"] is True
+        events_response = await server._chat_job_events_handler(events_request)
+        assert isinstance(events_response, web.Response)
+        assert (
+            json.loads(events_response.text or "{}")["job"]["history_finalized"] is True
+        )
+        next_job = await manager.create_job("next", job.conversation_id)
+        assert next_job.task is not None
+        await asyncio.wait_for(next_job.task, timeout=2.0)
+    finally:
+        release_title.set()
+        await manager.stop()
+
+
 async def _store_runtime_attachment(
     attachment_id: str = "attachment123",
     *,

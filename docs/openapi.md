@@ -584,6 +584,8 @@ Undefined Chat 使用同一组 Runtime Chat 端点作为权威合同。客户端
 
 `events` 只包含 `after` 之后的持久事件以及当前运行阶段快照。快照使用当前 `last_seq`，便于刷新或断线后以 `job_id + seq` 轮询续接，但不会推进序号或重复写入历史。
 
+`done`、`error` 或 `cancelled` 终态事件可能早于历史落盘与任务收尾完成。客户端应继续查询 job，直到快照的 `history_finalized = true`，再重载历史、释放会话发送锁；该字段只有在历史已完成且任务已解除会话占用时才为 `true`，与 Runtime 接受下一任务的门槛一致。详情接口与 JSON 事件接口使用相同的完成信号。
+
 Runtime 在同一个 job 条件锁内维护事件、顶层阶段、Agent 阶段和耗时快照，因此 JSON 查询和兼容 SSE 都应看到一致的 job 状态。
 - `GET /api/v1/chat/jobs/{job_id}/events?after=<seq>` 加请求头 `Accept: text/event-stream`：兼容 SSE 订阅；SSE 帧包含 `id: <seq>`，长时间无事件时会发送 keep-alive 注释帧。
 - `POST /api/v1/chat/jobs/{job_id}/cancel`：取消运行中的 job。
