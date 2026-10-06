@@ -226,6 +226,9 @@ function createEnv(root, options = {}) {
             get() {
                 return this.textContent;
             },
+            set(value) {
+                this.textContent = value;
+            },
             configurable: true,
         });
     }
@@ -318,6 +321,7 @@ function createEnv(root, options = {}) {
             path.join(staticDir, name),
         ),
         path.join(staticDir, "runtime.js"),
+        ...(options.scripts || []).map((name) => path.join(staticDir, name)),
     ];
     // harness 专用垫片：产品脚本里 `const state = {...}` 属于这次 eval 的词法作用域，
     // 后续 window.eval 看不到它。只有拼在同一次 eval 里才能改 `state.authenticated`
@@ -3285,6 +3289,109 @@ for (const target of ["other", "same"]) {
     }
 }
 
+async function configAutoSave(env, outcome) {
+    const { window, response } = env;
+    env.setRoutes([
+        { match: "/api/config/summary", reply: { body: {
+            data: { onebot: { file_send_mode: "local", file_send_host: "initial" } }, comments: {},
+        } } },
+    ]);
+    const fetch = window.fetch;
+    const pending = [];
+    let inFlight = 0;
+    let maxInFlight = 0;
+    let saved = null;
+    window.fetch = (url, options) => {
+        if (String(url) === "/api/patch") {
+            inFlight += 1;
+            maxInFlight = Math.max(maxInFlight, inFlight);
+            return new Promise((resolve, reject) => {
+                pending.push({ patch: JSON.parse(options.body).patch, resolve, reject });
+            });
+        }
+        return fetch(url, options);
+    };
+    await window.loadConfig();
+    const mode = window.document.querySelector('[data-path="onebot.file_send_mode"].config-input');
+    const host = window.document.querySelector('[data-path="onebot.file_send_host"].config-input');
+    if (!mode || !host) throw new Error("config form was not built");
+    const changeMode = (value) => {
+        mode.value = value;
+        mode.dispatchEvent(new window.Event("change", { bubbles: true }));
+    };
+    const snapshot = () => ({
+        requestCount: pending.length,
+        status: textOf(window, "saveStatusText"),
+        active: window.document.getElementById("saveStatus").classList.contains("active"),
+        opacity: window.document.getElementById("saveStatus").style.opacity,
+        toasts: window.document.querySelector(".toast-container")?.textContent || "",
+    });
+    const finish = (index, result = { success: true }) => {
+        inFlight -= 1;
+        if (result.success) saved = pending[index].patch;
+        pending[index].resolve(response(200, result));
+    };
+    changeMode("stream");
+    await tick();
+    if (outcome === "saved_timer") {
+        finish(0);
+        await tick();
+        changeMode("url");
+        await tick();
+        await settle(2100);
+        const whilePending = snapshot();
+        finish(1);
+        await tick();
+        return { whilePending, final: snapshot(), saved, maxInFlight };
+    }
+    if (outcome === "typing") {
+        host.value = "updated-host";
+        host.dispatchEvent(new window.Event("input", { bubbles: true }));
+    } else {
+        changeMode("url");
+        changeMode("local");
+    }
+    await tick();
+    const beforeOldResponse = snapshot();
+    if (outcome === "network_error") {
+        inFlight -= 1;
+        pending[0].reject(new Error("obsolete save failure"));
+    } else {
+        finish(0, outcome === "api_error"
+            ? { success: false, error: "obsolete save failure" }
+            : { success: true, warning: "obsolete save warning" });
+    }
+    await tick();
+    const afterOldResponse = snapshot();
+    if (outcome === "typing") await settle(1100);
+    if (pending.length !== 2) throw new Error(`expected latest save after old response, got ${pending.length}`);
+    if (outcome.startsWith("latest_")) {
+        if (outcome === "latest_network_error") {
+            inFlight -= 1;
+            pending[1].reject(new Error("latest save failure"));
+        } else {
+            finish(1, { success: false, error: "latest save failure" });
+        }
+        await tick();
+        const afterFailure = snapshot();
+        changeMode("url");
+        await tick();
+        finish(2);
+        await tick();
+        return { afterFailure, final: snapshot(), saved, maxInFlight };
+    }
+    finish(1);
+    await tick();
+    return {
+        beforeOldResponse, afterOldResponse, final: snapshot(), maxInFlight, saved,
+        patches: pending.map((entry) => entry.patch),
+    };
+}
+
+for (const outcome of ["success", "network_error", "api_error", "typing", "saved_timer", "latest_network_error", "latest_api_error"]) {
+    SCENARIOS[`config_autosave_${outcome}`] = (env) => configAutoSave(env, outcome);
+}
+
 async function main() {
     const args = parseArgs(process.argv.slice(2));
     if (!args.scenario) throw new Error("缺少 --scenario");
@@ -3295,7 +3402,11 @@ async function main() {
         );
     }
     const root = resolveRoot(args.root);
-    const env = createEnv(root);
+    const env = createEnv(root, {
+        scripts: args.scenario.startsWith("config_autosave_")
+            ? ["config-form.js"]
+            : [],
+    });
     const result = await scenario(env);
     process.stdout.write(
         `${JSON.stringify({ ok: true, scenario: args.scenario, result })}\n`,

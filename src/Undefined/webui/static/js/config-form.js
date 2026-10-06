@@ -1,5 +1,8 @@
 let configFormLayoutInitialized = false;
 let configLayoutResizeObserver = null;
+let configSavePromise = null;
+let configPendingSave = null;
+let configSaveRevision = 0;
 
 function getConfigStickyChromeElements() {
     return [
@@ -123,6 +126,7 @@ function isRequestParamsPath(path) {
 }
 
 function scheduleAutoSave() {
+    configSaveRevision += 1;
     if (state.saveTimer) clearTimeout(state.saveTimer);
     showSaveStatus("saving", t("config.typing"));
     state.saveTimer = setTimeout(() => {
@@ -382,10 +386,15 @@ function showSaveStatus(status, text) {
         el.classList.add("active");
         txt.innerText = text || t("config.saving");
     } else if (status === "saved") {
+        const revision = configSaveRevision;
         el.classList.remove("active");
         txt.innerText = text || t("config.saved");
         setTimeout(() => {
-            if (!state.saveTimer) {
+            if (
+                !state.saveTimer &&
+                state.saveStatus === "saved" &&
+                revision === configSaveRevision
+            ) {
                 el.style.opacity = "0";
                 state.saveStatus = "idle";
                 updateSaveStatusText();
@@ -1232,6 +1241,9 @@ function parseInputValue(input) {
 }
 
 async function autoSave() {
+    if (state.saveTimer) clearTimeout(state.saveTimer);
+    state.saveTimer = null;
+    configSaveRevision += 1;
     showSaveStatus("saving");
 
     const patch = {};
@@ -1271,27 +1283,46 @@ async function autoSave() {
         patch[aotPath] = entries;
     });
 
-    try {
-        const res = await api("/api/patch", {
-            method: "POST",
-            body: JSON.stringify({ patch }),
-        });
-        const data = await res.json();
-        if (data.success) {
-            showSaveStatus("saved");
-            if (data.warning)
-                showToast(
-                    `${t("common.warning")}: ${data.warning}`,
-                    "warning",
-                    5000,
-                );
-        } else {
-            showSaveStatus("error", t("config.save_error"));
-            showToast(`${t("common.error")}: ${data.error}`, "error", 5000);
+    configPendingSave = { patch, revision: configSaveRevision };
+    if (configSavePromise) return configSavePromise;
+    configSavePromise = (async () => {
+        while (configPendingSave) {
+            const pending = configPendingSave;
+            configPendingSave = null;
+            try {
+                const res = await api("/api/patch", {
+                    method: "POST",
+                    body: JSON.stringify({ patch: pending.patch }),
+                });
+                const data = await res.json();
+                if (pending.revision !== configSaveRevision) continue;
+                if (data.success) {
+                    showSaveStatus("saved");
+                    if (data.warning)
+                        showToast(
+                            `${t("common.warning")}: ${data.warning}`,
+                            "warning",
+                            5000,
+                        );
+                } else {
+                    showSaveStatus("error", t("config.save_error"));
+                    showToast(
+                        `${t("common.error")}: ${data.error}`,
+                        "error",
+                        5000,
+                    );
+                }
+            } catch (e) {
+                if (pending.revision !== configSaveRevision) continue;
+                showSaveStatus("error", t("config.save_network_error"));
+                showToast(`${t("common.error")}: ${e.message}`, "error", 5000);
+            }
         }
-    } catch (e) {
-        showSaveStatus("error", t("config.save_network_error"));
-        showToast(`${t("common.error")}: ${e.message}`, "error", 5000);
+    })();
+    try {
+        await configSavePromise;
+    } finally {
+        configSavePromise = null;
     }
 }
 

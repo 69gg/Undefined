@@ -29,6 +29,13 @@ _BACKUP_DIR = Path("data") / "config_backups"
 _MAX_BACKUPS = 50
 
 
+def _config_backups() -> list[Path]:
+    return sorted(
+        _BACKUP_DIR.glob("config_*.toml"),
+        key=lambda path: (path.stat().st_mtime_ns, path.name),
+    )
+
+
 def _backup_config() -> str | None:
     """Create a timestamped backup of the current config.toml.
 
@@ -37,14 +44,21 @@ def _backup_config() -> str | None:
     if not CONFIG_PATH.exists():
         return None
     _BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    backup_name = f"config_{ts}.toml"
-    shutil.copy2(CONFIG_PATH, _BACKUP_DIR / backup_name)
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
+    with NamedTemporaryFile(
+        prefix=f"config_{ts}_", suffix=".toml", dir=_BACKUP_DIR, delete=False
+    ) as backup:
+        backup_path = Path(backup.name)
+    try:
+        shutil.copyfile(CONFIG_PATH, backup_path)
+    except Exception:
+        backup_path.unlink(missing_ok=True)
+        raise
     # Trim old backups beyond the cap
-    backups = sorted(_BACKUP_DIR.glob("config_*.toml"))
+    backups = _config_backups()
     while len(backups) > _MAX_BACKUPS:
         backups.pop(0).unlink(missing_ok=True)
-    return backup_name
+    return backup_path.name
 
 
 @routes.get("/api/v1/management/config")
@@ -222,7 +236,7 @@ async def config_history_handler(request: web.Request) -> Response:
     if not _BACKUP_DIR.exists():
         return web.json_response({"backups": []})
     backups: list[dict[str, object]] = []
-    for f in sorted(_BACKUP_DIR.glob("config_*.toml"), reverse=True):
+    for f in reversed(_config_backups()):
         stat = f.stat()
         backups.append({"name": f.name, "size": stat.st_size, "mtime": stat.st_mtime})
     return web.json_response({"backups": backups})
