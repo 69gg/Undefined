@@ -160,7 +160,11 @@ async def gzip_middleware(
                     mime = _GZIP_MIME.get(
                         file_path.suffix.lower(), "application/octet-stream"
                     )
-                    new_resp = web.Response(body=compressed, content_type=mime)
+                    new_resp = web.Response(
+                        body=compressed,
+                        status=response.status,
+                        headers={"Content-Type": mime},
+                    )
                     # 保留外层中间件已设置的 header（如安全头）
                     _skip = {
                         "content-length",
