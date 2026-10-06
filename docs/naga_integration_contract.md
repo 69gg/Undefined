@@ -104,6 +104,7 @@ Authorization: Bearer <config.[naga].api_key>
 - 若渲染失败，会回退为文本发送，并在响应中标记 `render_fallback=true`
 - 当 `mode=both` 时：两条通道都必须先通过会话策略，否则整单 HTTP 403（`naga policy denied`），不会部分投递；策略通过后若发送链路部分失败，只要至少一条通道发送成功仍可返回 `200`，由 `sent_private` / `sent_group` 表示实际投递结果
 - 成功响应会额外带 `partial_success` 与 `delivery_status`，用于显式区分“完全成功”和“部分成功”
+- 实际投递结果确认后，先提交同 `uuid` 的幂等结果，再保存使用统计。统计落盘失败只记录日志，不改变已成功或部分成功的投递结果；该阶段遇到取消也先收敛结果和租约，再传播取消，同 `uuid` 重试不会重新发送。进程重启及幂等缓存有效期仍遵循既有缓存边界。
 - 对同一个 `uuid` 的重复调用：
   - 若 payload 完全一致，则直接复用首个结果
   - 若 payload 不一致，则返回 `409`
