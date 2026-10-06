@@ -20,6 +20,7 @@ from Undefined.config.models import MessageBatcherConfig
 from Undefined.handlers import MessageHandler
 from Undefined.services.coordinator import AICoordinator
 from Undefined.services.message_batcher import BatchDispatchToken, MessageBatcher
+from Undefined.services.queue_manager import QueueManager
 
 
 def _make_coordinator(
@@ -389,6 +390,131 @@ async def test_execute_reply_skips_cancelled_batch_token() -> None:
     )
 
     execute_auto.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bypass", ["group_at", "group_poke", "private_poke"])
+async def test_bypass_reply_preserves_speculative_inflight_ownership(
+    bypass: str,
+) -> None:
+    coordinator, _mock_queue, batcher = _make_coordinator(window_seconds=60.0)
+    batcher.update_config(
+        MessageBatcherConfig(enabled=True, window_seconds=60.0, pre_send_seconds=10.0)
+    )
+    coordinator.config.bot_qq = 999
+    coordinator.config.get_context_recent_messages_limit = lambda: 0
+    coordinator.scheduler = None
+    sent: list[str] = []
+
+    async def send_message(_target: Any, message: str, **_kwargs: Any) -> None:
+        sent.append(message)
+
+    coordinator.sender = SimpleNamespace(
+        send_group_message=send_message,
+        send_address_message=send_message,
+        send_private_message=AsyncMock(),
+    )
+    coordinator.onebot = SimpleNamespace(
+        get_image=AsyncMock(), get_forward_msg=AsyncMock(), send_like=AsyncMock()
+    )
+    coordinator.ai.memory_storage = None
+    coordinator.ai.runtime_config = coordinator.config
+    started = {name: asyncio.Event() for name in ("old", "bypass", "new")}
+    release = {name: asyncio.Event() for name in started}
+    old_cancelled = asyncio.Event()
+    finish_old_cancel = asyncio.Event()
+    tasks: dict[str, asyncio.Task[Any]] = {}
+    requests: dict[str, dict[str, Any]] = {}
+
+    def request_name(question: str) -> str:
+        if "独立旁路" in question:
+            return "bypass"
+        return "new" if "批次补充" in question else "old"
+
+    async def ask(question: str, **kwargs: Any) -> None:
+        name = request_name(question)
+        current_task = asyncio.current_task()
+        assert current_task is not None
+        tasks[name] = current_task
+        started[name].set()
+        try:
+            await release[name].wait()
+        except asyncio.CancelledError:
+            if name == "old":
+                old_cancelled.set()
+                # 让旧请求的 finally 在新 token 注册之后执行。
+                await finish_old_cancel.wait()
+            raise
+        await kwargs["send_message_callback"](f"{name} reply")
+
+    async def execute(request: dict[str, Any]) -> None:
+        requests[request_name(request["full_question"])] = request
+        await coordinator.execute_reply(request)
+
+    coordinator.ai.ask = ask
+    coordinator._is_at_bot = lambda content: any(
+        item.get("type") == "at" for item in content
+    )
+    queue = QueueManager(ai_request_interval=0.0)
+    coordinator.queue_manager = queue
+    queue.start(execute)
+    scope = "private:100" if bypass == "private_poke" else "group:1"
+    key = (scope, 100)
+
+    async def submit(text: str, *, independent: bool = False) -> None:
+        if bypass == "private_poke":
+            await coordinator.handle_private_reply(100, text, [], is_poke=independent)
+        else:
+            content = (
+                [{"type": "at", "data": {"qq": "999"}}]
+                if independent and bypass == "group_at"
+                else []
+            )
+            await coordinator.handle_auto_reply(
+                1,
+                100,
+                text,
+                content,
+                is_poke=independent and bypass == "group_poke",
+            )
+
+    try:
+        await submit("旧批次")
+        await batcher._handle_t2(key)
+        await asyncio.wait_for(started["old"].wait(), timeout=1.0)
+        await submit("独立旁路", independent=True)
+        await asyncio.wait_for(started["bypass"].wait(), timeout=1.0)
+        assert "_message_batcher_token" not in requests["bypass"]
+        state = batcher._buckets[key]
+        assert state.inflight is not None
+        assert state.inflight.task is tasks["old"]
+
+        await submit("批次补充")
+        await asyncio.wait_for(old_cancelled.wait(), timeout=1.0)
+        assert not tasks["bypass"].done()
+        assert requests["old"]["_message_batcher_token"].cancelled
+        await batcher._handle_t2(key)
+        await asyncio.wait_for(started["new"].wait(), timeout=1.0)
+        finish_old_cancel.set()
+        with pytest.raises(asyncio.CancelledError):
+            await tasks["old"]
+        state = batcher._buckets[key]
+        assert state.inflight is not None
+        assert state.inflight.task is tasks["new"]
+
+        release["bypass"].set()
+        await tasks["bypass"]
+        assert state.inflight is not None
+        assert state.inflight.task is tasks["new"]
+        release["new"].set()
+        await tasks["new"]
+        assert sent == ["bypass reply", "new reply"]
+    finally:
+        finish_old_cancel.set()
+        for state in list(batcher._buckets.values()):
+            batcher._cancel_t1(state)
+            batcher._cancel_t2(state)
+        await queue.stop()
 
 
 @pytest.mark.asyncio

@@ -19,7 +19,11 @@ from Undefined.attachments import (
 from Undefined.context import RequestContext
 from Undefined.context_resource_registry import collect_context_resources
 from Undefined.render import render_html_to_image, render_markdown_to_html
-from Undefined.services.message_batcher import BufferedMessage, make_scope
+from Undefined.services.message_batcher import (
+    BatchDispatchToken,
+    BufferedMessage,
+    make_scope,
+)
 from Undefined.utils.recent_messages import get_recent_messages_prefer_local
 from Undefined.utils.message_targets import DeliveryAddress, parse_delivery_address
 from Undefined.utils.message_reply import ReplyContext
@@ -187,6 +191,10 @@ class PrivateReplyMixin:
             raise ValueError("私聊投递地址与逻辑 QQ 身份不一致")
         channel = address.channel
         batcher_scope = str(request.get("batch_scope") or make_scope(user_id=user_id))
+        batch_token_raw = request.get("_message_batcher_token")
+        batch_token = (
+            batch_token_raw if isinstance(batch_token_raw, BatchDispatchToken) else None
+        )
 
         async with RequestContext(
             request_type="private",
@@ -315,8 +323,10 @@ class PrivateReplyMixin:
                     batcher is not None
                     and batcher_scope is not None
                     and current_task is not None
+                    and batcher.register_inflight(
+                        batcher_scope, user_id, current_task, ctx, token=batch_token
+                    )
                 ):
-                    batcher.register_inflight(batcher_scope, user_id, current_task, ctx)
                     registered_task = current_task
                 typing_started = False
                 try:
@@ -375,7 +385,7 @@ class PrivateReplyMixin:
                         and registered_task is not None
                     ):
                         batcher.unregister_inflight(
-                            batcher_scope, user_id, registered_task
+                            batcher_scope, user_id, registered_task, token=batch_token
                         )
                 if result:
                     scope_key = build_attachment_scope(

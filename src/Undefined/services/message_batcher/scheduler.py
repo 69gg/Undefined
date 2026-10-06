@@ -305,34 +305,46 @@ class MessageBatcher:
         sender_id: int,
         task: asyncio.Task[Any],
         request_context: Any = None,
-    ) -> None:
+        *,
+        token: BatchDispatchToken | None,
+    ) -> bool:
         """coordinator 在 ``execute_reply`` 开头上报 inflight LLM 任务。
 
-        如果桶不存在或 phase 不是 SPECULATING，则忽略（说明这次 fire 不是投机的）。
+        只接受当前投机批次的 token，独立旁路请求或过期批次不能占用此桶。
         """
         key = (scope, sender_id)
         state = self._buckets.get(key)
-        if state is None:
-            return
-        if state.phase is not BatchPhase.SPECULATING:
-            return
+        if (
+            state is None
+            or state.phase is not BatchPhase.SPECULATING
+            or token is None
+            or token.cancelled
+            or state.dispatch_token is not token
+        ):
+            return False
         state.inflight = _InflightInfo(task=task, request_context=request_context)
         logger.debug(
             "[MessageBatcher] 注册 inflight 任务: scope=%s sender=%s",
             scope,
             sender_id,
         )
+        return True
 
     # 注销 inflight 任务
     def unregister_inflight(
-        self, scope: str, sender_id: int, task: asyncio.Task[Any]
+        self,
+        scope: str,
+        sender_id: int,
+        task: asyncio.Task[Any],
+        *,
+        token: BatchDispatchToken | None,
     ) -> None:
         """coordinator 在 ``execute_reply`` 结束（含异常/取消）时上报。"""
         key = (scope, sender_id)
         state = self._buckets.get(key)
-        if state is None:
+        if state is None or token is None or state.dispatch_token is not token:
             return
-        if state.inflight is not None and state.inflight.task is not task:
+        if state.inflight is None or state.inflight.task is not task:
             logger.debug(
                 "[MessageBatcher] 忽略过期 inflight 注销: scope=%s sender=%s phase=%s",
                 scope,

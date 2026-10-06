@@ -13,7 +13,11 @@ from Undefined.attachments import attachment_refs_to_xml
 from Undefined.context import RequestContext
 from Undefined.context_resource_registry import collect_context_resources
 from Undefined.render import render_html_to_image, render_markdown_to_html
-from Undefined.services.message_batcher import BufferedMessage, make_scope
+from Undefined.services.message_batcher import (
+    BatchDispatchToken,
+    BufferedMessage,
+    make_scope,
+)
 from Undefined.utils.recent_messages import get_recent_messages_prefer_local
 from Undefined.utils.xml import (
     escape_xml_attr,
@@ -207,6 +211,10 @@ class GroupReplyMixin:
         )
         # 用于向 batcher 注册 inflight 任务（仅当本请求源自合并桶时生效）
         batcher_scope: str | None = make_scope(group_id=group_id) if group_id else None
+        batch_token_raw = request.get("_message_batcher_token")
+        batch_token = (
+            batch_token_raw if isinstance(batch_token_raw, BatchDispatchToken) else None
+        )
 
         async with RequestContext(
             request_type="group",
@@ -290,10 +298,10 @@ class GroupReplyMixin:
                     batcher is not None
                     and batcher_scope is not None
                     and current_task is not None
-                ):
-                    batcher.register_inflight(
-                        batcher_scope, sender_id, current_task, ctx
+                    and batcher.register_inflight(
+                        batcher_scope, sender_id, current_task, ctx, token=batch_token
                     )
+                ):
                     registered_task = current_task
                 try:
                     await self.ai.ask(
@@ -331,7 +339,7 @@ class GroupReplyMixin:
                         and registered_task is not None
                     ):
                         batcher.unregister_inflight(
-                            batcher_scope, sender_id, registered_task
+                            batcher_scope, sender_id, registered_task, token=batch_token
                         )
             except asyncio.CancelledError:
                 # 投机预发送被新消息抢占取消：不写错误日志、不重试
