@@ -198,6 +198,19 @@ describe("MarkdownContent", () => {
 		expect(screen.getByText("复制")).toBeInTheDocument();
 	});
 
+	it("未知 fenced-code 语言不会将代码里的 HTML 插入正文", () => {
+		const code =
+			'<style>body { color: red; }</style>\n<form id="injected"><input name="password"></form>';
+		const { container } = render(
+			<MarkdownContent
+				content={`段落\n\n\`\`\`notalanguage\n${code}\n\`\`\``}
+				onPreviewHtml={mockOnPreviewHtml}
+			/>,
+		);
+		expect(container.querySelector("code")?.textContent).toBe(code);
+		expect(container.querySelector("style, form, input")).toBeNull();
+	});
+
 	it("渲染混合内容", () => {
 		const mixedContent = `# 标题
 

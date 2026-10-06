@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import hljs from "highlight.js";
 import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LanguageProvider, LOCALE_STORAGE_KEY } from "../i18n";
@@ -30,6 +31,7 @@ describe("CodeBlock", () => {
 
 	afterEach(() => {
 		vi.clearAllMocks();
+		vi.restoreAllMocks();
 	});
 
 	it("应该渲染代码块", () => {
@@ -189,6 +191,42 @@ describe("CodeBlock", () => {
 			);
 		}).not.toThrow();
 	});
+
+	it.each(["notalanguage", "vue"])(
+		"未知语言 %s 的 HTML 保持为可复制的代码文本",
+		async (language) => {
+			const code =
+				'<style>body { color: red; }</style>\n<form id="injected"><input name="password"></form>\n& <script>alert("x")</script>';
+			const { container } = renderCodeBlock(
+				<CodeBlock code={code} language={language} />,
+			);
+			expect(container.querySelector("code")?.textContent).toBe(code);
+			expect(container.querySelector("style, form, input, script")).toBeNull();
+			expect(screen.getByText("plaintext")).toBeInTheDocument();
+			fireEvent.click(screen.getByText("复制"));
+			await waitFor(() => expect(mockWriteText).toHaveBeenCalledWith(code));
+		},
+	);
+
+	it.each(["highlight", "highlightAuto"] as const)(
+		"%s 抛出异常时 HTML 同样保持为文本",
+		(method) => {
+			vi.spyOn(hljs, method).mockImplementation(() => {
+				throw new Error("受控高亮异常");
+			});
+			vi.spyOn(console, "error").mockImplementation(() => undefined);
+			const code =
+				'<style>body { display: none; }</style><form id="injected" />';
+			const { container } = renderCodeBlock(
+				<CodeBlock
+					code={code}
+					language={method === "highlight" ? "html" : undefined}
+				/>,
+			);
+			expect(container.querySelector("code")?.textContent).toBe(code);
+			expect(container.querySelector("style, form")).toBeNull();
+		},
+	);
 
 	it("应该正确渲染空代码", () => {
 		const code = "";
