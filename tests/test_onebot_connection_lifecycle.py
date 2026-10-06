@@ -105,3 +105,57 @@ async def test_shutdown_cancels_and_collects_message_handlers(disconnect: bool) 
             await asyncio.wait_for(running, 1)
     assert cancelled.is_set()
     assert not client._tasks
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("phase", ["sleep", "connect"])
+async def test_reconnect_gap_cancellation_collects_previous_handlers(
+    monkeypatch: pytest.MonkeyPatch, phase: str
+) -> None:
+    client = OneBotClient("ws://example.invalid")
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+    gap = asyncio.Event()
+    connections = 0
+    original_run = client.run
+
+    async def handler(data: dict[str, Any]) -> None:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    async def connect() -> None:
+        nonlocal connections
+        connections += 1
+        if connections == 1:
+            client.ws = cast(Any, _WebSocket(started))
+        else:
+            gap.set()
+            await asyncio.Event().wait()
+
+    async def run() -> None:
+        await original_run()
+        if phase == "sleep":
+            gap.set()
+
+    client.set_message_handler(handler)
+    monkeypatch.setattr(client, "connect", connect)
+    monkeypatch.setattr(client, "run", run)
+    running = asyncio.create_task(
+        client.run_with_reconnect(reconnect_interval=60 if phase == "sleep" else 0)
+    )
+    try:
+        await asyncio.wait_for(gap.wait(), 1)
+        assert client._tasks
+        assert not cancelled.is_set()
+        running.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(running, 1)
+        assert cancelled.is_set()
+        assert not client._tasks
+    finally:
+        running.cancel()
+        await asyncio.gather(running, return_exceptions=True)
+        await client.disconnect()

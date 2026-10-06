@@ -1067,24 +1067,29 @@ class OneBotClient:
         self._should_stop = False
         reconnect_count = 0
 
-        while not self._should_stop:
-            try:
-                if reconnect_count > 0:
-                    logger.info(f"[WebSocket] 正在尝试第 {reconnect_count} 次重连...")
-                await self.connect()
-                reconnect_count = 0  # 连接成功重置计数
-                await self.run()
-            except websockets.ConnectionClosed as e:
-                logger.warning(f"[WebSocket] 连接已断开: {e}")
-            except Exception as e:
-                logger.error(f"[WebSocket] 发生错误: {e}")
+        try:
+            while not self._should_stop:
+                try:
+                    if reconnect_count > 0:
+                        logger.info(
+                            f"[WebSocket] 正在尝试第 {reconnect_count} 次重连..."
+                        )
+                    await self.connect()
+                    reconnect_count = 0  # 连接成功重置计数
+                    await self.run()
+                except websockets.ConnectionClosed as e:
+                    logger.warning(f"[WebSocket] 连接已断开: {e}")
+                except Exception as e:
+                    logger.error(f"[WebSocket] 发生错误: {e}")
 
-            if self._should_stop:
-                break
+                if self._should_stop:
+                    break
 
-            reconnect_count += 1
-            logger.info(f"{reconnect_interval} 秒后尝试重连...")
-            await asyncio.sleep(reconnect_interval)
+                reconnect_count += 1
+                logger.info(f"{reconnect_interval} 秒后尝试重连...")
+                await asyncio.sleep(reconnect_interval)
+        finally:
+            await self._cancel_message_tasks()
 
     def stop(self) -> None:
         """停止运行"""
