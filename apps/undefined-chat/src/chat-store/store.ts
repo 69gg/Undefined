@@ -678,6 +678,8 @@ export function createChatStore({
 	let runtimeSuspended = false;
 	const draftRevisionsByConversation = new Map<string, number>();
 	let draftRevision = 0;
+	const historyRequestsByConversation = new Map<string, number>();
+	let historyRequestGeneration = 0;
 	const listeners = new Set<() => void>();
 	const subscriptionsByJob = new Map<string, string>();
 	const fallbackTimersByJob = new Map<string, ReturnType<typeof setTimeout>>();
@@ -700,6 +702,14 @@ export function createChatStore({
 	}
 
 	function dispatch(action: ChatAction): void {
+		if (
+			action.type === "history/set" ||
+			action.type === "history/error" ||
+			action.type === "message/optimisticUser" ||
+			action.type === "conversation/remove"
+		) {
+			historyRequestsByConversation.delete(action.conversationId);
+		}
 		if (action.type === "draft/set") {
 			draftRevisionsByConversation.set(action.conversationId, ++draftRevision);
 		} else if (action.type === "conversation/remove") {
@@ -726,6 +736,7 @@ export function createChatStore({
 		fallbackTimersByJob.clear();
 		latestFallbackRequestByJob.clear();
 		fallbackBackoffByJob.clear();
+		historyRequestsByConversation.clear();
 	}
 
 	function resetRuntimeScope(nextUrl: string): void {
@@ -765,13 +776,14 @@ export function createChatStore({
 	async function loadHistory(conversationId: string): Promise<void> {
 		if (runtimeSuspended) return;
 		const generation = runtimeGeneration;
+		const request = beginHistoryRequest(conversationId);
 		dispatch({ type: "history/loading", conversationId });
 		try {
 			const history = await client.getHistory({
 				conversationId,
 				limit: HISTORY_LIMIT,
 			});
-			if (generation !== runtimeGeneration) return;
+			if (!isCurrentHistoryRequest(conversationId, generation, request)) return;
 			dispatch({
 				type: "history/set",
 				conversationId,
@@ -781,7 +793,7 @@ export function createChatStore({
 				total: history.total,
 			});
 		} catch (err) {
-			if (generation !== runtimeGeneration) return;
+			if (!isCurrentHistoryRequest(conversationId, generation, request)) return;
 			// 单会话历史加载失败降级为会话级错误，不升级为全局致命错误
 			dispatch({
 				type: "history/error",
@@ -789,6 +801,23 @@ export function createChatStore({
 				error: errorMessage(err),
 			});
 		}
+	}
+
+	function beginHistoryRequest(conversationId: string): number {
+		const request = ++historyRequestGeneration;
+		historyRequestsByConversation.set(conversationId, request);
+		return request;
+	}
+
+	function isCurrentHistoryRequest(
+		conversationId: string,
+		generation: number,
+		request: number,
+	): boolean {
+		return (
+			generation === runtimeGeneration &&
+			historyRequestsByConversation.get(conversationId) === request
+		);
 	}
 
 	async function startStreamForJob(job: ChatJob): Promise<void> {
@@ -1709,6 +1738,7 @@ export function createChatStore({
 			return;
 		}
 
+		const request = beginHistoryRequest(conversationId);
 		dispatch({ type: "history/loading", conversationId });
 
 		try {
@@ -1717,7 +1747,7 @@ export function createChatStore({
 				historyState.nextBefore ?? undefined,
 				HISTORY_LIMIT,
 			);
-			if (generation !== runtimeGeneration) return;
+			if (!isCurrentHistoryRequest(conversationId, generation, request)) return;
 
 			const newItems = [...response.items, ...historyState.items];
 
@@ -1730,7 +1760,7 @@ export function createChatStore({
 				total: response.total,
 			});
 		} catch (error) {
-			if (generation !== runtimeGeneration) return;
+			if (!isCurrentHistoryRequest(conversationId, generation, request)) return;
 			dispatch({
 				type: "history/error",
 				conversationId,
