@@ -7,7 +7,7 @@ A `Tauri v2` management client for Undefined that targets the remote Management 
 - Desktop builds for `Windows`, `macOS`, and `Linux`
 - Android build support from the same codebase
 - Mobile-friendly shell for connecting to remote instances
-- Separate connection profiles for `Management` and `Runtime-only` modes
+- Local connection profiles with separate Management and Runtime protocol/port settings
 
 ## Scripts
 
@@ -39,8 +39,12 @@ npm run tauri:build:no-strip
 
 ## Connection model
 
-- **Management mode**: connect with `management_url` and a password/token flow.
-- **Runtime-only mode**: connect with `runtime_url` and `X-Undefined-API-Key` compatible credentials.
+- **Management**: open the configured WebUI, optionally logging in with its management password before navigation.
+- **Runtime**: probe the configured Runtime's `/health` and `/openapi.json`. Chat authentication is configured in Undefined Chat or the WebUI.
+
+The connection editor stores a host and separate protocol/port choices for Management and Runtime. New profiles use HTTP by default; select HTTPS for TLS endpoints. Existing profiles using `managementUrl` / `runtimeUrl` are migrated with their original HTTP/HTTPS protocols and ports. IPv6 hosts accept either `::1` or `[::1]` and produce a URL with a single pair of brackets. Saving and reloading a migrated profile preserves these choices.
+
+`npm test` runs the connection migration, save/reload, probe, and login regressions with in-memory storage and network/navigation stubs. It is included in `npm run check` and never contacts a real instance.
 
 This scaffold intentionally keeps the frontend shell lightweight. It is suitable for embedding into both browser-hosted WebUI and Tauri clients.
 
