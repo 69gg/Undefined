@@ -2,6 +2,8 @@ from pathlib import Path
 from typing import Any, Dict
 import logging
 
+from Undefined.skills.shared import resolve_download_cache_path
+
 logger = logging.getLogger(__name__)
 
 
@@ -10,8 +12,23 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     file_path: str = args.get("file_path", "")
     action: str = args.get("action", "list")
     extract_path: str | None = args.get("extract_path")
-
-    path = Path(file_path)
+    if action not in {"list", "extract"}:
+        return "错误：action 只能是 list 或 extract"
+    try:
+        path = Path(file_path).resolve()
+        if action == "extract":
+            path = resolve_download_cache_path(path, context)
+            target = (
+                Path(extract_path)
+                if extract_path
+                else path.parent / f"extracted_{path.stem}"
+            )
+            target = resolve_download_cache_path(target, context)
+            if target == path.parent or not target.is_relative_to(path.parent):
+                raise ValueError("解压目标必须是当前压缩包所在目录的子目录")
+            extract_path = str(target)
+    except (OSError, ValueError) as exc:
+        return f"错误：{exc}"
 
     if not path.exists():
         return f"错误：文件不存在 {file_path}"
@@ -101,6 +118,8 @@ async def _extract_tar(path: Path, action: str, extract_path: str | None) -> str
         return "\n".join(info)
 
     else:
+        if not hasattr(tarfile, "data_filter"):
+            return "当前 Python 缺少安全 TAR 解压能力，请更新 Python 补丁版本；仍可使用 list 列出文件"
         if extract_path:
             target_dir = Path(extract_path)
         else:
@@ -108,7 +127,7 @@ async def _extract_tar(path: Path, action: str, extract_path: str | None) -> str
             target_dir.mkdir(exist_ok=True)
 
         with tarfile.open(path, "r:*") as tar_ref:
-            tar_ref.extractall(target_dir)
+            tar_ref.extractall(target_dir, filter="data")
 
         info.append(f"\n已解压到：{target_dir}")
         info.append(f"解压文件数：{len(file_list)}")

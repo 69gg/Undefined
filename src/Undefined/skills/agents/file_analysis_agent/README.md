@@ -15,6 +15,8 @@
 - 内部附件 UID（`pic_xxx` / `file_xxx`）由工具按当前会话作用域解析；多模态分析可直接传 UID，其他解析工具先用 `download_file` 转成本地路径
 - `download_file` 的附件回源遇到目标策略拒绝、响应读取异常等失败时，会记录日志并返回“附件 UID 本地化失败”，不会继续尝试 URL 下载；`TimeoutError` 及其他 `OSError` 仍返回“附件文件读取失败”，任务取消正常向上传递
 - PDF 文字提取走 `extract_pdf`；扫描版、图表、版式或指定页码范围视觉分析走 `describe_pdf_page`
+- `extract_archive(list)` 可以列出本地压缩包；解压前先用 `download_file` 取得下载缓存内路径，解压目标限定为压缩包所在目录的子目录。TAR 显式使用 `data` 安全过滤器，拒绝越界成员、指向外部的链接及设备文件。缺少 `tarfile.data_filter` 的旧 Python 补丁版本仍可列出文件，但会拒绝 TAR 解压并提示更新补丁版本，不回退到无过滤解压。
+- `cleanup_temp.task_uuid` 只接受下载缓存的直接子目录名，拒绝绝对路径、路径跳转和符号链接；留空清理时跳过符号链接目录。
 
 开发提示：
 - 解析类工具尽量使用异步 I/O 或 `asyncio.to_thread`

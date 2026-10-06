@@ -8,7 +8,7 @@
             "properties": {
                 "file_path": {
                     "type": "string",
-                    "description": "本地压缩包路径"
+                    "description": "本地压缩包路径；解压前须用 download_file 将其放入下载缓存"
                 },
                 "action": {
                     "type": "string",
@@ -16,7 +16,7 @@
                 },
                 "extract_path": {
                     "type": "string",
-                    "description": "解压目标路径（可选），默认为临时目录"
+                    "description": "解压目标路径（可选），必须是当前压缩包所在缓存目录的子目录；默认 extracted_<文件名>"
                 }
             },
             "required": ["file_path"]

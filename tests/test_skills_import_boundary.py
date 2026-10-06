@@ -36,7 +36,6 @@ _BASELINE: frozenset[str] = frozenset(
         "agents/entertainment_agent/tools/minecraft_skin/handler.py::Undefined.utils.paths",
         "agents/entertainment_agent/tools/wenchang_dijun/handler.py::Undefined.attachments",
         "agents/file_analysis_agent/handler.py::Undefined.attachments",
-        "agents/file_analysis_agent/tools/cleanup_temp/handler.py::Undefined.utils.paths",
         "agents/file_analysis_agent/tools/describe_pdf_page/handler.py::Undefined.utils",
         "agents/file_analysis_agent/tools/describe_pdf_page/handler.py::Undefined.utils.paths",
         "agents/info_agent/tools/arxiv_search/handler.py::Undefined.arxiv.client",
