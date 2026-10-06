@@ -133,9 +133,12 @@ HTML 采用与 WebUI 基线对齐的双层策略：
 - `npm run typecheck`
 - `npm run test:unit`
 - `npm run test:e2e`（Vitest + jsdom integration tests）
+- `npm run test:build`（独立 Node 测试：临时生产构建、chunk 体积与导入图、全语言高亮一致性）
 - `npm run tauri:fmt:check`
 - `npm run tauri:check`
 - `npm run tauri:test`
+
+生产构建将应用、React、其他依赖与高亮模块分开；全部高亮语言仍同步注册并保持自动检测。分包控制单个 chunk 的大小并细化缓存粒度，总下载体积基本不变；独立 gzip 压缩会因减少字典复用而增加压缩体积。构建回归执行实际输出的高亮模块，核对语言顺序、逐语言结果与自动检测，并检查默认体积门槛和导入图无环。
 
 jsdom integration tests 不等同于真实 Tauri/Android E2E。发布前仍应执行 Android smoke checklist 和必要的桌面 Tauri smoke。
 

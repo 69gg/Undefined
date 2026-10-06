@@ -45,7 +45,9 @@ npm run check
 npm run tauri:dev
 ```
 
-`npm run check` 当前包含 Biome、TypeScript、unit/jsdom integration tests、cargo fmt、cargo check 和 cargo test。
+`npm run check` 当前包含 Biome、TypeScript、unit/jsdom integration tests、独立 Node production build 回归、cargo fmt、cargo check 和 cargo test。
+
+`npm run build` 将应用、React、其余依赖与代码高亮模块分别打包。highlight.js 的全部语言定义按文件名区间拆成四组，仍同步注册并保留自动检测；分包控制单个 chunk 的体积并细化缓存粒度，全部语言支持保持一致。总下载体积基本不变，独立 gzip 压缩会因减少字典复用而增加压缩体积。`npm run test:build` 在临时目录构建，检查默认 500 kB 限制、chunk 导入图，并执行生产高亮模块，核对完整语言列表、各语言高亮和自动检测结果。
 
 Biome 固定为 **2.5.10**，与 Console 和根目录 WebUI 配置保持一致；使用 `npm ci` 安装锁定版本。App 的 `biome.json` 使用独立嵌套配置（`root: false`），不继承 WebUI 格式规则，并显式启用 React 的 `noArrayIndexKey` 检查，避免依赖自动检测造成漏检；升级约定见 [构建文档](../../docs/build.md#6-git-hook-集成)。
 

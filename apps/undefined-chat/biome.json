@@ -9,6 +9,7 @@
         "includes": [
             "**/src/**/*.ts",
             "**/src/**/*.tsx",
+            "**/tests/**/*.mjs",
             "**/package.json",
             "**/tsconfig.json",
             "**/vite.config.ts",
