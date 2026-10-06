@@ -56,7 +56,7 @@ uv run deploy up
 | 发布端口的绑定地址 | 保持 `127.0.0.1`；在服务器上部署时，访问方法见下文[远程访问](#在自己的电脑上访问服务器) |
 | 是否拉取 NagaAgent 子模块 | 不需要 NagaAgent 代码问答时选“否” |
 
-向导随后会展示配置变更，确认后开始拉取镜像和启动容器。首次运行需要下载依赖与镜像，请等待命令完成。
+向导随后会展示配置变更，最终确认前只读取配置和模板；选择取消不会创建 `config.toml` 或拉取 NagaAgent 子模块。确认后才生成配置、按需初始化子模块、拉取镜像并启动容器。首次运行需要下载依赖与镜像，请等待命令完成。
 
 如需跳过向导，可用 `uv run deploy up --yes` 代替；首次执行采用默认配置，之后执行会沿用上次的部署选择。只想提前查看变更时，可用 `uv run deploy up --dry-run`，它不会写文件或启动容器。
 
@@ -85,7 +85,7 @@ uv run deploy status
 3. 配置 `models.chat`、`models.vision`、`models.agent` 的 API 地址、API Key 和模型名称；其他已启用功能所需的模型也应按配置提示填写。完整要求见 [配置必填项](configuration.md#3-严格模式stricttrue必填项)。
 4. 保存配置并检查校验结果；字段缺失或无效时，按提示补齐。
 
-也可以直接编辑仓库根目录的 `config.toml`。部署工具已填写 OneBot 连接和所选服务的地址，首次部署通常无需再改这些项。**模型 API 和 QQ 身份信息需要你自己填写，容器启动不代表这些配置已完成。**
+也可以直接编辑仓库根目录的 `config.toml`，部署工具与 Bot 一样支持 UTF-8 和 UTF-8 BOM 编码。部署工具已填写 OneBot 连接和所选服务的地址，首次部署通常无需再改这些项。**模型 API 和 QQ 身份信息需要你自己填写，容器启动不代表这些配置已完成。**
 
 ### 扫码登录并测试回复
 
@@ -226,6 +226,8 @@ uv run deploy up --port bot_webui=18787 --port napcat_webui=16099
 修改后分别通过 `18787` 和 `16099` 访问两个管理页面。部署工具会记住端口与绑定地址，下次重跑无需重复填写；请通过命令参数修改，避免手工改 `deploy/.env` 或 `deploy/STATE.json`。
 
 重新运行向导可以调整模式和可选服务。重复部署会重新生成 Compose 与服务配置，并复用已有有效凭据；对生成文件的手工修改可能被覆盖。修改过 WebUI 密码时，以 `config.toml` 中的当前值为准。
+
+`container` 模式的 Python 解释器使用 `deploy/data/cache/python_interpreter/` 中独立的临时工作目录。部署工具通过容器环境变量传入这份共享目录在 Bot 内和宿主机上的不同路径，使宿主 Docker 能读取脚本、依赖清单和生成的文件；不会共享整个宿主 `/tmp`。`host` 模式继续使用系统临时目录。手工部署容器时的设置方法见 [Python 解释器工具说明](../src/Undefined/skills/tools/python_interpreter/README.md#容器内使用宿主-docker)。
 
 ### 更新版本
 

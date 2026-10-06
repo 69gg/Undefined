@@ -201,6 +201,8 @@ uv run deploy up
 
 部署结束后，按终端显示的地址和密码进入 WebUI，填写模型 API 与 QQ 身份配置，到 NapCat 扫码登录后，再返回 WebUI 点击“启动机器人”。`container` 与 `host` 模式都会将 `[webui].autostart_bot` 设为 `false`、`[onebot].file_send_mode` 设为 `"stream"`。**环境准备、首次配置、远程访问和常见问题请直接看 [Docker 一键部署指南](docker-deploy.md)**。
 
+向导在最终确认前只读取配置，取消不会生成文件或初始化子模块；已有 `config.toml` 支持 UTF-8 BOM 编码。`container` 模式还会为 Python 解释器自动映射已共享的 `deploy/data/cache/python_interpreter/`，让宿主 Docker 从正确的宿主路径读取执行文件。手工挂载 Docker socket 的容器需按 [Python 解释器工具说明](../src/Undefined/skills/tools/python_interpreter/README.md#容器内使用宿主-docker)配置共享路径。
+
 ---
 
 ## pip/uv tool 部署（快速体验）

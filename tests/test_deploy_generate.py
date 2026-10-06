@@ -128,6 +128,43 @@ def test_container_mode_publishes_bot_ports(tmp_path: Path) -> None:
     assert env["UNDEFINED_DEPLOY_PORT_BOT_WEBUI_BIND"] == catalog.DEFAULT_PORT_BIND
 
 
+def test_container_maps_python_interpreter_paths_to_existing_data_mount(
+    tmp_path: Path,
+) -> None:
+    ctx = _ctx(tmp_path)
+    config = generate.build(ctx)
+    bot = _compose_services(config.compose_text)["undefined-bot"]
+    environment = bot["environment"]
+    local_root = Path(config.env[generate.PYTHON_INTERPRETER_LOCAL_DIR_ENV])
+    host_root = Path(config.env[generate.PYTHON_INTERPRETER_HOST_DIR_ENV])
+
+    assert local_root != host_root
+    # 真实 host 来源必须由 data/ 挂载及同一相对路径推出，不能传 Bot 的绝对路径。
+    data_mount = next(
+        volume for volume in bot["volumes"] if volume.endswith(":/data/Undefined/data")
+    )
+    source, target = data_mount.split(":")
+    assert host_root == (ctx.layout.root / source).resolve() / local_root.relative_to(
+        target
+    )
+    assert environment["UNDEFINED_PYTHON_INTERPRETER_LOCAL_DIR"] == (
+        "${" + generate.PYTHON_INTERPRETER_LOCAL_DIR_ENV + "}"
+    )
+    assert environment["UNDEFINED_PYTHON_INTERPRETER_HOST_DIR"] == (
+        "${" + generate.PYTHON_INTERPRETER_HOST_DIR_ENV + "}"
+    )
+    assert not any(volume.endswith(":/tmp") for volume in bot["volumes"])
+
+
+def test_host_mode_leaves_python_interpreter_temp_paths_unchanged(
+    tmp_path: Path,
+) -> None:
+    config = generate.build(_ctx(tmp_path, mode=catalog.MODE_HOST))
+    assert generate.PYTHON_INTERPRETER_LOCAL_DIR_ENV not in config.env
+    assert generate.PYTHON_INTERPRETER_HOST_DIR_ENV not in config.env
+    assert "undefined-bot" not in _compose_services(config.compose_text)
+
+
 def test_unselected_service_ports_are_not_published(tmp_path: Path) -> None:
     env = generate.build(_ctx(tmp_path)).env
     assert "UNDEFINED_DEPLOY_PORT_SEARXNG" not in env

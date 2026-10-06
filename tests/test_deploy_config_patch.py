@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from Undefined.deploy import config_patch
+from Undefined.config.toml_io import load_toml_data
 from Undefined.webui.utils.comment import parse_comment_map
 
 #: 故意写成「已有注释 + 已有用户自定义值 + 嵌套表」的形态，
@@ -61,6 +62,26 @@ def _plan(config_path: Path, desired: dict[str, object]) -> config_patch.PatchPl
         desired=desired,
         about={"onebot.ws_url": "协议端地址"},
     )
+
+
+def test_apply_accepts_bom_config_and_preserves_original_backup(
+    config_dir: tuple[Path, Path, Path],
+) -> None:
+    config, example, backup_dir = config_dir
+    config.write_text(EXAMPLE, encoding="utf-8-sig")
+    original = config.read_bytes()
+    assert config_patch.load_toml(config) == load_toml_data(config, strict=True)
+
+    outcome = config_patch.apply_plan(
+        _plan(config, {"onebot.ws_url": "ws://napcat:3001"}),
+        example_path=example,
+        backup_dir=backup_dir,
+    )
+
+    assert outcome.written is True
+    assert outcome.backup_path is not None
+    assert outcome.backup_path.read_bytes() == original
+    assert config_patch.load_toml(config)["onebot"]["ws_url"] == "ws://napcat:3001"
 
 
 def test_plan_items_report_current_and_about(

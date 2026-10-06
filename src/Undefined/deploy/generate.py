@@ -67,6 +67,10 @@ IMAGE_ENV_PREFIX = "UNDEFINED_DEPLOY_"
 
 #: 挂进本体容器的宿主机 Docker socket（DooD）。
 DOCKER_SOCKET_ENV = "UNDEFINED_DEPLOY_DOCKER_SOCKET"
+#: Python 解释器在已挂载 data/ 下共享文件；两端路径允许不同。
+PYTHON_INTERPRETER_TMP_SUBDIR = Path("cache") / "python_interpreter"
+PYTHON_INTERPRETER_LOCAL_DIR_ENV = "UNDEFINED_DEPLOY_PYTHON_INTERPRETER_LOCAL_DIR"
+PYTHON_INTERPRETER_HOST_DIR_ENV = "UNDEFINED_DEPLOY_PYTHON_INTERPRETER_HOST_DIR"
 
 
 class GenerateError(RuntimeError):
@@ -264,6 +268,13 @@ def build_env(ctx: GenerateContext) -> dict[str, str]:
         "UNDEFINED_DEPLOY_LXMUSIC2API_UID": str(_current_uid()),
         "UNDEFINED_DEPLOY_LXMUSIC2API_GID": str(_current_gid()),
     }
+    if ctx.mode == catalog.MODE_CONTAINER:
+        env[PYTHON_INTERPRETER_LOCAL_DIR_ENV] = str(
+            Path(CONTAINER_REPO_PATH) / "data" / PYTHON_INTERPRETER_TMP_SUBDIR
+        )
+        env[PYTHON_INTERPRETER_HOST_DIR_ENV] = str(
+            ctx.layout.data_dir / PYTHON_INTERPRETER_TMP_SUBDIR
+        )
 
     # 端口与绑定：默认只绑回环，远程访问需显式改 --port-bind
     for key, spec in catalog.port_specs().items():

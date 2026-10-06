@@ -107,7 +107,7 @@ def load_toml(path: Path) -> dict[str, Any]:
     if not path.is_file():
         return {}
     try:
-        return tomllib.loads(path.read_text(encoding="utf-8"))
+        return tomllib.loads(path.read_text(encoding="utf-8-sig"))
     except tomllib.TOMLDecodeError as exc:
         raise ConfigError(f"{path} 解析失败：{exc}") from exc
     except OSError as exc:

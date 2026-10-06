@@ -628,6 +628,66 @@ def test_up_creates_full_config_from_example_on_fresh_clone(
     assert parsed["webui"]["autostart_bot"] is False
 
 
+@pytest.mark.parametrize("existing_config", (False, True))
+def test_cancel_up_writes_nothing_and_does_not_initialize_submodule(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    existing_config: bool,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "config.toml.example").write_text(CONFIG_TOML, encoding="utf-8")
+    if existing_config:
+        (repo / "config.toml").write_text(CONFIG_TOML, encoding="utf-8")
+    before = {path.name: path.read_bytes() for path in repo.iterdir()}
+    answers = iter(("", "", "n"))
+    monkeypatch.setattr(runner, "repo_root", lambda: repo)
+    monkeypatch.setattr(runner, "wizard_enabled", lambda options: True)
+    monkeypatch.setattr(runner.Wizard, "_ask", lambda self, prompt: next(answers))
+
+    def unexpected_side_effect(*args: object, **kwargs: object) -> None:
+        raise AssertionError("取消前不能写入子模块或调用 Docker")
+
+    monkeypatch.setattr(nagaagent, "ensure_submodule", unexpected_side_effect)
+    monkeypatch.setattr(docker_cli, "check_availability", unexpected_side_effect)
+
+    assert runner.run_up(_yes_options(yes=False, dry_run=False, nagaagent=True)) == 0
+    assert {path.name: path.read_bytes() for path in repo.iterdir()} == before
+    assert "已取消，未改动任何文件。" in capsys.readouterr().out
+
+
+def test_up_accepts_bom_config(
+    fake_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path = fake_repo / "config.toml"
+    config_path.write_text(CONFIG_TOML, encoding="utf-8-sig")
+    _stub_docker(monkeypatch)
+
+    assert runner.run_up(_yes_options(dry_run=False)) == 0
+    assert (
+        tomllib.loads(config_path.read_text())["onebot"]["file_send_mode"] == "stream"
+    )
+
+
+def test_up_reports_invalid_config_before_any_write(
+    fake_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config_path = fake_repo / "config.toml"
+    config_path.write_text("[broken", encoding="utf-8")
+
+    def unexpected_submodule(*args: object, **kwargs: object) -> None:
+        raise AssertionError("无效配置不能触发子模块写入")
+
+    monkeypatch.setattr(nagaagent, "ensure_submodule", unexpected_submodule)
+    assert runner.run_up(_yes_options(dry_run=False, nagaagent=True)) != 0
+    assert config_path.read_text() == "[broken"
+    assert not (fake_repo / "deploy").exists()
+    assert "解析失败" in capsys.readouterr().out
+
+
 @pytest.mark.parametrize("mode", catalog.DEPLOY_MODES)
 @pytest.mark.parametrize("previous_file_mode", ("local", "url"))
 def test_up_replaces_legacy_startup_and_file_transport_settings(

@@ -19,6 +19,10 @@ services:
     networks:
       - undefined-deploy
     working_dir: /data/Undefined
+    environment:
+      # Docker bind mount 来源由宿主 daemon 解析；不可把 Bot 容器的 /tmp 直接传给它。
+      UNDEFINED_PYTHON_INTERPRETER_LOCAL_DIR: ${UNDEFINED_DEPLOY_PYTHON_INTERPRETER_LOCAL_DIR}
+      UNDEFINED_PYTHON_INTERPRETER_HOST_DIR: ${UNDEFINED_DEPLOY_PYTHON_INTERPRETER_HOST_DIR}
     ports:
       - "${UNDEFINED_DEPLOY_PORT_BOT_WEBUI_BIND}:${UNDEFINED_DEPLOY_PORT_BOT_WEBUI}:8787"
       - "${UNDEFINED_DEPLOY_PORT_BOT_API_BIND}:${UNDEFINED_DEPLOY_PORT_BOT_API}:8788"
