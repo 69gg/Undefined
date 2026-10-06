@@ -175,7 +175,7 @@ class Wizard:
     def _ask(self, prompt: str) -> str:
         try:
             return input(f"{prompt}: ")
-        except (EOFError, KeyboardInterrupt):
+        except EOFError:
             print("\n（未输入，使用默认值）")
             return ""
 

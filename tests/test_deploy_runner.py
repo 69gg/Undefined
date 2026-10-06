@@ -17,7 +17,8 @@ from typing import Any, Sequence
 import pytest
 import yaml
 
-from Undefined.deploy import catalog, docker_cli, generate, nagaagent, runner
+from Undefined.deploy import catalog, cli, docker_cli, generate, nagaagent, runner
+from Undefined.deploy.catalog import EXIT_ERROR
 from Undefined.deploy.docker_cli import CommandResult, DockerAvailability
 from Undefined.deploy.state import DeployLayout, read_state
 
@@ -655,6 +656,53 @@ def test_cancel_up_writes_nothing_and_does_not_initialize_submodule(
     assert runner.run_up(_yes_options(yes=False, dry_run=False, nagaagent=True)) == 0
     assert {path.name: path.read_bytes() for path in repo.iterdir()} == before
     assert "已取消，未改动任何文件。" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("existing_config", (False, True))
+def test_ctrl_c_at_final_confirmation_aborts_without_side_effects(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    existing_config: bool,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "config.toml.example").write_text(CONFIG_TOML, encoding="utf-8")
+    if existing_config:
+        (repo / "config.toml").write_text(CONFIG_TOML, encoding="utf-8")
+    before = {path.name: path.read_bytes() for path in repo.iterdir()}
+    monkeypatch.setattr(runner, "repo_root", lambda: repo)
+    monkeypatch.setattr(runner, "wizard_enabled", lambda options: True)
+
+    def _interrupt_final_confirmation(prompt: str) -> str:
+        if "按以上计划继续" in prompt:
+            raise KeyboardInterrupt
+        return ""
+
+    def _unexpected_side_effect(*args: object, **kwargs: object) -> None:
+        raise AssertionError("Ctrl+C 取消前不能写入子模块或调用 Docker")
+
+    monkeypatch.setattr("builtins.input", _interrupt_final_confirmation)
+    monkeypatch.setattr(nagaagent, "ensure_submodule", _unexpected_side_effect)
+    monkeypatch.setattr(docker_cli, "check_availability", _unexpected_side_effect)
+
+    assert (
+        cli.main(
+            [
+                "up",
+                "--mode",
+                "container",
+                "--with",
+                "",
+                "--with-nagaagent",
+                "--port-bind",
+                "127.0.0.1",
+            ]
+        )
+        == EXIT_ERROR
+    )
+    assert {path.name: path.read_bytes() for path in repo.iterdir()} == before
+    assert "已取消。" in capsys.readouterr().out
 
 
 def test_up_accepts_bom_config(
