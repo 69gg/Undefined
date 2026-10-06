@@ -148,7 +148,9 @@ class _FakeClient:
         paths: list[Path] = []
         for name in chapter.pictures:
             path = dest / name
-            path.write_bytes(b"page")
+            # jmcpy 默认不覆盖同名页面：保留章节身份以验证不会复用上一章图片。
+            if not path.exists():
+                path.write_bytes(str(chapter.chapter_id).encode())
             paths.append(path)
         self.downloads.append(
             {
@@ -480,6 +482,60 @@ async def test_download_book_keeps_every_chapter_when_orders_collide(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("password", [None, "Ab3xK9Qm"])
+@pytest.mark.parametrize(
+    ("orders", "expected_indices"),
+    [
+        ((2, 2), ("002", "003")),
+        ((2, 2, 3), ("002", "003", "004")),
+        ((1, 3, 3, 4), ("001", "003", "004", "005")),
+        ((3, 3, 3), ("003", "004", "005")),
+    ],
+)
+async def test_download_book_preserves_chapter_pages_when_orders_collide(
+    monkeypatch: pytest.MonkeyPatch,
+    orders: tuple[int, ...],
+    expected_indices: tuple[str, ...],
+    password: str | None,
+) -> None:
+    chapter_ids = [111 * index for index in range(1, len(orders) + 1)]
+    _install_client(
+        monkeypatch,
+        chapters=[
+            (chapter_id, order, "序章")
+            for chapter_id, order in zip(chapter_ids, orders, strict=True)
+        ],
+    )
+    captured = _capture_write_pdf(monkeypatch)
+
+    result, _ = await download_book("1114751", config=_config(), password=password)
+
+    assert result.ok
+    assert result.page_count == len(orders) * 2
+    assert [item["dest"].name for item in _FakeClient.instances[0].downloads] == [
+        f"c{index}" for index in expected_indices
+    ]
+    sources = [
+        path.read_bytes() for call in captured["calls"] for path in call["sources"]
+    ]
+    assert sources == [
+        str(chapter_id).encode() for chapter_id in chapter_ids for _ in range(2)
+    ]
+    if password is not None:
+        archive = _archive(result)
+        assert archive.zip_path is not None
+        assert _zip_entries(archive.zip_path) == [
+            f"JM1114751 {index} 序章.pdf" for index in expected_indices
+        ]
+        assert [pdf.order for pdf in archive.pdfs] == list(orders)
+        assert [pdf.chapter_id for pdf in archive.pdfs] == chapter_ids
+    else:
+        plain = _plain(result)
+        assert plain.pdf_path is not None
+        assert len(captured["calls"]) == 1
+
+
+@pytest.mark.asyncio
 async def test_download_book_skips_chapter_whose_pages_all_failed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -613,11 +669,40 @@ def test_build_settings_leaves_home_unset_when_session_dir_empty(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(jm_client, "get_request_proxy", lambda *_args, **_kwargs: None)
+    monkeypatch.delenv("JMCPY_HOME", raising=False)
 
     settings = jm_client.build_settings(_config(jm_session_dir="  "))
 
     assert settings.home is None
     assert settings.proxy is None
+
+
+@pytest.mark.parametrize(
+    ("session_dir", "env_home", "expected_home"),
+    [
+        ("", "/tmp/jmcpy-env", Path("/tmp/jmcpy-env")),
+        ("  ", "  /tmp/jmcpy-env  ", Path("/tmp/jmcpy-env")),
+        (" /tmp/jmcpy-explicit ", "/tmp/jmcpy-env", Path("/tmp/jmcpy-explicit")),
+        ("", "  ", None),
+    ],
+)
+def test_build_settings_resolves_session_dir_before_jmcpy_home(
+    monkeypatch: pytest.MonkeyPatch,
+    session_dir: str,
+    env_home: str,
+    expected_home: Path | None,
+) -> None:
+    monkeypatch.setenv("JMCPY_HOME", env_home)
+    monkeypatch.setattr(jm_client, "get_request_proxy", lambda *_args, **_kwargs: None)
+
+    settings = jm_client.build_settings(_config(jm_session_dir=session_dir))
+
+    assert settings.home == expected_home
+    assert (
+        settings.resolved_session_path
+        == (expected_home if expected_home is not None else settings.resolved_home)
+        / "session.json"
+    )
 
 
 def _page_png(path: Path, size: tuple[int, int], *, band: int = 0) -> Path:

@@ -6,6 +6,7 @@ jmcpy 的接口与图片 CDN 都走 HTTPS，因此这里只按 scheme 取 ``[pro
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,8 @@ _PROXY_PROBE_URL = "https://18comic.vip"
 def build_settings(config: Any) -> Settings:
     """把 ``[jm]`` 配置映射成 jmcpy 的 :class:`~jmcpy.Settings`。"""
     home = str(getattr(config, "jm_session_dir", "") or "").strip()
+    if not home:
+        home = os.environ.get("JMCPY_HOME", "").strip()
     return Settings(
         proxy=get_request_proxy(_PROXY_PROBE_URL, proxy_scope="jm", config=config),
         timeout=float(getattr(config, "jm_request_timeout", 20.0)),

@@ -59,6 +59,22 @@ async def test_jm_book_info_mode_rejects_bad_book_id(
 
 
 @pytest.mark.asyncio
+async def test_jm_book_rejects_malformed_url_without_fetching(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fetch = AsyncMock()
+    monkeypatch.setattr(jm_tool, "jm_book_info_text", fetch)
+
+    result = await execute(
+        {"book_id": "https://[18comic.vip/album/350234", "output_mode": "info"},
+        _context(),
+    )
+
+    assert "无法解析禁漫车号" in result
+    fetch.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_jm_book_uid_mode_registers_attachment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

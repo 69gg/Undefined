@@ -1611,8 +1611,8 @@ request_timeout = 20.0
 # zh: 图片下载超时（秒）。<=0 回退 60，>600 截断到 600。
 # en: Image download timeout (seconds). <=0 falls back to 60, >600 is clamped to 600.
 image_timeout = 60.0
-# zh: jmcpy 的配置目录（登录态与会话文件所在目录，可指向已登录的 JMCPY_HOME）。留空使用平台默认目录。
-# en: jmcpy config directory (login session files; point it at an existing JMCPY_HOME). Empty uses the platform default directory.
+# zh: jmcpy 的配置目录（登录态与会话文件所在目录）。显式值优先；留空读取 JMCPY_HOME，两者均为空时使用平台默认目录。
+# en: jmcpy config directory (login session files). An explicit value takes precedence; empty falls back to JMCPY_HOME, then the platform default directory.
 session_dir = ""
 
 # zh: Code Delivery Agent 配置（代码交付 Agent，在 Docker 容器中编写代码并打包上传）。

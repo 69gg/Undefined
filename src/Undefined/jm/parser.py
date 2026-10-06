@@ -42,7 +42,11 @@ def _strip_wrapper_chars(value: str) -> str:
     return html.unescape(value).strip().rstrip(_URL_WRAPPERS)
 
 
-def _is_jm_host(host: str) -> bool:
+def _is_jm_url(value: str) -> bool:
+    try:
+        host = urlsplit(value).hostname or ""
+    except ValueError:
+        return False
     return any(keyword in host for keyword in _JM_HOST_KEYWORDS)
 
 
@@ -53,7 +57,7 @@ def normalize_jm_id(value: int | str) -> str | None:
     （普通数字串与非禁漫链接都不会被误判成车号）。
     """
     if isinstance(value, str) and "://" in value:
-        if not _is_jm_host(urlsplit(value).hostname or ""):
+        if not _is_jm_url(value):
             return None
     try:
         digits = normalize_book_id(value)
@@ -83,7 +87,7 @@ def _iter_candidates(text: str) -> Iterator[tuple[int, str]]:
     """产出 ``(位置, 候选串)``：链接与 ``JM`` 车号混排时也按原文顺序排列。"""
     for match in _URL_REGEX.finditer(text):
         candidate = _strip_wrapper_chars(match.group(0))
-        if _is_jm_host(urlsplit(candidate).hostname or ""):
+        if _is_jm_url(candidate):
             yield match.start(), candidate
     for match in _JM_TOKEN_REGEX.finditer(text):
         yield match.start(), match.group(1)
