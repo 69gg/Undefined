@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -12,6 +14,56 @@ from Undefined.api import RuntimeAPIContext
 from Undefined.api.routes.cognitive import cognitive_profile_handler
 from Undefined.cognitive.profile_storage import ProfileStorage
 from Undefined.skills.toolsets.cognitive.get_profile.handler import execute
+
+
+@pytest.mark.asyncio
+async def test_profile_paths_are_validated_in_file_io_threads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    storage = ProfileStorage(tmp_path)
+    event_loop_thread = threading.get_ident()
+    checked_threads: list[int] = []
+    original = storage._contained_path
+
+    def check_path(path: Path) -> Path:
+        checked_threads.append(threading.get_ident())
+        return original(path)
+
+    monkeypatch.setattr(storage, "_contained_path", check_path)
+    await storage.write_profile("user", "10001", "v1")
+    await storage.write_profile("user", "10001", "v2")
+    assert await storage.read_profile("user", "10001") == "v2"
+    revisions = await storage.list_revisions("user", "10001")
+    assert await storage.read_revision("user", "10001", revisions[0]) == "v1"
+    await storage.restore_revision("user", "10001", revisions[0])
+    assert checked_threads
+    assert event_loop_thread not in checked_threads
+
+
+@pytest.mark.asyncio
+async def test_profile_read_checks_links_after_dispatching_file_io(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    base = tmp_path / "profiles"
+    users = base / "users"
+    users.mkdir(parents=True)
+    (users / "10001.md").write_text("safe", encoding="utf-8")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "10001.md").write_text("private", encoding="utf-8")
+    storage = ProfileStorage(base)
+    original = asyncio.to_thread
+
+    async def dispatch_after_link_change(
+        func: Any, /, *args: Any, **kwargs: Any
+    ) -> Any:
+        users.rename(base / "original-users")
+        users.symlink_to(outside, target_is_directory=True)
+        return await original(func, *args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "to_thread", dispatch_after_link_change)
+    with pytest.raises(ValueError, match="超出存储目录"):
+        await storage.read_profile("user", "10001")
 
 
 @pytest.mark.asyncio

@@ -76,12 +76,12 @@ class ProfileStorage:
         return path
 
     async def read_profile(self, entity_type: str, entity_id: str) -> str | None:
-        p = self._profile_path(entity_type, entity_id)
         logger.info(
             "[认知侧写] 读取侧写: entity_type=%s entity_id=%s", entity_type, entity_id
         )
 
         def _read() -> str | None:
+            p = self._profile_path(entity_type, entity_id)
             if not p.exists():
                 return None
             return p.read_text(encoding="utf-8")
@@ -106,10 +106,10 @@ class ProfileStorage:
             len(content or ""),
         )
         async with self._get_lock(entity_type, entity_id):
-            p = self._profile_path(entity_type, entity_id)
-            hist_dir = self._history_dir(entity_type, entity_id)
 
             def _write() -> None:
+                p = self._profile_path(entity_type, entity_id)
+                hist_dir = self._history_dir(entity_type, entity_id)
                 p.parent.mkdir(parents=True, exist_ok=True)
                 hist_dir.mkdir(parents=True, exist_ok=True)
 
@@ -156,9 +156,8 @@ class ProfileStorage:
         )
 
     async def list_revisions(self, entity_type: str, entity_id: str) -> list[str]:
-        hist_dir = self._history_dir(entity_type, entity_id)
-
         def _list() -> list[str]:
+            hist_dir = self._history_dir(entity_type, entity_id)
             if not hist_dir.exists():
                 return []
             return sorted(f.name for f in hist_dir.glob("*.md"))
@@ -193,9 +192,11 @@ class ProfileStorage:
     ) -> str | None:
         """读取指定历史版本内容；版本名取 `list_revisions` 的返回值。"""
         name = self._normalize_revision_name(revision)
-        path = self._contained_path(self._history_dir(entity_type, entity_id) / name)
 
         def _read() -> str | None:
+            path = self._contained_path(
+                self._history_dir(entity_type, entity_id) / name
+            )
             if not path.exists():
                 return None
             return path.read_text(encoding="utf-8")
