@@ -9,7 +9,7 @@ use crate::preview::{
 };
 use crate::runtime_client::{
     build_runtime_url, job_events_url, parse_sse_chunks, runtime_health_from_body_result,
-    RuntimeRequestInput, StartJobEventStreamInput, Utf8ChunkDecoder,
+    ConversationHistoryInput, RuntimeRequestInput, StartJobEventStreamInput, Utf8ChunkDecoder,
 };
 use crate::secret::{
     api_key_status_from_storage, classify_secret_storage, derive_stronghold_key,
@@ -26,6 +26,28 @@ use crate::{
         upload_uses_streaming_body, UploadAttachmentInput,
     },
 };
+
+#[test]
+fn history_input_accepts_runtime_numeric_cursors() {
+    for before in [0, 70] {
+        let input: ConversationHistoryInput = serde_json::from_value(serde_json::json!({
+            "conversationId": "default",
+            "limit": 50,
+            "before": before,
+        }))
+        .unwrap();
+        assert_eq!(input.conversation_id, "default");
+        assert_eq!(input.limit, Some(50));
+        assert_eq!(input.before, Some(before));
+    }
+    for input in [
+        serde_json::json!({"conversationId": "default"}),
+        serde_json::json!({"conversationId": "default", "before": null}),
+    ] {
+        let input: ConversationHistoryInput = serde_json::from_value(input).unwrap();
+        assert_eq!(input.before, None);
+    }
+}
 
 #[test]
 fn normalize_runtime_url_removes_trailing_slashes() {

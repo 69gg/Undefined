@@ -168,7 +168,9 @@ function withoutConversationJob(
 
 export function isJobRunning(job: ChatJob | null | undefined): boolean {
 	return Boolean(
-		job && !["done", "error", "cancelled"].includes(job.status.toLowerCase()),
+		job &&
+			(!["done", "error", "cancelled"].includes(job.status.toLowerCase()) ||
+				!job.historyFinalized),
 	);
 }
 
@@ -672,6 +674,8 @@ export function createChatStore({
 	const fallbackTimersByJob = new Map<string, ReturnType<typeof setTimeout>>();
 	/** 每个 job 当前的 JSON 轮询退避间隔（ms），随连续失败指数增长、成功后重置 */
 	const fallbackBackoffByJob = new Map<string, number>();
+	const latestFallbackRequestByJob = new Map<string, number>();
+	let fallbackRequestGeneration = 0;
 	let unlistenRuntimeSse: (() => void) | null = null;
 	/** bootstrap 重入保护：已在进行中的 bootstrap promise，避免并发重入导致 SSE 监听泄漏 */
 	let inFlightBootstrap: Promise<void> | null = null;
@@ -706,6 +710,7 @@ export function createChatStore({
 			clearTimeout(timer);
 		}
 		fallbackTimersByJob.clear();
+		latestFallbackRequestByJob.clear();
 	}
 
 	async function loadHistory(conversationId: string): Promise<void> {
@@ -737,13 +742,18 @@ export function createChatStore({
 		if (subscriptionsByJob.has(job.jobId)) {
 			return;
 		}
-		const subscription = await client.startJobEventStream({
-			jobId: job.jobId,
-			afterSeq: state.eventCursorByJob[job.jobId] ?? job.lastSeq,
-			conversationId: job.conversationId,
-		});
-		if (subscription.subscriptionId) {
-			subscriptionsByJob.set(job.jobId, subscription.subscriptionId);
+		try {
+			const subscription = await client.startJobEventStream({
+				jobId: job.jobId,
+				afterSeq: state.eventCursorByJob[job.jobId] ?? job.lastSeq,
+				conversationId: job.conversationId,
+			});
+			if (subscription.subscriptionId) {
+				subscriptionsByJob.set(job.jobId, subscription.subscriptionId);
+			}
+		} catch {
+			// job 已建立；订阅失败只切换传输方式，不能回滚成功发送的输入。
+			fetchJobEventsFallback(job.jobId);
 		}
 	}
 
@@ -754,6 +764,25 @@ export function createChatStore({
 			fallbackTimersByJob.delete(jobId);
 		}
 		fallbackBackoffByJob.delete(jobId);
+		latestFallbackRequestByJob.delete(jobId);
+	}
+
+	function finishJob(jobId: string, conversationId: string): void {
+		const active = state.activeJobsByConversation[conversationId];
+		if (active && active.jobId !== jobId) {
+			return;
+		}
+		stopFallbackPolling(jobId);
+		const subscriptionId = subscriptionsByJob.get(jobId);
+		if (subscriptionId) {
+			subscriptionsByJob.delete(jobId);
+			void client.stopJobEventStream(subscriptionId);
+		}
+		dispatch({ type: "job/remove", conversationId, jobId });
+		if (Object.keys(state.activeJobsByConversation).length === 0) {
+			dispatch({ type: "connection/set", connectionState: "connected" });
+		}
+		void loadHistory(conversationId);
 	}
 
 	/** 计算并推进某个 job 的下一次轮询退避间隔（指数增长，封顶 JSON_FALLBACK_MAX_MS） */
@@ -779,6 +808,18 @@ export function createChatStore({
 	}
 
 	function fetchJobEventsFallback(jobId: string): void {
+		const conversationId = state.jobConversationById[jobId];
+		if (
+			!conversationId ||
+			state.activeJobsByConversation[conversationId]?.jobId !== jobId
+		) {
+			return;
+		}
+		const requestGeneration = ++fallbackRequestGeneration;
+		latestFallbackRequestByJob.set(jobId, requestGeneration);
+		const isCurrentRequest = (): boolean =>
+			latestFallbackRequestByJob.get(jobId) === requestGeneration &&
+			state.activeJobsByConversation[conversationId]?.jobId === jobId;
 		const timer = fallbackTimersByJob.get(jobId);
 		if (timer) {
 			clearTimeout(timer);
@@ -789,29 +830,51 @@ export function createChatStore({
 			.fetchJobEventsJson({
 				jobId,
 				afterSeq: state.eventCursorByJob[jobId] ?? 0,
-				conversationId: state.jobConversationById[jobId],
+				conversationId,
 			})
 			.then((response) => {
+				if (!isCurrentRequest()) {
+					return;
+				}
+				const active = state.activeJobsByConversation[conversationId];
+				const consumedSeq = Math.max(
+					state.eventCursorByJob[jobId] ?? 0,
+					active?.lastSeq ?? 0,
+				);
+				if (response.job.lastSeq < consumedSeq) {
+					// SSE 可能在请求途中推进；旧快照不能回退正文或阶段，继续拉取即可。
+					scheduleFallbackPolling(jobId);
+					return;
+				}
 				// 拉取成功：重置退避间隔
 				fallbackBackoffByJob.delete(jobId);
-				dispatch({ type: "job/upsert", job: response.job });
+				// 先续接事件保留此前时间线，再应用权威正文快照，避免增量重复计数。
 				applyRuntimeEvents(jobId, response.events);
-				const hasTerminalEvent = response.events.some((item) =>
-					TERMINAL_EVENTS.has(item.event),
-				);
+				const replayedJob =
+					state.activeJobsByConversation[response.job.conversationId];
+				dispatch({
+					type: "job/upsert",
+					job: {
+						...response.job,
+						currentTimeline: replayedJob?.currentTimeline ?? [],
+						// Runtime 运行快照只含未结束调用，完整调用树由事件回放保留。
+						currentToolCalls:
+							replayedJob?.currentToolCalls ?? response.job.currentToolCalls,
+					},
+				});
 				if (isJobRunning(response.job)) {
 					scheduleFallbackPolling(jobId, JSON_FALLBACK_BASE_MS);
-				} else if (!hasTerminalEvent && response.job.conversationId) {
-					void loadHistory(response.job.conversationId);
-					dispatch({ type: "connection/set", connectionState: "connected" });
+				} else if (response.job.conversationId) {
+					finishJob(jobId, response.job.conversationId);
 				}
 			})
 			.catch(() => {
+				if (!isCurrentRequest()) {
+					return;
+				}
 				// 单次失败不直接放弃：仅当该 job 仍是活跃任务时按指数退避继续重试，
 				// 否则停止轮询。连接状态保持 json_fallback（仍在尝试），而非直接 disconnected。
-				const conversationId = state.jobConversationById[jobId];
 				const stillActive =
-					conversationId != null &&
 					state.activeJobsByConversation[conversationId]?.jobId === jobId;
 				if (stillActive) {
 					scheduleFallbackPolling(jobId, nextFallbackDelay(jobId));
@@ -891,7 +954,10 @@ export function createChatStore({
 			if (selected) {
 				await loadHistory(selected);
 			}
-			if (activeJobs.jobs.length > 0) {
+			if (
+				activeJobs.jobs.length > 0 &&
+				state.connectionState !== "json_fallback"
+			) {
 				dispatch({ type: "connection/set", connectionState: "streaming" });
 			}
 		} catch (err) {
@@ -1006,16 +1072,6 @@ export function createChatStore({
 		dispatch({ type: "draft/set", conversationId, draft });
 	}
 
-	function latestEventSeq(jobId: string): number {
-		const cursor = state.eventCursorByJob[jobId] ?? 0;
-		const events = state.eventsByJob[jobId] ?? [];
-		const lastEventSeq = events.reduce(
-			(maxSeq, item) => Math.max(maxSeq, item.seq),
-			0,
-		);
-		return Math.max(cursor, lastEventSeq);
-	}
-
 	async function sendSelectedMessage(): Promise<void> {
 		// in-flight 锁：从点击到 job 建立期间阻止重复发送，
 		// 避免快速双击重复插入乐观消息 / 重复请求后端
@@ -1115,19 +1171,29 @@ export function createChatStore({
 
 	async function cancelJob(jobId: string): Promise<void> {
 		const conversationId = state.jobConversationById[jobId];
+		if (!conversationId) {
+			return;
+		}
 		try {
 			const cancelled = await client.cancelJob(jobId);
-			dispatch({ type: "job/upsert", job: cancelled });
-			applyRuntimeEvents(jobId, [
-				{
-					seq: Math.max(latestEventSeq(jobId), cancelled.lastSeq) + 1,
-					event: "cancelled",
-					payload: {
-						job_id: jobId,
-						conversation_id: cancelled.conversationId || conversationId,
-					},
+			const current = state.activeJobsByConversation[conversationId];
+			if (current?.jobId !== jobId) {
+				return;
+			}
+			dispatch({
+				type: "job/upsert",
+				job: {
+					...cancelled,
+					currentTimeline: current.currentTimeline,
+					currentToolCalls: current.currentToolCalls,
 				},
-			]);
+			});
+			// 取消响应不是增量事件，不伪造序号；真正终态由 Runtime 游标续接。
+			if (isJobRunning(cancelled)) {
+				scheduleFallbackPolling(jobId);
+			} else {
+				finishJob(jobId, conversationId);
+			}
 		} catch (err) {
 			dispatch({ type: "send/error", error: errorMessage(err) });
 		}
@@ -1432,22 +1498,28 @@ export function createChatStore({
 			}
 		}
 
-		// 终态事件：清理 job 并重载历史
-		const doneEvent = events.find((item) =>
-			["done", "error", "cancelled"].includes(item.event),
+		// 终态事件先保留会话和展示状态，确认 Runtime 历史落盘后再释放发送锁。
+		const doneEvent = events.find(
+			(item) => item.seq > prevCursor && TERMINAL_EVENTS.has(item.event),
 		);
 		if (doneEvent && conversationId) {
-			stopFallbackPolling(jobId);
-			const subscriptionId = subscriptionsByJob.get(jobId);
-			if (subscriptionId) {
-				subscriptionsByJob.delete(jobId);
-				void client.stopJobEventStream(subscriptionId);
+			const currentJob = state.activeJobsByConversation[conversationId];
+			if (currentJob && currentJob.jobId !== jobId) {
+				return;
 			}
-			dispatch({ type: "job/remove", conversationId, jobId });
-			if (Object.keys(state.activeJobsByConversation).length === 0) {
-				dispatch({ type: "connection/set", connectionState: "connected" });
+			if (currentJob && !currentJob.historyFinalized) {
+				const status =
+					doneEvent.payload.error === "cancelled"
+						? "cancelled"
+						: doneEvent.event;
+				dispatch({
+					type: "job/upsert",
+					job: { ...currentJob, status },
+				});
+				scheduleFallbackPolling(jobId);
+			} else {
+				finishJob(jobId, conversationId);
 			}
-			void loadHistory(conversationId);
 		}
 	}
 

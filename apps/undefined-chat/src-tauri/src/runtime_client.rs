@@ -92,7 +92,7 @@ pub struct ConversationHistoryInput {
     #[serde(default)]
     pub limit: Option<u32>,
     #[serde(default)]
-    pub before: Option<String>,
+    pub before: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -495,8 +495,7 @@ pub async fn get_history(
         path.push_str(&format!("&limit={limit}"));
     }
     if let Some(before) = input.before {
-        path.push_str("&before=");
-        path.push_str(&urlencoding::encode(&before));
+        path.push_str(&format!("&before={before}"));
     }
     request_json_command(
         &app,

@@ -383,6 +383,7 @@ describe("chat store", () => {
 			jobId: "job-1",
 			conversationId: "default",
 			status: "done",
+			historyFinalized: true,
 			lastSeq: 2,
 		});
 		const client = runtimeClientStub({
@@ -455,6 +456,7 @@ describe("chat store", () => {
 			jobId: "job-1",
 			conversationId: "default",
 			status: "cancelled",
+			historyFinalized: true,
 			lastSeq: 4,
 		});
 		const client = runtimeClientStub({
