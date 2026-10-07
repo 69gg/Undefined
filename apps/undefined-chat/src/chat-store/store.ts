@@ -809,13 +809,13 @@ export function createChatStore({
 		fallbackTimersByJob.clear();
 		latestFallbackRequestByJob.clear();
 		fallbackBackoffByJob.clear();
-		historyRequestsByConversation.clear();
 	}
 
 	function resetRuntimeScope(nextUrl: string): void {
 		runtimeUrl = nextUrl;
 		runtimeGeneration += 1;
 		clearNativeSubscriptions();
+		historyRequestsByConversation.clear();
 		sendInFlight = false;
 		lastCommandsFetchedAt = 0;
 		draftRevisionsByConversation.clear();
@@ -836,6 +836,7 @@ export function createChatStore({
 			sendInFlight = false;
 		}
 		runtimeSuspended = true;
+		historyRequestsByConversation.clear();
 		inFlightBootstrap = null;
 		state = {
 			...state,
@@ -1141,6 +1142,29 @@ export function createChatStore({
 					recoveredJobs.push(snapshot);
 				}
 			}
+			const historyConversationIds = new Set(selected ? [selected] : []);
+			const recoveredJobIds = new Set(recoveredJobs.map((item) => item.jobId));
+			// 已落盘终态会从 active 列表消失；补刷仍存在的非当前会话缓存。
+			for (const previous of Object.values(state.activeJobsByConversation)) {
+				if (
+					conversationIds.has(previous.conversationId) &&
+					!recoveredJobIds.has(previous.jobId)
+				) {
+					historyConversationIds.add(previous.conversationId);
+				}
+			}
+			// 配置暂停可能发生在 finishJob 已移除任务、历史刷新尚未返回时。
+			for (const [conversationId, history] of Object.entries(
+				state.historyByConversation,
+			)) {
+				if (
+					history.loading &&
+					!historyRequestsByConversation.has(conversationId) &&
+					conversationIds.has(conversationId)
+				) {
+					historyConversationIds.add(conversationId);
+				}
+			}
 			dispatch({
 				type: "bootstrap/success",
 				runtimeConfig,
@@ -1168,9 +1192,7 @@ export function createChatStore({
 				if (generation !== runtimeGeneration) return;
 				await startStreamForJob(activeJob);
 			}
-			if (selected) {
-				await loadHistory(selected);
-			}
+			await Promise.all([...historyConversationIds].map(loadHistory));
 			if (generation !== runtimeGeneration) return;
 			if (
 				Object.keys(state.activeJobsByConversation).length > 0 &&
@@ -1312,7 +1334,8 @@ export function createChatStore({
 			return;
 		}
 		dispatch({ type: "conversation/select", conversationId });
-		if (!state.historyByConversation[conversationId]) {
+		const history = state.historyByConversation[conversationId];
+		if (!history || history.error) {
 			await loadHistory(conversationId);
 		}
 	}

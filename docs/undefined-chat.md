@@ -70,7 +70,8 @@ Runtime 请求必须由 Tauri command 拼接到已配置 origin 下，避免 Rea
 - 取消请求错误和 SSE 的连接状态通知同样只作用于对应的活跃 job，旧任务的迟到通知不会改写新任务的错误或连接状态。
 - `done` / `error` / `cancelled` 事件到达后，客户端继续保留当前会话的 job 和发送锁，通过 JSON polling 等待 `history_finalized=true`，确认历史落盘后再刷新历史并清理订阅。
 - 历史分页的 `before` / `next_before` 是非负数值索引；React 与 Tauri command 使用同一数值契约，首屏不传 `before`。
-- Android 回到前台时执行 `store.bootstrap()`，刷新配置、会话、当前历史页和 active jobs；每个任务接受完整快照及其游标后重新建立事件订阅。请求途中已消费更高序号时保留更新的本地状态。
+- Android 回到前台时执行 `store.bootstrap()`，刷新配置、会话、当前历史页和 active jobs；每个任务接受完整快照及其游标后重新建立事件订阅。已从 active 列表消失的本地任务还会补刷所属会话的权威历史，包括非当前会话；已删除会话不再请求。请求途中已消费更高序号时保留更新的本地状态。
+- 同一 Runtime 重建订阅时保留已开始的终态历史刷新；切换 Runtime 或暂停保存连接配置时，旧请求响应仍会被丢弃。
 
 ## 安全存储
 
