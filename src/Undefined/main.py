@@ -427,9 +427,6 @@ async def main() -> None:
         logger.info("[认知记忆] 史官后台任务已启动")
 
     if meme_worker is not None:
-        if meme_job_queue is not None:
-            recovered = await meme_job_queue.recover_stale(timeout_seconds=300.0)
-            logger.info("[memes] 启动前陈旧任务恢复完成: recovered=%s", recovered)
         await meme_worker.start()
         logger.info("[memes] 后台任务已启动")
 
