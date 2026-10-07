@@ -3,6 +3,34 @@ let configLayoutResizeObserver = null;
 let configSavePromise = null;
 let configPendingSave = null;
 let configSaveRevision = 0;
+let configOperationPromise = null;
+let configLoadPromise = null;
+
+async function runConfigOperation(operation) {
+    // 恢复/同步/重新加载替换整个表单，旧快照不能在它们之后继续保存。
+    configSaveRevision += 1;
+    configPendingSave = null;
+    if (state.saveTimer) clearTimeout(state.saveTimer);
+    state.saveTimer = null;
+    const previous = configOperationPromise;
+    const form = get("formSections");
+    if (form) form.inert = true;
+    const current = (async () => {
+        if (previous) await previous.catch(() => {});
+        if (configSavePromise) await configSavePromise;
+        if (configLoadPromise) await configLoadPromise;
+        return await operation();
+    })();
+    configOperationPromise = current;
+    try {
+        return await current;
+    } finally {
+        if (configOperationPromise === current) {
+            configOperationPromise = null;
+            if (form) form.inert = false;
+        }
+    }
+}
 
 function getConfigStickyChromeElements() {
     return [
@@ -62,23 +90,30 @@ function initConfigFormLayout() {
 }
 
 async function loadConfig() {
-    if (state.configLoading) return;
+    if (configLoadPromise) return configLoadPromise;
     state.configLoading = true;
     state.configLoaded = false;
     setConfigState("loading");
+    configLoadPromise = (async () => {
+        try {
+            const res = await api("/api/config/summary");
+            const data = await res.json();
+            state.config = data.data;
+            state.comments = data.comments || {};
+            state.configLoaded = true;
+            buildConfigForm();
+            setConfigState(null);
+        } catch (e) {
+            setConfigState("error");
+            showToast(t("config.error"), "error", 5000);
+        } finally {
+            state.configLoading = false;
+        }
+    })();
     try {
-        const res = await api("/api/config/summary");
-        const data = await res.json();
-        state.config = data.data;
-        state.comments = data.comments || {};
-        state.configLoaded = true;
-        buildConfigForm();
-        setConfigState(null);
-    } catch (e) {
-        setConfigState("error");
-        showToast(t("config.error"), "error", 5000);
+        await configLoadPromise;
     } finally {
-        state.configLoading = false;
+        configLoadPromise = null;
     }
 }
 
@@ -126,6 +161,7 @@ function isRequestParamsPath(path) {
 }
 
 function scheduleAutoSave() {
+    if (configOperationPromise) return;
     configSaveRevision += 1;
     if (state.saveTimer) clearTimeout(state.saveTimer);
     showSaveStatus("saving", t("config.typing"));
@@ -1241,6 +1277,7 @@ function parseInputValue(input) {
 }
 
 async function autoSave() {
+    if (configOperationPromise) return;
     if (state.saveTimer) clearTimeout(state.saveTimer);
     state.saveTimer = null;
     configSaveRevision += 1;
@@ -1331,74 +1368,79 @@ async function syncConfigTemplate(button) {
     setButtonLoading(button, true);
     showSaveStatus("saving", t("config.syncing"));
     try {
-        const previewRes = await api("/api/config/sync-template?write=false", {
-            method: "POST",
+        await runConfigOperation(async () => {
+            const previewRes = await api(
+                "/api/config/sync-template?write=false",
+                {
+                    method: "POST",
+                },
+            );
+            const previewData = await previewRes.json();
+            if (!previewData.success) {
+                showSaveStatus("error", t("config.save_error"));
+                showToast(
+                    `${t("common.error")}: ${previewData.error || t("config.sync_error")}`,
+                    "error",
+                    5000,
+                );
+                return;
+            }
+
+            let shouldPrune = false;
+            if (
+                Array.isArray(previewData.removed_paths) &&
+                previewData.removed_paths.length > 0
+            ) {
+                const listing = previewData.removed_paths
+                    .map((p) => `  - ${p}`)
+                    .join("\n");
+                shouldPrune = confirm(
+                    `${t("config.prune_confirm")}\n\n${listing}\n\n${t("config.prune_confirm_action")}`,
+                );
+            }
+
+            const finalUrl = shouldPrune
+                ? "/api/config/sync-template?prune=true"
+                : "/api/config/sync-template";
+            const finalRes = await api(finalUrl, { method: "POST" });
+            const finalData = await finalRes.json();
+            if (!finalData.success) {
+                showSaveStatus("error", t("config.save_error"));
+                showToast(
+                    `${t("common.error")}: ${finalData.error || t("config.sync_error")}`,
+                    "error",
+                    5000,
+                );
+                return;
+            }
+
+            await loadConfig();
+            showSaveStatus("saved", t("config.saved"));
+            if (finalData.warning) {
+                showToast(
+                    `${t("common.warning")}: ${finalData.warning}`,
+                    "warning",
+                    5000,
+                );
+            }
+            if (shouldPrune) {
+                const removedCount = Number.isFinite(finalData.removed_count)
+                    ? finalData.removed_count
+                    : Array.isArray(finalData.removed_paths)
+                      ? finalData.removed_paths.length
+                      : 0;
+                showToast(
+                    `${t("config.prune_success")} (-${removedCount})`,
+                    "info",
+                    4000,
+                );
+            } else {
+                const suffix = Number.isFinite(finalData.added_count)
+                    ? ` (+${finalData.added_count})`
+                    : "";
+                showToast(`${t("config.sync_success")}${suffix}`, "info", 4000);
+            }
         });
-        const previewData = await previewRes.json();
-        if (!previewData.success) {
-            showSaveStatus("error", t("config.save_error"));
-            showToast(
-                `${t("common.error")}: ${previewData.error || t("config.sync_error")}`,
-                "error",
-                5000,
-            );
-            return;
-        }
-
-        let shouldPrune = false;
-        if (
-            Array.isArray(previewData.removed_paths) &&
-            previewData.removed_paths.length > 0
-        ) {
-            const listing = previewData.removed_paths
-                .map((p) => `  - ${p}`)
-                .join("\n");
-            shouldPrune = confirm(
-                `${t("config.prune_confirm")}\n\n${listing}\n\n${t("config.prune_confirm_action")}`,
-            );
-        }
-
-        const finalUrl = shouldPrune
-            ? "/api/config/sync-template?prune=true"
-            : "/api/config/sync-template";
-        const finalRes = await api(finalUrl, { method: "POST" });
-        const finalData = await finalRes.json();
-        if (!finalData.success) {
-            showSaveStatus("error", t("config.save_error"));
-            showToast(
-                `${t("common.error")}: ${finalData.error || t("config.sync_error")}`,
-                "error",
-                5000,
-            );
-            return;
-        }
-
-        await loadConfig();
-        showSaveStatus("saved", t("config.saved"));
-        if (finalData.warning) {
-            showToast(
-                `${t("common.warning")}: ${finalData.warning}`,
-                "warning",
-                5000,
-            );
-        }
-        if (shouldPrune) {
-            const removedCount = Number.isFinite(finalData.removed_count)
-                ? finalData.removed_count
-                : Array.isArray(finalData.removed_paths)
-                  ? finalData.removed_paths.length
-                  : 0;
-            showToast(
-                `${t("config.prune_success")} (-${removedCount})`,
-                "info",
-                4000,
-            );
-        } else {
-            const suffix = Number.isFinite(finalData.added_count)
-                ? ` (+${finalData.added_count})`
-                : "";
-            showToast(`${t("config.sync_success")}${suffix}`, "info", 4000);
-        }
     } catch (e) {
         showSaveStatus("error", t("config.sync_error"));
         showToast(`${t("common.error")}: ${e.message}`, "error", 5000);
@@ -1410,7 +1452,7 @@ async function syncConfigTemplate(button) {
 async function resetConfig() {
     if (!confirm(t("config.reset_confirm"))) return;
     try {
-        await loadConfig();
+        await runConfigOperation(loadConfig);
         showToast(t("config.reload_success"), "info");
     } catch (e) {
         showToast(t("config.reload_error"), "error");

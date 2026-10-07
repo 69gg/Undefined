@@ -978,17 +978,22 @@ async function init() {
                         if (!confirm(t("config.history_restore_confirm")))
                             return;
                         try {
-                            await api("/api/config/history/restore", {
-                                method: "POST",
-                                headers: {
-                                    "Content-Type": "application/json",
-                                },
-                                body: JSON.stringify({ name }),
+                            await runConfigOperation(async () => {
+                                await api("/api/config/history/restore", {
+                                    method: "POST",
+                                    headers: {
+                                        "Content-Type": "application/json",
+                                    },
+                                    body: JSON.stringify({ name }),
+                                });
+                                showToast(
+                                    t("config.history_restored"),
+                                    "success",
+                                );
+                                panel.style.display = "none";
+                                if (formGrid) formGrid.style.display = "";
+                                await loadConfig();
                             });
-                            showToast(t("config.history_restored"), "success");
-                            panel.style.display = "none";
-                            if (formGrid) formGrid.style.display = "";
-                            loadConfig();
                         } catch (e) {
                             showToast(
                                 `${t("common.error")}: ${e.message}`,

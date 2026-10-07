@@ -11,8 +11,11 @@ from aiohttp.web_response import Response
 from Undefined.config.loader import Config
 from Undefined.config.loader import CONFIG_PATH, load_toml_data
 from Undefined.config import get_config_manager
+from Undefined.utils import io as async_io
+from ..utils.config_io import config_write_lock
 from ._shared import routes, check_auth
 from ..utils import (
+    ConfigTemplateSyncResult,
     read_config_source,
     validate_toml,
     validate_required_config,
@@ -82,10 +85,18 @@ async def save_config_handler(request: web.Request) -> Response:
     if not valid:
         return web.json_response({"success": False, "error": msg}, status=400)
     try:
-        _backup_config()
-        CONFIG_PATH.write_text(content, encoding="utf-8")
-        get_config_manager().reload()
-        logic_valid, logic_msg = validate_required_config()
+
+        def write_config() -> None:
+            with config_write_lock(CONFIG_PATH):
+                _backup_config()
+                async_io.write_text_sync(CONFIG_PATH, content, use_lock=False)
+
+        async def save_and_reload() -> tuple[bool, str]:
+            await asyncio.to_thread(write_config)
+            get_config_manager().reload()
+            return validate_required_config()
+
+        logic_valid, logic_msg = await async_io.run_cancellation_safe(save_and_reload())
         return web.json_response(
             {
                 "success": True,
@@ -162,21 +173,29 @@ async def config_patch_handler(request: web.Request) -> Response:
     if not isinstance(patch, dict):
         return web.json_response({"error": "Invalid payload"}, status=400)
 
-    source = read_config_source()
+    def write_patch() -> None:
+        with config_write_lock(CONFIG_PATH):
+            source = read_config_source()
+            data = tomllib.loads(source["content"]) if source["content"].strip() else {}
+            patched = apply_patch(data, patch)
+            _backup_config()
+            async_io.write_text_sync(
+                CONFIG_PATH,
+                render_toml(patched, comments=load_comment_map()),
+                use_lock=False,
+            )
+
+    async def patch_and_reload() -> tuple[bool, str]:
+        await asyncio.to_thread(write_patch)
+        get_config_manager().reload()
+        return validate_required_config()
+
     try:
-        data = tomllib.loads(source["content"]) if source["content"].strip() else {}
+        validation_ok, validation_msg = await async_io.run_cancellation_safe(
+            patch_and_reload()
+        )
     except tomllib.TOMLDecodeError as exc:
         return web.json_response({"error": f"TOML parse error: {exc}"}, status=400)
-    if not isinstance(data, dict):
-        data = {}
-
-    patched = apply_patch(data, patch)
-    _backup_config()
-    CONFIG_PATH.write_text(
-        render_toml(patched, comments=load_comment_map()), encoding="utf-8"
-    )
-    get_config_manager().reload()
-    validation_ok, validation_msg = validate_required_config()
     return web.json_response(
         {
             "success": True,
@@ -193,15 +212,20 @@ async def sync_config_template_handler(request: web.Request) -> Response:
         return web.json_response({"error": "Unauthorized"}, status=401)
     prune = request.query.get("prune") == "true"
     write = request.query.get("write", "true").lower() != "false"
-    try:
+
+    async def sync_and_reload() -> tuple[ConfigTemplateSyncResult, bool, str | None]:
         result = await asyncio.to_thread(sync_config_file, prune=prune, write=write)
         validation_ok = True
         validation_msg: str | None = None
         if write:
-            await asyncio.to_thread(get_config_manager().reload)
-            validation_ok, validation_msg = await asyncio.to_thread(
-                validate_required_config
-            )
+            get_config_manager().reload()
+            validation_ok, validation_msg = validate_required_config()
+        return result, validation_ok, validation_msg
+
+    try:
+        result, validation_ok, validation_msg = await async_io.run_cancellation_safe(
+            sync_and_reload()
+        )
         return web.json_response(
             {
                 "success": True,
@@ -233,12 +257,20 @@ async def config_history_handler(request: web.Request) -> Response:
     """Return the list of config backups, newest first."""
     if not check_auth(request):
         return web.json_response({"error": "Unauthorized"}, status=401)
-    if not _BACKUP_DIR.exists():
-        return web.json_response({"backups": []})
-    backups: list[dict[str, object]] = []
-    for f in reversed(_config_backups()):
-        stat = f.stat()
-        backups.append({"name": f.name, "size": stat.st_size, "mtime": stat.st_mtime})
+
+    def read_history() -> list[dict[str, object]]:
+        with config_write_lock(CONFIG_PATH):
+            if not _BACKUP_DIR.exists():
+                return []
+            backups: list[dict[str, object]] = []
+            for f in reversed(_config_backups()):
+                stat = f.stat()
+                backups.append(
+                    {"name": f.name, "size": stat.st_size, "mtime": stat.st_mtime}
+                )
+            return backups
+
+    backups = await asyncio.to_thread(read_history)
     return web.json_response({"backups": backups})
 
 
@@ -258,13 +290,24 @@ async def config_restore_handler(request: web.Request) -> Response:
     backup_path = (_BACKUP_DIR / name).resolve()
     if not str(backup_path).startswith(str(_BACKUP_DIR.resolve())):
         return web.json_response({"error": "Invalid backup name"}, status=400)
-    if not backup_path.exists():
+
+    def write_restore() -> None:
+        with config_write_lock(CONFIG_PATH):
+            content = backup_path.read_text(encoding="utf-8")
+            valid, msg = validate_toml(content)
+            if not valid:
+                raise ValueError(f"Backup TOML invalid: {msg}")
+            _backup_config()
+            async_io.write_text_sync(CONFIG_PATH, content, use_lock=False)
+
+    async def restore_and_reload() -> None:
+        await asyncio.to_thread(write_restore)
+        get_config_manager().reload()
+
+    try:
+        await async_io.run_cancellation_safe(restore_and_reload())
+    except FileNotFoundError:
         return web.json_response({"error": "Backup not found"}, status=404)
-    content = backup_path.read_text(encoding="utf-8")
-    valid, msg = validate_toml(content)
-    if not valid:
-        return web.json_response({"error": f"Backup TOML invalid: {msg}"}, status=400)
-    _backup_config()
-    CONFIG_PATH.write_text(content, encoding="utf-8")
-    get_config_manager().reload()
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
     return web.json_response({"success": True, "message": "Restored"})

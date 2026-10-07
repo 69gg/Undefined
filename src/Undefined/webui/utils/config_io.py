@@ -8,11 +8,17 @@ from typing import Any
 from Undefined.config import load_webui_settings
 from Undefined.config.loader import CONFIG_PATH, Config
 from Undefined.utils.resources import resolve_resource_path
+from Undefined.utils.file_lock import FileLock
 
 logger = logging.getLogger(__name__)
 
 CONFIG_EXAMPLE_PATH = Path("config.toml.example")
 TomlData = dict[str, Any]
+
+
+def config_write_lock(config_path: Path) -> FileLock:
+    """所有配置写入口共同保护读取、变换与原子替换，锁文件不随替换移动。"""
+    return FileLock(config_path.with_name(f"{config_path.name}.lock"))
 
 
 def _resolve_config_example_path(path: Path = CONFIG_EXAMPLE_PATH) -> Path | None:

@@ -59,3 +59,27 @@ def test_latest_auto_save_failure_remains_visible_and_next_edit_can_retry(
     assert result["saved"]["onebot.file_send_mode"] == "url"
     assert result["final"]["status"] == "已保存"
     assert result["maxInFlight"] == 1
+
+
+@pytest.mark.parametrize("operation", ["restore", "sync", "reload", "restore_sync"])
+def test_config_replacement_discards_old_snapshots_and_waits_for_inflight_save(
+    operation: str,
+) -> None:
+    result = run_scenario(f"config_replacement_{operation}")
+    assert result["beforeResponse"] == {
+        "patchCount": 1,
+        "mutationCount": 0,
+        "formInert": True,
+    }
+    assert result["patchCount"] == 1
+    assert (
+        result["serverMode"]
+        == result["formMode"]
+        == ("local" if operation.startswith("restore") else "stream")
+    )
+    assert result["formInert"] is False
+    assert "obsolete save warning" not in result["toasts"]
+    if operation == "restore_sync":
+        assert result["calls"].index("/api/config/history/restore") < result[
+            "calls"
+        ].index("/api/config/sync-template?write=false")

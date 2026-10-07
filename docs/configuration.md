@@ -19,6 +19,8 @@
 - 示例模板：`config.toml.example`
 - 启动 WebUI 时，如 `config.toml` 不存在，会自动用示例模板生成。
 - 已有 `config.toml` 想补齐新增配置项/注释时，可用 WebUI 的“同步模板”按钮，或运行 `python scripts/sync_config_template.py`（也支持 `uv run python scripts/sync_config_template.py`）。
+- Management 的整体保存、增量修改、恢复、模板同步和密码更新共用配置文件读改写锁，并原子替换文件；请求取消会等写入、主循环热更新及必要的凭据撤销完成后再传播。备份列表与恢复读取也同备份裁剪串行。
+- WebUI 恢复、同步或重新加载时会停止旧保存队列，等在途保存结束后再替换配置；期间表单暂停编辑，完成后以服务器配置重建。
 
 ### 1.2 运行时本地文件
 - `config.local.json`：运行时维护的本地管理员列表（如 `/admin add`）。

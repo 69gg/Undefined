@@ -3392,6 +3392,94 @@ for (const outcome of ["success", "network_error", "api_error", "typing", "saved
     SCENARIOS[`config_autosave_${outcome}`] = (env) => configAutoSave(env, outcome);
 }
 
+async function configReplacement(env, operation) {
+    const { window, response, root } = env;
+    const calls = [];
+    let serverMode = "local";
+    let finishPatch;
+    let patchCount = 0;
+    window.confirm = () => true;
+    window.fetch = async (url, options = {}) => {
+        const route = String(url);
+        calls.push(route);
+        if (route === "/api/config/summary") return response(200, {
+            data: { onebot: { file_send_mode: serverMode, file_send_host: "localhost" } },
+            comments: {},
+        });
+        if (route === "/api/patch") {
+            patchCount += 1;
+            serverMode = JSON.parse(options.body).patch["onebot.file_send_mode"];
+            if (patchCount === 1) return new Promise((resolve) => { finishPatch = resolve; });
+            return response(200, { success: true });
+        }
+        if (route === "/api/config/history") return response(200, {
+            backups: [{ name: "config_previous.toml", mtime: 1, size: 1 }],
+        });
+        if (route === "/api/config/history/restore") {
+            serverMode = "local";
+            return response(200, { success: true });
+        }
+        if (route.startsWith("/api/config/sync-template")) return response(200, {
+            success: true, removed_paths: [], added_count: 1,
+        });
+        throw new Error(`unexpected config route: ${route}`);
+    };
+    // 使用真实历史按钮的处理器，避免仅测试串行 helper 而漏掉其调用入口。
+    const main = fs.readFileSync(path.join(root, "src/Undefined/webui/static/js/main.js"), "utf8");
+    const start = main.indexOf('    get("btnConfigHistory")?.addEventListener');
+    const end = main.indexOf("    const logout = async", start);
+    window.eval(main.slice(start, end));
+    await window.loadConfig();
+    const mode = () => window.document.querySelector('[data-path="onebot.file_send_mode"].config-input');
+    const changeMode = (value) => {
+        mode().value = value;
+        mode().dispatchEvent(new window.Event("change", { bubbles: true }));
+    };
+    changeMode("stream");
+    await tick();
+    changeMode("url");
+    // 同时覆盖已排队快照与尚未触发的 debounce。
+    const host = window.document.querySelector('[data-path="onebot.file_send_host"].config-input');
+    host.value = "obsolete-host";
+    host.dispatchEvent(new window.Event("input", { bubbles: true }));
+    let completion;
+    if (operation === "restore" || operation === "restore_sync") {
+        window.get("btnConfigHistory").click();
+        await tick();
+        window.document.querySelector("[data-restore-name]").click();
+        if (operation === "restore_sync") {
+            completion = window.syncConfigTemplate(window.get("btnSyncConfigTemplate"));
+        }
+    } else if (operation === "sync") {
+        completion = window.syncConfigTemplate(window.get("btnSyncConfigTemplate"));
+    } else {
+        completion = window.resetConfig();
+    }
+    await tick();
+    const beforeResponse = {
+        patchCount,
+        mutationCount: calls.filter((url) => url.includes("/restore") || url.includes("sync-template")).length,
+        formInert: window.get("formSections").inert,
+    };
+    finishPatch(response(200, { success: true, warning: "obsolete save warning" }));
+    if (completion) await completion;
+    await tick();
+    await settle(1100);
+    return {
+        beforeResponse,
+        patchCount,
+        calls,
+        serverMode,
+        formMode: mode().value,
+        formInert: window.get("formSections").inert,
+        toasts: window.document.querySelector(".toast-container")?.textContent || "",
+    };
+}
+
+for (const operation of ["restore", "sync", "reload", "restore_sync"]) {
+    SCENARIOS[`config_replacement_${operation}`] = (env) => configReplacement(env, operation);
+}
+
 function workflowEditorFixture(env) {
     const { window, response } = env;
     const tasks = ["A", "B"].map((id) => ({
@@ -3792,7 +3880,7 @@ async function main() {
     }
     const root = resolveRoot(args.root);
     const env = createEnv(root, {
-        scripts: args.scenario.startsWith("config_autosave_")
+        scripts: args.scenario.startsWith("config_autosave_") || args.scenario.startsWith("config_replacement_")
             ? ["config-form.js"]
             : args.scenario.startsWith("workflow_editor_")
               ? ["workflow-graph.js", "workflow-canvas.js", "workflow-inspector.js", "schedules.js"]

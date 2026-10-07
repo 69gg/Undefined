@@ -1,3 +1,4 @@
+import asyncio
 import tomllib
 
 from aiohttp import web
@@ -5,6 +6,8 @@ from aiohttp.web_response import Response
 
 from Undefined.config.loader import CONFIG_PATH, DEFAULT_WEBUI_PASSWORD
 from Undefined.config import WebUISettings, get_config_manager
+from Undefined.utils import io as async_io
+from ..utils.config_io import config_write_lock
 from ._shared import (
     auth_capabilities,
     routes,
@@ -244,28 +247,34 @@ async def password_handler(request: web.Request) -> Response:
             status=400,
         )
 
-    source = read_config_source()
-    try:
-        data_dict = (
-            tomllib.loads(source["content"]) if source["content"].strip() else {}
+    def write_password() -> None:
+        with config_write_lock(CONFIG_PATH):
+            source = read_config_source()
+            data_dict = (
+                tomllib.loads(source["content"]) if source["content"].strip() else {}
+            )
+            patched = apply_patch(data_dict, {"webui.password": new_password})
+            async_io.write_text_sync(
+                CONFIG_PATH,
+                render_toml(patched, comments=load_comment_map()),
+                use_lock=False,
+            )
+
+    async def password_and_reload() -> None:
+        await asyncio.to_thread(write_password)
+        manager = get_config_manager()
+        manager.reload()
+        request.app[SETTINGS_APP_KEY] = WebUISettings.from_config(
+            manager.load(strict=False), config_exists=True
         )
+        get_session_store(request).clear()
+
+    try:
+        await async_io.run_cancellation_safe(password_and_reload())
     except tomllib.TOMLDecodeError as exc:
         return web.json_response(
             {"success": False, "error": f"TOML parse error: {exc}"}, status=400
         )
-    if not isinstance(data_dict, dict):
-        data_dict = {}
-
-    patched = apply_patch(data_dict, {"webui.password": new_password})
-    CONFIG_PATH.write_text(
-        render_toml(patched, comments=load_comment_map()), encoding="utf-8"
-    )
-    manager = get_config_manager()
-    manager.reload()
-    request.app[SETTINGS_APP_KEY] = WebUISettings.from_config(
-        manager.load(strict=False), config_exists=True
-    )
-    get_session_store(request).clear()
 
     resp = web.json_response({"success": True, "message": "Password updated"})
     resp.del_cookie(SESSION_COOKIE)

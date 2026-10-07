@@ -365,7 +365,9 @@ async def delete_tree(dir_path: Path | str) -> bool:
     return await asyncio.to_thread(sync_delete)
 
 
-def _write_text_sync(target: Path, content: str, use_lock: bool) -> None:
+def write_text_sync(file_path: str | Path, content: str, use_lock: bool = True) -> None:
+    """在线程中的读改写事务内复用文本原子写入；已持文件锁时传 False。"""
+    target = Path(file_path)
     target.parent.mkdir(parents=True, exist_ok=True)
 
     def atomic_write() -> None:
@@ -442,7 +444,7 @@ async def write_text(
 ) -> None:
     """原子写入文本文件"""
     target = Path(file_path)
-    await asyncio.to_thread(_write_text_sync, target, content, use_lock)
+    await asyncio.to_thread(write_text_sync, target, content, use_lock)
 
 
 async def read_text(file_path: str | Path, use_lock: bool = False) -> str | None:
