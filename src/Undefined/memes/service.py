@@ -485,7 +485,11 @@ class MemeService(MemeSearchMixin):
             existing = merged.get(uid)
             if existing is None:
                 stored_record = missing_records.get(uid)
-                if stored_record is None:
+                if (
+                    stored_record is None
+                    or stored_record.status != "ready"
+                    or (not include_disabled and not stored_record.enabled)
+                ):
                     continue
                 existing = {
                     "record": stored_record,

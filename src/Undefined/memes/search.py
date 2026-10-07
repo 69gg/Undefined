@@ -16,8 +16,10 @@ from Undefined.memes.models import (
 )
 from Undefined.utils.message_targets import resolve_delivery_address
 from Undefined.utils.coerce import safe_int
+from Undefined.utils.io import run_cancellation_safe
 
 if TYPE_CHECKING:
+    from contextlib import AbstractAsyncContextManager
     import threading
 
     from Undefined.memes.store import MemeStore
@@ -36,6 +38,10 @@ class MemeSearchMixin:
         _retrieval_runtime: Any | None
         _store: MemeStore
         _vector_store: MemeVectorStore
+
+        def _meme_mutation_lock(
+            self, digest: str
+        ) -> AbstractAsyncContextManager[None]: ...
 
     def resolve_global_image_sync(self, uid: str) -> AttachmentRecord | None:
         normalized_uid = str(uid or "").strip()
@@ -276,7 +282,11 @@ class MemeSearchMixin:
             existing = merged.get(uid)
             if existing is None:
                 stored_record = missing_records.get(uid)
-                if stored_record is None:
+                if (
+                    stored_record is None
+                    or stored_record.status != "ready"
+                    or (not include_disabled and not stored_record.enabled)
+                ):
                     continue
                 existing = {
                     "record": stored_record,
@@ -465,10 +475,22 @@ class MemeSearchMixin:
         else:
             return "发送失败：当前 sender 不支持微信投递地址"
 
-        now = _now_iso()
-        updated_record = await self._store.increment_use(uid, now)
-        if updated_record is not None:
-            await self._vector_store.upsert(updated_record)
+        async def record_usage() -> None:
+            current = await self._store.get(uid)
+            if current is None or current.generation != record.generation:
+                return
+            updated_record = await self._store.increment_use(uid, _now_iso())
+            if updated_record is not None:
+                await self._vector_store.upsert(updated_record)
+
+        try:
+            async with self._meme_mutation_lock(record.content_sha256):
+                await run_cancellation_safe(record_usage())
+        except Exception:
+            # 投递已经完成；统计失败不能使调用者据此重发同一张图片。
+            logger.warning(
+                "[memes] 已发送但使用统计/索引更新失败: uid=%s", uid, exc_info=True
+            )
         if sent_message_id is not None:
             return f"表情包已发送（message_id={sent_message_id}）"
         return "表情包已发送"
