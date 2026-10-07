@@ -104,7 +104,10 @@ async def memory_create_handler(
     fact = str(body.get("fact", "") or "").strip()
     if not fact:
         return _json_error("fact must not be empty", status=400)
-    new_uuid = await memory_storage.add(fact)
+    try:
+        new_uuid = await memory_storage.add(fact)
+    except OSError:
+        return _json_error("Failed to persist memory", status=500)
     if new_uuid is None:
         return _json_error("Failed to create memory", status=500)
     existing = [m for m in memory_storage.get_all() if m.uuid == new_uuid]
@@ -135,7 +138,10 @@ async def memory_update_handler(
     fact = str(body.get("fact", "") or "").strip()
     if not fact:
         return _json_error("fact must not be empty", status=400)
-    ok = await memory_storage.update(target_uuid, fact)
+    try:
+        ok = await memory_storage.update(target_uuid, fact)
+    except OSError:
+        return _json_error("Failed to persist memory", status=500)
     if not ok:
         return _json_error(f"Memory {target_uuid} not found", status=404)
     return web.json_response({"uuid": target_uuid, "fact": fact, "updated": True})
@@ -150,7 +156,10 @@ async def memory_delete_handler(
     target_uuid = str(request.match_info.get("uuid", "")).strip()
     if not target_uuid:
         return _json_error("uuid is required", status=400)
-    ok = await memory_storage.delete(target_uuid)
+    try:
+        ok = await memory_storage.delete(target_uuid)
+    except OSError:
+        return _json_error("Failed to persist memory", status=500)
     if not ok:
         return _json_error(f"Memory {target_uuid} not found", status=404)
     return web.json_response({"uuid": target_uuid, "deleted": True})

@@ -1,9 +1,10 @@
 """AI 记忆存储管理模块"""
 
+import asyncio
 import json
 import logging
 import uuid
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -34,6 +35,8 @@ class MemoryStorage:
         """
         self.max_memories = max_memories
         self._memories: list[Memory] = []
+        self._save_lock = asyncio.Lock()
+        self._needs_rewrite = False
         self._load()
 
     def _load(self) -> None:
@@ -56,6 +59,7 @@ class MemoryStorage:
                 loaded_memories.append(Memory(**item))
 
             self._memories = loaded_memories
+            self._needs_rewrite = needs_rewrite
             logger.info(
                 "[记忆] 加载完成: count=%s file=%s",
                 len(self._memories),
@@ -70,16 +74,18 @@ class MemoryStorage:
             logger.warning("[记忆] 加载失败: %s", exc)
             self._memories = []
 
-    async def _save(self) -> None:
-        """保存记忆到文件"""
-        try:
-            from Undefined.utils import io
+    async def _save(self, memories: list[Memory]) -> None:
+        """持有写锁时提交独立快照，落盘后才更新可见状态。"""
+        from Undefined.utils import io
 
-            data = [asdict(m) for m in self._memories]
+        async def commit() -> None:
+            data = [asdict(memory) for memory in memories]
             await io.write_json(MEMORY_FILE_PATH, data, use_lock=True)
-            logger.debug("[记忆] 保存完成: count=%s", len(self._memories))
-        except Exception as exc:
-            logger.error("[记忆] 保存失败: %s", exc)
+            self._memories = memories
+            self._needs_rewrite = False
+            logger.debug("[记忆] 保存完成: count=%s", len(memories))
+
+        await io.run_cancellation_safe(commit())
 
     async def add(self, fact: str) -> Optional[str]:
         """添加一条记忆
@@ -94,38 +100,32 @@ class MemoryStorage:
             logger.warning("[记忆] 尝试添加空记忆，已忽略")
             return None
 
-        # 检查是否已存在相同内容
-        for existing in self._memories:
-            if existing.fact == fact.strip():
-                logger.debug("[记忆] 记忆内容已存在，忽略: %s...", fact[:50])
-                return existing.uuid
+        async with self._save_lock:
+            for existing in self._memories:
+                if existing.fact == fact.strip():
+                    if self._needs_rewrite:
+                        await self._save(self._memories.copy())
+                    logger.debug("[记忆] 记忆内容已存在，忽略: %s...", fact[:50])
+                    return existing.uuid
 
-        memory = Memory(
-            uuid=str(uuid.uuid4()),
-            fact=fact.strip(),
-            created_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        )
-
-        # 添加到列表末尾
-        self._memories.append(memory)
-
-        # 如果超过上限，移除最旧的
-        if len(self._memories) > self.max_memories:
-            removed = self._memories.pop(0)
-            logger.info(
-                "[记忆] 超过上限，移除最旧记忆: %s...",
-                removed.fact[:50],
+            memory = Memory(
+                uuid=str(uuid.uuid4()),
+                fact=fact.strip(),
+                created_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             )
-
-        await self._save()
-        logger.info(
-            "[记忆] 已添加: uuid=%s size=%s/%s content=%s...",
-            memory.uuid,
-            len(self._memories),
-            self.max_memories,
-            fact[:50],
-        )
-        return memory.uuid
+            memories = [*self._memories, memory]
+            removed = memories.pop(0) if len(memories) > self.max_memories else None
+            await self._save(memories)
+            if removed is not None:
+                logger.info("[记忆] 超过上限，移除最旧记忆: %s...", removed.fact[:50])
+            logger.info(
+                "[记忆] 已添加: uuid=%s size=%s/%s content=%s...",
+                memory.uuid,
+                len(self._memories),
+                self.max_memories,
+                fact[:50],
+            )
+            return memory.uuid
 
     async def update(self, memory_uuid: str, fact: str) -> bool:
         """更新一条记忆
@@ -137,16 +137,18 @@ class MemoryStorage:
         返回:
             是否更新成功
         """
-        for i, m in enumerate(self._memories):
-            if m.uuid == memory_uuid:
-                self._memories[i].fact = fact.strip()
-                await self._save()
-                logger.info(
-                    "[记忆] 已更新: uuid=%s content=%s...",
-                    memory_uuid,
-                    fact[:50],
-                )
-                return True
+        async with self._save_lock:
+            for index, memory in enumerate(self._memories):
+                if memory.uuid == memory_uuid:
+                    memories = self._memories.copy()
+                    memories[index] = replace(memory, fact=fact.strip())
+                    await self._save(memories)
+                    logger.info(
+                        "[记忆] 已更新: uuid=%s content=%s...",
+                        memory_uuid,
+                        fact[:50],
+                    )
+                    return True
         logger.warning("[记忆] 未找到 UUID=%s 的记忆，更新失败", memory_uuid)
         return False
 
@@ -159,16 +161,18 @@ class MemoryStorage:
         返回:
             是否删除成功
         """
-        for i, m in enumerate(self._memories):
-            if m.uuid == memory_uuid:
-                removed = self._memories.pop(i)
-                await self._save()
-                logger.info(
-                    "[记忆] 已删除: uuid=%s content=%s...",
-                    memory_uuid,
-                    removed.fact[:50],
-                )
-                return True
+        async with self._save_lock:
+            for index, memory in enumerate(self._memories):
+                if memory.uuid == memory_uuid:
+                    memories = self._memories.copy()
+                    removed = memories.pop(index)
+                    await self._save(memories)
+                    logger.info(
+                        "[记忆] 已删除: uuid=%s content=%s...",
+                        memory_uuid,
+                        removed.fact[:50],
+                    )
+                    return True
         logger.warning("[记忆] 未找到 UUID=%s 的记忆，删除失败", memory_uuid)
         return False
 
@@ -178,12 +182,12 @@ class MemoryStorage:
         返回:
             记忆列表（按时间顺序，最早的在前）
         """
-        return self._memories.copy()
+        return [replace(memory) for memory in self._memories]
 
     async def clear(self) -> None:
         """清空所有记忆"""
-        self._memories = []
-        await self._save()
+        async with self._save_lock:
+            await self._save([])
         logger.info("[记忆] 已清空所有记忆")
 
     def count(self) -> int:

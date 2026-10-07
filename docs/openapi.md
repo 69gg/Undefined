@@ -187,7 +187,7 @@ HEAD /api/v1/onebot/files/{file_id}?token=...
 说明：这里的 HTTP 探针是“可达性/连通性探测”。只要拿到 HTTP 响应就会记为 `status=ok`，真实业务状态应结合 `http_status` 一起解读。
 当 Naga 集成未启用时，`naga_model` 会以 `status=skipped`、`reason=naga_integration_disabled` 出现在结果中。
 
-### 记忆（只读）
+### 长期记忆
 
 - `GET /api/v1/memory`
 - 查询参数：
@@ -195,7 +195,11 @@ HEAD /api/v1/onebot/files/{file_id}?token=...
   - `top_k`：返回条数上限（可选，正整数）
   - `time_from` / `time_to`：ISO 时间范围过滤（可选）
 
-说明：仅提供查看/查询，不提供写入接口，不改变现有记忆存储格式。
+- `POST /api/v1/memory`：用 `{"fact":"..."}` 创建记忆，成功返回 `201`；重复内容返回已提交记录的 UUID。
+- `PATCH /api/v1/memory/{uuid}`：用 `{"fact":"..."}` 更新记忆，成功返回 `200`。
+- `DELETE /api/v1/memory/{uuid}`：删除记忆，成功返回 `200`；不存在的 UUID 返回 `404`。
+
+增删改先串行原子落盘，再发布内存状态；持久化失败返回 `500` 并保留原记录，故障修复后可重试。等待提交锁时取消不会产生修改，实际写入开始后取消会先等待文件与内存提交完成。存储格式保持兼容。
 
 时间筛选接受带 `Z`、明确 UTC 偏移或无时区的 ISO 时间。无时区查询与旧记录中的无时区 `created_at` 均按 Bot 所在系统的本地时区解释（采用该日期的时区偏移），转换到 UTC 后比较；带偏移的时间按其实际时刻比较。上下界均包含在结果中；开始晚于结束时自动交换上下界。无效查询时间返回 `400`，无法解析创建时间的记录在启用时间筛选时跳过。响应中的 `created_at` 保留原始存储字符串。
 
