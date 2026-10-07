@@ -204,3 +204,58 @@ async def test_cancelled_conversation_commit_finishes_before_unlocking(
         if reader is not None:
             await asyncio.gather(reader, return_exceptions=True)
         await store.stop()
+
+
+@pytest.mark.asyncio
+async def test_failed_legacy_migration_preserves_cache_disk_and_can_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = await _seed(tmp_path, monkeypatch, "migration")
+    conv_id = webchat_store.DEFAULT_WEBCHAT_CONVERSATION_ID
+    await store.create_conversation(conversation_id=conv_id, title="before migration")
+    marker = tmp_path / "migration.json"
+    marker.unlink()
+    legacy_path = (
+        tmp_path
+        / "legacy-history"
+        / f"private_{webchat_store.WEBCHAT_VIRTUAL_USER_ID}.json"
+    )
+    await io.write_json(
+        legacy_path,
+        [{"message": "legacy question", "display_name": "user", "user_id": 42}],
+    )
+    path = tmp_path / "conversations" / f"{conv_id}.json"
+    before_disk = path.read_bytes()
+    before_cache = await store.get_conversation(conv_id)
+    original_write = io.write_json_sync
+
+    def fail_migration_write(
+        file_path: Path | str, data: Any, use_lock: bool = True
+    ) -> None:
+        if Path(file_path) == path:
+            raise OSError("isolated migration write failure")
+        original_write(file_path, data, use_lock)
+
+    try:
+        with pytest.MonkeyPatch.context() as failure:
+            failure.setattr(io, "write_json_sync", fail_migration_write)
+            with pytest.raises(OSError, match="isolated migration write failure"):
+                await store.ensure_ready()
+        assert not marker.exists()
+        assert path.read_bytes() == before_disk
+        assert await store.get_conversation(conv_id) == before_cache
+
+        await store.ensure_ready()
+        cached = await store.get_conversation(conv_id)
+        assert cached is not None
+        assert cached == json.loads(path.read_text(encoding="utf-8"))
+        assert cached["messages"][0]["message"] == "legacy question"
+        assert cached["title"] == "legacy question"
+        assert marker.exists()
+        restarted = webchat_store.WebChatConversationStore()
+        await restarted.ensure_ready()
+        assert await restarted.get_conversation(conv_id) == cached
+        await restarted.stop()
+    finally:
+        await store.stop()

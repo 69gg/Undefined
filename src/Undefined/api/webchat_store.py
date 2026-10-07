@@ -505,7 +505,7 @@ class WebChatConversationStore:
                 )
                 conv_id = str(conv["id"])
                 async with self._get_lock(conv_id):
-                    cached = self._require_conversation_locked(conv_id)
+                    cached = _copy_json(self._require_conversation_locked(conv_id))
                     cached["messages"] = [
                         _normalize_history_record(
                             item,
