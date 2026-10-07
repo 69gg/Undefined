@@ -165,26 +165,46 @@ function updateAuthFromPayload(payload) {
     return true;
 }
 
+let _authRefreshRequest = null;
+
 async function refreshAccessToken() {
-    if (!state.authRefreshToken) {
+    const refreshToken = state.authRefreshToken;
+    if (!refreshToken) {
         throw new Error("Unauthorized");
     }
-    const response = await apiWithFallback(authEndpointCandidates("refresh"), {
-        method: "POST",
-        body: JSON.stringify({ refresh_token: state.authRefreshToken }),
-        headers: state.authAccessToken
-            ? { Authorization: `Bearer ${state.authAccessToken}` }
-            : {},
-    });
-    const payload = await response
-        .clone()
-        .json()
-        .catch(() => ({}));
-    if (!response.ok || !updateAuthFromPayload(payload)) {
-        clearStoredAuthTokens();
-        throw new Error("Unauthorized");
+    if (_authRefreshRequest?.token === refreshToken) {
+        return _authRefreshRequest.promise;
     }
-    return payload;
+    const request = { token: refreshToken, promise: null };
+    request.promise = (async () => {
+        const response = await apiWithFallback(
+            authEndpointCandidates("refresh"),
+            {
+                method: "POST",
+                body: JSON.stringify({ refresh_token: refreshToken }),
+                headers: state.authAccessToken
+                    ? { Authorization: `Bearer ${state.authAccessToken}` }
+                    : {},
+            },
+        );
+        const payload = await response
+            .clone()
+            .json()
+            .catch(() => ({}));
+        // 登录或退出可能已替换会话；旧请求不能改写新令牌。
+        if (state.authRefreshToken !== refreshToken) return payload;
+        if (!response.ok || !updateAuthFromPayload(payload)) {
+            clearStoredAuthTokens();
+            throw new Error("Unauthorized");
+        }
+        return payload;
+    })();
+    _authRefreshRequest = request;
+    try {
+        return await request.promise;
+    } finally {
+        if (_authRefreshRequest === request) _authRefreshRequest = null;
+    }
 }
 
 async function api(path, options = {}) {
@@ -216,7 +236,7 @@ async function api(path, options = {}) {
                 _skipRefreshRetry: true,
             });
         } catch (_error) {
-            clearStoredAuthTokens();
+            // refreshAccessToken 只清除仍属于失败请求的令牌。
         }
     }
     if (res.status === 401) {

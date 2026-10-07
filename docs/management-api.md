@@ -75,6 +75,8 @@ Management API 兼容两套鉴权：
 
 ### 查询会话
 
+WebUI 的并发请求共用同一次 refresh token 轮换；旧会话的迟到刷新响应不会覆盖新登录的令牌，也不会清除新会话。浏览器的 Cookie Session 认证继续兼容。
+
 - `GET /api/v1/management/auth/session`
 
 返回当前是否已认证、是否仍在使用默认密码、配置文件是否存在，以及控制面的 capabilities。
