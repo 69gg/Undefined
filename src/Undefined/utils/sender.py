@@ -557,6 +557,7 @@ class MessageSender:
             name=name,
             kind=kind,
         )
+        mark_message_sent_this_turn()
         sent_at_ms = time.time_ns() // 1_000_000
         if not auto_history:
             return
@@ -673,6 +674,7 @@ class MessageSender:
                 prepared,
             )
         ).strip()
+        mark_message_sent_this_turn()
         if not auto_history:
             return sent_message_id
         sent_at_ms = time.time_ns() // 1_000_000
@@ -2068,6 +2070,7 @@ class AddressBoundSender:
                 sequential_fallback = True
                 receipts.extend(await self._send_weixin_forward_units(batch))
             else:
+                mark_message_sent_this_turn()
                 if receipt:
                     receipts.append(receipt)
         return receipts

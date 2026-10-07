@@ -1259,6 +1259,54 @@ async def test_send_wechat_file_records_client_id_and_send_time(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("auto_history", [False, True])
+@pytest.mark.parametrize("kind", ["file", "voice"])
+async def test_wechat_media_ack_marks_turn_before_history(
+    sender: MessageSender,
+    tmp_path: Path,
+    auto_history: bool,
+    kind: str,
+) -> None:
+    source = tmp_path / "report.wav"
+    await async_io.write_bytes(source, b"isolated media")
+    service = SimpleNamespace(
+        send_file=AsyncMock(return_value="file-ack"),
+        prepare_voice=AsyncMock(
+            return_value=PreparedWeixinVoice(content=b"silk", duration_ms=200)
+        ),
+        send_prepared_voice=AsyncMock(return_value="voice-ack"),
+    )
+    sender.set_weixin_service(service)
+    async with RequestContext("private", user_id=12345) as ctx:
+        await sender.send_address_file(
+            DeliveryAddress("wechat", 12345),
+            str(source),
+            kind=kind,
+            auto_history=auto_history,
+        )
+        assert ctx.get_resource("message_sent_this_turn") is True
+    history = cast(AsyncMock, sender.history_manager.add_private_message)
+    assert history.await_count == int(auto_history)
+
+
+@pytest.mark.asyncio
+async def test_wechat_media_failure_does_not_mark_turn(
+    sender: MessageSender,
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "report.txt"
+    await async_io.write_text(source, "report")
+    service = SimpleNamespace(send_file=AsyncMock(side_effect=ValueError("invalid")))
+    sender.set_weixin_service(service)
+    async with RequestContext("private", user_id=12345) as ctx:
+        with pytest.raises(ValueError, match="invalid"):
+            await sender.send_address_file(
+                DeliveryAddress("wechat", 12345), str(source)
+            )
+        assert ctx.get_resource("message_sent_this_turn") is None
+
+
+@pytest.mark.asyncio
 async def test_send_wechat_file_enforces_private_access_control(
     sender: MessageSender,
     tmp_path: Path,
@@ -1862,6 +1910,40 @@ async def test_send_wechat_forward_uses_ordered_multi_item_message(
     assert items[1].content == b"png"
     assert isinstance(items[2], OutboundTextItem)
     assert items[2].text == "B"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("first_ack", [False, True])
+async def test_wechat_bundle_marks_each_ack_before_later_failure(
+    sender: MessageSender,
+    first_ack: bool,
+) -> None:
+    weixin_config = cast(Any, sender.config.weixin)
+    weixin_config.multi_item_messages_enabled = True
+    weixin_config.multi_item_max_items = 1
+    weixin_config.media_max_size_mb = 100
+    failure = RequestTimeoutError("response lost")
+    service = SimpleNamespace(
+        send_items=AsyncMock(
+            side_effect=["first-ack", failure] if first_ack else failure
+        )
+    )
+    sender.set_weixin_service(service)
+    bound_sender = AddressBoundSender(sender, DeliveryAddress("wechat", 12345))
+    nodes = [
+        {"type": "node", "data": {"name": "Bot", "content": text}}
+        for text in ("first", "second")
+    ]
+    async with RequestContext("private", user_id=12345) as ctx:
+        with pytest.raises(RequestTimeoutError):
+            await bound_sender.send_private_forward_message(
+                12345, nodes, history_message="two nodes"
+            )
+        assert ctx.get_resource("message_sent_this_turn") is (
+            True if first_ack else None
+        )
+    assert service.send_items.await_count == (2 if first_ack else 1)
+    cast(AsyncMock, sender.history_manager.add_private_message).assert_not_awaited()
 
 
 @pytest.mark.asyncio
