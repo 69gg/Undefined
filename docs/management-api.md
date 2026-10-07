@@ -244,7 +244,7 @@ GET /api/v1/management/runtime/commands?scope=webui&q=help
   - `PATCH` 传 `{"title":"..."}`。
   - `DELETE` 使用路径参数 `conversation_id`。
 - 校验：
-  - 删除会话时 Runtime 会检查是否存在运行中或收尾落盘中的 WebChat job。
+  - 删除会话与接受新任务共用串行边界；存在运行中或收尾落盘的 WebChat job 时返回 `409`，已删除会话创建新任务返回 `404`。
 - 响应：
   - `200` / `201`：会话列表或会话对象。
   - `404`：会话不存在。

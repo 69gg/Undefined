@@ -108,6 +108,89 @@ async def _last_webchat_record(server: RuntimeAPIServer) -> dict[str, Any]:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("first_operation", ["create", "delete"])
+@pytest.mark.parametrize("pre_record_user_history", [False, True])
+async def test_conversation_delete_and_job_acceptance_are_serialized(
+    monkeypatch: pytest.MonkeyPatch,
+    first_operation: str,
+    pre_record_user_history: bool,
+) -> None:
+    release_chat = asyncio.Event()
+    chat_started = asyncio.Event()
+
+    async def run_chat(_ctx: RuntimeAPIContext, **_kwargs: Any) -> str:
+        chat_started.set()
+        await release_chat.wait()
+        return "chat"
+
+    monkeypatch.setattr(runtime_api_chat, "run_webui_chat", run_chat)
+    server = RuntimeAPIServer(_context(), host="127.0.0.1", port=8788)
+    manager = server._chat_job_manager
+    store = manager.conversation_store
+    await store.ensure_ready(manager._ctx.history_manager)
+    conversation = await store.create_conversation()
+    conversation_id = str(conversation["id"])
+    request = cast(
+        web.Request,
+        cast(Any, _DummyRequest(match_info={"conversation_id": conversation_id})),
+    )
+    # 模拟重命名/文件写入持有真实会话锁，让两种请求在同一边界排队。
+    conversation_lock = store._get_lock(conversation_id)
+    await conversation_lock.acquire()
+
+    async def create() -> runtime_api_chat.ChatJob | None:
+        try:
+            return await manager.create_job(
+                "hello",
+                conversation_id,
+                pre_record_user_history=pre_record_user_history,
+            )
+        except KeyError:
+            return None
+
+    async def delete() -> web.Response:
+        return await server._chat_conversation_delete_handler(request)
+
+    try:
+        if first_operation == "create":
+            creation = asyncio.create_task(create())
+            await asyncio.sleep(0)
+            deletion = asyncio.create_task(delete())
+        else:
+            deletion = asyncio.create_task(delete())
+            await asyncio.sleep(0)
+            creation = asyncio.create_task(create())
+        await asyncio.sleep(0)
+        conversation_lock.release()
+        job, response = await asyncio.wait_for(
+            asyncio.gather(creation, deletion), timeout=2
+        )
+        if first_operation == "create":
+            assert job is not None
+            assert response.status == 409
+            assert await store.get_conversation(conversation_id) is not None
+            await asyncio.wait_for(chat_started.wait(), timeout=2)
+            await store.append_message(
+                conversation_id,
+                role="bot",
+                text_content="reply",
+                display_name="Bot",
+                user_name="Bot",
+            )
+        else:
+            assert response.status == 200
+            assert job is None
+            assert not manager._jobs
+            assert not chat_started.is_set()
+            assert await store.get_conversation(conversation_id) is None
+    finally:
+        if conversation_lock.locked():
+            conversation_lock.release()
+        release_chat.set()
+        await server.stop()
+
+
+@pytest.mark.asyncio
 async def test_history_finalized_is_published_only_after_job_releases_session(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

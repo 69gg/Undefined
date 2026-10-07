@@ -411,35 +411,38 @@ class ChatJobManager:
         await self.conversation_store.ensure_ready(self._ctx.history_manager)
         requested_conversation_id = str(conversation_id or "").strip()
         resolved_conversation_id = requested_conversation_id or _DEFAULT_CONVERSATION_ID
-        conversation = await self.conversation_store.get_conversation(
-            resolved_conversation_id
-        )
-        if conversation is None:
-            if requested_conversation_id:
-                raise KeyError(resolved_conversation_id)
-            conversation = await self.conversation_store.ensure_default_conversation()
-            resolved_conversation_id = str(conversation["id"])
-        now = time.time()
-        job = ChatJob(
-            job_id=uuid4().hex,
-            text=text,
-            created_at=now,
-            updated_at=now,
-            conversation_id=resolved_conversation_id,
-            user_history_attachments=list(user_history_attachments or []),
-            user_history_references=list(user_history_references or []),
-            user_history_pre_recorded=pre_record_user_history
-            or reuse_previous_user_history,
-        )
         async with self._lock:
             if self._closing:
                 raise ChatJobManagerClosingError("Chat service is stopping")
+            # 会话存在性检查与 job 接受必须和删除共用同一串行边界。
+            conversation = await self.conversation_store.get_conversation(
+                resolved_conversation_id
+            )
+            if conversation is None:
+                if requested_conversation_id:
+                    raise KeyError(resolved_conversation_id)
+                conversation = (
+                    await self.conversation_store.ensure_default_conversation()
+                )
+                resolved_conversation_id = str(conversation["id"])
             if any(
                 self._job_blocks_history_mutation(existing)
                 for existing in self._jobs.values()
                 if existing.conversation_id == resolved_conversation_id
             ):
                 raise RuntimeError("Chat job is still running")
+            now = time.time()
+            job = ChatJob(
+                job_id=uuid4().hex,
+                text=text,
+                created_at=now,
+                updated_at=now,
+                conversation_id=resolved_conversation_id,
+                user_history_attachments=list(user_history_attachments or []),
+                user_history_references=list(user_history_references or []),
+                user_history_pre_recorded=pre_record_user_history
+                or reuse_previous_user_history,
+            )
             self._jobs[job.job_id] = job
             try:
                 # stop 必须等创建阶段收敛后再快照，避免漏掉稍后才启动的 task。
@@ -586,6 +589,18 @@ class ChatJobManager:
                 )
                 or 0
             )
+
+    async def delete_conversation_when_idle(self, conversation_id: str) -> bool | None:
+        """删除空闲会话；None 表示会话仍被已接受的任务占用。"""
+        await self.conversation_store.ensure_ready(self._ctx.history_manager)
+        async with self._lock:
+            if any(
+                self._job_blocks_history_mutation(job)
+                and job.conversation_id == conversation_id
+                for job in self._jobs.values()
+            ):
+                return None
+            return await self.conversation_store.delete_conversation(conversation_id)
 
     async def cancel_job(self, job_id: str) -> ChatJob | None:
         job = await self.get_job(job_id)
@@ -2832,11 +2847,10 @@ async def chat_conversation_delete_handler(
     job_manager: ChatJobManager,
     request: web.Request,
 ) -> Response:
-    await job_manager.conversation_store.ensure_ready(ctx.history_manager)
     conversation_id = str(request.match_info.get("conversation_id", "") or "").strip()
-    if await job_manager.has_running_job(conversation_id):
+    existed = await job_manager.delete_conversation_when_idle(conversation_id)
+    if existed is None:
         return _json_error("Chat job is still running", status=409)
-    existed = await job_manager.conversation_store.delete_conversation(conversation_id)
     if not existed:
         return _json_error("Conversation not found", status=404)
     logger.info(

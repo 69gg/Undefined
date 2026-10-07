@@ -397,7 +397,7 @@ Undefined Chat 使用同一组 Runtime Chat 端点作为权威合同。客户端
 - `GET /api/v1/chat/conversations`：列出 WebChat 会话，响应包含 `conversations`、`active_job`、`default_conversation_id` 和 `virtual_user_id`。
 - `POST /api/v1/chat/conversations`：新建会话，Body 可选 `{"title":"..."}`。不传标题时先使用临时标题。
 - `PATCH /api/v1/chat/conversations/{conversation_id}`：重命名会话，Body 为 `{"title":"..."}`。手动标题会标记为 `manual`，后续不会被自动标题覆盖。
-- `DELETE /api/v1/chat/conversations/{conversation_id}`：删除会话 JSON。若目标会话存在运行中或收尾落盘的 WebChat job，返回 `409`。
+- `DELETE /api/v1/chat/conversations/{conversation_id}`：删除会话 JSON。与新任务接受共用串行边界；若目标会话存在运行中或收尾落盘的 WebChat job，返回 `409`，删除后的会话创建新任务返回 `404`。
 
 会话标题由后端维护。第一条用户消息写入后会先用首问前若干字符作为临时标题；当该会话同时具备首问和首答时，后端会调标题生成模型用“首问 + 首答”生成正式标题。标题生成带状态和内容哈希校验，避免并发回复、手动重命名或历史变化时把旧标题写回新内容。
 
