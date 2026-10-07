@@ -94,7 +94,8 @@ class MemoryStorage:
             fact: 记忆内容
 
         返回:
-            新生成的 UUID，如果失败则返回 None
+            新记忆或已有相同事实的 UUID；空白事实返回 None。
+            写入失败向调用方传播异常，并保持原有记忆。
         """
         if not fact or not fact.strip():
             logger.warning("[记忆] 尝试添加空记忆，已忽略")
