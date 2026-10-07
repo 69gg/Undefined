@@ -95,6 +95,7 @@ function convertToolCallSnapshot(snap: ToolCallSnapshot): HistoryToolCall {
 		ui_hint: snap.uiHint,
 		duration_ms: snap.durationMs ?? snap.elapsedMs ?? undefined,
 		current_stage: snap.currentStage,
+		current_stage_detail: snap.detail,
 		children: snap.children?.map(convertToolCallSnapshot),
 		timeline: snap.timeline,
 	};
@@ -849,6 +850,9 @@ export function MessageTimeline({
 											<MessageTimelineContent
 												timeline={timeline}
 												fallbackContent={item.content}
+												completeTimeline={Boolean(
+													item.webchat?.timeline?.length,
+												)}
 												attachments={item.attachments}
 												onPreviewHtml={onPreviewHtml}
 												onImageClick={onOpenImage}
@@ -931,6 +935,7 @@ export function MessageTimeline({
 							<MessageTimelineContent
 								timeline={buildStreamingTimeline(activeJob)}
 								fallbackContent={activeJob.reply || ""}
+								completeTimeline
 								attachments={[]}
 								onPreviewHtml={onPreviewHtml}
 								onImageClick={onOpenImage}

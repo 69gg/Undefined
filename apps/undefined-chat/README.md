@@ -16,7 +16,7 @@ Undefined Chat 是 `apps/undefined-chat/` 下的 Tauri v2 + React 19 原生聊�
 - 工具调用块：层级展示、状态、运行中实时计时、阶段明细（stage detail）、与 WebUI 一致的输入/输出预览（JSON/Python 风格结构化、Markdown 输出、附件图片预览）；历史回放支持 timeline/calls/events 多级回退。
 - 自动滚动：智能跟随底部，可在设置面板开关，偏好持久化到 localStorage。
 - 重命名只更新目标会话标题，保留当前会话、输入草稿与移动端面板；请求期间切换会话也不会被迟到响应切回。
-- 事件：SSE 优先，断开时 JSON fallback（指数退避重连，活跃任务持续重试）。
+- 事件：SSE 优先，断开时 JSON fallback（指数退避重连，活跃任务持续重试）；完整任务快照恢复消息与已结束调用，并按快照游标续接，旧 Runtime 的正文前缀也会保留。
 - 快捷键：Ctrl/Cmd+N 新会话，Ctrl/Cmd+K 聚焦输入并打开命令模式，Ctrl/Cmd+/ 切换侧栏，Ctrl/Cmd+, 打开设置，Escape 关闭当前弹层/抽屉。
 - i18n：中英双语运行时切换，提供语言切换 UI，并按系统语言自动检测默认语言。
 
@@ -31,7 +31,7 @@ Undefined Chat 是 `apps/undefined-chat/` 下的 Tauri v2 + React 19 原生聊�
 Android：
 
 - 文件选择器返回的 `content://` URI 通过 Tauri fs plugin 打开，上传链路仍需要真机/模拟器 smoke 覆盖。
-- 生命周期监听使用 Tauri `tauri://suspended` / `tauri://resumed` 事件；恢复前台时重新 bootstrap 并恢复 Runtime 订阅。逐 job 主动补齐仍依赖 store 的 SSE 断线 fallback 行为。
+- 生命周期监听使用 Tauri `tauri://suspended` / `tauri://resumed` 事件；恢复前台时重新 bootstrap，接受 Runtime 的完整任务时间线与对应游标后恢复订阅；快照内已有事件不会重复追加。
 - Android 通过生成工程注入的 `SecretPlugin` 使用 Android Keystore + AES-GCM 保存 API Key：密钥在 AndroidKeyStore 中生成且不可导出，加密后的密文存放在 `MODE_PRIVATE` 的 SharedPreferences 中。Android 生成插件已接入并有脚本/Rust 测试覆盖，真实设备仍需 smoke 验证；只有平台安全存储不可用且用户显式确认时，才允许不安全文件降级。
 
 iOS：

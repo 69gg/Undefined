@@ -30,12 +30,16 @@ type HistoryTimelineEntry = {
 	stage?: string;
 	detail?: string;
 	call?: HistoryToolCall;
+	callId?: string;
+	seq?: number;
 };
 
 export type MessageTimelineContentProps = {
 	timeline: unknown[];
 	/** 完整正文，timeline 中无任何顶层 message 文本时作为兜底渲染 */
 	fallbackContent?: string;
+	/** 完整时间线内的 Agent 正文也已渲染；仅调用树回退仍可使用正文兜底。 */
+	completeTimeline?: boolean;
 	attachments?: Attachment[];
 	onPreviewHtml: (input: HtmlPreviewRequest) => void;
 	/**
@@ -58,6 +62,23 @@ function normalizeEntries(timeline: unknown[]): HistoryTimelineEntry[] {
 	return timeline.filter(
 		(e): e is HistoryTimelineEntry =>
 			e !== null && typeof e === "object" && "type" in e,
+	);
+}
+
+function hasTimelineMessage(entries: HistoryTimelineEntry[]): boolean {
+	return entries.some((entry) =>
+		entry.type === "message"
+			? Boolean(entry.content?.trim())
+			: entry.type === "call" && isToolCall(entry.call)
+				? hasCallMessage(entry.call)
+				: false,
+	);
+}
+
+function hasCallMessage(call: HistoryToolCall): boolean {
+	return (
+		hasTimelineMessage(normalizeEntries(call.timeline ?? [])) ||
+		(call.children ?? []).some(hasCallMessage)
 	);
 }
 
@@ -93,29 +114,30 @@ function convertHistoryToolCallToToolBlock(
 					? "cancelled"
 					: "done";
 
-	// 转换子工具调用（优先从 timeline 中提取，兼容旧的 children 字段）
 	const children = new Map<string, ToolBlockType>();
-
-	// 从 timeline 中提取子调用（新格式）
-	if (Array.isArray(call.timeline)) {
-		const childCalls = call.timeline.filter(
-			(e): e is HistoryTimelineEntry & { call: HistoryToolCall } =>
-				e.type === "call" && isToolCall(e.call),
-		);
-
-		childCalls.forEach((entry, idx) => {
-			const childBlock = convertHistoryToolCallToToolBlock(entry.call, idx);
-			children.set(childBlock.webchatCallId, childBlock);
-		});
-	}
-
-	// 兼容旧格式：直接的 children 数组
+	const timeline: ToolBlockType["timeline"] = [];
+	// 旧 children 与新版时间线引用同一子块，时间线保留 Agent 正文与调用的先后顺序。
 	if (Array.isArray(call.children)) {
 		call.children.forEach((child, idx) => {
 			const childBlock = convertHistoryToolCallToToolBlock(child, idx);
 			children.set(childBlock.webchatCallId, childBlock);
 		});
 	}
+	normalizeEntries(call.timeline ?? []).forEach((entry, idx) => {
+		const timestamp = entry.seq ?? idx;
+		if (entry.type === "message" && entry.content) {
+			timeline.push({ type: "output", timestamp, content: entry.content });
+		} else if (entry.type === "call") {
+			let callId = entry.callId;
+			if (isToolCall(entry.call)) {
+				const childBlock = convertHistoryToolCallToToolBlock(entry.call, idx);
+				callId = childBlock.webchatCallId;
+				children.set(callId, childBlock);
+			}
+			if (callId && children.has(callId))
+				timeline.push({ type: "call", timestamp, callId });
+		}
+	});
 
 	const now = Date.now();
 	const startTime = now - (call.duration_ms || 0);
@@ -132,7 +154,7 @@ function convertHistoryToolCallToToolBlock(
 		currentStage: call.current_stage,
 		stageDetail: call.current_stage_detail,
 		children,
-		timeline: [],
+		timeline,
 		startTime,
 		endTime,
 	};
@@ -145,14 +167,17 @@ function convertHistoryToolCallToToolBlock(
 export function MessageTimelineContent({
 	timeline,
 	fallbackContent,
+	completeTimeline = false,
 	attachments = [],
 	onPreviewHtml,
 	onImageClick,
 }: MessageTimelineContentProps) {
 	const entries = normalizeEntries(timeline);
-	const hasMessageText = entries.some(
-		(e) => e.type === "message" && Boolean(e.content?.trim()),
-	);
+	const hasMessageText =
+		entries.some(
+			(entry) => entry.type === "message" && Boolean(entry.content?.trim()),
+		) ||
+		(completeTimeline && hasTimelineMessage(entries));
 
 	// 本地图片预览状态：仅在外部未提供 onImageClick 时启用
 	const [previewImage, setPreviewImage] = useState<{
@@ -197,7 +222,7 @@ export function MessageTimelineContent({
 				return null;
 			})}
 
-			{/* timeline 中无任何顶层文本时，用完整正文兜底 */}
+			{/* 时间线完全没有正文时才兜底，避免重复展示 Agent 内正文。 */}
 			{!hasMessageText && fallbackContent?.trim() ? (
 				<MarkdownContent
 					content={fallbackContent}

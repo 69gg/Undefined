@@ -6,7 +6,7 @@ Undefined Chat 是 `apps/undefined-chat/` 下的原生优先 WebChat 客户端�
 
 | 能力 | 当前状态 | 说明 |
 |---|---|---|
-| 会话管理 | 已实现 | 创建、删除、重命名、切换；未实现置顶会话 |
+| 会话管理 | 已实现 | 创建、删除、重命名、切换；重命名保留当前会话、草稿与移动端面板，未实现置顶会话 |
 | 历史分页 | 已实现 | cursor-based 加载更早消息，prepend 后保持滚动锚点；超长历史采用窗口化渲染 |
 | Markdown 渲染 | 已实现 | 表格、引用、列表、任务列表、链接、内联/块级代码 |
 | 代码高亮 | 已实现 | highlight.js，多语言自动/显式高亮，支持复制 |
@@ -14,7 +14,7 @@ Undefined Chat 是 `apps/undefined-chat/` 下的原生优先 WebChat 客户端�
 | HTML 预览窗口 | 已实现 | 独立窗口/Android Activity，临时 file URL，预览窗口内可运行脚本；保留 `connect-src 'none'`、导航守卫、IPC 隔离、1 MB 限制和临时文件清理 |
 | 附件上传/下载 | 已实现 | Tauri 流式上传、下载、预览；显示上传状态，不显示百分比进度 |
 | 图片展示 | 已实现 | UID 附件图片经 Tauri 预览接口转 blob，支持内联、附件区和全屏查看 |
-| 工具调用块 | 已实现 | 层级展示、状态、运行中实时计时（统一时钟）、阶段明细（stage detail）、与 WebUI 一致的输入/输出预览（JSON/Python 风格结构化、Markdown 输出、附件图片预览）；历史回放支持 timeline/calls/events 多级回退 |
+| 工具调用块 | 已实现 | 层级展示、状态、运行中实时计时（统一时钟）、阶段明细（stage detail）、与 WebUI 一致的输入/输出预览（JSON/Python 风格结构化、Markdown 输出、附件图片预览）；Agent 内正文与子调用按时间线顺序展示；历史回放支持 timeline/calls/events 多级回退 |
 | 事件流 | 已实现 | SSE 优先，断开/错误时 JSON fallback（指数退避重连，活跃任务持续重试） |
 | 命令面板 | 已实现 | `/` 候选、子命令、方向键、Tab/Enter 补全；空态反馈（加载中/无匹配/不可用）；窗口聚焦按 TTL 刷新命令列表 |
 | 消息引用 | 已实现 | 引用 bot 消息、划词引用选中文本、发送引用、引用芯片跳转当前已加载源消息（不在当前页时自动加载一页更早历史，仍未命中需手动继续） |
@@ -64,13 +64,13 @@ Runtime 请求必须由 Tauri command 拼接到已配置 origin 下，避免 Rea
 
 - 默认使用 SSE 订阅 job events。
 - SSE error/closed 或原生订阅建立失败时使用 `job_id + seq` 调用 JSON events fallback 补齐遗漏事件；消息已成功创建 job 后，订阅失败不会撤回用户消息或恢复已发送草稿。
-- JSON fallback 先续接增量事件，再应用 Runtime 的完整正文与阶段快照，保留已有消息/工具时间线和已结束调用，避免把快照正文再次累计。
+- Runtime 任务快照包含 `current_timeline`：完整的顶层消息、已结束和运行中的调用树，以及 Agent 内消息与子调用的顺序。客户端接受此快照时同时推进到 `last_seq`，SSE 与 JSON 只追加后续序号，避免正文丢失或重复。
+- 旧 Runtime 缺少 `current_timeline` 时，客户端保留快照的完整正文前缀，JSON fallback 先续接事件以保留已有调用树；重放缓冲缺失消息时按权威正文恢复。旧服务无法仅凭正文提供完整的 Agent 嵌套顺序。
 - 重叠 JSON 请求按 job 身份和请求代次校验；已结束、已被替换的 job 或落后于已消费事件游标的回包会被忽略，避免迟到响应覆盖下一轮任务或回退回复内容。
 - 取消请求错误和 SSE 的连接状态通知同样只作用于对应的活跃 job，旧任务的迟到通知不会改写新任务的错误或连接状态。
 - `done` / `error` / `cancelled` 事件到达后，客户端继续保留当前会话的 job 和发送锁，通过 JSON polling 等待 `history_finalized=true`，确认历史落盘后再刷新历史并清理订阅。
 - 历史分页的 `before` / `next_before` 是非负数值索引；React 与 Tauri command 使用同一数值契约，首屏不传 `before`。
-- Android 回到前台时执行 `store.bootstrap()`，刷新配置、会话、当前历史页和 active jobs，并重新建立事件订阅。
-- 当前没有公开的 store 方法在 resume 时逐 job 主动补齐；这部分仍依赖 SSE 断线 fallback。
+- Android 回到前台时执行 `store.bootstrap()`，刷新配置、会话、当前历史页和 active jobs；每个任务接受完整快照及其游标后重新建立事件订阅。请求途中已消费更高序号时保留更新的本地状态。
 
 ## 安全存储
 

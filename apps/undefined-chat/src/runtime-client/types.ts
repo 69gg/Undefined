@@ -138,6 +138,8 @@ export type ChatJob = {
 	currentToolCalls: ToolCallSnapshot[];
 	/** 流式时间线：按事件到达顺序的 message 段 + 顶层 call（对齐 WebUI append 顺序） */
 	currentTimeline: StreamingTimelineItem[];
+	/** Runtime 提供完整时间线快照；缺省时兼容旧服务的 reply-only 快照。 */
+	hasTimelineSnapshot?: boolean;
 	historyFinalized: boolean;
 	waitingInput: unknown | null;
 };

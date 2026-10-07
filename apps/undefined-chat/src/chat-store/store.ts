@@ -178,6 +178,32 @@ export function isJobRunning(job: ChatJob | null | undefined): boolean {
 	);
 }
 
+function acceptJobSnapshot(job: ChatJob, previous?: ChatJob): ChatJob {
+	if (job.hasTimelineSnapshot || job.currentTimeline.length > 0) return job;
+	const sameJob = previous?.jobId === job.jobId ? previous : undefined;
+	if (sameJob && job.reply === sameJob.reply) {
+		return {
+			...job,
+			currentTimeline: sameJob.currentTimeline,
+			currentToolCalls: sameJob.currentToolCalls,
+		};
+	}
+	// 旧 Runtime 没有 timeline，先保存完整正文前缀，再续接快照之后的事件。
+	return {
+		...job,
+		currentTimeline: [
+			...(job.reply
+				? [{ type: "message" as const, seq: job.lastSeq, content: job.reply }]
+				: []),
+			...job.currentToolCalls.map((call) => ({
+				type: "call" as const,
+				seq: job.lastSeq,
+				callId: call.id,
+			})),
+		],
+	};
+}
+
 export function chatReducer(state: ChatState, action: ChatAction): ChatState {
 	switch (action.type) {
 		case "connection/set":
@@ -190,7 +216,14 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
 				error: null,
 			};
 		case "bootstrap/success": {
-			const activeJobs = activeJobsByConversation(action.activeJobs);
+			const snapshots = action.activeJobs.map((job) => {
+				const previous = state.activeJobsByConversation[job.conversationId];
+				// 订阅仍可能在 bootstrap 请求期间前进；更旧快照不能倒退已展示事件。
+				if (previous?.jobId === job.jobId && previous.lastSeq > job.lastSeq)
+					return previous;
+				return acceptJobSnapshot(job, previous);
+			});
+			const activeJobs = activeJobsByConversation(snapshots);
 			return {
 				...state,
 				bootstrapping: false,
@@ -204,7 +237,13 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
 				})),
 				selectedConversationId: action.selectedConversationId,
 				activeJobsByConversation: activeJobs,
-				jobConversationById: jobConversationById(action.activeJobs),
+				jobConversationById: jobConversationById(snapshots),
+				eventCursorByJob: {
+					...state.eventCursorByJob,
+					...Object.fromEntries(
+						snapshots.map((job) => [job.jobId, job.lastSeq]),
+					),
+				},
 				commands: action.commands,
 				error: null,
 			};
@@ -354,6 +393,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
 			return { ...state, sendError: action.error };
 		case "commands/set":
 			return { ...state, commands: action.commands };
+		case "job/snapshot":
 		case "job/upsert": {
 			const activeJobs = { ...state.activeJobsByConversation };
 			const jobConversations = {
@@ -370,6 +410,16 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
 				...state,
 				activeJobsByConversation: activeJobs,
 				jobConversationById: jobConversations,
+				eventCursorByJob:
+					action.type === "job/snapshot"
+						? {
+								...state.eventCursorByJob,
+								[action.job.jobId]: Math.max(
+									state.eventCursorByJob[action.job.jobId] ?? 0,
+									action.job.lastSeq,
+								),
+							}
+						: state.eventCursorByJob,
 				conversations: state.conversations.map((item) =>
 					item.id === action.job.conversationId
 						? { ...item, isRunning: isJobRunning(action.job) }
@@ -632,6 +682,23 @@ function chatEventFromRuntimeEvent(event: RuntimeSseEvent): ChatEvent {
  * 对齐 WebUI upsertTimelineToolBlock 的 key 策略（webchat_call_id || tool_call_id）。
  * 有 parentCallId 时在匹配父块的 children 里递归 upsert；否则在顶层 upsert。
  */
+function updateToolCall(
+	list: ToolCallSnapshot[],
+	callId: string,
+	patch: (call: ToolCallSnapshot) => ToolCallSnapshot,
+): ToolCallSnapshot[] {
+	return list.map((call) =>
+		call.id === callId
+			? patch(call)
+			: {
+					...call,
+					children: call.children
+						? updateToolCall(call.children, callId, patch)
+						: undefined,
+				},
+	);
+}
+
 function upsertToolCall(
 	list: ToolCallSnapshot[],
 	callId: string,
@@ -835,7 +902,7 @@ export function createChatStore({
 		try {
 			const subscription = await client.startJobEventStream({
 				jobId: job.jobId,
-				afterSeq: state.eventCursorByJob[job.jobId] ?? job.lastSeq,
+				afterSeq: Math.max(state.eventCursorByJob[job.jobId] ?? 0, job.lastSeq),
 				conversationId: job.conversationId,
 			});
 			if (generation !== runtimeGeneration) {
@@ -949,20 +1016,28 @@ export function createChatStore({
 				}
 				// 拉取成功：重置退避间隔
 				fallbackBackoffByJob.delete(jobId);
-				// 先续接事件保留此前时间线，再应用权威正文快照，避免增量重复计数。
-				applyRuntimeEvents(jobId, response.events);
+				if (!response.job.hasTimelineSnapshot) {
+					// 旧服务仅提供 reply；先回放增量以保留已有调用树。
+					applyRuntimeEvents(jobId, response.events);
+				}
 				const replayedJob =
 					state.activeJobsByConversation[response.job.conversationId];
-				dispatch({
-					type: "job/upsert",
-					job: {
-						...response.job,
-						currentTimeline: replayedJob?.currentTimeline ?? [],
-						// Runtime 运行快照只含未结束调用，完整调用树由事件回放保留。
-						currentToolCalls:
-							replayedJob?.currentToolCalls ?? response.job.currentToolCalls,
-					},
-				});
+				const replayComplete =
+					!response.job.messages.length ||
+					JSON.stringify(response.job.messages) ===
+						JSON.stringify(replayedJob?.messages);
+				const snapshot = response.job.hasTimelineSnapshot
+					? response.job
+					: acceptJobSnapshot({
+							...response.job,
+							currentTimeline: replayComplete
+								? (replayedJob?.currentTimeline ?? [])
+								: [],
+							currentToolCalls:
+								replayedJob?.currentToolCalls ?? response.job.currentToolCalls,
+						});
+				dispatch({ type: "job/snapshot", job: snapshot });
+
 				if (isJobRunning(response.job)) {
 					scheduleFallbackPolling(jobId, JSON_FALLBACK_BASE_MS);
 				} else if (response.job.conversationId) {
@@ -1306,7 +1381,7 @@ export function createChatStore({
 			dispatch({ type: "send/error", error: null });
 			const job = await client.sendMessage(input);
 			if (generation !== runtimeGeneration) return;
-			dispatch({ type: "job/upsert", job });
+			dispatch({ type: "job/snapshot", job: acceptJobSnapshot(job) });
 			dispatch({ type: "connection/set", connectionState: "streaming" });
 			await startStreamForJob(job);
 		} catch (err) {
@@ -1529,7 +1604,9 @@ export function createChatStore({
 			conversationId && state.activeJobsByConversation[conversationId];
 		if (activeJob && activeJob.jobId === jobId) {
 			let updatedJob = activeJob;
-			const newEvents = events.filter((item) => item.seq > prevCursor);
+			const newEvents = (state.eventsByJob[jobId] ?? []).filter(
+				(item) => item.seq > prevCursor,
+			);
 			for (const event of newEvents) {
 				if (event.event === "stage" && event.payload) {
 					// stage 事件：更新 currentStage/Detail/StartedAt（对齐 WebUI setChatStage）
@@ -1558,14 +1635,38 @@ export function createChatStore({
 						event.payload.content ?? event.payload.message ?? "",
 					);
 					if (content) {
+						const parentCallId = String(
+							event.payload.parent_webchat_call_id || "",
+						);
 						updatedJob = {
 							...updatedJob,
 							reply: updatedJob.reply + content,
-							currentTimeline: [
-								...updatedJob.currentTimeline,
-								{ type: "message", seq: event.seq, content },
-							],
+							messages: [...updatedJob.messages, content],
 						};
+						if (parentCallId) {
+							updatedJob = {
+								...updatedJob,
+								currentToolCalls: updateToolCall(
+									updatedJob.currentToolCalls,
+									parentCallId,
+									(parent) => ({
+										...parent,
+										timeline: [
+											...(parent.timeline ?? []),
+											{ type: "message", seq: event.seq, content },
+										],
+									}),
+								),
+							};
+						} else {
+							updatedJob = {
+								...updatedJob,
+								currentTimeline: [
+									...updatedJob.currentTimeline,
+									{ type: "message", seq: event.seq, content },
+								],
+							};
+						}
 					}
 				} else if (
 					event.event === "tool_start" ||
@@ -1624,6 +1725,22 @@ export function createChatStore({
 								}),
 							),
 						};
+						if (isStart && parentCallId) {
+							updatedJob = {
+								...updatedJob,
+								currentToolCalls: updateToolCall(
+									updatedJob.currentToolCalls,
+									parentCallId,
+									(parent) => ({
+										...parent,
+										timeline: [
+											...(parent.timeline ?? []),
+											{ type: "call", seq: event.seq, callId },
+										],
+									}),
+								),
+							};
+						}
 						// 顶层 tool_start/agent_start 首次进入主时间线（对齐 WebUI append 顺序；
 						// 嵌套子工具在父块 children 内，由 ToolBlock 递归渲染，不进主时间线）
 						if (
@@ -1682,8 +1799,17 @@ export function createChatStore({
 					}
 				}
 			}
-			if (updatedJob !== activeJob) {
-				dispatch({ type: "job/upsert", job: updatedJob });
+			if (newEvents.length > 0) {
+				dispatch({
+					type: "job/upsert",
+					job: {
+						...updatedJob,
+						lastSeq: Math.max(
+							updatedJob.lastSeq,
+							state.eventCursorByJob[jobId] ?? 0,
+						),
+					},
+				});
 			}
 		}
 

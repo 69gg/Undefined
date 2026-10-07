@@ -217,8 +217,39 @@ function normalizeEvent(value: unknown): ChatEvent {
 	};
 }
 
-function normalizeToolCall(value: unknown): ToolCallSnapshot {
-	const raw = record(value);
+function normalizeToolCall(
+	value: unknown,
+	liveCalls?: Map<string, RawRecord>,
+): ToolCallSnapshot {
+	const original = record(value);
+	const id =
+		text(original.id) ||
+		text(original.webchat_call_id) ||
+		text(original.webchatCallId) ||
+		text(original.name, "tool");
+	const raw: RawRecord = {
+		...original,
+		...liveCalls?.get(id),
+		children: original.children,
+		timeline: original.timeline,
+	};
+	const children = new Map(
+		arrayRecords(raw.children).map((child) => {
+			const normalized = normalizeToolCall(child, liveCalls);
+			return [normalized.id, normalized];
+		}),
+	);
+	const timeline = Array.isArray(raw.timeline)
+		? raw.timeline.map((value) => {
+				const entry = record(value);
+				if (entry.type !== "call" || !entry.call) return value;
+				const child = normalizeToolCall(entry.call, liveCalls);
+				children.set(child.id, child);
+				// 流式更新只改 children；时间线引用同一个子块，不能保留旧 inline 状态。
+				return { type: "call", seq: numberValue(entry.seq), callId: child.id };
+			})
+		: undefined;
+
 	return {
 		id:
 			text(raw.id) ||
@@ -229,7 +260,11 @@ function normalizeToolCall(value: unknown): ToolCallSnapshot {
 		status: text(raw.status, "running"),
 		elapsedMs: nullableNumber(field(raw, "elapsedMs", "elapsed_ms")),
 		durationMs: nullableNumber(field(raw, "durationMs", "duration_ms")),
-		detail: text(raw.detail) || text(raw.result_preview) || undefined,
+		detail:
+			text(raw.detail) ||
+			text(raw.current_stage_detail) ||
+			text(raw.result_preview) ||
+			undefined,
 		argumentsPreview:
 			text(raw.argumentsPreview) ||
 			text(raw.arguments_preview) ||
@@ -244,8 +279,8 @@ function normalizeToolCall(value: unknown): ToolCallSnapshot {
 		currentStage:
 			text(raw.currentStage) || text(raw.current_stage) || undefined,
 		isAgent: bool(raw.isAgent) || bool(raw.is_agent) || undefined,
-		children: arrayRecords(raw.children).map(normalizeToolCall),
-		timeline: Array.isArray(raw.timeline) ? raw.timeline : undefined,
+		children: [...children.values()],
+		timeline,
 	};
 }
 
@@ -273,6 +308,37 @@ function normalizeJob(value: unknown): ChatJob | null {
 	if (!jobId) {
 		return null;
 	}
+	const rawTimeline = field(raw, "currentTimeline", "current_timeline");
+	const hasTimelineSnapshot = Array.isArray(rawTimeline);
+	const liveCalls = arrayRecords(
+		field(raw, "currentToolCalls", "current_tool_calls"),
+	);
+	const liveById = new Map(
+		liveCalls.map((call) => [
+			text(call.id) ||
+				text(call.webchat_call_id) ||
+				text(call.webchatCallId) ||
+				text(call.name, "tool"),
+			call,
+		]),
+	);
+	const currentToolCalls: ToolCallSnapshot[] = [];
+	const currentTimeline: ChatJob["currentTimeline"] = [];
+	for (const entry of arrayRecords(rawTimeline)) {
+		const seq = numberValue(entry.seq);
+		if (entry.type === "message" && text(entry.content)) {
+			currentTimeline.push({
+				type: "message",
+				seq,
+				content: text(entry.content),
+			});
+		} else if (entry.type === "call" && entry.call) {
+			const call = normalizeToolCall(entry.call, liveById);
+			currentToolCalls.push(call);
+			currentTimeline.push({ type: "call", seq, callId: call.id });
+		}
+	}
+
 	return {
 		jobId,
 		conversationId: text(field(raw, "conversationId", "conversation_id")),
@@ -299,11 +365,12 @@ function normalizeJob(value: unknown): ChatJob | null {
 		currentAgentStages: arrayRecords(
 			field(raw, "currentAgentStages", "current_agent_stages"),
 		).map(normalizeAgentStage),
-		currentToolCalls: arrayRecords(
-			field(raw, "currentToolCalls", "current_tool_calls"),
-		).map(normalizeToolCall),
+		currentToolCalls: hasTimelineSnapshot
+			? currentToolCalls
+			: liveCalls.map((call) => normalizeToolCall(call)),
 		historyFinalized: bool(field(raw, "historyFinalized", "history_finalized")),
-		currentTimeline: [],
+		currentTimeline,
+		hasTimelineSnapshot,
 		waitingInput: field(raw, "waitingInput", "waiting_input") ?? null,
 	};
 }
