@@ -26,6 +26,7 @@ src/Undefined/
 ├── handlers/      # OneBot 消息分流（message_flow / poke / repeat / auto_extract）
 ├── jm/            # 禁漫（JM / 18comic）车号解析、关键词搜索、逐章 PDF 下载合成与 zip 打包
 ├── onebot/        # OneBot WebSocket 客户端
+├── weixin/        # 微信 iLink：service 账号生命周期、store 凭据/映射、audio 语音准备、transport 投递状态适配
 ├── skills/        # 技能插件核心目录 (存放所有的工具与智能体)
 │   ├── tools/           # 基础原子的工具 (独立的功能单元，如读写文件、网络请求等)
 │   ├── toolsets/        # 聚合工具集 (分组后的工具组)

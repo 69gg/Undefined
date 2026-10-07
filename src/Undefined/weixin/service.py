@@ -47,6 +47,7 @@ from Undefined.weixin.audio import (
 )
 from Undefined.weixin.models import WeixinAccount, normalize_alias
 from Undefined.weixin.store import UndefinedIlinkStateStore, WeixinStore
+from Undefined.weixin.transport import UndefinedIlinkTransport
 
 logger = logging.getLogger(__name__)
 
@@ -269,7 +270,7 @@ class WeixinService:
         state_store: UndefinedIlinkStateStore,
         options: ClientOptions,
     ) -> WeixinClientProtocol:
-        transport = IlinkTransport(bot_agent=self._bot_agent)
+        transport = UndefinedIlinkTransport(bot_agent=self._bot_agent)
         return AsyncWeixinIlinkClient(
             account.credentials,
             transport=transport,

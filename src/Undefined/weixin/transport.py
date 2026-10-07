@@ -1,0 +1,54 @@
+"""在 iLink 消息派发边界统一仓库投递错误合同。"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from typing import Any
+
+from weixin_ilink_client import (
+    ApiError,
+    HttpError,
+    IlinkTransport,
+    SessionPausedError,
+    UnsupportedCapabilityError,
+    WeixinCredentials,
+    WeixinIlinkError,
+)
+from weixin_ilink_client.constants import STALE_TOKEN_ERROR_CODE
+
+
+def is_definitive_weixin_delivery_rejection(exc: BaseException) -> bool:
+    """只有明确拒绝的消息结构错误才允许降级重发。"""
+    if isinstance(exc, SessionPausedError):
+        return False
+    if isinstance(exc, UnsupportedCapabilityError):
+        return True
+    if isinstance(exc, ApiError):
+        return exc.code != STALE_TOKEN_ERROR_CODE
+    if isinstance(exc, HttpError):
+        return 400 <= exc.status_code < 500 and exc.status_code not in {408, 425, 429}
+    return False
+
+
+class WeixinDeliveryUncertainError(WeixinIlinkError):
+    """消息派发已发起，但上游没有给出可确认的投递结果。"""
+
+    delivery_uncertain: bool = True
+
+
+class UndefinedIlinkTransport(IlinkTransport):
+    """仅适配 sendmessage；媒体上传与其他准备错误保留原有语义。"""
+
+    async def send_message(
+        self,
+        credentials: WeixinCredentials,
+        message: Mapping[str, Any],
+    ) -> None:
+        try:
+            await super().send_message(credentials, message)
+        except WeixinIlinkError as exc:
+            if is_definitive_weixin_delivery_rejection(exc):
+                raise
+            raise WeixinDeliveryUncertainError(
+                "微信投递结果未确认，禁止自动重发"
+            ) from exc

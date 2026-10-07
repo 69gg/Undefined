@@ -9,17 +9,12 @@ from urllib.parse import urlsplit
 from urllib.request import url2pathname
 
 from weixin_ilink_client import (
-    ApiError,
-    HttpError,
     MediaKind,
     OutboundMediaItem,
     OutboundMessageItem,
     OutboundTextItem,
     RefMessage,
-    SessionPausedError,
-    UnsupportedCapabilityError,
 )
-from weixin_ilink_client.constants import STALE_TOKEN_ERROR_CODE
 
 from Undefined.attachments import (
     AttachmentRecord,
@@ -46,6 +41,9 @@ from Undefined.utils.message_reply import (
 )
 from Undefined.utils.message_turn import mark_message_sent_this_turn
 from Undefined.weixin.audio import PreparedWeixinVoice
+from Undefined.weixin.transport import (
+    is_definitive_weixin_delivery_rejection as is_definitive_weixin_delivery_rejection,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -96,22 +94,6 @@ def _coerce_qq_reply_id(value: int | str | None) -> int | None:
     if parsed <= 0:
         raise ValueError("QQ 引用消息 ID 必须是正整数")
     return parsed
-
-
-def is_definitive_weixin_delivery_rejection(exc: BaseException) -> bool:
-    if isinstance(exc, SessionPausedError):
-        return False
-    if isinstance(exc, UnsupportedCapabilityError):
-        return True
-    if isinstance(exc, ApiError):
-        return exc.code != STALE_TOKEN_ERROR_CODE
-    if isinstance(exc, HttpError):
-        return 400 <= exc.status_code < 500 and exc.status_code not in {
-            408,
-            425,
-            429,
-        }
-    return False
 
 
 def _format_size(size_bytes: int | None) -> str:
