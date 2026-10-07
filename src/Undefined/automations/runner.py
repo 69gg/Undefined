@@ -991,7 +991,7 @@ class WorkflowRunner:
         variables: dict[str, Any],
         emit_if_needed: Callable[[dict[str, Any], str], Awaitable[None]],
     ) -> str:
-        count = int(node.get("count") or self.loop_max_iterations)
+        count = int(node.get("count", self.loop_max_iterations))
         max_iterations = min(
             int(node.get("max_iterations") or self.loop_max_iterations),
             self.loop_max_iterations,

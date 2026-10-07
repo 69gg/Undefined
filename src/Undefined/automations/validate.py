@@ -272,6 +272,15 @@ def collect_automation_issues(
                 )
             )
         if node_type in {"loop.times", "loop.each"}:
+            if node_type == "loop.times" and "count" in node:
+                count = node["count"]
+                if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+                    issues.append(
+                        _issue(
+                            f"{prefix}.count",
+                            "loop count must be a non-negative integer",
+                        )
+                    )
             try:
                 max_iterations = int(node.get("max_iterations") or loop_cap)
             except (TypeError, ValueError):
