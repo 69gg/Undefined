@@ -391,6 +391,7 @@ Undefined Chat 使用同一组 Runtime Chat 端点作为权威合同。客户端
 - 权限视角：`superadmin`。
 - 如果输入以 `/` 开头，按私聊命令分发执行（遵循命令 `allow_in_private` 开放策略）。
 - WebChat 会话持久化在 `data/webchat/conversations/<conversation_id>.json`，一个会话一个 JSON 文件。删除会话会删除对应 JSON；不会写入单个全局 conversations JSON。
+- 会话创建、改名、清空、标题状态及生成标题均在持久写入成功后更新可见缓存；写盘失败保留上次成功状态。删除失败也保留会话与标题任务，便于重试。持久操作开始后取消请求，会等文件和缓存提交收敛后再释放会话锁。
 - 首次加载会自动把旧版 `data/history/private_42.json` 或运行中的旧历史管理器记录迁移到 `legacy-system-42`，并写入 `data/webchat/legacy_private_42_migrated.json` 迁移标记。只要标记存在就不会重复迁移；即使删除迁移出的会话，也不会再次从旧文件恢复。
 
 ### WebUI AI Chat Conversations
