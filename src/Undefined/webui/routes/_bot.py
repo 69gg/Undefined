@@ -380,11 +380,11 @@ async def update_restart_handler(request: web.Request) -> Response:
     marker = get_pending_bot_autostart_marker(repo_root)
     if was_running:
         try:
-            await asyncio.wait_for(bot.stop(), timeout=8)
-        except asyncio.TimeoutError:
-            return web.json_response(
-                {"success": False, "error": "bot_stop_timeout"}, status=500
-            )
+            stopped = await bot.stop()
+            if stopped.get("running"):
+                return web.json_response(
+                    {"success": False, "error": "bot_stop_failed"}, status=500
+                )
         except Exception:
             logger.warning("[WebUI][更新] 停止 Bot 进程失败", exc_info=True)
             return web.json_response(

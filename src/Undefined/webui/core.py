@@ -10,6 +10,7 @@ import time
 import secrets
 from typing import Any
 from Undefined.config.webui_settings import DEFAULT_WEBUI_STOP_TIMEOUT_SECONDS
+from Undefined.utils.io import run_cancellation_safe
 
 logger = logging.getLogger(__name__)
 
@@ -193,6 +194,11 @@ class BotProcessController:
             return self.status()
 
     async def stop(self) -> dict[str, Any]:
+        # 客户端断开/重复取消不能留下未收敛的子进程或提前释放生命周期锁。
+        return await run_cancellation_safe(self._stop())
+
+    async def _stop(self) -> dict[str, Any]:
+        watch_task: asyncio.Task[None] | None = None
         async with self._lock:
             if not self._process or self._process.returncode is not None:
                 self._process = None
@@ -244,17 +250,21 @@ class BotProcessController:
             except Exception as e:
                 logger.error(f"停止进程出错: {e}")
             finally:
-                if self._watch_task and not self._watch_task.done():
-                    self._watch_task.cancel()
-                    try:
-                        await self._watch_task
-                    except asyncio.CancelledError:
-                        pass
-                self._watch_task = None
-                self._process = None
-                self._started_at = None
+                if process.returncode is not None:
+                    watch_task = self._watch_task
+                    self._watch_task = None
+                    self._process = None
+                    self._started_at = None
 
-            return self.status()
+        # watcher 的 finally 也会取得 _lock，必须在释放锁后等待。
+        if watch_task is not None:
+            if not watch_task.done():
+                watch_task.cancel()
+            try:
+                await watch_task
+            except asyncio.CancelledError:
+                pass
+        return self.status()
 
     async def _watch_process(self, process: asyncio.subprocess.Process) -> None:
         try:

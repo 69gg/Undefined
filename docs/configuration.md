@@ -1222,7 +1222,7 @@ api_key = "replace-with-your-key"
 - `webui.password` 在配置成功加载后立即刷新 Management 的登录密码，无需重启 WebUI。
 - `webui.autostart_bot` 控制下一次 WebUI 启动时是否自动启动机器人；修改不会立即启动或停止当前机器人进程。
 - `check_updates` 支持热更新；关闭后只停止页面打开时的自动检查，概览页仍可手动检查。
-- `stop_timeout_seconds` 支持热更新，下一次停止操作读取新值，进行中的停止保持开始时的期限。默认等待模型、下载、回复和历史收尾；设置正整数时需覆盖实际收尾耗时，超时强制终止可能跳过未完成的落盘。环境变量为 `WEBUI_STOP_TIMEOUT_SECONDS`，TOML 显式配置优先。
+- `stop_timeout_seconds` 支持热更新，下一次停止操作读取新值，进行中的停止保持开始时的期限。停止按钮、WebUI 关停与更新前停止共用此期限；请求取消也会先等待子进程清理收敛。默认等待模型、下载、回复和历史收尾；设置正整数时需覆盖实际收尾耗时，超时强制终止可能跳过未完成的落盘。环境变量为 `WEBUI_STOP_TIMEOUT_SECONDS`，TOML 显式配置优先。
 - `autostart_bot=true` 时，运行 `uv run Undefined-webui` 会自动拉起 bot 进程，无需手动点击启动按钮；与 WebUI 更新重启后的自动恢复机制（`pending_bot_autostart` marker）互不冲突。
 - `uv run deploy up` 在 `container` 与 `host` 模式下都会写入 `autostart_bot = false`；部署后先完成配置与 QQ 登录，再在 WebUI 点击“启动机器人”。
 - 自动检查在 WebUI 鉴权成功后异步执行，失败不会阻塞或打扰页面。GitHub Release 查询在 WebUI 进程内缓存 15 分钟；同一时刻的并发检查会共享一个在途任务，查询失败时也不会逐个重试外部请求。

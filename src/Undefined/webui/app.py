@@ -281,10 +281,9 @@ async def on_shutdown(app: web.Application) -> None:
         logger.info("[WebUI] 正在关闭，无运行中的机器人进程")
         return
     logger.info("[WebUI] 正在关闭，准备停止机器人进程...")
-    try:
-        await asyncio.wait_for(bot.stop(), timeout=5)
-    except asyncio.TimeoutError:
-        logger.warning("[WebUI] 关闭超时：机器人进程停止失败")
+    result = await bot.stop()
+    if result.get("running"):
+        logger.warning("[WebUI] 关闭时机器人进程仍未退出")
 
 
 async def on_cleanup(app: web.Application) -> None:
