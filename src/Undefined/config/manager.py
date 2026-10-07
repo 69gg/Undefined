@@ -98,6 +98,9 @@ class ConfigManager:
 
     async def _watch_loop(self, interval: float, debounce: float) -> None:
         self._last_snapshot = self._compute_snapshot()
+        # 启动和重启时追赶 load/上一监听器退出后发生的保存；先记快照，
+        # 保证读取期间另一进程的写入仍能在下一轮被发现。
+        await self._reload_from_disk()
         last_change = 0.0
         pending = False
         while self._watch_stop and not self._watch_stop.is_set():
@@ -109,13 +112,16 @@ class ConfigManager:
                 pending = True
             if pending and (time.monotonic() - last_change) >= debounce:
                 pending = False
-                async with self._reload_lock:
-                    try:
-                        changes = self.reload(strict=False)
-                        if changes:
-                            logger.info("[配置] 已应用热更新: %s", ", ".join(changes))
-                    except Exception as exc:
-                        logger.warning("[配置] 热重载失败: %s", exc)
+                await self._reload_from_disk()
+
+    async def _reload_from_disk(self) -> None:
+        async with self._reload_lock:
+            try:
+                changes = self.reload(strict=False)
+                if changes:
+                    logger.info("[配置] 已应用热更新: %s", ", ".join(changes))
+            except Exception as exc:
+                logger.warning("[配置] 热重载失败: %s", exc)
 
     def _compute_snapshot(self) -> dict[str, tuple[int, int]]:
         snapshot: dict[str, tuple[int, int]] = {}
