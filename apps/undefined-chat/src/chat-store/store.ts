@@ -843,6 +843,22 @@ export function createChatStore({
 			runtimeConfig,
 			bootstrapping: false,
 			connectionState: "disconnected",
+			attachmentsByConversation: Object.fromEntries(
+				Object.entries(state.attachmentsByConversation).map(
+					([conversationId, attachments]) => [
+						conversationId,
+						attachments.map((item) =>
+							["queued", "uploading"].includes(item.status)
+								? {
+										...item,
+										status: "error" as const,
+										error: "error.attachmentsFailed",
+									}
+								: item,
+						),
+					],
+				),
+			),
 		};
 		emit();
 	}

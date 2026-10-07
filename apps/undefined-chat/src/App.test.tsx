@@ -14,6 +14,7 @@ import { App } from "./App";
 import { LanguageProvider, LOCALE_STORAGE_KEY } from "./i18n";
 import { createTauriRuntimeClient } from "./runtime-client/tauri";
 import type {
+	Attachment,
 	AttachmentPreviewResult,
 	RuntimeConfig,
 } from "./runtime-client/types";
@@ -572,6 +573,86 @@ describe("App", () => {
 			});
 		});
 	});
+
+	test.each(["success", "failure"])(
+		"same-URL settings turn in-flight attachments into removable errors after late %s",
+		async (outcome) => {
+			let resolveUpload!: (value: Attachment) => void;
+			let rejectUpload!: (reason: Error) => void;
+			const pendingUpload = new Promise<Attachment>((resolve, reject) => {
+				resolveUpload = resolve;
+				rejectUpload = reject;
+			});
+			let config: RuntimeConfig = {
+				runtimeUrl: "http://same-runtime.test",
+				hasApiKey: true,
+			};
+			const attachment: Attachment = {
+				id: "file-A",
+				name: "A.txt",
+				size: 4,
+				kind: "file",
+				mediaType: "text/plain",
+				downloadUrl: "/attachment/file-A",
+				previewUrl: null,
+				discarded: false,
+			};
+			const client = runtimeClientStub({
+				getRuntimeConfig: vi.fn(async () => config),
+				saveRuntimeConfig: vi.fn(
+					async (runtimeUrl) => (config = { ...config, runtimeUrl }),
+				),
+				uploadAttachment: vi
+					.fn()
+					.mockImplementationOnce(() => pendingUpload)
+					.mockResolvedValue({ ...attachment, id: "reselected" }),
+			});
+			vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
+			vi.mocked(open).mockResolvedValue("/isolated/A.txt");
+			renderApp();
+			await screen.findByLabelText("消息输入");
+			await userEvent.click(screen.getByRole("button", { name: "添加附件" }));
+			await waitFor(() =>
+				expect(client.uploadAttachment).toHaveBeenCalledTimes(1),
+			);
+			fireEvent.keyDown(window, { key: ",", ctrlKey: true });
+			await screen.findByLabelText("Runtime URL");
+			await userEvent.click(screen.getByRole("button", { name: "保存并连接" }));
+			await waitFor(() =>
+				expect(screen.queryByLabelText("Runtime URL")).toBeNull(),
+			);
+			await act(async () => {
+				if (outcome === "success") resolveUpload(attachment);
+				else rejectUpload(new Error("obsolete upload failure"));
+				await Promise.resolve();
+			});
+			await userEvent.type(screen.getByLabelText("消息输入"), "after-settings");
+			fireEvent.keyDown(screen.getByLabelText("消息输入"), { key: "Enter" });
+			expect(await screen.findByText("请先移除上传失败的附件")).toBeTruthy();
+			expect(client.sendMessage).not.toHaveBeenCalled();
+			await userEvent.click(screen.getByRole("button", { name: "移除 A.txt" }));
+			await userEvent.click(screen.getByRole("button", { name: "添加附件" }));
+			await waitFor(() =>
+				expect(client.uploadAttachment).toHaveBeenCalledTimes(2),
+			);
+			await waitFor(() =>
+				expect(
+					screen.getByRole("list", { name: "附件队列" }).textContent,
+				).toContain("4 B"),
+			);
+			fireEvent.keyDown(screen.getByLabelText("消息输入"), { key: "Enter" });
+			await waitFor(() =>
+				expect(client.sendMessage).toHaveBeenCalledWith({
+					conversationId: "default",
+					message: {
+						text: "after-settings",
+						attachmentIds: ["reselected"],
+						references: [],
+					},
+				}),
+			);
+		},
+	);
 
 	test("ignores a file picker opened on the previous Runtime", async () => {
 		let resolvePicker!: (path: string) => void;

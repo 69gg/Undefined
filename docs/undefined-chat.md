@@ -88,6 +88,8 @@ API Key 不应暴露给 React 状态树或日志。Tauri 负责保存、读取�
 
 附件上传由 Tauri 从文件句柄流式读取并转发到 Runtime，React 只持有文件选择结果和上传状态。桌面路径和 `file://` URL 会做 regular file 校验；Android `content://` URI 交给 `tauri-plugin-fs` 打开，不强制使用本地 `metadata().is_file()` 判定。
 
+保存连接配置时，未完成的附件上传会转为失败状态；恢复连接后可移除并重新选择文件。同一 Runtime 已上传成功的附件保留，旧上传的成功或失败响应不会恢复已移除条目。普通同地址重连或 Android 恢复不暂停配置，正在上传的附件仍可正常结算；切换 Runtime 继续清理旧附件。
+
 下载和预览同样通过 Tauri 受控命令处理。下载以原子创建方式占用文件名，同名文件依次添加数字后缀，并发下载也不会覆盖已有文件；可用候选名耗尽时明确报错。图片附件通过 `AttachmentImage` 或附件预览按钮调用 `previewAttachment`，Rust 端带 auth 拉取附件字节，再转为 `Blob` URL 渲染；全屏预览走应用内 `ImageViewerModal`，关闭时释放临时 URL。
 
 历史时间线未接入全局图片查看回调时使用本地 `ImagePreview`。可从图片通过 Enter / Space 打开，焦点进入关闭按钮，Tab / Shift+Tab 保持在预览内；Escape、点击遮罩或关闭按钮均可关闭，焦点恢复到触发图片。
