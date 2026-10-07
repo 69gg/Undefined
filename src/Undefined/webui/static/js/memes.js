@@ -431,15 +431,8 @@
             state.listItems = append
                 ? state.listItems.concat(nextItems)
                 : nextItems;
-            if (
-                state.selectedUid &&
-                !state.listItems.some((item) => item.uid === state.selectedUid)
-            ) {
-                state.selectedUid = "";
-                state.detailRequestSeq += 1;
-                state.detail = null;
-                renderDetail(null);
-            }
+            // 同一查询刷新或分页只更新列表；详情可能因编辑后不再匹配筛选，
+            // 或不在新首页中，仍保留选中内容和未提交草稿。
             renderList();
             return payload;
         } finally {
