@@ -495,13 +495,15 @@ class WeixinService:
         *,
         actor: str = "management-api",
     ) -> dict[str, Any]:
-        try:
-            account = await self.store.set_account_enabled(alias, enabled)
-        except KeyError as exc:
-            raise WeixinNotFoundError(f"帐号 {alias} 不存在") from exc
-        except ValueError as exc:
-            raise WeixinServiceError(str(exc)) from exc
         async with self._lifecycle_lock:
+            if self._closed:
+                raise WeixinServiceError("微信服务已关闭")
+            try:
+                account = await self.store.set_account_enabled(alias, enabled)
+            except KeyError as exc:
+                raise WeixinNotFoundError(f"帐号 {alias} 不存在") from exc
+            except ValueError as exc:
+                raise WeixinServiceError(str(exc)) from exc
             if enabled and self._running and self.weixin_config.enabled:
                 await self._start_account_locked(account)
             elif not enabled:
@@ -550,20 +552,23 @@ class WeixinService:
     ) -> dict[str, Any]:
         normalized = self._normalize_alias(alias)
         self._validate_qq_id(qq_id)
-        existing = await self.store.get_account(normalized)
-        if existing is None:
-            raise WeixinNotFoundError(f"帐号 {normalized} 不存在")
-        await self._require_privileged_confirmation(
-            operation="rebind",
-            alias=normalized,
-            qq_id=qq_id,
-            confirmation_token=confirmation_token,
-            actor=actor,
-        )
-        try:
-            updated = await self.store.rebind_account(normalized, qq_id)
-        except ValueError as exc:
-            raise WeixinConflictError(str(exc)) from exc
+        async with self._lifecycle_lock:
+            if self._closed:
+                raise WeixinServiceError("微信服务已关闭")
+            existing = await self.store.get_account(normalized)
+            if existing is None:
+                raise WeixinNotFoundError(f"帐号 {normalized} 不存在")
+            await self._require_privileged_confirmation(
+                operation="rebind",
+                alias=normalized,
+                qq_id=qq_id,
+                confirmation_token=confirmation_token,
+                actor=actor,
+            )
+            try:
+                updated = await self.store.rebind_account(normalized, qq_id)
+            except ValueError as exc:
+                raise WeixinConflictError(str(exc)) from exc
         await self.store.append_audit(
             "account_rebound",
             actor=actor,
@@ -736,18 +741,21 @@ class WeixinService:
             created_at=now,
             updated_at=now,
         )
-        try:
-            await self.store.save_account(account)
-        except ValueError as exc:
-            raise WeixinConflictError(str(exc)) from exc
+        async with self._lifecycle_lock:
+            self._ensure_available()
+            if await self.store.get_account(account.alias) is not None:
+                raise WeixinConflictError(f"帐号别名 {account.alias} 已存在")
+            try:
+                await self.store.save_account(account)
+            except ValueError as exc:
+                raise WeixinConflictError(str(exc)) from exc
+            if self._running and self.weixin_config.enabled:
+                await self._start_account_locked(account)
         await self.store.append_audit(
             "account_bound",
             actor=actor,
             details={"alias": account.alias, "qq_id": account.qq_id},
         )
-        async with self._lifecycle_lock:
-            if self._running and self.weixin_config.enabled:
-                await self._start_account_locked(account)
         return account
 
     async def _start_account_locked(self, account: WeixinAccount) -> None:
