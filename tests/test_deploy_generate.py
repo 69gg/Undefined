@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import pytest
 import yaml
@@ -890,6 +891,45 @@ def test_host_mode_connect_urls_never_use_wildcard_bind(tmp_path: Path) -> None:
         assert "0.0.0.0" not in url, url
     assert "0.0.0.0" not in config.websocket_url
     assert "0.0.0.0" not in config.env["UNDEFINED_DEPLOY_SEARXNG_BASE_URL"]
+
+
+@pytest.mark.parametrize("bind", ["::1", "[::1]", "2001:db8::42"])
+def test_host_mode_ipv6_connect_urls_are_parseable(tmp_path: Path, bind: str) -> None:
+    ctx = _ctx(
+        tmp_path,
+        mode=catalog.MODE_HOST,
+        port_bind=bind,
+        services=("searxng", "firecrawl", "lxmusic2api"),
+        ports={"napcat_ws": 13001, "searxng": 18080},
+    )
+    config = generate.build(ctx)
+    expected_host = bind.removeprefix("[").removesuffix("]")
+    urls = generate.compose_service_urls(ctx)
+    for service, url in urls.items():
+        parsed = urlsplit(url)
+        assert parsed.hostname == expected_host
+        assert parsed.port == ctx.port(service)
+    websocket = urlsplit(config.websocket_url)
+    assert websocket.hostname == expected_host
+    assert websocket.port == 13001
+    searxng = urlsplit(config.env["UNDEFINED_DEPLOY_SEARXNG_BASE_URL"])
+    assert searxng.hostname == expected_host
+    assert searxng.port == 18080
+
+
+@pytest.mark.parametrize("bind", ["::", "[::]"])
+def test_host_mode_ipv6_wildcard_urls_use_loopback(tmp_path: Path, bind: str) -> None:
+    ctx = _ctx(tmp_path, mode=catalog.MODE_HOST, port_bind=bind)
+    config = generate.build(ctx)
+    assert urlsplit(config.websocket_url).hostname == "127.0.0.1"
+    assert (
+        urlsplit(config.env["UNDEFINED_DEPLOY_SEARXNG_BASE_URL"]).hostname
+        == "localhost"
+    )
+    assert all(
+        urlsplit(url).hostname == "127.0.0.1"
+        for url in generate.compose_service_urls(ctx).values()
+    )
 
 
 def test_bot_container_forbids_privilege_escalation(tmp_path: Path) -> None:

@@ -278,12 +278,14 @@ uv run Undefined-webui
 | `--with searxng,firecrawl,lxmusic2api` | 设置完整的可选服务列表，按需删减；也可使用 `--with-searxng` 等独立参数 |
 | `--with-nagaagent` / `--no-nagaagent` | 开启或关闭 NagaAgent 代码问答，首次默认关闭 |
 | `--port KEY=PORT` | 修改宿主机发布端口，可重复使用；端口键见 `uv run deploy up --help` |
-| `--port-bind ADDR` | 设置所有发布端口的绑定地址，首次默认 `127.0.0.1` |
+| `--port-bind ADDR` | 设置所有发布端口的绑定地址，首次默认 `127.0.0.1`；支持 IPv4、裸 IPv6（如 `::1`）和带方括号的 IPv6（如 `[::1]`） |
 | `--pull missing\|always\|never` | 镜像拉取策略，默认 `missing`；分别表示本地缺少时拉取、总是检查更新、不拉取 |
 | `--dry-run` | 预览配置差异与 Compose，隐藏凭据，不写文件、不启动容器 |
 | `--yes` / `-y` | 跳过向导，未指定项沿用上次选择或首次默认值 |
 
 ### 配置修改与运行权限
+
+`host` 模式生成的服务连接 URL 会为 IPv6 地址补上方括号；`0.0.0.0`、`::` 与 `[::]` 仅用于监听，生成连接目标时改用回环地址。
 
 部署工具会更新 OneBot 连接、WebUI / Runtime 监听地址与凭据、Bot 启动方式、文件发送模式和所选服务地址；模型、访问控制、提示词和历史配置的取值会保留。已有配置在写入前会备份，但写回时可能调整排序、空行或部分注释，可先用 `--dry-run` 查看计划。
 

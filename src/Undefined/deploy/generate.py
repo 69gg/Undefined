@@ -19,6 +19,7 @@ import yaml
 from Undefined.deploy import catalog, images, nagaagent
 from Undefined.deploy.config_patch import PatchPlan
 from Undefined.deploy.state import DeployLayout
+from Undefined.config.models import format_netloc
 
 #: 本体在 compose 里的服务名（与 compose.bot.yaml 一致）。
 BOT_SERVICE_NAME: Final[str] = "undefined-bot"
@@ -183,7 +184,8 @@ def _connect_host(bind: str) -> str:
     ``0.0.0.0`` / ``::`` 是监听语义（所有网卡），拿去当连接目标在部分平台上并
     不可用；本体与依赖服务都在本机时应当连回环。
     """
-    return "127.0.0.1" if bind in ("0.0.0.0", "::") else bind
+    host = bind.removeprefix("[").removesuffix("]")
+    return "127.0.0.1" if host in ("0.0.0.0", "::") else host
 
 
 def compose_service_urls(ctx: GenerateContext) -> dict[str, str]:
@@ -208,9 +210,8 @@ def compose_service_urls(ctx: GenerateContext) -> dict[str, str]:
     if mode == catalog.MODE_HOST:
         host = _connect_host(ctx.port_bind)
         return {
-            "searxng": f"http://{host}:{ctx.port('searxng')}",
-            "firecrawl": f"http://{host}:{ctx.port('firecrawl')}",
-            "lxmusic2api": f"http://{host}:{ctx.port('lxmusic2api')}",
+            key: f"http://{format_netloc(host, ctx.port(key))}"
+            for key in ("searxng", "firecrawl", "lxmusic2api")
         }
     raise GenerateError(f"未知部署模式 {mode!r}")
 
@@ -224,7 +225,7 @@ def _websocket_url(ctx: GenerateContext) -> str:
     """
     if ctx.mode == catalog.MODE_CONTAINER:
         return f"ws://{NAPCAT_SERVICE_NAME}:{catalog.container_port('napcat_ws')}"
-    return f"ws://{_connect_host(ctx.port_bind)}:{ctx.port('napcat_ws')}"
+    return f"ws://{format_netloc(_connect_host(ctx.port_bind), ctx.port('napcat_ws'))}"
 
 
 def build_env(ctx: GenerateContext) -> dict[str, str]:
@@ -334,11 +335,10 @@ def build_env(ctx: GenerateContext) -> dict[str, str]:
 
 def _searxng_base_url(ctx: GenerateContext) -> str:
     port = ctx.port("searxng")
-    if ctx.port_bind in ("0.0.0.0", "::"):
+    host = ctx.port_bind.removeprefix("[").removesuffix("]")
+    if host in ("0.0.0.0", "::"):
         host = "localhost"
-    else:
-        host = ctx.port_bind
-    return f"http://{host}:{port}"
+    return f"http://{format_netloc(host, port)}"
 
 
 def _selected_port_keys(ctx: GenerateContext) -> set[str]:
