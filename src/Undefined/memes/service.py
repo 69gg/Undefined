@@ -73,6 +73,7 @@ class MemeService(MemeSearchMixin):
         self._ingest_digest_locks_guard = asyncio.Lock()
         self._global_image_cache: dict[str, AttachmentRecord] = {}
         self._global_image_cache_lock = threading.Lock()
+        self._global_image_cache_generation = 0
 
     @property
     def enabled(self) -> bool:
@@ -150,42 +151,7 @@ class MemeService(MemeSearchMixin):
             return
         with self._global_image_cache_lock:
             self._global_image_cache.pop(normalized_uid, None)
-
-    def resolve_global_image_sync(self, uid: str) -> AttachmentRecord | None:
-        normalized_uid = str(uid or "").strip()
-        if not normalized_uid:
-            return None
-
-        with self._global_image_cache_lock:
-            cached = self._global_image_cache.get(normalized_uid)
-        if cached is not None:
-            return cached
-
-        record = self._store.get_sync(normalized_uid)
-        if record is None or not record.enabled or record.status != "ready":
-            return None
-        attachment = AttachmentRecord(
-            uid=record.uid,
-            scope_key="",
-            kind="image",
-            media_type="image",
-            display_name=Path(record.blob_path).name,
-            source_kind="meme_library",
-            source_ref=Path(record.blob_path).resolve().as_uri(),
-            local_path=record.blob_path,
-            mime_type=record.mime_type,
-            sha256=record.content_sha256,
-            created_at=record.created_at,
-            segment_data={"subType": "1"},
-            semantic_kind="meme",
-            description=record.description,
-        )
-        with self._global_image_cache_lock:
-            self._global_image_cache[normalized_uid] = attachment
-        return attachment
-
-    async def resolve_global_image(self, uid: str) -> AttachmentRecord | None:
-        return await asyncio.to_thread(self.resolve_global_image_sync, uid)
+            self._global_image_cache_generation += 1
 
     async def get_meme(self, uid: str) -> dict[str, Any] | None:
         record = await self._store.get(uid)
