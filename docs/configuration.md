@@ -370,6 +370,8 @@ Prompt caching 补充：
 - `responses_force_stateless_replay=false`
 - `use_proxy=false`
 
+媒体分析的进程内缓存按完整媒体来源、媒体类型与补充指令区分；相同输入复用结果，长路径或 data URL 的共同前缀不会串用分析结果。
+
 ### 4.4.4 `[models.security]` 安全模型
 
 字段：
