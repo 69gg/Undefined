@@ -29,6 +29,7 @@
         chatHistoryHasMore: false,
         chatHistoryLoading: false,
         chatHistoryRequest: null,
+        chatSendRequest: null,
         chatHistoryFinalization: null,
         chatTopLoadSuppressedUntil: 0,
         chatAutoScroll: true,
@@ -2405,11 +2406,14 @@
         return added.length;
     }
 
-    function clearChatAttachments() {
-        runtimeState.chatAttachments.forEach((item) => {
+    function clearChatAttachments(items = runtimeState.chatAttachments) {
+        items.forEach((item) => {
             if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
         });
-        runtimeState.chatAttachments = [];
+        const removed = new Set(items);
+        runtimeState.chatAttachments = runtimeState.chatAttachments.filter(
+            (item) => !removed.has(item),
+        );
         renderPendingChatAttachments();
     }
 
@@ -2488,8 +2492,11 @@
         return true;
     }
 
-    function clearChatReferences() {
-        runtimeState.chatReferences = [];
+    function clearChatReferences(items = runtimeState.chatReferences) {
+        const removed = new Set(items);
+        runtimeState.chatReferences = runtimeState.chatReferences.filter(
+            (item) => !removed.has(item),
+        );
         renderPendingChatReferences();
     }
 
@@ -5060,6 +5067,7 @@
     }
 
     function resetChatConversationState() {
+        runtimeState.chatSendRequest = null;
         stopActiveJobResumeTimer();
         runtimeState.activeJobResumeAttempts = 0;
         runtimeState.activeJobResumeRequest = null;
@@ -5726,6 +5734,14 @@
         }
     }
 
+    function isCurrentChatSendRequest(request) {
+        return (
+            runtimeState.chatSendRequest === request &&
+            request.conversationId === currentChatConversationId() &&
+            request.jobId === runtimeState.activeJobId
+        );
+    }
+
     async function sendChatMessage(options = {}) {
         if (runtimeState.chatBusy) return;
         const input = get("runtimeChatInput");
@@ -5736,8 +5752,8 @@
             await createChatConversation({ switchTo: true });
         }
         if (!currentChatConversationId()) return;
-        const message =
-            retryMessage || String((input && input.value) || "").trim();
+        const inputValue = String((input && input.value) || "");
+        const message = retryMessage || inputValue.trim();
         const attachments = [...runtimeState.chatAttachments];
         const references = [...runtimeState.chatReferences];
         const outboundAttachments = retryMessage ? [] : attachments;
@@ -5749,6 +5765,11 @@
         )
             return;
 
+        const request = {
+            conversationId: currentChatConversationId(),
+            jobId: runtimeState.activeJobId,
+        };
+        runtimeState.chatSendRequest = request;
         runtimeState.chatBusy = true;
         setButtonLoading(button, true);
         syncChatBusyControls();
@@ -5762,33 +5783,36 @@
             if (!outboundMessage) {
                 throw new Error("message is required");
             }
-            clearToolCollapseTimers();
-            stopChatPolling();
-            stopChatClock();
-            runtimeState.toolBlocks.clear();
-            runtimeState.streamingMessageId = null;
-            runtimeState.activeChatMessageId = null;
-            runtimeState.lastEventSeq = 0;
-            if (!retryMessage) {
-                appendChatMessage("user", outboundMessage);
+            if (isCurrentChatSendRequest(request)) {
+                clearToolCollapseTimers();
+                stopChatPolling();
+                stopChatClock();
+                runtimeState.toolBlocks.clear();
+                runtimeState.streamingMessageId = null;
+                runtimeState.activeChatMessageId = null;
+                runtimeState.lastEventSeq = 0;
+                if (!retryMessage) {
+                    appendChatMessage("user", outboundMessage);
+                    if (input && input.value === inputValue) {
+                        input.value = "";
+                        closeChatCommandPalette();
+                    }
+                    clearChatAttachments(outboundAttachments);
+                    clearChatReferences(outboundReferences);
+                }
+                forceScrollChatToBottomSoon();
             }
-            if (!retryMessage && input) {
-                input.value = "";
-                closeChatCommandPalette();
-                clearChatAttachments();
-                clearChatReferences();
-            }
-            forceScrollChatToBottomSoon();
 
             const res = await api("/api/runtime/chat/jobs", {
                 method: "POST",
                 body: JSON.stringify({
                     message: outboundMessage,
-                    conversation_id: currentChatConversationId(),
+                    conversation_id: request.conversationId,
                     reuse_previous_user_message: !!retryMessage,
                 }),
             });
             const data = await parseJsonSafe(res);
+            if (!isCurrentChatSendRequest(request)) return;
             if (!res.ok || (data && data.error)) {
                 throw new Error(buildRequestError(res, data));
             }
@@ -5798,8 +5822,10 @@
             }
             ensureStreamingMessage();
             forceScrollChatToBottomSoon();
+            runtimeState.activeJobConversationId = request.conversationId;
             await attachChatJob(jobId, 0);
         } catch (error) {
+            if (!isCurrentChatSendRequest(request)) return;
             runtimeState.chatBusy = false;
             setButtonLoading(button, false);
             syncChatBusyControls();

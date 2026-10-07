@@ -3018,6 +3018,127 @@ for (const outcome of ["events", "done", "failure"]) {
     SCENARIOS[`stale_job_poll_${outcome}`] = (env) => staleChatJobPoll(env, outcome);
 }
 
+async function staleChatSend(env, boundary, target, outcome, newerJob) {
+    const { window, response } = env;
+    let releaseOld;
+    const posts = [];
+    const polls = [];
+    window.fetch = (url, options = {}) => {
+        const parsed = new window.URL(url, window.location.href);
+        const pathname = parsed.pathname;
+        if (pathname.endsWith("/chat/conversations")) {
+            return Promise.resolve(response(200, {
+                conversations: [{ id: "A", title: "A" }, { id: "B", title: "B" }],
+            }));
+        }
+        if (pathname.endsWith("/chat/history")) {
+            return Promise.resolve(response(200, {
+                items: [{ role: "bot", content: `history-${parsed.searchParams.get("conversation_id")}` }],
+                has_more: false,
+            }));
+        }
+        if (pathname.endsWith("/chat/jobs/active")) {
+            return Promise.resolve(response(200, { job: null }));
+        }
+        if (pathname.endsWith("/chat/files")) {
+            return new Promise((resolve) => {
+                releaseOld = () => resolve(response(outcome === "failure" ? 500 : 200,
+                    outcome === "failure" ? { error: "obsolete upload failure" }
+                        : { id: "file-original", name: "original.txt", size: 4 }));
+            });
+        }
+        if (pathname.endsWith("/chat/jobs")) {
+            const body = JSON.parse(options.body);
+            posts.push(body);
+            if (body.message.startsWith("original")) {
+                if (boundary === "post") {
+                    return new Promise((resolve) => {
+                        releaseOld = () => resolve(response(outcome === "failure" ? 409 : 202,
+                            outcome === "failure" ? { error: "obsolete send failure" }
+                                : { job_id: "old", conversation_id: "A" }));
+                    });
+                }
+                return Promise.resolve(response(202, { job_id: "old", conversation_id: "A" }));
+            }
+            return Promise.resolve(response(202, { job_id: "new", conversation_id: body.conversation_id }));
+        }
+        if (pathname.endsWith("/events")) {
+            polls.push(String(url));
+            return Promise.resolve(response(200, { events: [], job: {
+                job_id: pathname.includes("/new/") ? "new" : "old",
+                conversation_id: parsed.searchParams.get("conversation_id"),
+                status: "running", last_seq: 0,
+            } }));
+        }
+        throw new Error(`unexpected route ${pathname}`);
+    };
+    window.RuntimeController.init();
+    await window.RuntimeController.loadChatHistory(true);
+    const input = window.document.getElementById("runtimeChatInput");
+    const button = window.document.getElementById("btnRuntimeChatSend");
+    const pick = (name) => {
+        const picker = window.document.getElementById("runtimeChatFileInput");
+        Object.defineProperty(picker, "files", {
+            configurable: true,
+            value: [new window.File(["file"], name, { type: "text/plain" })],
+        });
+        picker.dispatchEvent(new window.Event("change", { bubbles: true }));
+    };
+    input.value = "original";
+    if (boundary === "upload") pick("original.txt");
+    button.click();
+    await tick();
+    if (target !== "normal" && target !== "edited") {
+        window.document.querySelector('[data-conversation-select="B"]').click();
+        await tick();
+        if (target === "same") {
+            window.document.querySelector('[data-conversation-select="A"]').click();
+            await tick();
+        }
+    }
+    if (newerJob) {
+        input.value = "new-request";
+        button.click();
+        await tick();
+    }
+    if (target !== "normal") {
+        input.value = "later-draft";
+        pick("later.txt");
+    }
+    const snapshot = () => ({
+        title: textOf(window, "runtimeChatCurrentTitle"),
+        draft: input.value,
+        attachments: textOf(window, "runtimeChatAttachments"),
+        disabled: button.disabled,
+        busy: button.getAttribute("aria-busy"),
+        nodes: chatNodes(window).map(({ role, contentText, jobId }) => ({ role, contentText, jobId })),
+        cancelIds: Array.from(window.document.querySelectorAll("[data-cancel-job]"))
+            .filter((node) => !node.hidden).map((node) => node.dataset.cancelJob),
+        toast: textOf(window, "toast-container"),
+    });
+    const beforeLate = snapshot();
+    if (!releaseOld) throw new Error("send did not reach deferred boundary");
+    releaseOld();
+    await tick();
+    const afterLate = snapshot();
+    return { beforeLate, afterLate, posts, polls };
+}
+
+for (const boundary of ["upload", "post"]) {
+    for (const target of ["other", "same"]) {
+        for (const outcome of ["success", "failure"]) {
+            for (const newerJob of [false, true]) {
+                SCENARIOS[`stale_send_${boundary}_${target}_${outcome}_${newerJob}`] =
+                    (env) => staleChatSend(env, boundary, target, outcome, newerJob);
+            }
+        }
+    }
+    SCENARIOS[`stale_send_${boundary}_normal`] =
+        (env) => staleChatSend(env, boundary, "normal", "success", false);
+}
+SCENARIOS.stale_send_upload_edited =
+    (env) => staleChatSend(env, "upload", "edited", "success", false);
+
 async function staleChatHistoryPage(env, returnToSameConversation, outcome) {
     const { window, setRoutes, response } = env;
     const historyReads = { A: 0, B: 0 };

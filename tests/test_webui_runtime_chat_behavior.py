@@ -693,6 +693,49 @@ def test_auto_scroll_toggle_persists_preference() -> None:
 # --------------------------------------------------------------------------- #
 
 
+@pytest.mark.parametrize("boundary", ["upload", "post"])
+@pytest.mark.parametrize("target", ["other", "same"])
+@pytest.mark.parametrize("outcome", ["success", "failure"])
+@pytest.mark.parametrize("newer_job", [False, True])
+def test_late_send_preserves_current_editor_and_job(
+    boundary: str, target: str, outcome: str, newer_job: bool
+) -> None:
+    result = run_scenario(
+        f"stale_send_{boundary}_{target}_{outcome}_{str(newer_job).lower()}"
+    )
+    assert result["afterLate"] == result["beforeLate"], result
+    assert result["afterLate"]["draft"] == "later-draft", result
+    assert "later.txt" in result["afterLate"]["attachments"], result
+    original_posts = [
+        body for body in result["posts"] if body["message"].startswith("original")
+    ]
+    assert len(original_posts) == (
+        0 if boundary == "upload" and outcome == "failure" else 1
+    ), result
+    assert all(body["conversation_id"] == "A" for body in original_posts), result
+    assert all("/jobs/old/events" not in url for url in result["polls"]), result
+    assert result["afterLate"]["cancelIds"] == (["new"] if newer_job else []), result
+
+
+@pytest.mark.parametrize("boundary", ["upload", "post"])
+def test_current_send_still_attaches_its_job(boundary: str) -> None:
+    result = run_scenario(f"stale_send_{boundary}_normal")
+    assert result["posts"][0]["conversation_id"] == "A", result
+    assert result["afterLate"]["draft"] == "", result
+    assert result["afterLate"]["disabled"] is True, result
+    assert result["afterLate"]["cancelIds"] == ["old"], result
+    assert any("/jobs/old/events" in url for url in result["polls"]), result
+
+
+def test_upload_completion_preserves_new_input_and_attachments_in_same_view() -> None:
+    result = run_scenario("stale_send_upload_edited")
+    assert result["posts"][0]["conversation_id"] == "A", result
+    assert result["afterLate"]["draft"] == "later-draft", result
+    assert "later.txt" in result["afterLate"]["attachments"], result
+    assert "original.txt" not in result["afterLate"]["attachments"], result
+    assert result["afterLate"]["cancelIds"] == ["old"], result
+
+
 @pytest.mark.parametrize("target", ["other", "same"])
 @pytest.mark.parametrize("outcome", ["running", "empty", "failure"])
 def test_late_active_job_resume_cannot_replace_current_conversation_or_job(
