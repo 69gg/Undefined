@@ -191,6 +191,117 @@ async def test_conversation_delete_and_job_acceptance_are_serialized(
 
 
 @pytest.mark.asyncio
+async def test_running_job_snapshot_contains_complete_nested_display_timeline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ready = asyncio.Event()
+    release = asyncio.Event()
+
+    async def run_chat(
+        _ctx: RuntimeAPIContext,
+        *,
+        send_output: Any,
+        webchat_event_callback: Any,
+        **_kwargs: Any,
+    ) -> str:
+        await send_output(42, "root prefix")
+        await webchat_event_callback(
+            "tool_start",
+            {
+                "tool_call_id": "agent-tool",
+                "webchat_call_id": "agent",
+                "name": "web_agent",
+                "is_agent": True,
+                "arguments": {"password": "must-not-leak"},
+            },
+        )
+        await send_output(42, "agent message")
+        nested = {
+            "tool_call_id": "search-tool",
+            "webchat_call_id": "agent/search",
+            "parent_webchat_call_id": "agent",
+            "name": "search",
+        }
+        await webchat_event_callback("tool_start", nested)
+        await webchat_event_callback(
+            "tool_end", {**nested, "ok": True, "result": "completed search"}
+        )
+        ready.set()
+        await release.wait()
+        return "chat"
+
+    monkeypatch.setattr(runtime_api_chat, "run_webui_chat", run_chat)
+    server = RuntimeAPIServer(_context(), host="127.0.0.1", port=8788)
+    manager = server._chat_job_manager
+    job = await manager.create_job("hello")
+    try:
+        await asyncio.wait_for(ready.wait(), timeout=2)
+        detail = await server._chat_job_detail_handler(
+            cast(
+                web.Request, cast(Any, _DummyRequest(match_info={"job_id": job.job_id}))
+            )
+        )
+        snapshot = json.loads(detail.text or "{}")
+        assert snapshot["last_seq"] == job.next_seq - 1
+        assert snapshot["messages"] == ["root prefix", "agent message"]
+        timeline = snapshot["current_timeline"]
+        assert [item["type"] for item in timeline] == ["message", "call"]
+        assert timeline[0]["content"] == "root prefix"
+        agent = timeline[1]["call"]
+        assert agent["webchat_call_id"] == "agent"
+        assert agent["status"] == "running"
+        assert [item["type"] for item in agent["timeline"]] == ["message", "call"]
+        assert agent["timeline"][0]["content"] == "agent message"
+        child = agent["timeline"][1]["call"]
+        assert child["status"] == "done"
+        assert child["result_preview"] == "completed search"
+        assert agent["children"] == [child]
+        assert "must-not-leak" not in json.dumps(timeline)
+        assert len(snapshot["current_tool_calls"]) == 1
+        assert snapshot["current_tool_calls"][0]["webchat_call_id"] == "agent"
+        events, refreshed, _live = await manager.events_after_with_snapshot(
+            job, snapshot["last_seq"]
+        )
+        assert events == []
+        assert refreshed["current_timeline"] == timeline
+    finally:
+        release.set()
+        await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_job_snapshot_preserves_display_content_beyond_sse_replay_limit() -> None:
+    manager = runtime_api_chat.ChatJobManager(_context())
+    job = runtime_api_chat.ChatJob("snapshot-job", "hello", 1, 1, status="running")
+    for index in range(runtime_api_chat._CHAT_JOB_EVENT_BUFFER_LIMIT + 5):
+        await manager._append_event(job, "message", {"content": f"message-{index}"})
+    snapshot = await manager.snapshot(job)
+    timeline = snapshot["current_timeline"]
+    assert len(job.events) == runtime_api_chat._CHAT_JOB_EVENT_BUFFER_LIMIT
+    assert len(timeline) == runtime_api_chat._CHAT_JOB_EVENT_BUFFER_LIMIT + 5
+    assert timeline[0]["content"] == "message-0"
+    assert timeline[-1]["content"] == (
+        f"message-{runtime_api_chat._CHAT_JOB_EVENT_BUFFER_LIMIT + 4}"
+    )
+    assert timeline[-1]["seq"] == snapshot["last_seq"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["error", "cancelled"])
+async def test_terminal_snapshot_finalizes_unclosed_display_calls(status: str) -> None:
+    manager = runtime_api_chat.ChatJobManager(_context())
+    job = runtime_api_chat.ChatJob("terminal-job", "hello", 1, 1, status=status)
+    await manager.append_lifecycle_event(
+        job,
+        "tool_start",
+        {"tool_call_id": "tool", "webchat_call_id": "tool", "name": "search"},
+    )
+    timeline = (await manager.snapshot(job))["current_timeline"]
+    assert timeline[0]["call"]["status"] == status
+    assert timeline == runtime_api_chat._build_webchat_history_payload(job)["timeline"]
+
+
+@pytest.mark.asyncio
 async def test_history_finalized_is_published_only_after_job_releases_session(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

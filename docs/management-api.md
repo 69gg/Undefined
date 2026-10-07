@@ -280,7 +280,8 @@ GET /api/v1/management/runtime/commands?scope=webui&q=help
   - `404`：会话不存在。
   - `409`：job 正在运行或历史尚未完成落盘。
 - 元数据语义：
-  - `webchat.duration_ms`、`webchat.events`、`webchat.timeline`、`current_tool_calls`、`stage` / `agent_stage` 是 **display-only**，用于刷新后恢复工具 / Agent 展示块、阶段和耗时。
+  - `webchat.duration_ms`、`webchat.events`、`webchat.timeline`、`current_timeline`、`current_tool_calls`、`stage` / `agent_stage` 是 **display-only**，用于刷新后恢复工具 / Agent 展示块、阶段和耗时。
+  - Job 快照的 `current_timeline` 包含截至 `last_seq` 的完整正文与嵌套调用；客户端接受后从 `last_seq` 续流。增量重放缓冲保留最近 1000 条事件，完整展示快照和历史不按这个上限截断。
   - 这些 WebChat 展示元数据不是 **AI-context**，不会作为后续 AI 对话上下文注入。
   - 工具 / Agent 输入输出预览由 Runtime 统一脱敏和截断。
 

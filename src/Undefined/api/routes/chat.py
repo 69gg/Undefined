@@ -260,6 +260,14 @@ class ChatJob:
         now = time.time()
         elapsed_ms = _job_elapsed_ms(self, now)
         stage_elapsed_ms = _stage_elapsed_ms(self, now)
+        timeline_events = (
+            _finalize_webchat_history_events(self)
+            if self.status in {"done", "error", "cancelled"}
+            else [
+                {"seq": item.seq, "event": item.event, "payload": dict(item.payload)}
+                for item in self.webchat_events
+            ]
+        )
         return {
             "job_id": self.job_id,
             "conversation_id": self.conversation_id,
@@ -280,6 +288,7 @@ class ChatJob:
             "messages": list(self.outputs),
             "current_agent_stages": self.current_agent_stage_snapshots(now),
             "current_tool_calls": self.current_tool_call_snapshots(now),
+            "current_timeline": _build_webchat_timeline(timeline_events),
             # 对外完成信号与新任务/历史修改的放行门槛一致。
             "history_finalized": self.history_finalized and self.done.is_set(),
             "waiting_input": None,
@@ -963,9 +972,8 @@ class ChatJobManager:
         if len(job.events) > _CHAT_JOB_EVENT_BUFFER_LIMIT:
             job.events = job.events[-_CHAT_JOB_EVENT_BUFFER_LIMIT:]
         if item.event in _WEBCHAT_HISTORY_EVENTS:
+            # 展示快照与历史需要完整内容；只有 SSE 重放缓冲采用固定上限。
             job.webchat_events.append(item)
-            if len(job.webchat_events) > _CHAT_JOB_EVENT_BUFFER_LIMIT:
-                job.webchat_events = job.webchat_events[-_CHAT_JOB_EVENT_BUFFER_LIMIT:]
         job.changed.notify_all()
         return item
 

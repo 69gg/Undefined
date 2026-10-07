@@ -377,6 +377,7 @@ Undefined Chat 使用同一组 Runtime Chat 端点作为权威合同。客户端
 - WebChat 不发布模型 token 级文本增量，也不发布工具参数增量；正文以 `message` 事件展示，工具只按生命周期事件展示。
 - `stage`、`agent_stage`、`webchat.calls`、`webchat.timeline`、`current_tool_calls` 和 `duration_ms` 是 display-only 展示元数据，不作为 AI-context 注入后续对话。
 - 工具结束事件 payload 会尽量带 `duration_ms`。运行中的 job 快照会在 `current_tool_calls` 返回仍在执行的工具 / Agent 及其后端计算的 `duration_ms`。
+- Job 快照的 `current_timeline` 包含截至 `last_seq` 的完整展示时间线（正文、已结束和运行中的调用及 Agent 内嵌时间线），客户端接受快照后从该序号续接事件。只有 SSE/JSON 增量事件重放缓冲保留最近 1000 条，完整展示快照与历史不会因此截掉早期正文。
 - WebUI 每 0.5 秒查询一次；查询间隙只用本地时间临时递增显示，下一次查询后以 Runtime 返回值校准。
 - 并发工具按实际完成时间发布结束事件，LLM tool message 回填仍保持模型要求的原始顺序。
 - 工具 / Agent 事件 payload 由后端补齐调用链字段：`webchat_call_id`、`parent_webchat_call_id`、`depth`、`agent_path`。
