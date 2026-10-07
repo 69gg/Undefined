@@ -117,21 +117,26 @@ class ModelQueue:
         return sum(queue.retry_count() for queue in self.lane_queues().values())
 
     def trim_normal_queue(self) -> None:
-        """如果群聊普通队列超过10个，仅保留最新的2个"""
+        """普通队列过长时只裁剪外围请求，保留所有 LLM 子请求和重试。"""
         queue_size = self.group_normal_queue.qsize()
         if queue_size > 10:
+            requests = self.group_normal_queue.drain()
+            outer_indices = [
+                index
+                for index, request in enumerate(requests)
+                if request.get("type") not in {"queued_llm_call", "background_llm_call"}
+            ]
+            discarded_indices = set(outer_indices[:-2])
+            for index, request in enumerate(requests):
+                if index not in discarded_indices:
+                    self.group_normal_queue.put_nowait(request)
+            if not discarded_indices:
+                return
             logger.warning(
-                "[队列修剪][%s] 群聊普通队列长度=%s 超过阈值(10)，将丢弃旧请求",
+                "[队列修剪][%s] 群聊普通队列长度=%s 超过阈值(10)，丢弃旧外围请求=%s，保留全部LLM子请求",
                 self.model_name,
                 queue_size,
-            )
-            latest_requests = self.group_normal_queue.drain()[-2:]
-            for req in latest_requests:
-                self.group_normal_queue.put_nowait(req)
-            logger.info(
-                "[队列修剪][%s] 修剪完成，保留最新=%s",
-                self.model_name,
-                len(latest_requests),
+                len(discarded_indices),
             )
 
 

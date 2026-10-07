@@ -276,6 +276,8 @@ Stream 本地文件投递在同一 Bot 内串行，纯文本不等待上传锁�
 | `prompt_cache_enabled` | OpenAI 模式下是否自动生成稳定的 `prompt_cache_key`；Anthropic 模式不发送该字段；默认 `true` |
 | `request_params` | 额外请求体参数（透传给模型 API，保留字段会忽略） |
 
+普通群聊队列过长时，仅裁剪尚未发车的外围请求；已经启动的 AI 调用所等待的 LLM 子请求及重试保留原相对顺序，避免调用方因裁剪而继续等待超时。
+
 请求模式说明：
 - `api_mode="openai.chat_completions"`：走 `AsyncOpenAI.chat.completions.create(...)`
   - `max_tokens > 0` 时发送 `max_tokens`；为 `0` 或负数时省略

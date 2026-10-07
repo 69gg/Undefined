@@ -66,6 +66,8 @@ src/Undefined/
 
 Runtime API 和 WebUI 向 aiohttp `Application` 存储上下文等共享对象时，使用模块级 `web.AppKey` 常量并在所有读写处复用，保持类型安全并避免 `NotAppKeyWarning`。Runtime API 的应用构造回归测试会将该警告视为错误。
 
+普通群聊 lane 超过 10 项时，只对尚未发车的外围请求保留最新 2 项；已启动 AI 调用的 `queued_llm_call` 子请求及其重试始终保留原相对顺序。调用方取消和超时仍通过共享取消状态阻止后续模型执行，队列裁剪不能丢弃内部等待者。
+
 ### CHANGELOG 维护约定
 
 - 仓库根目录的 `CHANGELOG.md` 是正式版本历史的唯一事实来源。
