@@ -1,4 +1,8 @@
 const LOG_TAIL_LINES = 5000;
+let _logViewGeneration = 0;
+let _logFetchRequest = 0;
+const _logFilesRequests = new Map();
+const _logCurrentFiles = new Map();
 
 async function fetchLogs(force = false) {
     if (!force && !shouldFetch("logs")) return;
@@ -12,18 +16,29 @@ async function fetchLogs(force = false) {
         renderLogs();
         return;
     }
+    const type = state.logType;
+    const file = state.logFile;
+    const generation = _logViewGeneration;
+    const request = ++_logFetchRequest;
+    const isCurrent = () =>
+        request === _logFetchRequest &&
+        generation === _logViewGeneration &&
+        type === state.logType &&
+        file === state.logFile;
     try {
         const params = new URLSearchParams({
             lines: String(LOG_TAIL_LINES),
-            type: state.logType,
+            type,
         });
-        if (state.logFile) params.set("file", state.logFile);
+        if (file) params.set("file", file);
         const res = await api(`/api/logs?${params.toString()}`);
         const text = await res.text();
+        if (!isCurrent()) return;
         state.logsRaw = text || "";
         recordFetchSuccess("logs");
         renderLogs();
     } catch (e) {
+        if (!isCurrent()) return;
         recordFetchError("logs");
         if (!container) return;
         container.dataset.placeholder = "true";
@@ -167,11 +182,13 @@ function startLogStream() {
     const stream = new EventSource(`/api/logs/stream?${params.toString()}`);
     state.logStream = stream;
     stream.onmessage = (event) => {
+        if (state.logStream !== stream) return;
         state.logsRaw = event.data || "";
         recordFetchSuccess("logs");
         renderLogs();
     };
     stream.onerror = () => {
+        if (state.logStream !== stream) return;
         state.logStreamFailed = true;
         stopLogStream();
         if (state.logAutoRefresh && !state.logsPaused) startLogTimer();
@@ -240,25 +257,40 @@ async function copyLogsToClipboard() {
 }
 
 async function fetchLogFiles(force = false) {
-    if (state.logFiles[state.logType] && !force) {
+    const type = state.logType;
+    const generation = _logViewGeneration;
+    if (state.logFiles[type] && !force) {
+        state.logFileCurrent = _logCurrentFiles.get(type) || "";
         updateLogFileSelect();
         return;
     }
+    const request = (_logFilesRequests.get(type) || 0) + 1;
+    _logFilesRequests.set(type, request);
     try {
-        const res = await api(`/api/logs/files?type=${state.logType}`);
+        const res = await api(`/api/logs/files?type=${type}`);
         const data = await res.json();
-        state.logFiles[state.logType] = data.files || [];
+        if (_logFilesRequests.get(type) !== request) return;
+        state.logFiles[type] = data.files || [];
+        _logCurrentFiles.set(type, data.current || "");
+        if (state.logType !== type || generation !== _logViewGeneration) return;
         state.logFileCurrent = data.current || "";
         updateLogFileSelect();
-    } catch (e) {
-        state.logFiles[state.logType] = [];
+        updateLogRefreshState();
+    } catch (_error) {
+        if (_logFilesRequests.get(type) !== request) return;
+        state.logFiles[type] = [];
     }
 }
 
 function setLogType(type) {
     if (state.logType === type) return;
+    stopLogStream();
+    stopLogTimer();
+    _logViewGeneration += 1;
     state.logType = type;
     state.logFile = "";
+    state.logFileCurrent = "";
+    state.logStreamEnabled = type !== "all";
     state.logsRaw = "";
     state.logStreamFailed = false;
     updateLogTabs();
