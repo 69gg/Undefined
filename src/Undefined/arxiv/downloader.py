@@ -15,6 +15,7 @@ from Undefined.utils.http_download import (
     probe_remote_file,
 )
 from Undefined.utils.paths import DOWNLOAD_CACHE_DIR, ensure_dir
+from Undefined.utils import io
 
 logger = logging.getLogger(__name__)
 
@@ -46,63 +47,69 @@ async def download_paper_pdf(
     task_dir = ensure_dir(_ARXIV_DOWNLOAD_DIR / uuid.uuid4().hex)
     file_path = task_dir / build_download_filename(paper.paper_id)
 
-    final_url = paper.pdf_url
-    expected_size: int | None = None
-
     try:
-        probe = await probe_remote_file(
-            paper.pdf_url,
-            timeout_seconds=min(timeout_seconds, 60.0),
-            follow_redirects=True,
-            context=context,
-            proxy_scope="arxiv",
-        )
-        final_url = probe.final_url
-        expected_size = probe.content_length
-        if expected_size is not None and expected_size > max_file_size_bytes:
-            logger.info(
-                "[arXiv] PDF 超过限制，跳过下载: paper=%s size=%sB limit=%sMB",
-                paper.paper_id,
-                expected_size,
-                max_file_size_mb,
+        final_url = paper.pdf_url
+        expected_size: int | None = None
+        try:
+            probe = await probe_remote_file(
+                paper.pdf_url,
+                timeout_seconds=min(timeout_seconds, 60.0),
+                follow_redirects=True,
+                context=context,
+                proxy_scope="arxiv",
             )
-            return PaperDownloadResult(None, expected_size, "too_large"), task_dir
-    except Exception as exc:
-        logger.warning(
-            "[arXiv] PDF 预检失败，转为直接流式下载: paper=%s err=%s",
-            paper.paper_id,
-            exc,
-        )
+            final_url = probe.final_url
+            expected_size = probe.content_length
+            if expected_size is not None and expected_size > max_file_size_bytes:
+                logger.info(
+                    "[arXiv] PDF 超过限制，跳过下载: paper=%s size=%sB limit=%sMB",
+                    paper.paper_id,
+                    expected_size,
+                    max_file_size_mb,
+                )
+                return PaperDownloadResult(None, expected_size, "too_large"), task_dir
+        except Exception as exc:
+            logger.warning(
+                "[arXiv] PDF 预检失败，转为直接流式下载: paper=%s err=%s",
+                paper.paper_id,
+                exc,
+            )
 
-    try:
-        _, downloaded_size = await download_remote_file(
-            final_url,
-            file_path,
-            max_file_size_bytes=max_file_size_bytes,
-            timeout_seconds=timeout_seconds,
-            expected_size=expected_size,
-            follow_redirects=True,
-            proxy_scope="arxiv",
-            proxy_config=context.get("runtime_config") if context else None,
-        )
-        logger.info(
-            "[arXiv] PDF 下载完成: paper=%s size=%sB path=%s",
-            paper.paper_id,
-            downloaded_size,
-            file_path,
-        )
-        return PaperDownloadResult(file_path, downloaded_size, "downloaded"), task_dir
-    except ValueError as exc:
-        logger.info(
-            "[arXiv] PDF 下载跳过: paper=%s reason=%s",
-            paper.paper_id,
-            exc,
-        )
-        return PaperDownloadResult(None, None, "skipped"), task_dir
-    except Exception:
-        logger.exception("[arXiv] PDF 下载失败: paper=%s", paper.paper_id)
-        return PaperDownloadResult(None, None, "failed"), task_dir
+        try:
+            _, downloaded_size = await download_remote_file(
+                final_url,
+                file_path,
+                max_file_size_bytes=max_file_size_bytes,
+                timeout_seconds=timeout_seconds,
+                expected_size=expected_size,
+                follow_redirects=True,
+                proxy_scope="arxiv",
+                proxy_config=context.get("runtime_config") if context else None,
+            )
+            logger.info(
+                "[arXiv] PDF 下载完成: paper=%s size=%sB path=%s",
+                paper.paper_id,
+                downloaded_size,
+                file_path,
+            )
+            return PaperDownloadResult(
+                file_path, downloaded_size, "downloaded"
+            ), task_dir
+        except ValueError as exc:
+            logger.info(
+                "[arXiv] PDF 下载跳过: paper=%s reason=%s",
+                paper.paper_id,
+                exc,
+            )
+            return PaperDownloadResult(None, None, "skipped"), task_dir
+        except Exception:
+            logger.exception("[arXiv] PDF 下载失败: paper=%s", paper.paper_id)
+            return PaperDownloadResult(None, None, "failed"), task_dir
+    except BaseException:
+        # 返回前仍由下载器持有任务目录；取消不能落到尚未建立的 sender finally。
+        await cleanup_download_path(task_dir)
+        raise
 
 
 async def cleanup_download_path(task_dir: Path) -> None:
-    await cleanup_download_dir(task_dir)
+    await io.run_cancellation_safe(cleanup_download_dir(task_dir))

@@ -1,17 +1,18 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import aiofiles
+from aiofiles.threadpool.binary import AsyncBufferedIOBase
 import httpx
 
 from Undefined.skills.http_config import build_httpx_client_kwargs
 from Undefined.skills.http_client import request_with_retry
+from Undefined.utils import io
 
 DEFAULT_DOWNLOAD_CHUNK_SIZE = 64 * 1024
 
@@ -100,7 +101,16 @@ async def download_remote_file(
                 ):
                     raise ValueError("远程文件大小与预检不一致，已取消下载")
 
-                async with aiofiles.open(part_path, "wb") as f:
+                output: AsyncBufferedIOBase | None = None
+
+                async def open_output() -> None:
+                    nonlocal output
+                    output = await aiofiles.open(part_path, "wb")
+
+                try:
+                    # 先取得所有权再传播取消，避免 open 线程返回的 handle 无人关闭。
+                    await io.run_cancellation_safe(open_output())
+                    assert output is not None
                     async for chunk in response.aiter_bytes(chunk_size=chunk_size):
                         if not chunk:
                             continue
@@ -112,15 +122,18 @@ async def download_remote_file(
                             and response.num_bytes_downloaded > expected_size
                         ):
                             raise ValueError("下载中发现文件超出预检大小，已取消下载")
-                        await f.write(chunk)
-                    await f.flush()
+                        await io.run_cancellation_safe(output.write(chunk))
+                    await io.run_cancellation_safe(output.flush())
+                finally:
+                    if output is not None:
+                        await io.run_cancellation_safe(output.close())
                 if (
                     expected_size is not None
                     and response.num_bytes_downloaded != expected_size
                 ):
                     raise ValueError("下载完成后大小与预检不一致，已取消下载")
 
-        await asyncio.to_thread(os.replace, part_path, target_path)
+        await io.run_cancellation_safe(io.move_path(part_path, target_path))
         return str(target_path.resolve()), downloaded_size
     finally:
         if part_path.exists():
