@@ -197,7 +197,11 @@ export type ChatAction =
 	  }
 	// 会话管理
 	| { type: "conversation/select"; conversationId: string }
-	| { type: "conversation/upsert"; conversation: Conversation }
+	| {
+			type: "conversation/upsert";
+			conversation: Conversation;
+			select?: boolean;
+	  }
 	| {
 			type: "conversation/remove";
 			conversationId: string;

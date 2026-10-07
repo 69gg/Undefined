@@ -301,8 +301,14 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
 							item.id === action.conversation.id ? action.conversation : item,
 						)
 					: [action.conversation, ...state.conversations],
-				selectedConversationId: action.conversation.id,
-				settings: { ...state.settings, mobilePanel: "chat" },
+				selectedConversationId:
+					action.select === false
+						? state.selectedConversationId
+						: action.conversation.id,
+				settings:
+					action.select === false
+						? state.settings
+						: { ...state.settings, mobilePanel: "chat" },
 			};
 		}
 		case "conversation/creating":
@@ -1198,6 +1204,7 @@ export function createChatStore({
 				dispatch({
 					type: "conversation/upsert",
 					conversation: { ...conversation, title: newTitle },
+					select: false,
 				});
 			}
 		} catch (err) {

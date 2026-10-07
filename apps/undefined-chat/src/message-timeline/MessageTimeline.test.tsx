@@ -1,4 +1,10 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import {
+	act,
+	fireEvent,
+	screen,
+	waitFor,
+	within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, test, vi } from "vitest";
@@ -304,10 +310,10 @@ describe("MessageTimeline", () => {
 			configurable: true,
 			value: 1400,
 		});
-		await Promise.resolve();
-		for (const callback of rafCallbacks.splice(0)) {
-			callback(0);
-		}
+		await act(async () => {
+			await Promise.resolve();
+			for (const callback of rafCallbacks.splice(0)) callback(0);
+		});
 
 		expect(timeline.scrollTop).toBe(420);
 		expect(onLoadMoreHistory).toHaveBeenCalledOnce();

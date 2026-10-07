@@ -15,6 +15,7 @@ Undefined Chat 是 `apps/undefined-chat/` 下的 Tauri v2 + React 19 原生聊�
 - 引用：引用 bot 消息、划词引用选中文本、发送引用、引用芯片跳转当前已加载源消息；源消息不在当前页时会自动加载一页更早历史，仍未命中需手动继续加载更早历史。
 - 工具调用块：层级展示、状态、运行中实时计时、阶段明细（stage detail）、与 WebUI 一致的输入/输出预览（JSON/Python 风格结构化、Markdown 输出、附件图片预览）；历史回放支持 timeline/calls/events 多级回退。
 - 自动滚动：智能跟随底部，可在设置面板开关，偏好持久化到 localStorage。
+- 重命名只更新目标会话标题，保留当前会话、输入草稿与移动端面板；请求期间切换会话也不会被迟到响应切回。
 - 事件：SSE 优先，断开时 JSON fallback（指数退避重连，活跃任务持续重试）。
 - 快捷键：Ctrl/Cmd+N 新会话，Ctrl/Cmd+K 聚焦输入并打开命令模式，Ctrl/Cmd+/ 切换侧栏，Ctrl/Cmd+, 打开设置，Escape 关闭当前弹层/抽屉。
 - i18n：中英双语运行时切换，提供语言切换 UI，并按系统语言自动检测默认语言。
