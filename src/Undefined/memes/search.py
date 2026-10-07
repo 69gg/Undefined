@@ -491,6 +491,10 @@ class MemeSearchMixin:
             logger.warning(
                 "[memes] 已发送但使用统计/索引更新失败: uid=%s", uid, exc_info=True
             )
+            task = asyncio.current_task()
+            if task is not None and task.cancelling():
+                # 收尾异常可能与外部取消同时发生，仍需保留任务的取消语义。
+                raise asyncio.CancelledError
         if sent_message_id is not None:
             return f"表情包已发送（message_id={sent_message_id}）"
         return "表情包已发送"

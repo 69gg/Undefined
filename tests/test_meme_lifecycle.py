@@ -509,3 +509,58 @@ async def test_cancelled_delete_finishes_cleanup_before_following_edit(
             *([editing] if editing is not None else []),
             return_exceptions=True,
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["usage", "index"])
+async def test_cancelled_meme_usage_preserves_cancellation_when_cleanup_fails(
+    tmp_path: Path, failure: str
+) -> None:
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    class _DelayedFailingStore(MemeStore):
+        async def increment_use(self, uid: str, used_at: str) -> MemeRecord | None:
+            if failure == "usage":
+                entered.set()
+                await release.wait()
+                raise RuntimeError("isolated usage failure after cancellation")
+            return await super().increment_use(uid, used_at)
+
+    class _DelayedFailingVectors(_Vectors):
+        async def upsert(self, record: MemeRecord) -> None:
+            if failure == "index" and record.use_count:
+                entered.set()
+                await release.wait()
+                raise RuntimeError("isolated index failure after cancellation")
+            await super().upsert(record)
+
+    service, store, _, record = await _fixture(
+        tmp_path,
+        store=_DelayedFailingStore(tmp_path / "memes.sqlite3"),
+        vectors=_DelayedFailingVectors(),
+    )
+    sender = SimpleNamespace(send_group_message=AsyncMock(return_value=1234))
+    sending = asyncio.create_task(
+        service.send_meme_by_uid(
+            record.uid, {"request_type": "group", "group_id": 123, "sender": sender}
+        )
+    )
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=3)
+        sending.cancel()
+        await asyncio.sleep(0)
+        sending.cancel()
+        assert not sending.done()
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(sending, timeout=3)
+        assert sending.cancelled()
+        sender.send_group_message.assert_awaited_once()
+        saved = await store.get(record.uid)
+        assert saved is not None
+        assert saved.use_count == (0 if failure == "usage" else 1)
+        assert service._ingest_digest_locks == {}
+    finally:
+        release.set()
+        await asyncio.gather(sending, return_exceptions=True)
