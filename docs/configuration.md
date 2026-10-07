@@ -988,7 +988,9 @@ summary = ""
 |---|---:|---|---|
 | `use_proxy` | `false` | URL 文件下载等消息工具联网请求是否使用 `[proxy]` 中的代理地址 | |
 | `send_text_file_max_size_kb` | `512` | 文本文件发送上限（KB） | `<=0` 回退 `512` |
-| `send_url_file_max_size_mb` | `100` | URL 文件发送上限（MB） | `<=0` 回退 `100` |
+| `send_url_file_max_size_mb` | `100` | URL 文件发送上限（MB），按 HTTP 解压后的落盘字节计算 | `<=0` 回退 `100` |
+
+下载预检与完整性校验中的 `Content-Length` 按 HTTP 传输字节比较；gzip 等压缩响应仍按实际解码后的文件大小执行容量限制。
 
 ---
 

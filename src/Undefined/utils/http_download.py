@@ -70,6 +70,7 @@ async def download_remote_file(
     proxy_scope: str = "messages",
     proxy_config: Any | None = None,
 ) -> tuple[str, int]:
+    """下载解码后的文件；预检大小按 HTTP 传输字节校验，容量按落盘字节限制。"""
     part_path = target_path.with_suffix(f"{target_path.suffix}.part")
 
     try:
@@ -108,14 +109,16 @@ async def download_remote_file(
                             raise ValueError("下载中发现文件超过大小限制，已取消下载")
                         if (
                             expected_size is not None
-                            and downloaded_size > expected_size
+                            and response.num_bytes_downloaded > expected_size
                         ):
                             raise ValueError("下载中发现文件超出预检大小，已取消下载")
                         await f.write(chunk)
                     await f.flush()
-
-        if expected_size is not None and downloaded_size != expected_size:
-            raise ValueError("下载完成后大小与预检不一致，已取消下载")
+                if (
+                    expected_size is not None
+                    and response.num_bytes_downloaded != expected_size
+                ):
+                    raise ValueError("下载完成后大小与预检不一致，已取消下载")
 
         await asyncio.to_thread(os.replace, part_path, target_path)
         return str(target_path.resolve()), downloaded_size
