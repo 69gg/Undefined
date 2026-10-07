@@ -11,6 +11,8 @@ import "./ToolBlock.css";
 
 type HistoryToolCall = {
 	id?: string;
+	webchat_call_id?: string;
+	tool_call_id?: string;
 	name: string;
 	is_agent?: boolean;
 	status: string;
@@ -144,7 +146,11 @@ function convertHistoryToolCallToToolBlock(
 	const endTime = mappedStatus === "running" ? undefined : now;
 
 	return {
-		webchatCallId: call.id || `call-${index}-${call.name}`,
+		webchatCallId:
+			call.id ||
+			call.webchat_call_id ||
+			call.tool_call_id ||
+			`call-${index}-${call.name}`,
 		toolName: call.name || "--",
 		status: mappedStatus,
 		isAgent: call.is_agent,

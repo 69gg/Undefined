@@ -40,6 +40,45 @@ describe("hasRenderableTimeline", () => {
 });
 
 describe("MessageTimelineContent", () => {
+	test("uses Runtime snake_case IDs to render one child shared by children and timeline", () => {
+		const child = {
+			webchat_call_id: "agent/search",
+			name: "search",
+			status: "done",
+			timeline: [{ type: "message", content: "Nested completed body" }],
+		};
+		renderContent(
+			<MessageTimelineContent
+				onPreviewHtml={vi.fn()}
+				completeTimeline
+				timeline={[
+					{
+						type: "call",
+						call: {
+							webchat_call_id: "agent",
+							name: "research",
+							is_agent: true,
+							status: "done",
+							children: [child],
+							timeline: [
+								{ type: "message", content: "Before child" },
+								{ type: "call", call: child },
+							],
+						},
+					},
+				]}
+			/>,
+		);
+		expect(screen.getAllByText("search")).toHaveLength(1);
+		expect(screen.getAllByText("Nested completed body")).toHaveLength(1);
+		expect(
+			screen
+				.getByText("search")
+				.closest("details")
+				?.getAttribute("data-call-id"),
+		).toBe("agent/search");
+	});
+
 	test("keeps historical Agent messages and nested calls inside the Agent in order", () => {
 		renderContent(
 			<MessageTimelineContent

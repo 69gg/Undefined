@@ -98,7 +98,7 @@ const toolBlocks = useStore(state => state.toolBlocksByJob[jobId]);
 实时运行的工具块由 store 维护；历史消息则由 `MessageTimelineContent` 消费一条已交错好的
 `timeline`，其中 `type === "call"` 的条目经 `convertHistoryToolCallToToolBlock` 转换为本组件所需的
 `ToolBlock`（映射 `arguments_preview`/`result_preview`/`is_agent`/`current_stage`/`current_stage_detail`
-等字段，并按 `duration_ms` 反推 `startTime`）。嵌套 `message` 转为输出条目，`call` 引用对应子块；已被时间线引用的子块不会再次追加到末尾。
+等字段，并按 `duration_ms` 反推 `startTime`）。调用身份兼容 Runtime 的 `webchat_call_id`、`tool_call_id` 与已有 `id`，同一子调用在 `children` 和 `timeline` 中只渲染一次。嵌套 `message` 转为输出条目，`call` 引用对应子块；已被时间线引用的子块不会再次追加到末尾。
 
 `timeline` 由 `MessageTimeline` 的 `buildHistoryTimeline` 按可用性多级回退构建：
 

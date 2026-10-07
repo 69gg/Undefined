@@ -65,7 +65,7 @@ Runtime 请求必须由 Tauri command 拼接到已配置 origin 下，避免 Rea
 - 默认使用 SSE 订阅 job events。
 - SSE error/closed 或原生订阅建立失败时使用 `job_id + seq` 调用 JSON events fallback 补齐遗漏事件；消息已成功创建 job 后，订阅失败不会撤回用户消息或恢复已发送草稿。
 - Runtime 任务快照包含 `current_timeline`：完整的顶层消息、已结束和运行中的调用树，以及 Agent 内消息与子调用的顺序。客户端接受此快照时同时推进到 `last_seq`，SSE 与 JSON 只追加后续序号，避免正文丢失或重复。
-- 旧 Runtime 缺少 `current_timeline` 时，客户端保留快照的完整正文前缀，JSON fallback 先续接事件以保留已有调用树；重放缓冲缺失消息时按权威正文恢复。旧服务无法仅凭正文提供完整的 Agent 嵌套顺序。
+- 旧 Runtime 缺少 `current_timeline` 时，客户端保留快照的完整正文前缀，JSON fallback 先续接事件以保留已有调用树；重放缓冲缺失消息时按权威正文恢复。同一任务恢复时，推进游标前复用 JSON 回放补齐后台工具开始、结束和 Agent 阶段变化，即使正文没有改变；回放失败保留旧游标供 SSE 继续恢复。旧服务无法仅凭正文恢复已超出事件缓冲的完整 Agent 嵌套顺序。
 - 重叠 JSON 请求按 job 身份和请求代次校验；已结束、已被替换的 job 或落后于已消费事件游标的回包会被忽略，避免迟到响应覆盖下一轮任务或回退回复内容。
 - 取消请求错误和 SSE 的连接状态通知同样只作用于对应的活跃 job，旧任务的迟到通知不会改写新任务的错误或连接状态。
 - `done` / `error` / `cancelled` 事件到达后，客户端继续保留当前会话的 job 和发送锁，通过 JSON polling 等待 `history_finalized=true`，确认历史落盘后再刷新历史并清理订阅。

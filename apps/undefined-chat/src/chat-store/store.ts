@@ -228,7 +228,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
 				...state,
 				bootstrapping: false,
 				connectionState:
-					action.activeJobs.length > 0 ? "streaming" : "connected",
+					Object.keys(activeJobs).length > 0 ? "streaming" : "connected",
 				runtimeConfig: action.runtimeConfig,
 				health: action.health,
 				conversations: action.conversations.map((item) => ({
@@ -973,14 +973,16 @@ export function createChatStore({
 		fallbackTimersByJob.set(jobId, timer);
 	}
 
-	function fetchJobEventsFallback(jobId: string): void {
+	async function fetchJobEventsFallback(
+		jobId: string,
+	): Promise<ChatJob | null> {
 		const generation = runtimeGeneration;
 		const conversationId = state.jobConversationById[jobId];
 		if (
 			!conversationId ||
 			state.activeJobsByConversation[conversationId]?.jobId !== jobId
 		) {
-			return;
+			return null;
 		}
 		const requestGeneration = ++fallbackRequestGeneration;
 		latestFallbackRequestByJob.set(jobId, requestGeneration);
@@ -994,16 +996,14 @@ export function createChatStore({
 			fallbackTimersByJob.delete(jobId);
 		}
 		dispatch({ type: "connection/set", connectionState: "json_fallback" });
-		void client
+		return client
 			.fetchJobEventsJson({
 				jobId,
 				afterSeq: state.eventCursorByJob[jobId] ?? 0,
 				conversationId,
 			})
 			.then((response) => {
-				if (!isCurrentRequest()) {
-					return;
-				}
+				if (!isCurrentRequest()) return null;
 				const active = state.activeJobsByConversation[conversationId];
 				const consumedSeq = Math.max(
 					state.eventCursorByJob[jobId] ?? 0,
@@ -1012,7 +1012,7 @@ export function createChatStore({
 				if (response.job.lastSeq < consumedSeq) {
 					// SSE 可能在请求途中推进；旧快照不能回退正文或阶段，继续拉取即可。
 					scheduleFallbackPolling(jobId);
-					return;
+					return active ?? null;
 				}
 				// 拉取成功：重置退避间隔
 				fallbackBackoffByJob.delete(jobId);
@@ -1043,11 +1043,10 @@ export function createChatStore({
 				} else if (response.job.conversationId) {
 					finishJob(jobId, response.job.conversationId);
 				}
+				return snapshot;
 			})
 			.catch(() => {
-				if (!isCurrentRequest()) {
-					return;
-				}
+				if (!isCurrentRequest()) return null;
 				// 单次失败不直接放弃：仅当该 job 仍是活跃任务时按指数退避继续重试，
 				// 否则停止轮询。连接状态保持 json_fallback（仍在尝试），而非直接 disconnected。
 				const stillActive =
@@ -1056,11 +1055,9 @@ export function createChatStore({
 					scheduleFallbackPolling(jobId, nextFallbackDelay(jobId));
 				} else {
 					stopFallbackPolling(jobId);
-					dispatch({
-						type: "connection/set",
-						connectionState: "disconnected",
-					});
+					dispatch({ type: "connection/set", connectionState: "disconnected" });
 				}
+				return null;
 			});
 	}
 
@@ -1123,13 +1120,34 @@ export function createChatStore({
 				conversationsResponse.conversations[0]?.id ||
 				activeJobs.jobs[0]?.conversationId ||
 				"";
+			const recoveredJobs: ChatJob[] = [];
+			for (const snapshot of activeJobs.jobs) {
+				const previous =
+					state.activeJobsByConversation[snapshot.conversationId];
+				if (
+					!snapshot.hasTimelineSnapshot &&
+					previous?.jobId === snapshot.jobId &&
+					snapshot.lastSeq > previous.lastSeq
+				) {
+					// 旧 API 不含完整调用树；推进游标前用同一 JSON 回放补齐后台工具/阶段事件。
+					const recovered = await fetchJobEventsFallback(snapshot.jobId);
+					if (generation !== runtimeGeneration) return;
+					recoveredJobs.push(
+						recovered ??
+							state.activeJobsByConversation[snapshot.conversationId] ??
+							previous,
+					);
+				} else {
+					recoveredJobs.push(snapshot);
+				}
+			}
 			dispatch({
 				type: "bootstrap/success",
 				runtimeConfig,
 				health,
 				conversations: conversationsResponse.conversations,
 				selectedConversationId: selected,
-				activeJobs: activeJobs.jobs,
+				activeJobs: recoveredJobs,
 				commands: commands.commands,
 			});
 			clearNativeSubscriptions();
@@ -1146,7 +1164,7 @@ export function createChatStore({
 				return;
 			}
 			unlistenRuntimeSse = unlisten;
-			for (const activeJob of activeJobs.jobs) {
+			for (const activeJob of Object.values(state.activeJobsByConversation)) {
 				if (generation !== runtimeGeneration) return;
 				await startStreamForJob(activeJob);
 			}
@@ -1155,7 +1173,7 @@ export function createChatStore({
 			}
 			if (generation !== runtimeGeneration) return;
 			if (
-				activeJobs.jobs.length > 0 &&
+				Object.keys(state.activeJobsByConversation).length > 0 &&
 				state.connectionState !== "json_fallback"
 			) {
 				dispatch({ type: "connection/set", connectionState: "streaming" });

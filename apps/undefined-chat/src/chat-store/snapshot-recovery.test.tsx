@@ -33,6 +33,7 @@ function nativeSnapshot(lastSeq: number) {
 		status: "running",
 		last_seq: lastSeq,
 		reply: "Agent before\n\nAgent after\n\nMain answer",
+		messages: ["Agent before", "Agent after", "Main answer"],
 		history_finalized: false,
 		current_tool_calls: [
 			{
@@ -133,13 +134,17 @@ describe("job snapshot recovery", () => {
 				if (legacy) delete raw.current_timeline;
 				return { status: 200, ok: true, body: { job: raw, jobs: [raw] } };
 			});
-			const client = runtimeClientStub({ getActiveJobs: native.getActiveJobs });
+			const client = runtimeClientStub({
+				getActiveJobs: native.getActiveJobs,
+				fetchJobEventsJson: native.fetchJobEventsJson,
+			});
 			const store = createChatStore({ client });
 			await store.bootstrap();
 			snapshot = {
 				...nativeSnapshot(7),
 				reply:
 					"Agent before\n\nAgent after\n\nMain answer\n\nSnapshot addition",
+				messages: [...nativeSnapshot(7).messages, "Snapshot addition"],
 				current_timeline: [
 					...nativeSnapshot(7).current_timeline,
 					{ type: "message", seq: 7, content: "Snapshot addition" },
@@ -465,4 +470,158 @@ describe("job snapshot recovery", () => {
 			store.suspendRuntime();
 		},
 	);
+
+	test.each(["running", "done", "error", "cancelled"])(
+		"legacy resume replays same-body tool and Agent changes before advancing the cursor (%s)",
+		async (status) => {
+			let seq = 1;
+			const rawSnapshot = () => ({
+				job_id: "job-1",
+				conversation_id: "default",
+				status: "running",
+				last_seq: seq,
+				reply: "Same body",
+				messages: ["Same body"],
+				current_tool_calls: [],
+				history_finalized: false,
+			});
+			const replay = [
+				{
+					seq: 2,
+					event: "agent_start",
+					payload: {
+						webchat_call_id: "agent",
+						name: "research",
+						is_agent: true,
+					},
+				},
+				{
+					seq: 3,
+					event: "agent_stage",
+					payload: {
+						webchat_call_id: "agent",
+						agent_name: "research",
+						stage: "thinking",
+						detail: "Newest stage detail",
+					},
+				},
+				{
+					seq: 4,
+					event: "tool_start",
+					payload: {
+						webchat_call_id: "nested",
+						parent_webchat_call_id: "agent",
+						name: "search",
+					},
+				},
+				...(status === "running"
+					? []
+					: [
+							{
+								seq: 5,
+								event: "tool_end",
+								payload: {
+									webchat_call_id: "nested",
+									parent_webchat_call_id: "agent",
+									name: "search",
+									status,
+									ok: status !== "error",
+									result_preview: "Completed search",
+								},
+							},
+						]),
+				{
+					seq: 6,
+					event: "tool_start",
+					payload: { webchat_call_id: "pending", name: "pending" },
+				},
+			];
+			vi.mocked(invoke).mockImplementation(async (command) => ({
+				status: 200,
+				ok: true,
+				body:
+					command === "get_active_jobs"
+						? { job: rawSnapshot(), jobs: [rawSnapshot()] }
+						: { job: rawSnapshot(), events: replay, after: 1, last_seq: seq },
+			}));
+			const native = createTauriRuntimeClient();
+			const client = runtimeClientStub({
+				getActiveJobs: native.getActiveJobs,
+				fetchJobEventsJson: native.fetchJobEventsJson,
+			});
+			const store = createChatStore({ client });
+			await store.bootstrap();
+			seq = 6;
+			await store.bootstrap({ resuming: true });
+			const active = store.getSnapshot().activeJobsByConversation.default;
+			expect(active.reply).toBe("Same body");
+			expect(
+				active.currentToolCalls.find((call) => call.id === "agent"),
+			).toMatchObject({
+				currentStage: "thinking",
+				detail: "Newest stage detail",
+				children: [{ id: "nested", status }],
+			});
+			expect(
+				active.currentToolCalls.some((call) => call.id === "pending"),
+			).toBe(true);
+			expect(invoke).toHaveBeenCalledWith("fetch_job_events_json", {
+				input: { jobId: "job-1", conversationId: "default", afterSeq: 1 },
+			});
+			expect(client.startJobEventStream).toHaveBeenLastCalledWith({
+				jobId: "job-1",
+				conversationId: "default",
+				afterSeq: 6,
+			});
+			store.applyRuntimeEvents(
+				"job-1",
+				replay.map((item) => event(item)),
+			);
+			renderJob(store.getSnapshot().activeJobsByConversation.default);
+			expect(screen.getAllByText("search")).toHaveLength(1);
+			expect(
+				screen
+					.getByText("search")
+					.closest("details")
+					?.classList.contains(status),
+			).toBe(true);
+			store.suspendRuntime();
+		},
+	);
+
+	test("a failed legacy resume replay keeps the old cursor available for SSE recovery", async () => {
+		let active = job({
+			lastSeq: 1,
+			reply: "Same body",
+			messages: ["Same body"],
+		});
+		const client = runtimeClientStub({
+			getActiveJobs: vi.fn(async () => ({ job: active, jobs: [active] })),
+			fetchJobEventsJson: vi.fn(async () => {
+				throw new Error("offline");
+			}),
+		});
+		const store = createChatStore({ client });
+		await store.bootstrap();
+		active = { ...active, lastSeq: 4 };
+		await store.bootstrap({ resuming: true });
+		expect(store.getSnapshot().eventCursorByJob["job-1"]).toBe(1);
+		expect(client.startJobEventStream).toHaveBeenLastCalledWith({
+			jobId: "job-1",
+			conversationId: "default",
+			afterSeq: 1,
+		});
+		store.applyRuntimeEvents("job-1", [
+			event({
+				seq: 2,
+				event: "tool_start",
+				payload: { webchat_call_id: "recovered", name: "recovered" },
+			}),
+		]);
+		expect(
+			store.getSnapshot().activeJobsByConversation.default.currentToolCalls[0]
+				?.name,
+		).toBe("recovered");
+		store.suspendRuntime();
+	});
 });
