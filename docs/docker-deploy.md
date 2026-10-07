@@ -227,6 +227,8 @@ uv run deploy up --port bot_webui=18787 --port napcat_webui=16099
 
 重新运行向导可以调整模式和可选服务。重复部署会重新生成 Compose 与服务配置，并复用已有有效凭据；对生成文件的手工修改可能被覆盖。修改过 WebUI 密码时，以 `config.toml` 中的当前值为准。
 
+音乐服务生成配置的内容摘要会写入该服务的 Compose label。配置或密钥变化后，`up` 会仅重建需要更新的音乐容器，使单文件挂载读到原子替换后的新配置；内容相同时摘要保持稳定，不会因此重建其他服务。
+
 `container` 模式的 Python 解释器使用 `deploy/data/cache/python_interpreter/` 中独立的临时工作目录。部署工具通过容器环境变量传入这份共享目录在 Bot 内和宿主机上的不同路径，使宿主 Docker 能读取脚本、依赖清单和生成的文件；不会共享整个宿主 `/tmp`。`host` 模式继续使用系统临时目录。手工部署容器时的设置方法见 [Python 解释器工具说明](../src/Undefined/skills/tools/python_interpreter/README.md#容器内使用宿主-docker)。
 
 ### 更新版本

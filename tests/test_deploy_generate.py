@@ -709,6 +709,37 @@ def test_lxmusic2api_config_has_mandatory_fields(tmp_path: Path) -> None:
 # --------------------------------------------------------------------------- #
 
 
+@pytest.mark.parametrize("mode", [catalog.MODE_CONTAINER, catalog.MODE_HOST])
+def test_lxmusic_config_digest_recreates_only_changed_service(
+    tmp_path: Path, mode: str
+) -> None:
+    services = ("lxmusic2api", "searxng")
+    first = generate.build(_ctx(tmp_path, mode=mode, services=services))
+    repeated = generate.build(
+        _ctx(tmp_path, mode=mode, services=services, previous_env=first.env)
+    )
+    assert _compose_services(repeated.compose_text) == _compose_services(
+        first.compose_text
+    )
+    previous = dict(first.env)
+    previous["UNDEFINED_DEPLOY_LXMUSIC2API_KEY"] = "isolated-rotated-key"
+    rotated = generate.build(
+        _ctx(tmp_path, mode=mode, services=services, previous_env=previous)
+    )
+    first_services = _compose_services(first.compose_text)
+    rotated_services = _compose_services(rotated.compose_text)
+    lx_name = generate.LXMUSIC2API_SERVICE_NAME
+    label = generate.SERVICE_CONFIG_DIGEST_LABEL
+    assert (
+        rotated_services[lx_name]["labels"][label]
+        != first_services[lx_name]["labels"][label]
+    )
+    assert {
+        key: value for key, value in rotated_services.items() if key != lx_name
+    } == {key: value for key, value in first_services.items() if key != lx_name}
+    assert "isolated-rotated-key" not in rotated.compose_text
+
+
 def test_container_mode_uses_compose_service_names(tmp_path: Path) -> None:
     urls = generate.compose_service_urls(_ctx(tmp_path))
     assert urls["searxng"] == "http://searxng:8080"

@@ -27,6 +27,7 @@ services:
     cap_drop:
       - ALL
     volumes:
+      # 生成层将配置内容摘要写入本服务 label；原子替换后通过 compose up 定向重建。
       - ./lxmusic2api/config.toml:/app/config.toml:ro
       - ./lxmusic2api/.private:/app/.private:ro
       - ./lxmusic2api/data:/app/data

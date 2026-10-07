@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import secrets
 import string
@@ -29,6 +30,7 @@ NAPCAT_SERVICE_NAME: Final[str] = "napcat"
 SEARXNG_SERVICE_NAME: Final[str] = "searxng"
 FIRECRAWL_SERVICE_NAME: Final[str] = "firecrawl-api"
 LXMUSIC2API_SERVICE_NAME: Final[str] = "lxmusic2api"
+SERVICE_CONFIG_DIGEST_LABEL: Final[str] = "io.undefined.config-sha256"
 #: 本体容器内的工作目录（与 compose.bot.yaml 的 working_dir 一致）。
 CONTAINER_REPO_PATH: Final[str] = "/data/Undefined"
 
@@ -637,8 +639,21 @@ def _mount_napcat_ws_template(ctx: GenerateContext, fragments: dict[str, Any]) -
 def build(ctx: GenerateContext) -> GeneratedConfiguration:
     """组装一次 ``up`` 的全部生成物。"""
     env = build_env(ctx)
+    lxmusic2api_config = (
+        render_lxmusic2api_config(env)
+        if catalog.LXMUSIC2API.key in ctx.services
+        else None
+    )
     fragments = load_compose_fragments(compose_fragment_names(ctx))
     apply_context_overrides(ctx, fragments)
+    if lxmusic2api_config is not None:
+        # 单文件 bind mount 持有旧 inode；配置变化必须参与该服务的重建判断。
+        labels = fragments["services"][LXMUSIC2API_SERVICE_NAME].setdefault(
+            "labels", {}
+        )
+        labels[SERVICE_CONFIG_DIGEST_LABEL] = hashlib.sha256(
+            lxmusic2api_config.encode("utf-8")
+        ).hexdigest()
     compose_text = render_compose(fragments, project_name=catalog.COMPOSE_PROJECT_NAME)
     patch_plan = build_patch_plan(ctx, env)
 
@@ -654,11 +669,7 @@ def build(ctx: GenerateContext) -> GeneratedConfiguration:
         firecrawl_env=(
             render_firecrawl_env(env) if catalog.FIRECRAWL.key in ctx.services else None
         ),
-        lxmusic2api_config=(
-            render_lxmusic2api_config(env)
-            if catalog.LXMUSIC2API.key in ctx.services
-            else None
-        ),
+        lxmusic2api_config=lxmusic2api_config,
         napcat_ws_config=render_napcat_ws_config(ctx, env),
         napcat_ws_token=env["UNDEFINED_DEPLOY_NAPCAT_WS_TOKEN"],
         websocket_url=str(patch_plan.desired["onebot.ws_url"]),

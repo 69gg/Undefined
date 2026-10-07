@@ -953,6 +953,46 @@ def test_empty_with_clears_previous_service_selection(
     assert state.services == (), "空元组应清空上次选择，而不是沿用"
 
 
+def test_repeat_up_with_missing_lxmusic_key_updates_service_digest(
+    fake_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_docker(monkeypatch)
+    options = _yes_options(services=("lxmusic2api",), dry_run=False)
+    assert runner.run_up(options) == 0
+    layout = DeployLayout.under(fake_repo)
+    initial_services = yaml.safe_load(layout.compose_file.read_text(encoding="utf-8"))[
+        "services"
+    ]
+    repeat_options = _yes_options(services=None, dry_run=False)
+    assert runner.run_up(repeat_options) == 0
+    assert (
+        yaml.safe_load(layout.compose_file.read_text(encoding="utf-8"))["services"]
+        == initial_services
+    )
+    previous = runner.load_previous_env(layout)
+    old_key = previous.pop("UNDEFINED_DEPLOY_LXMUSIC2API_KEY")
+    layout.env_file.write_text(generate.render_env(previous), encoding="utf-8")
+    assert runner.run_up(repeat_options) == 0
+    services = yaml.safe_load(layout.compose_file.read_text(encoding="utf-8"))[
+        "services"
+    ]
+    lx_name = generate.LXMUSIC2API_SERVICE_NAME
+    label = generate.SERVICE_CONFIG_DIGEST_LABEL
+    assert (
+        services[lx_name]["labels"][label] != initial_services[lx_name]["labels"][label]
+    )
+    assert {key: value for key, value in services.items() if key != lx_name} == {
+        key: value for key, value in initial_services.items() if key != lx_name
+    }
+    host = tomllib.loads(
+        (layout.lxmusic2api_dir / "config.toml").read_text(encoding="utf-8")
+    )
+    bot = tomllib.loads((fake_repo / "config.toml").read_text(encoding="utf-8"))
+    assert host["auth"]["api_key"] != old_key
+    assert bot["lxmusic2api"]["api_key"] == host["auth"]["api_key"]
+
+
 def test_lxmusic2api_config_is_owner_only(tmp_path: Path) -> None:
     """桥接服务的 config.toml 含 api_key，应收紧到属主可读。"""
     import stat
