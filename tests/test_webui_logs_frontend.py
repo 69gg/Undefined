@@ -187,6 +187,7 @@ const state = {view: 'app', tab: 'logs', authenticated: true, logType: 'bot',
   logAutoRefresh: true, logSearch: '', logLevel: 'all', logAtBottom: true};
 const pending = [];
 const streams = [];
+let activePollTimers = 0;
 class EventSource {
   constructor(url) { this.url = url; this.closed = false; streams.push(this); }
   close() { this.closed = true; }
@@ -196,7 +197,7 @@ const context = vm.createContext({state, URLSearchParams, Map, EventSource,
   get: id => dom.window.document.getElementById(id), t: key => key,
   escapeHtml: text => text, shouldFetch: () => true,
   recordFetchSuccess: () => {}, recordFetchError: () => {},
-  startLogTimer: () => {}, stopLogTimer: () => {},
+  startLogTimer: () => {activePollTimers=1;}, stopLogTimer: () => {activePollTimers=0;},
   api: async path => new Promise(resolve => pending.push({path, resolve})),
 });
 vm.runInContext(fs.readFileSync(root + '/src/Undefined/webui/static/js/ui.js', 'utf8'), context);
@@ -214,9 +215,13 @@ const answer = (path, data) => pending.find(item => item.path === path).resolve(
   answer('/api/logs/files?type=webui', {files: [{name:'webui.log',current:true}],current:'webui.log'});
   answer('/api/logs?lines=5000&type=bot', 'STALE_BOT_SNAPSHOT');
   await tick();
+  vm.runInContext('fetchLogs(true)', context);
+  streams[2].onmessage({data:'NEWER_LIVE_BOT'});
+  answer('/api/logs?lines=5000&type=bot&file=bot.log', 'STALE_CURRENT_VIEW_GET');
+  await tick();
   const select = dom.window.document.getElementById('logFileSelect');
   console.log(JSON.stringify({closed: streams.slice(0,2).map(item=>item.closed),
-    activeUrl: state.logStream.url, logsRaw:state.logsRaw,
+    activeUrl: state.logStream.url, logsRaw:state.logsRaw, activePollTimers,
     options:Array.from(select.options).map(item=>item.value), selected:select.value,
     botCache:state.logFiles.bot.map(item=>item.name),
     webuiCache:state.logFiles.webui.map(item=>item.name)}));
@@ -234,7 +239,8 @@ const answer = (path, data) => pending.find(item => item.path === path).resolve(
     result = json.loads(completed.stdout.strip().splitlines()[-1])
     assert result["closed"] == [True, True]
     assert result["activeUrl"].endswith("type=bot")
-    assert result["logsRaw"] == "CURRENT_BOT"
+    assert result["logsRaw"] == "NEWER_LIVE_BOT"
+    assert result["activePollTimers"] == 0
     assert result["options"] == result["botCache"] == ["bot.log"]
     assert result["selected"] == "bot.log"
     assert result["webuiCache"] == ["webui.log"]

@@ -183,6 +183,8 @@ function startLogStream() {
     state.logStream = stream;
     stream.onmessage = (event) => {
         if (state.logStream !== stream) return;
+        // 流消息比此前发出的 GET 新，不能让迟到快照回退正文。
+        _logFetchRequest += 1;
         state.logsRaw = event.data || "";
         recordFetchSuccess("logs");
         renderLogs();
@@ -224,7 +226,7 @@ function updateLogRefreshState() {
         startLogTimer();
         return;
     }
-    if (startLogStream()) {
+    if (state.logStream || startLogStream()) {
         stopLogTimer();
         return;
     }
