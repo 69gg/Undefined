@@ -84,7 +84,7 @@ def test_file_uri_path_text_supports_windows_drive_and_unc(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "Undefined.utils.sender.url2pathname",
+        "Undefined.utils.paths.url2pathname",
         nturl2path.url2pathname,
     )
 

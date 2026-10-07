@@ -3,12 +3,11 @@
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Callable
-from urllib.parse import urlsplit
-from urllib.request import url2pathname
 
 from Undefined.attachments.segments import is_localish_path
 from Undefined.attachments.render import _escape_cq_component
 from Undefined.utils.common import CQ_PATTERN
+from Undefined.utils.paths import file_uri_path_text
 
 _MEDIA_FIELDS = {
     "image": ("file",),
@@ -22,11 +21,7 @@ def local_file_path(value: str) -> Path | None:
     if not is_localish_path(value):
         return None
     if value.startswith("file://"):
-        uri = urlsplit(value)
-        path = url2pathname(uri.path)
-        if uri.netloc and uri.netloc != "localhost":
-            path = f"//{uri.netloc}{path}"
-        return Path(path)
+        return Path(file_uri_path_text(value))
     return Path(value)
 
 

@@ -21,7 +21,7 @@ from Undefined.attachments.forward_snapshot import (
     snapshot_forward_tree,
 )
 from Undefined.attachments.models import RegisteredMessageAttachments
-from Undefined.utils.paths import WEBUI_FILE_CACHE_DIR
+from Undefined.utils.paths import WEBUI_FILE_CACHE_DIR, file_uri_path_text
 from Undefined.utils.xml import escape_xml_attr
 
 if TYPE_CHECKING:
@@ -236,8 +236,11 @@ def display_name_from_source(raw_source: str, fallback: str) -> str:
     if not raw_source:
         return fallback
     if raw_source.startswith("file://"):
-        raw_source = raw_source[7:]
-    name = Path(unquote(urlsplit(raw_source).path)).name
+        name = Path(file_uri_path_text(raw_source)).name
+    elif is_localish_path(raw_source):
+        name = Path(raw_source).name
+    else:
+        name = Path(unquote(urlsplit(raw_source).path)).name
     return name or fallback
 
 
@@ -519,7 +522,7 @@ async def register_message_attachments(
                             ref = record.prompt_ref()
                         elif is_localish_path(resolved_source):
                             local_path = (
-                                resolved_source[7:]
+                                file_uri_path_text(resolved_source)
                                 if resolved_source.startswith("file://")
                                 else resolved_source
                             )
@@ -545,7 +548,7 @@ async def register_message_attachments(
                         local_file_path = _resolve_webui_file_id(file_id)
                     elif is_localish_path(raw_source):
                         local_file_path = Path(
-                            raw_source[7:]
+                            file_uri_path_text(raw_source)
                             if raw_source.startswith("file://")
                             else raw_source
                         )

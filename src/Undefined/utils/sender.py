@@ -5,8 +5,6 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 import time
 from typing import Any, Literal
-from urllib.parse import urlsplit
-from urllib.request import url2pathname
 
 from weixin_ilink_client import (
     MediaKind,
@@ -40,6 +38,7 @@ from Undefined.utils.message_reply import (
     format_markdown_reply,
 )
 from Undefined.utils.message_turn import mark_message_sent_this_turn
+from Undefined.utils.paths import file_uri_path_text
 from Undefined.weixin.audio import PreparedWeixinVoice
 from Undefined.weixin.transport import (
     is_definitive_weixin_delivery_rejection as is_definitive_weixin_delivery_rejection,
@@ -163,12 +162,7 @@ def _iter_segments_deep(value: object) -> list[dict[str, Any]]:
 
 
 def _file_uri_path_text(raw_source: str) -> str:
-    parsed = urlsplit(raw_source)
-    netloc = parsed.netloc.strip()
-    uri_path = parsed.path
-    if netloc and netloc.lower() != "localhost":
-        uri_path = f"//{netloc}{uri_path}"
-    return url2pathname(uri_path)
+    return file_uri_path_text(raw_source)
 
 
 async def _local_path_from_segment_source(source: Any) -> Path | None:
