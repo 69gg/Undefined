@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from pathlib import Path
 import threading
 from types import SimpleNamespace
@@ -319,3 +320,192 @@ async def test_delivery_error_does_not_increment_meme_usage(tmp_path: Path) -> N
         )
     assert await store.get(record.uid) == record
     assert vectors.records[record.uid] == record
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mutation", ["pin", "edit", "delete_other"])
+@pytest.mark.parametrize("parallel", [False, True])
+async def test_prune_skips_candidate_changed_after_snapshot(
+    tmp_path: Path, mutation: str, parallel: bool
+) -> None:
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    class _SnapshotStore(MemeStore):
+        async def list_prune_candidates(self) -> list[MemeRecord]:
+            records = await super().list_prune_candidates()
+            entered.set()
+            await release.wait()
+            return records
+
+    service, store, vectors, record = await _fixture(
+        tmp_path, store=_SnapshotStore(tmp_path / "memes.sqlite3")
+    )
+    other_blob = tmp_path / "other.png"
+    other_blob.write_bytes(b"second isolated meme")
+    other = await store.upsert_record(
+        replace(
+            record,
+            uid="pic_other",
+            content_sha256="other content",
+            blob_path=str(other_blob),
+            preview_path=str(other_blob),
+            file_size=other_blob.stat().st_size,
+            use_count=1,
+            generation="",
+        )
+    )
+    await vectors.upsert(other)
+    pruning = asyncio.create_task(service._prune_if_needed())
+    prunings = [pruning]
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=3)
+        if parallel:
+            prunings.append(asyncio.create_task(service._prune_if_needed()))
+        if mutation == "delete_other":
+            assert await service.delete_meme(other.uid)
+        else:
+            assert await service.update_meme(
+                record.uid,
+                pinned=True if mutation == "pin" else None,
+                manual_description="edited description" if mutation == "edit" else None,
+            )
+        protected = await store.get(record.uid)
+        release.set()
+        await asyncio.wait_for(asyncio.gather(*prunings), timeout=3)
+        assert await store.get(record.uid) == protected
+        assert Path(record.blob_path).is_file()
+        assert vectors.records[record.uid] == protected
+        assert await store.get(other.uid) is None
+        assert not other_blob.exists()
+        assert (await store.stats())["total_count"] == 1
+        assert service._ingest_digest_locks == {}
+    finally:
+        release.set()
+        await asyncio.gather(*prunings, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["index", "blob", "preview", "frames"])
+async def test_failed_delete_keeps_metadata_and_allows_cleanup_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    armed = False
+
+    class _FailingVectors(_Vectors):
+        async def delete(self, uid: str) -> None:
+            if armed and failure == "index":
+                raise RuntimeError("isolated vector delete failure")
+            await super().delete(uid)
+
+    service, store, vectors, record = await _fixture(
+        tmp_path, vectors=_FailingVectors()
+    )
+    preview = tmp_path / "preview.png"
+    preview.write_bytes(b"isolated preview")
+    record = await store.upsert_record(replace(record, preview_path=str(preview)))
+    await vectors.upsert(record)
+    frames = tmp_path / "previews"
+    frames.mkdir()
+    frame = frames / f"{record.uid}_f0.png"
+    frame.write_bytes(b"isolated frame")
+    target = {
+        "blob": Path(record.blob_path),
+        "preview": preview,
+        "frames": frame,
+    }.get(failure)
+    original_unlink = Path.unlink
+
+    def failing_unlink(self: Path, missing_ok: bool = False) -> None:
+        if armed and self == target:
+            raise OSError("isolated file delete failure")
+        original_unlink(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", failing_unlink)
+    armed = True
+    error_type = RuntimeError if failure == "index" else OSError
+    with pytest.raises(error_type, match="isolated .* delete failure"):
+        await service.delete_meme(record.uid)
+    assert await store.get(record.uid) == record
+    assert (await store.stats())["total_count"] == 1
+    assert (await store.stats())["total_bytes"] == record.file_size
+    if failure == "index":
+        assert Path(record.blob_path).is_file()
+        assert preview.is_file()
+        assert frame.is_file()
+        assert vectors.records[record.uid] == record
+    else:
+        assert target is not None and target.is_file()
+
+    armed = False
+    assert await service.delete_meme(record.uid)
+    assert await store.get(record.uid) is None
+    assert record.uid not in vectors.records
+    assert not Path(record.blob_path).exists()
+    assert not preview.exists()
+    assert not frame.exists()
+    assert (await store.stats())["total_count"] == 0
+    assert service._ingest_digest_locks == {}
+
+
+@pytest.mark.asyncio
+async def test_stale_conditional_delete_does_not_touch_index_or_files(
+    tmp_path: Path,
+) -> None:
+    service, store, vectors, record = await _fixture(tmp_path)
+    assert await service.update_meme(
+        record.uid, manual_description="latest description"
+    )
+    current = await store.get(record.uid)
+
+    assert not await service.delete_meme(record.uid, expected_record=record)
+
+    assert await store.get(record.uid) == current
+    assert vectors.records[record.uid] == current
+    assert Path(record.blob_path).is_file()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_delete_finishes_cleanup_before_following_edit(
+    tmp_path: Path,
+) -> None:
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    class _DelayedVectors(_Vectors):
+        async def delete(self, uid: str) -> None:
+            entered.set()
+            await release.wait()
+            await super().delete(uid)
+
+    service, store, vectors, record = await _fixture(
+        tmp_path, vectors=_DelayedVectors()
+    )
+    deleting = asyncio.create_task(service.delete_meme(record.uid))
+    editing: asyncio.Task[dict[str, Any] | None] | None = None
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=3)
+        deleting.cancel()
+        editing = asyncio.create_task(
+            service.update_meme(record.uid, manual_description="must not restore")
+        )
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        deleting.cancel()
+        assert not deleting.done()
+        assert not editing.done()
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(deleting, timeout=3)
+        assert await asyncio.wait_for(editing, timeout=3) is None
+        assert await store.get(record.uid) is None
+        assert record.uid not in vectors.records
+        assert not Path(record.blob_path).exists()
+        assert service._ingest_digest_locks == {}
+    finally:
+        release.set()
+        await asyncio.gather(
+            deleting,
+            *([editing] if editing is not None else []),
+            return_exceptions=True,
+        )

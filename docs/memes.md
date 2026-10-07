@@ -59,4 +59,6 @@ gif_analysis_frames = 6         # GIF 的抽帧数量
 
 编辑、停用或删除会使全局 UID 附件缓存失效。正在读取旧记录的解析线程会重新核对失效代次，重新读取当前状态，不会把停用前的记录重新缓存。
 
+容量清理复用人工删除的内容锁和修订校验；候选列出后才置顶或编辑的条目会跳过，多个清理任务串行检查当前容量。删除会先完成向量、原图、预览与 GIF 临时帧清理，最后移除 SQLite 记录。索引或文件删除失败时，元数据仍保留并计入容量，可在故障恢复后重试删除；此前已清理的文件允许再次删除。
+
 * Management API 完整接口参阅 [Management API — Runtime 代理](management-api.md#6-runtime-代理)，Runtime API 直连接口参阅 [Runtime API — 表情包库](openapi.md#表情包库)。
