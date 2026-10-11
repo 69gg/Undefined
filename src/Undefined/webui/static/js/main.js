@@ -979,13 +979,22 @@ async function init() {
                             return;
                         try {
                             await runConfigOperation(async () => {
-                                await api("/api/config/history/restore", {
-                                    method: "POST",
-                                    headers: {
-                                        "Content-Type": "application/json",
+                                const res = await api(
+                                    "/api/config/history/restore",
+                                    {
+                                        method: "POST",
+                                        headers: {
+                                            "Content-Type": "application/json",
+                                        },
+                                        body: JSON.stringify({ name }),
                                     },
-                                    body: JSON.stringify({ name }),
-                                });
+                                );
+                                const data = await res.json();
+                                if (!res.ok || !data.success) {
+                                    throw new Error(
+                                        data.error || t("config.save_error"),
+                                    );
+                                }
                                 showToast(
                                     t("config.history_restored"),
                                     "success",

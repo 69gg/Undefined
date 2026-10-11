@@ -3624,6 +3624,7 @@ async function configReplacement(env, operation) {
     let serverMode = "local";
     let finishPatch;
     let patchCount = 0;
+    let restoreAttempts = 0;
     window.confirm = () => true;
     window.fetch = async (url, options = {}) => {
         const route = String(url);
@@ -3642,6 +3643,15 @@ async function configReplacement(env, operation) {
             backups: [{ name: "config_previous.toml", mtime: 1, size: 1 }],
         });
         if (route === "/api/config/history/restore") {
+            restoreAttempts += 1;
+            if (restoreAttempts === 1 && operation.startsWith("restore_failure_")) {
+                if (operation === "restore_failure_network") {
+                    throw new Error("isolated restore failure");
+                }
+                return response(operation === "restore_failure_http" ? 500 : 200, {
+                    success: false, error: "isolated restore failure",
+                });
+            }
             serverMode = "local";
             return response(200, { success: true });
         }
@@ -3669,7 +3679,7 @@ async function configReplacement(env, operation) {
     host.value = "obsolete-host";
     host.dispatchEvent(new window.Event("input", { bubbles: true }));
     let completion;
-    if (operation === "restore" || operation === "restore_sync") {
+    if (operation.startsWith("restore")) {
         window.get("btnConfigHistory").click();
         await tick();
         window.document.querySelector("[data-restore-name]").click();
@@ -3691,8 +3701,22 @@ async function configReplacement(env, operation) {
     if (completion) await completion;
     await tick();
     await settle(1100);
+    let afterFailure = null;
+    if (operation.startsWith("restore_failure_")) {
+        afterFailure = {
+            formMode: mode().value,
+            formHost: window.document.querySelector('[data-path="onebot.file_send_host"].config-input').value,
+            formInert: window.get("formSections").inert,
+            panelVisible: window.get("configHistoryPanel").style.display !== "none",
+            summaryCount: calls.filter((url) => url === "/api/config/summary").length,
+            toasts: window.document.querySelector(".toast-container")?.textContent || "",
+        };
+        window.document.querySelector("[data-restore-name]").click();
+        await tick();
+    }
     return {
         beforeResponse,
+        afterFailure,
         patchCount,
         calls,
         serverMode,
@@ -3702,7 +3726,7 @@ async function configReplacement(env, operation) {
     };
 }
 
-for (const operation of ["restore", "sync", "reload", "restore_sync"]) {
+for (const operation of ["restore", "sync", "reload", "restore_sync", "restore_failure_http", "restore_failure_api", "restore_failure_network"]) {
     SCENARIOS[`config_replacement_${operation}`] = (env) => configReplacement(env, operation);
 }
 

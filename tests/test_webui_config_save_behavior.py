@@ -83,3 +83,21 @@ def test_config_replacement_discards_old_snapshots_and_waits_for_inflight_save(
         assert result["calls"].index("/api/config/history/restore") < result[
             "calls"
         ].index("/api/config/sync-template?write=false")
+
+
+@pytest.mark.parametrize("outcome", ["http", "api", "network"])
+def test_failed_config_restore_preserves_form_and_allows_retry(outcome: str) -> None:
+    result = run_scenario(f"config_replacement_restore_failure_{outcome}")
+    failure = result["afterFailure"]
+    assert failure["formMode"] == "url"
+    assert failure["formHost"] == "obsolete-host"
+    assert failure["formInert"] is False
+    assert failure["panelVisible"] is True
+    assert failure["summaryCount"] == 1
+    assert "isolated restore failure" in failure["toasts"]
+    assert "已恢复配置" not in failure["toasts"]
+    assert result["serverMode"] == result["formMode"] == "local"
+    assert result["formInert"] is False
+    assert result["patchCount"] == 1
+    assert result["calls"].count("/api/config/history/restore") == 2
+    assert "已恢复配置" in result["toasts"]
