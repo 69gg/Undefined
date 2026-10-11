@@ -24,6 +24,7 @@ class ConfigManager:
         self._watch_stop: asyncio.Event | None = None
         self._last_snapshot: dict[str, tuple[int, int]] = {}
         self._reload_lock = asyncio.Lock()
+        self._watch_restart_lock = asyncio.Lock()
         self._pending_changes: dict[str, tuple[Any, Any]] = {}
 
     def load(self, strict: bool = True) -> Config:
@@ -92,9 +93,16 @@ class ConfigManager:
                     except asyncio.CancelledError:
                         pass
         finally:
-            self._watch_task = None
-            self._watch_stop = None
+            if self._watch_task is task:
+                self._watch_task = None
+                self._watch_stop = None
             logger.info("[配置] 热重载已停止")
+
+    async def restart_hot_reload(self, *, interval: float, debounce: float) -> None:
+        """按更新顺序完成停止与启动，避免并发重启丢失后续参数。"""
+        async with self._watch_restart_lock:
+            await self.stop_hot_reload()
+            self.start_hot_reload(interval=interval, debounce=debounce)
 
     async def _watch_loop(self, interval: float, debounce: float) -> None:
         self._last_snapshot = self._compute_snapshot()
@@ -105,6 +113,8 @@ class ConfigManager:
         pending = False
         while self._watch_stop and not self._watch_stop.is_set():
             await asyncio.sleep(interval)
+            if self._watch_stop is None or self._watch_stop.is_set():
+                break
             snapshot = self._compute_snapshot()
             if snapshot != self._last_snapshot:
                 self._last_snapshot = snapshot

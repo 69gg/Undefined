@@ -106,6 +106,10 @@ class _FakeConfigManager:
     def start_hot_reload(self, *, interval: float, debounce: float) -> None:
         self.started.append((interval, debounce))
 
+    async def restart_hot_reload(self, *, interval: float, debounce: float) -> None:
+        await self.stop_hot_reload()
+        self.start_hot_reload(interval=interval, debounce=debounce)
+
 
 def test_apply_config_updates_propagates_to_security_service() -> None:
     updated = cast(

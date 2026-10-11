@@ -473,8 +473,7 @@ async def _apply_message_handler_automations_hot_reload(
 async def _restart_config_hot_reload(
     config_manager: ConfigManager, interval: float, debounce: float
 ) -> None:
-    await config_manager.stop_hot_reload()
-    config_manager.start_hot_reload(interval=interval, debounce=debounce)
+    await config_manager.restart_hot_reload(interval=interval, debounce=debounce)
     logger.info(
         "[配置] 配置热更新已重启: interval=%.2fs debounce=%.2fs",
         interval,
