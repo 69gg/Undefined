@@ -996,7 +996,9 @@ class WorkflowRunner:
         variables: dict[str, Any],
         emit_if_needed: Callable[[dict[str, Any], str], Awaitable[None]],
     ) -> str:
-        count = int(node.get("count", self.loop_max_iterations))
+        # Persisted legacy graphs can contain null despite current write validation.
+        raw_count = node.get("count")
+        count = self.loop_max_iterations if raw_count is None else int(raw_count)
         max_iterations = min(
             int(node.get("max_iterations") or self.loop_max_iterations),
             self.loop_max_iterations,
