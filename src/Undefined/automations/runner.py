@@ -214,11 +214,16 @@ def _parse_each_source(raw: str) -> list[Any]:
     return [line for line in text.splitlines() if line.strip()]
 
 
-def _merge_scoped_variables(target: dict[str, Any], scoped: dict[str, Any]) -> None:
-    """Propagate workflow outputs without leaking loop-local index/item values."""
-    for key, value in scoped.items():
-        if key not in {"index", "item"}:
-            target[key] = value
+def _scoped_variable_updates(
+    previous: dict[str, Any], scoped: dict[str, Any]
+) -> dict[str, Any]:
+    """Publish only this iteration's changes, preserving concurrent sibling output."""
+    return {
+        key: value
+        for key, value in scoped.items()
+        if key not in {"index", "item"}
+        and (key not in previous or value != previous[key])
+    }
 
 
 _OPTION_ID_RE = re.compile(r"[^A-Za-z0-9_]+")
@@ -1051,8 +1056,9 @@ class WorkflowRunner:
                 include_bodies=True,
                 only_ids=body,
             )
-            _merge_scoped_variables(loop_variables, iteration_variables)
-            _merge_scoped_variables(variables, iteration_variables)
+            updates = _scoped_variable_updates(loop_variables, iteration_variables)
+            loop_variables.update(updates)
+            variables.update(updates)
         return last
 
     async def _run_loop_each(
@@ -1093,6 +1099,7 @@ class WorkflowRunner:
                 include_bodies=True,
                 only_ids=body,
             )
-            _merge_scoped_variables(loop_variables, iteration_variables)
-            _merge_scoped_variables(variables, iteration_variables)
+            updates = _scoped_variable_updates(loop_variables, iteration_variables)
+            loop_variables.update(updates)
+            variables.update(updates)
         return last
