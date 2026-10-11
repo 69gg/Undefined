@@ -33,7 +33,7 @@ Undefined Chat 是 `apps/undefined-chat/` 下的 Tauri v2 + React 19 原生聊�
 Android：
 
 - 文件选择器返回的 `content://` URI 通过 Tauri fs plugin 打开，上传链路仍需要真机/模拟器 smoke 覆盖。
-- 生命周期监听使用 Tauri `tauri://suspended` / `tauri://resumed` 事件；恢复前台时重新 bootstrap，接受 Runtime 的完整任务时间线与对应游标后恢复订阅；快照内已有事件不会重复追加。
+- 生命周期监听使用 Tauri `tauri://suspended` / `tauri://resumed` 事件；恢复前台时重新 bootstrap，接受 Runtime 的完整任务时间线与对应游标后恢复订阅；快照内已有事件不会重复追加。卸载或重新注册时会清理尚在异步注册中的监听，已排队的旧恢复回调不会再发起请求。
 - Android 通过生成工程注入的 `SecretPlugin` 使用 Android Keystore + AES-GCM 保存 API Key：密钥在 AndroidKeyStore 中生成且不可导出，加密后的密文存放在 `MODE_PRIVATE` 的 SharedPreferences 中。Android 生成插件已接入并有脚本/Rust 测试覆盖，真实设备仍需 smoke 验证；只有平台安全存储不可用且用户显式确认时，才允许不安全文件降级。
 
 iOS：

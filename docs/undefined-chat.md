@@ -119,7 +119,7 @@ HTML 采用与 WebUI 基线对齐的双层策略：
 - 会话列表抽屉、遮罩、Escape 关闭、ARIA 状态和焦点恢复。
 - `visualViewport` 驱动的 `--keyboard-inset`，用于输入区软键盘避让。
 - 安全区 `env(safe-area-inset-*)` 和移动端 44px 触控目标。
-- Android 生命周期使用 Tauri `tauri://suspended` / `tauri://resumed`。
+- Android 生命周期使用 Tauri `tauri://suspended` / `tauri://resumed`。卸载或重新注册时也会清理尚未完成的异步监听，已经释放的监听回调不会再次触发重连。
 
 真实设备或模拟器 smoke 建议覆盖：
 

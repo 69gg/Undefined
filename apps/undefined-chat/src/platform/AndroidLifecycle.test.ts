@@ -76,6 +76,18 @@ describe("AndroidLifecycle", () => {
 	});
 
 	describe("setupAndroidLifecycle", () => {
+		it("cleans registrations resolved after teardown and ignores queued resume callbacks", async () => {
+			const client = runtimeClientStub();
+			const store = createChatStore({ client });
+			const cleanup = setupAndroidLifecycle(store);
+			const queuedResume = listeners.get("tauri://resumed");
+			cleanup();
+			await Promise.resolve();
+			expect(unlisten).toHaveBeenCalledTimes(2);
+			await queuedResume?.();
+			expect(client.getRuntimeConfig).not.toHaveBeenCalled();
+		});
+
 		it("reloads a completed background conversation through the real resume listener", async () => {
 			let completed = false;
 			const client = runtimeClientStub({
