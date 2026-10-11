@@ -755,6 +755,7 @@ export function createChatStore({
 	let historyRequestGeneration = 0;
 	const listeners = new Set<() => void>();
 	const subscriptionsByJob = new Map<string, string>();
+	const streamRequestsByJob = new Map<string, symbol>();
 	const fallbackTimersByJob = new Map<string, ReturnType<typeof setTimeout>>();
 	/** 每个 job 当前的 JSON 轮询退避间隔（ms），随连续失败指数增长、成功后重置 */
 	const fallbackBackoffByJob = new Map<string, number>();
@@ -803,6 +804,7 @@ export function createChatStore({
 			void client.stopJobEventStream(subscriptionId);
 		}
 		subscriptionsByJob.clear();
+		streamRequestsByJob.clear();
 		for (const timer of fallbackTimersByJob.values()) {
 			clearTimeout(timer);
 		}
@@ -913,16 +915,25 @@ export function createChatStore({
 	async function startStreamForJob(job: ChatJob): Promise<void> {
 		if (runtimeSuspended) return;
 		const generation = runtimeGeneration;
-		if (subscriptionsByJob.has(job.jobId)) {
+		if (
+			subscriptionsByJob.has(job.jobId) ||
+			streamRequestsByJob.has(job.jobId)
+		) {
 			return;
 		}
+		const request = Symbol();
+		streamRequestsByJob.set(job.jobId, request);
+		const isCurrentRequest = (): boolean =>
+			generation === runtimeGeneration &&
+			streamRequestsByJob.get(job.jobId) === request &&
+			state.activeJobsByConversation[job.conversationId]?.jobId === job.jobId;
 		try {
 			const subscription = await client.startJobEventStream({
 				jobId: job.jobId,
 				afterSeq: Math.max(state.eventCursorByJob[job.jobId] ?? 0, job.lastSeq),
 				conversationId: job.conversationId,
 			});
-			if (generation !== runtimeGeneration) {
+			if (!isCurrentRequest()) {
 				if (subscription.subscriptionId) {
 					void client.stopJobEventStream(subscription.subscriptionId);
 				}
@@ -932,9 +943,13 @@ export function createChatStore({
 				subscriptionsByJob.set(job.jobId, subscription.subscriptionId);
 			}
 		} catch {
-			if (generation !== runtimeGeneration) return;
+			if (!isCurrentRequest()) return;
 			// job 已建立；订阅失败只切换传输方式，不能回滚成功发送的输入。
 			fetchJobEventsFallback(job.jobId);
+		} finally {
+			if (streamRequestsByJob.get(job.jobId) === request) {
+				streamRequestsByJob.delete(job.jobId);
+			}
 		}
 	}
 
@@ -954,6 +969,7 @@ export function createChatStore({
 			return;
 		}
 		stopFallbackPolling(jobId);
+		streamRequestsByJob.delete(jobId);
 		const subscriptionId = subscriptionsByJob.get(jobId);
 		if (subscriptionId) {
 			subscriptionsByJob.delete(jobId);
@@ -1109,6 +1125,9 @@ export function createChatStore({
 				return;
 			}
 
+			const jobsBeforeRefresh = new Set(
+				Object.values(state.activeJobsByConversation).map((job) => job.jobId),
+			);
 			const [health, conversationsResponse, activeJobs, commands] =
 				await Promise.all([
 					client.probeRuntime(),
@@ -1157,6 +1176,17 @@ export function createChatStore({
 				} else {
 					recoveredJobs.push(snapshot);
 				}
+			}
+			// 快照请求期间，先前发出的发送请求可能刚获 ACK；旧列表不能删除新任务。
+			// 请求开始前已存在的任务仍以服务端列表为准，允许回收离线时已完成的任务。
+			for (const current of Object.values(state.activeJobsByConversation)) {
+				if (jobsBeforeRefresh.has(current.jobId)) continue;
+				const index = recoveredJobs.findIndex(
+					(snapshot) => snapshot.conversationId === current.conversationId,
+				);
+				if (index < 0) recoveredJobs.push(current);
+				else if (recoveredJobs[index].jobId !== current.jobId)
+					recoveredJobs[index] = current;
 			}
 			const historyConversationIds = new Set(selected ? [selected] : []);
 			const recoveredJobIds = new Set(recoveredJobs.map((item) => item.jobId));

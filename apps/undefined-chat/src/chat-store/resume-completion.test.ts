@@ -1,8 +1,11 @@
 import { describe, expect, test, vi } from "vitest";
 import type {
 	ActiveJobsResponse,
+	ChatJob,
+	EventStreamSubscription,
 	HistoryResponse,
 	JobEventsJsonResponse,
+	RuntimeHealth,
 } from "../runtime-client/types";
 import {
 	conversation,
@@ -14,10 +17,12 @@ import { createChatStore } from "./store";
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
-	const promise = new Promise<T>((resolvePromise) => {
+	let reject!: (reason: Error) => void;
+	const promise = new Promise<T>((resolvePromise, rejectPromise) => {
 		resolve = resolvePromise;
+		reject = rejectPromise;
 	});
-	return { promise, resolve };
+	return { promise, resolve, reject };
 }
 
 function resumeFixture() {
@@ -80,6 +85,187 @@ function resumeFixture() {
 }
 
 describe("completed jobs omitted from a reconnect snapshot", () => {
+	test("deduplicates a send ACK subscription while resume is still installing its listener", async () => {
+		const sending = deferred<ChatJob>();
+		const listener = deferred<() => void>();
+		const stream = deferred<EventStreamSubscription>();
+		const accepted = job({ hasTimelineSnapshot: true });
+		const client = runtimeClientStub({
+			sendMessage: vi.fn(() => sending.promise),
+			startJobEventStream: vi
+				.fn()
+				.mockImplementationOnce(() => stream.promise)
+				.mockResolvedValue({
+					subscriptionId: "duplicate-subscription",
+					jobId: accepted.jobId,
+					afterSeq: 0,
+				}),
+			cancelJob: vi.fn(async () =>
+				job({ status: "cancelled", historyFinalized: true }),
+			),
+		});
+		const store = createChatStore({ client });
+		await store.bootstrap();
+		store.updateDraft("default", "question");
+		const sendRequest = store.sendSelectedMessage();
+		vi.mocked(client.getActiveJobs).mockResolvedValueOnce({
+			job: accepted,
+			jobs: [accepted],
+		});
+		vi.mocked(client.listenRuntimeSse).mockImplementationOnce(
+			() => listener.promise,
+		);
+		const resuming = store.bootstrap({ resuming: true });
+		await vi.waitFor(() =>
+			expect(client.listenRuntimeSse).toHaveBeenCalledTimes(2),
+		);
+		sending.resolve(accepted);
+		await vi.waitFor(() =>
+			expect(client.startJobEventStream).toHaveBeenCalledTimes(1),
+		);
+		listener.resolve(() => {});
+		await resuming;
+		stream.resolve({
+			subscriptionId: "single-subscription",
+			jobId: accepted.jobId,
+			afterSeq: 0,
+		});
+		await sendRequest;
+		expect(client.startJobEventStream).toHaveBeenCalledTimes(1);
+		await store.cancelJob(accepted.jobId);
+		expect(client.stopJobEventStream).toHaveBeenCalledExactlyOnceWith(
+			"single-subscription",
+		);
+	});
+
+	test.each(["success", "failure"])(
+		"ignores late pre-resume stream %s without replacing the recovered subscription",
+		async (outcome) => {
+			const sending = deferred<ChatJob>();
+			const health = deferred<RuntimeHealth>();
+			const oldStream = deferred<EventStreamSubscription>();
+			const accepted = job({ hasTimelineSnapshot: true });
+			const client = runtimeClientStub({
+				sendMessage: vi.fn(() => sending.promise),
+				startJobEventStream: vi
+					.fn()
+					.mockImplementationOnce(() => oldStream.promise)
+					.mockResolvedValueOnce({
+						subscriptionId: "recovered-subscription",
+						jobId: accepted.jobId,
+						afterSeq: 0,
+					}),
+				cancelJob: vi.fn(async () =>
+					job({ status: "cancelled", historyFinalized: true }),
+				),
+			});
+			const store = createChatStore({ client });
+			await store.bootstrap();
+			store.updateDraft("default", "question");
+			const sendRequest = store.sendSelectedMessage();
+			vi.mocked(client.probeRuntime).mockImplementationOnce(
+				() => health.promise,
+			);
+			const resuming = store.bootstrap({ resuming: true });
+			await vi.waitFor(() =>
+				expect(client.getActiveJobs).toHaveBeenCalledTimes(2),
+			);
+			sending.resolve(accepted);
+			await vi.waitFor(() =>
+				expect(client.startJobEventStream).toHaveBeenCalledTimes(1),
+			);
+			health.resolve({ ok: true, status: 200, body: "ok" });
+			await resuming;
+			expect(client.startJobEventStream).toHaveBeenCalledTimes(2);
+			if (outcome === "success") {
+				oldStream.resolve({
+					subscriptionId: "obsolete-subscription",
+					jobId: accepted.jobId,
+					afterSeq: 0,
+				});
+			} else {
+				oldStream.reject(new Error("obsolete stream start failed"));
+			}
+			await sendRequest;
+			if (outcome === "success") {
+				expect(client.stopJobEventStream).toHaveBeenCalledWith(
+					"obsolete-subscription",
+				);
+			} else {
+				expect(client.stopJobEventStream).not.toHaveBeenCalled();
+			}
+			expect(client.fetchJobEventsJson).not.toHaveBeenCalled();
+			await store.cancelJob(accepted.jobId);
+			expect(client.stopJobEventStream).toHaveBeenLastCalledWith(
+				"recovered-subscription",
+			);
+		},
+	);
+
+	test.each([false, true])(
+		"retains a send accepted during resume without retaining a completed job (snapshot includes send: %s)",
+		async (snapshotIncludesSend) => {
+			const sending = deferred<ChatJob>();
+			const health = deferred<RuntimeHealth>();
+			const previous = job({ jobId: "completed-B", conversationId: "B" });
+			const accepted = job({
+				jobId: "new-A",
+				conversationId: "A",
+				hasTimelineSnapshot: true,
+			});
+			const snapshot = { ...accepted, lastSeq: 3, reply: "newer reply" };
+			const client = runtimeClientStub({
+				listConversations: vi.fn(async () => ({
+					conversations: [conversation({ id: "A" }), conversation({ id: "B" })],
+					activeJob: null,
+					defaultConversationId: "A",
+					virtualUserId: "webchat",
+				})),
+				getActiveJobs: vi
+					.fn()
+					.mockResolvedValueOnce({ job: previous, jobs: [previous] })
+					.mockResolvedValueOnce({
+						job: snapshotIncludesSend ? snapshot : null,
+						jobs: snapshotIncludesSend ? [snapshot] : [],
+					}),
+				sendMessage: vi.fn(() => sending.promise),
+			});
+			const store = createChatStore({ client });
+			await store.bootstrap();
+			store.updateDraft("A", "question-A");
+			const sendRequest = store.sendSelectedMessage();
+			vi.mocked(client.probeRuntime).mockImplementationOnce(
+				() => health.promise,
+			);
+			const resuming = store.bootstrap({
+				preserveSelectionId: "A",
+				resuming: true,
+			});
+			await vi.waitFor(() =>
+				expect(client.getActiveJobs).toHaveBeenCalledTimes(2),
+			);
+			sending.resolve(accepted);
+			await sendRequest;
+			expect(store.getSnapshot().activeJobsByConversation.A?.jobId).toBe(
+				"new-A",
+			);
+			health.resolve({ ok: true, status: 200, body: "ok" });
+			await resuming;
+			expect(store.getSnapshot().activeJobsByConversation.A).toEqual(
+				snapshotIncludesSend ? snapshot : accepted,
+			);
+			expect(store.getSnapshot().activeJobsByConversation.B).toBeUndefined();
+			expect(store.getSnapshot().jobConversationById).toEqual({ "new-A": "A" });
+			expect(store.getSnapshot().connectionState).toBe("streaming");
+			expect(client.startJobEventStream).toHaveBeenLastCalledWith({
+				jobId: "new-A",
+				conversationId: "A",
+				afterSeq: snapshotIncludesSend ? 3 : 0,
+			});
+			expect(client.startJobEventStream).toHaveBeenCalledTimes(3);
+		},
+	);
+
 	test("refreshes a nonselected conversation even when its old JSON response arrives after resume", async () => {
 		const { client, store, start, complete } = resumeFixture();
 		const terminal = deferred<JobEventsJsonResponse>();
