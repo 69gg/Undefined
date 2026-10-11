@@ -205,6 +205,8 @@ uv run deploy up
 
 向导在最终确认前只读取配置，选择“否”或按 Ctrl+C 取消都不会生成文件或初始化子模块；Ctrl+C 会立即结束命令，不会采用默认的“继续”。已有 `config.toml` 支持 UTF-8 BOM 编码。`container` 模式还会为 Python 解释器自动映射已共享的 `deploy/data/cache/python_interpreter/`，让宿主 Docker 从正确的宿主路径读取执行文件。手工挂载 Docker socket 的容器需按 [Python 解释器工具说明](../src/Undefined/skills/tools/python_interpreter/README.md#容器内使用宿主-docker)配置共享路径。
 
+向导的模式、服务、NagaAgent、绑定地址和最终确认输入均可用 Ctrl+C 取消，CLI 会统一输出“已取消。”并以退出码 `1` 结束，不打印异常堆栈。最终确认选择“否”则正常返回退出码 `0`。
+
 ---
 
 ## pip/uv tool 部署（快速体验）

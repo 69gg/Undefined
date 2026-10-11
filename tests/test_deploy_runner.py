@@ -659,11 +659,22 @@ def test_cancel_up_writes_nothing_and_does_not_initialize_submodule(
 
 
 @pytest.mark.parametrize("existing_config", (False, True))
-def test_ctrl_c_at_final_confirmation_aborts_without_side_effects(
+@pytest.mark.parametrize(
+    "interrupt_prompt",
+    [
+        pytest.param("请输入编号 [", id="mode"),
+        pytest.param("请输入编号，逗号或空格分隔", id="services"),
+        pytest.param("拉取 NagaAgent 子模块吗？", id="nagaagent"),
+        pytest.param("绑定地址 [", id="port-bind"),
+        pytest.param("按以上计划继续？", id="confirmation"),
+    ],
+)
+def test_ctrl_c_in_wizard_aborts_without_side_effects(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     existing_config: bool,
+    interrupt_prompt: str,
 ) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -674,35 +685,25 @@ def test_ctrl_c_at_final_confirmation_aborts_without_side_effects(
     monkeypatch.setattr(runner, "repo_root", lambda: repo)
     monkeypatch.setattr(runner, "wizard_enabled", lambda options: True)
 
-    def _interrupt_final_confirmation(prompt: str) -> str:
-        if "按以上计划继续" in prompt:
+    def _interrupt_prompt(prompt: str) -> str:
+        if interrupt_prompt in prompt:
             raise KeyboardInterrupt
+        if "拉取 NagaAgent 子模块吗？" in prompt:
+            return "y"
         return ""
 
     def _unexpected_side_effect(*args: object, **kwargs: object) -> None:
         raise AssertionError("Ctrl+C 取消前不能写入子模块或调用 Docker")
 
-    monkeypatch.setattr("builtins.input", _interrupt_final_confirmation)
+    monkeypatch.setattr("builtins.input", _interrupt_prompt)
     monkeypatch.setattr(nagaagent, "ensure_submodule", _unexpected_side_effect)
     monkeypatch.setattr(docker_cli, "check_availability", _unexpected_side_effect)
 
-    assert (
-        cli.main(
-            [
-                "up",
-                "--mode",
-                "container",
-                "--with",
-                "",
-                "--with-nagaagent",
-                "--port-bind",
-                "127.0.0.1",
-            ]
-        )
-        == EXIT_ERROR
-    )
+    assert cli.main(["up"]) == EXIT_ERROR
     assert {path.name: path.read_bytes() for path in repo.iterdir()} == before
-    assert "已取消。" in capsys.readouterr().out
+    captured = capsys.readouterr()
+    assert "已取消。" in captured.out
+    assert "Traceback" not in captured.out + captured.err
 
 
 def test_up_accepts_bom_config(
