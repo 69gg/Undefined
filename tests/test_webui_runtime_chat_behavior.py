@@ -773,6 +773,43 @@ def test_late_old_job_poll_cannot_replace_or_stop_new_job(outcome: str) -> None:
     assert bots[-1]["contentTexts"] == ["new-live", "new-followup"], bots
 
 
+@pytest.mark.parametrize("outcome", ["events", "failure"])
+def test_late_same_job_poll_cannot_replay_events_or_replace_current_retry(
+    outcome: str,
+) -> None:
+    result = run_scenario(f"stale_job_poll_same-{outcome}")
+
+    assert result["beforeLate"]["nodes"][0]["content"] == ["old-live"], result
+    assert result["afterLate"] == result["beforeLate"], result
+    assert len(result["pollUrls"]) == 3, result
+    assert "after=3&" in result["pollUrls"][-1], result
+
+
+@pytest.mark.parametrize("outcome", ["success", "failure"])
+def test_late_history_cannot_erase_a_new_job_started_while_loading(
+    outcome: str,
+) -> None:
+    result = run_scenario(f"history_response_after_new_job_{outcome}")
+
+    assert result["beforeLate"] == {
+        "nodes": [{"role": "user", "content": ["new-question"]}]
+        + (
+            [{"role": "bot", "content": ["new-live-reply"]}]
+            if outcome == "success"
+            else []
+        ),
+        "disabled": outcome == "success",
+    }, result
+    assert result["afterLate"] == result["beforeLate"], result
+    if outcome == "success":
+        assert result["afterReopen"] == result["beforeLate"], result
+    else:
+        assert result["afterReopen"] == {
+            "nodes": [{"role": "bot", "content": ["persisted-after-failed-send"]}],
+            "disabled": False,
+        }, result
+
+
 def test_foreign_conversation_events_are_ignored() -> None:
     """别的会话的事件不得写进当前会话的聊天区。
 

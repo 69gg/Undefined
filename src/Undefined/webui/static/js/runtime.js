@@ -40,6 +40,7 @@
         streamingMessageId: null,
         activeChatMessageId: null,
         chatPollTimer: null,
+        chatPollRequest: null,
         chatPollBackoffMs: 500,
         chatClockTimer: null,
         activeJobResumeTimer: null,
@@ -972,6 +973,7 @@
     function stopChatPolling() {
         clearTimeout(runtimeState.chatPollTimer);
         runtimeState.chatPollTimer = null;
+        runtimeState.chatPollRequest = null;
     }
 
     function stopChatClock() {
@@ -5511,6 +5513,11 @@
 
     async function pollChatJob(jobId) {
         if (runtimeState.activeJobId !== jobId) return;
+        const request = {};
+        runtimeState.chatPollRequest = request;
+        const isCurrentRequest = () =>
+            runtimeState.chatPollRequest === request &&
+            runtimeState.activeJobId === jobId;
         runtimeState.chatBusy = true;
         setButtonLoading(get("btnRuntimeChatSend"), true);
         syncChatBusyControls();
@@ -5521,11 +5528,11 @@
                     format: "json",
                 }),
             ]);
-            if (runtimeState.activeJobId !== jobId) return;
+            if (!isCurrentRequest()) return;
             runtimeState.chatPollBackoffMs = CHAT_POLL_INTERVAL_MS;
             applyChatEventsPayload(data, jobId);
         } catch (error) {
-            if (runtimeState.activeJobId !== jobId) return;
+            if (!isCurrentRequest()) return;
             showToast(t("runtime.chat_reconnecting"), "warning", 1800);
             runtimeState.chatPollBackoffMs = Math.min(
                 8000,
@@ -5535,7 +5542,7 @@
                 ),
             );
         }
-        if (runtimeState.activeJobId !== jobId) return;
+        if (!isCurrentRequest()) return;
         if (!runtimeState.chatBusy) {
             stopChatPolling();
             return;
@@ -5784,6 +5791,11 @@
                 throw new Error("message is required");
             }
             if (isCurrentChatSendRequest(request)) {
+                runtimeState.chatHistoryRequest = null;
+                runtimeState.chatHistoryLoading = false;
+                runtimeState.chatHistoryLoaded = true;
+                const historyLoader = get("runtimeChatLoadMore");
+                if (historyLoader) historyLoader.textContent = "";
                 clearToolCollapseTimers();
                 stopChatPolling();
                 stopChatClock();
@@ -5826,6 +5838,7 @@
             await attachChatJob(jobId, 0);
         } catch (error) {
             if (!isCurrentChatSendRequest(request)) return;
+            runtimeState.chatHistoryLoaded = false;
             runtimeState.chatBusy = false;
             setButtonLoading(button, false);
             syncChatBusyControls();

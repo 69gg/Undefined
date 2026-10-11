@@ -353,6 +353,8 @@ WebUI 内嵌聊天渲染 `<attachment uid="..."/>` / `<pic uid="..."/>` 图片�
 
 按 `conversation_id + job_id + seq` 续接 WebChat job 事件，支持 JSON 增量查询和兼容 SSE。
 
+WebUI 每次轮询还会校验请求身份；切换会话后重新续接同一任务时，旧响应不会重复追加正文或改写当前重试状态。发送新消息后，发送前发起的迟到历史响应也不能清空当前用户消息和实时回复。
+
 - 参数：
   - `conversation_id`：可选；传入时必须与 job 所属会话一致。
   - `after`：返回大于该 `seq` 的事件。

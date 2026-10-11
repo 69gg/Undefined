@@ -2968,8 +2968,42 @@ async function staleChatJobPoll(env, outcome) {
     if (pending.length !== 2) {
         throw new Error(`expected two overlapping old job polls, got ${pending.length}`);
     }
+    if (outcome.startsWith("same-")) {
+        pending[1].resolve(response(200, {
+            job: { ...oldJob, last_seq: 3, current_stage: "thinking", current_stage_detail: "current-model" },
+            events: [
+                { seq: 1, event: "meta", payload: oldJob },
+                { seq: 2, event: "message", payload: { ...oldJob, content: "old-live" } },
+                { seq: 3, event: "stage", payload: { ...oldJob, stage: "thinking", detail: "current-model" } },
+            ],
+        }));
+        await tick();
+        const snapshot = () => ({
+            nodes: botNodes(window).map((node) => ({ content: node.contentTexts })),
+            stageDetails: Array.from(window.document.querySelectorAll(".runtime-chat-stage"))
+                .map((node) => node.dataset.stageDetail),
+            disabled: button.disabled,
+            toast: textOf(window, "toast-container"),
+        });
+        const beforeLate = snapshot();
+        if (outcome === "same-failure") {
+            pending[0].reject(new Error("obsolete same job poll failure"));
+        } else {
+            pending[0].resolve(response(200, {
+                job: { ...oldJob, current_stage: "thinking", current_stage_detail: "obsolete-model" },
+                events: [
+                    { seq: 1, event: "meta", payload: oldJob },
+                    { seq: 2, event: "message", payload: { ...oldJob, content: "old-live" } },
+                ],
+            }));
+        }
+        await tick();
+        const afterLate = snapshot();
+        await settle(650);
+        return { beforeLate, afterLate, pollUrls: pending.map((item) => item.url) };
+    }
     oldFinished = true;
-    pending[0].resolve(response(200, {
+    pending[1].resolve(response(200, {
         job: { ...oldJob, status: "done", last_seq: 3, history_finalized: true },
         events: [{ seq: 3, event: "done", payload: { job_id: "old", conversation_id: "A", reply: "old-live" } }],
     }));
@@ -2986,10 +3020,10 @@ async function staleChatJobPoll(env, outcome) {
     });
     const beforeLate = snapshot();
     if (outcome === "failure") {
-        pending[1].reject(new Error("obsolete poll failure"));
+        pending[0].reject(new Error("obsolete poll failure"));
     } else {
         const terminal = outcome === "done";
-        pending[1].resolve(response(200, {
+        pending[0].resolve(response(200, {
             job: terminal ? { ...oldJob, status: "done", history_finalized: true } : oldJob,
             events: terminal ? [
                 { seq: 99, event: "done", payload: { job_id: "old", conversation_id: "A", reply: "INTRUDER" } },
@@ -3014,7 +3048,7 @@ async function staleChatJobPoll(env, outcome) {
     };
 }
 
-for (const outcome of ["events", "done", "failure"]) {
+for (const outcome of ["events", "done", "failure", "same-events", "same-failure"]) {
     SCENARIOS[`stale_job_poll_${outcome}`] = (env) => staleChatJobPoll(env, outcome);
 }
 
@@ -3122,6 +3156,77 @@ async function staleChatSend(env, boundary, target, outcome, newerJob) {
     await tick();
     const afterLate = snapshot();
     return { beforeLate, afterLate, posts, polls };
+}
+
+async function historyResponseAfterNewJob(env, sendFails) {
+    const { window, response } = env;
+    let releaseHistory;
+    let deferHistory = false;
+    let running = false;
+    let failedSend = false;
+    const job = { job_id: "new-A", conversation_id: "A", status: "running", last_seq: 2 };
+    window.fetch = (url, options = {}) => {
+        const parsed = new window.URL(url, window.location.href);
+        const pathname = parsed.pathname;
+        if (pathname.endsWith("/chat/conversations")) return Promise.resolve(response(200, {
+            conversations: [{ id: "A", title: "A" }, { id: "B", title: "B" }],
+        }));
+        if (pathname.endsWith("/chat/history")) {
+            if (deferHistory && parsed.searchParams.get("conversation_id") === "A") {
+                return new Promise((resolve) => { releaseHistory = resolve; });
+            }
+            return Promise.resolve(response(200, {
+                items: failedSend ? [{ role: "bot", content: "persisted-after-failed-send" }] : [],
+                has_more: false,
+            }));
+        }
+        if (pathname.endsWith("/chat/jobs/active")) return Promise.resolve(response(200, { job: running ? job : null }));
+        if (pathname.endsWith("/chat/jobs") && options.method === "POST") {
+            if (sendFails) {
+                failedSend = true;
+                return Promise.resolve(response(409, { error: "definite-send-failure" }));
+            }
+            running = true;
+            return Promise.resolve(response(202, job));
+        }
+        if (pathname.endsWith("/events")) {
+            const after = Number(parsed.searchParams.get("after"));
+            return Promise.resolve(response(200, { job, events: [
+                { seq: 1, event: "meta", payload: job },
+                { seq: 2, event: "message", payload: { ...job, content: "new-live-reply" } },
+            ].filter((event) => event.seq > after) }));
+        }
+        throw new Error(`unexpected route ${pathname}`);
+    };
+    window.RuntimeController.init();
+    await window.RuntimeController.loadChatHistory(true);
+    window.document.querySelector('[data-conversation-select="B"]').click();
+    await tick();
+    deferHistory = true;
+    window.document.querySelector('[data-conversation-select="A"]').click();
+    await tick();
+    window.document.getElementById("runtimeChatInput").value = "new-question";
+    window.document.getElementById("btnRuntimeChatSend").click();
+    await tick();
+    const snapshot = () => ({
+        nodes: chatNodes(window).map((node) => ({ role: node.role, content: node.contentTexts })),
+        disabled: window.document.getElementById("btnRuntimeChatSend").disabled,
+    });
+    const beforeLate = snapshot();
+    if (!releaseHistory) throw new Error("A latest history was not pending");
+    releaseHistory(response(200, { items: [{ role: "bot", content: "older-history" }], has_more: false }));
+    await tick();
+    const afterLate = snapshot();
+    deferHistory = false;
+    window.__harness.setAuthenticated(true);
+    window.RuntimeController.onTabActivated("chat");
+    await tick();
+    return { beforeLate, afterLate, afterReopen: snapshot() };
+}
+
+for (const outcome of ["success", "failure"]) {
+    SCENARIOS[`history_response_after_new_job_${outcome}`] = (env) =>
+        historyResponseAfterNewJob(env, outcome === "failure");
 }
 
 for (const boundary of ["upload", "post"]) {
