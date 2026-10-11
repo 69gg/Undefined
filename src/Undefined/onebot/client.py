@@ -192,6 +192,7 @@ class OneBotClient:
 
     async def disconnect(self) -> None:
         """断开连接"""
+        self.stop_accepting_messages()
         self.stop()
         try:
             if self.ws:

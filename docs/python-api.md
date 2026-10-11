@@ -164,6 +164,12 @@ client = OneBotClient(cfg.onebot_ws_url, cfg.onebot_token, config_getter=lambda:
 
 `OneBotFileTransport` 的 `chunk_size`、`timeout` 和 `store` 可用于测试注入，不是额外业务配置。URL 模式需要将同一客户端传入 `RuntimeAPIContext.onebot`，并显式启动 `RuntimeAPIServer`；服务会绑定客户端的临时文件存储与实际监听端口，OneBot 发送方法不会自动启动 Runtime。准备错误为 `FileTransferError`，含 `mode`、`stage`、`user_message` 与 `file_transfer_error` 标记；投递发出后结果未确认仍为 `OneBotDeliveryUncertainError`。详细模式与部署要求见 [配置说明](configuration.md#43-onebot-协议端连接)。
 
+### `OneBotClient` 关闭与重连
+
+`stop_accepting_messages()` 关闭新消息与通知事件入口，但保留已有 API 响应的处理，供已接收任务收尾；随后可用 `drain_message_tasks()` 等待这些任务完成。`disconnect()` 会先关闭新事件入口，再关闭 WebSocket 并取消、回收剩余消息任务，直接调用它也不会在断开期间新建消息任务。
+
+`disconnect()` 用于终止当前客户端，后续启动应创建新的 `OneBotClient`。网络断线时，`run_with_reconnect()` 的自动重连路径不会调用 `disconnect()`，也不会关闭新事件入口。
+
 ### `Config.builder`
 
 链式构建器，适合在 base mapping 上覆盖少量字段：

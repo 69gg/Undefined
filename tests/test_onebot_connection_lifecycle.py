@@ -108,6 +108,56 @@ async def test_shutdown_cancels_and_collects_message_handlers(disconnect: bool) 
 
 
 @pytest.mark.asyncio
+async def test_disconnect_rejects_late_events_but_keeps_api_responses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = OneBotClient("ws://example.invalid")
+    socket = _WebSocket()
+    closing = asyncio.Event()
+    allow_close = asyncio.Event()
+    handled: list[dict[str, Any]] = []
+
+    async def close() -> None:
+        closing.set()
+        await allow_close.wait()
+        await _WebSocket.close(socket)
+
+    async def handler(data: dict[str, Any]) -> None:
+        handled.append(data)
+
+    monkeypatch.setattr(socket, "close", close)
+    client.ws = cast(Any, socket)
+    client.set_message_handler(handler)
+    response: asyncio.Future[dict[str, Any]] = (
+        asyncio.get_running_loop().create_future()
+    )
+    client._pending_responses["pending"] = response
+    disconnecting = asyncio.create_task(client.disconnect())
+    try:
+        await asyncio.wait_for(closing.wait(), 1)
+        await client._dispatch_message({"post_type": "message"})
+        await client._dispatch_message(
+            {"post_type": "notice", "notice_type": "notify", "sub_type": "poke"}
+        )
+        await client._dispatch_message(
+            {"post_type": "notice", "notice_type": "group_increase"}
+        )
+        await client._dispatch_message(
+            {"post_type": "notice", "notice_type": "group_decrease"}
+        )
+        await client._dispatch_message({"echo": "pending", "status": "ok"})
+        await asyncio.sleep(0)
+        assert not handled
+        assert not client._tasks
+        assert response.result()["status"] == "ok"
+    finally:
+        allow_close.set()
+        await asyncio.wait_for(disconnecting, 1)
+    assert client.ws is None
+    assert not client._tasks
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("phase", ["sleep", "connect"])
 async def test_reconnect_gap_cancellation_collects_previous_handlers(
     monkeypatch: pytest.MonkeyPatch, phase: str
