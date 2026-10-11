@@ -43,6 +43,7 @@ from Undefined.utils.sender import (
 )
 from Undefined.weixin.audio import PreparedWeixinVoice
 from Undefined.weixin.service import WeixinService, WeixinServiceError
+from Undefined.weixin.transport import WeixinDeliveryUncertainError
 
 
 @pytest.fixture
@@ -2003,14 +2004,55 @@ async def test_wechat_bundle_marks_each_ack_before_later_failure(
         for text in ("first", "second")
     ]
     async with RequestContext("private", user_id=12345) as ctx:
-        with pytest.raises(RequestTimeoutError):
+        with pytest.raises(
+            WeixinDeliveryUncertainError if first_ack else RequestTimeoutError
+        ) as raised:
             await bound_sender.send_private_forward_message(
                 12345, nodes, history_message="two nodes"
             )
+        if first_ack:
+            assert raised.value.__cause__ is failure
         assert ctx.get_resource("message_sent_this_turn") is (
             True if first_ack else None
         )
     assert service.send_items.await_count == (2 if first_ack else 1)
+    cast(AsyncMock, sender.history_manager.add_private_message).assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("first_ack", [False, True])
+@pytest.mark.parametrize("cancelled", [False, True])
+async def test_wechat_text_chunks_preserve_partial_ack_on_later_failure(
+    sender: MessageSender,
+    first_ack: bool,
+    cancelled: bool,
+) -> None:
+    failure = asyncio.CancelledError() if cancelled else ApiError(40001, "sendmessage")
+    service = SimpleNamespace(
+        send_text=AsyncMock(
+            side_effect=["first-ack", failure] if first_ack else failure
+        )
+    )
+    sender.set_weixin_service(service)
+    async with RequestContext("private", user_id=12345) as ctx:
+        # 先前无关消息的成功标志不能把本条首次拒绝误判成部分投递。
+        ctx.set_resource("message_sent_this_turn", True)
+        expected_error = (
+            asyncio.CancelledError
+            if cancelled
+            else WeixinDeliveryUncertainError
+            if first_ack
+            else ApiError
+        )
+        with pytest.raises(expected_error) as raised:
+            await sender.send_address_message(
+                DeliveryAddress("wechat", 12345), "x" * (MAX_MESSAGE_LENGTH + 1)
+            )
+        if first_ack and not cancelled:
+            assert raised.value.__cause__ is failure
+        else:
+            assert raised.value is failure
+    assert service.send_text.await_count == (2 if first_ack else 1)
     cast(AsyncMock, sender.history_manager.add_private_message).assert_not_awaited()
 
 

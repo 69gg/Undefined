@@ -31,7 +31,7 @@ def is_definitive_weixin_delivery_rejection(exc: BaseException) -> bool:
 
 
 class WeixinDeliveryUncertainError(WeixinIlinkError):
-    """消息派发已发起，但上游没有给出可确认的投递结果。"""
+    """消息已开始派发，但无法确认整体投递完成。"""
 
     delivery_uncertain: bool = True
 

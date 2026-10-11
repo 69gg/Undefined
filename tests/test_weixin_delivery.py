@@ -32,7 +32,17 @@ from Undefined.weixin.transport import (
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "response", ["timeout", "server_error", "rejection", "history_error"]
+    "response",
+    [
+        "timeout",
+        "server_error",
+        "rejection",
+        "history_error",
+        "partial_bundle_rejection",
+        "partial_sequential_rejection",
+        "partial_fallback_rejection",
+        "first_sequential_rejection",
+    ],
 )
 async def test_sdk_dispatch_error_controls_jm_fallback(
     tmp_path: Path,
@@ -44,6 +54,18 @@ async def test_sdk_dispatch_error_controls_jm_fallback(
     def handle(request: httpx.Request) -> httpx.Response:
         message = json.loads(request.content)["msg"]
         requests.append(message)
+        rejected_requests = {
+            "partial_bundle_rejection": {2, 3},
+            "partial_sequential_rejection": {2},
+            "partial_fallback_rejection": {1, 3},
+            "first_sequential_rejection": {1},
+        }.get(response)
+        if rejected_requests is not None:
+            return httpx.Response(
+                200,
+                json={"ret": 40001 if len(requests) in rejected_requests else 0},
+                request=request,
+            )
         if len(requests) == 1:
             if response == "history_error":
                 return httpx.Response(200, json={"ret": 0}, request=request)
@@ -75,8 +97,13 @@ async def test_sdk_dispatch_error_controls_jm_fallback(
         ]
     sender_config = MagicMock()
     sender_config.is_private_allowed.return_value = True
-    sender_config.weixin.multi_item_messages_enabled = True
-    sender_config.weixin.multi_item_max_items = 10
+    sender_config.weixin.multi_item_messages_enabled = response not in {
+        "partial_sequential_rejection",
+        "first_sequential_rejection",
+    }
+    sender_config.weixin.multi_item_max_items = (
+        1 if response == "partial_bundle_rejection" else 10
+    )
     sender_config.weixin.media_max_size_mb = 100
     sender = MessageSender(MagicMock(), history, bot_qq=999, config=sender_config)
     sender.set_weixin_service(service)
@@ -114,7 +141,13 @@ async def test_sdk_dispatch_error_controls_jm_fallback(
         )
     zip_send.assert_awaited_once()
     await service.stop()
-    if response == "history_error":
+    if response.startswith("partial_"):
+        assert len(requests) == (2 if response == "partial_sequential_rejection" else 3)
+        assert "投递结果未确认" in status
+    elif response == "first_sequential_rejection":
+        assert [len(message["item_list"]) for message in requests] == [1, 1, 1]
+        assert "合并转发被拒，已改为普通消息发送信息与密码" in status
+    elif response == "history_error":
         assert [len(message["item_list"]) for message in requests] == [2]
         assert "已发送合并转发" in status
     elif response == "rejection":

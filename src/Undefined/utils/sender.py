@@ -1,7 +1,7 @@
 """消息发送管理"""
 
 import logging
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -43,6 +43,7 @@ from Undefined.utils.message_turn import mark_message_sent_this_turn
 from Undefined.utils.paths import file_uri_path_text
 from Undefined.weixin.audio import PreparedWeixinVoice
 from Undefined.weixin.transport import (
+    WeixinDeliveryUncertainError,
     is_definitive_weixin_delivery_rejection as is_definitive_weixin_delivery_rejection,
 )
 
@@ -74,6 +75,19 @@ def _weixin_history_guard(user_id: int) -> Iterator[None]:
         yield
     except Exception:
         logger.exception("[历史记录] 记录微信发送失败: user=%s", user_id)
+
+
+@contextmanager
+def _weixin_partial_delivery_guard(has_sent: Callable[[], bool]) -> Iterator[None]:
+    """后续分片失败时保留本条消息已部分送达的事实，禁止整条降级重发。"""
+    try:
+        yield
+    except Exception as exc:
+        if has_sent() and not getattr(exc, "delivery_uncertain", False):
+            raise WeixinDeliveryUncertainError(
+                "微信消息已部分送达，禁止整条自动重发"
+            ) from exc
+        raise
 
 
 def _extract_message_id(result: object) -> int | None:
@@ -794,75 +808,76 @@ class MessageSender:
 
         reply_mode = ""
         reference_pending = reference is not None
-        for unit in delivery_units:
-            if unit.kind == "text":
-                text_chunks = _split_text_chunks(unit.text)
+        with _weixin_partial_delivery_guard(lambda: sent_any):
+            for unit in delivery_units:
+                if unit.kind == "text":
+                    text_chunks = _split_text_chunks(unit.text)
+                    if reference_pending:
+                        assert reference is not None
+                        try:
+                            receipt = await service.send_text(
+                                user_id,
+                                text_chunks[0],
+                                reference=reference,
+                            )
+                        except Exception as exc:
+                            if not is_definitive_weixin_delivery_rejection(exc):
+                                raise
+                            logger.warning(
+                                "[微信引用] 原生引用被明确拒绝，降级为 Markdown: "
+                                "user=%s target=%s error=%s",
+                                user_id,
+                                reply_to,
+                                type(exc).__name__,
+                            )
+                            assert reply_context is not None
+                            fallback_text = format_markdown_reply(
+                                reply_context,
+                                unit.text,
+                            )
+                            for chunk in _split_text_chunks(fallback_text):
+                                record_sent(await service.send_text(user_id, chunk))
+                            reply_mode = "markdown_fallback"
+                        else:
+                            record_sent(receipt)
+                            for chunk in text_chunks[1:]:
+                                record_sent(await service.send_text(user_id, chunk))
+                            reply_mode = "native"
+                        reference_pending = False
+                    else:
+                        for chunk in text_chunks:
+                            record_sent(await service.send_text(user_id, chunk))
+                    continue
+
                 if reference_pending:
                     assert reference is not None
                     try:
-                        receipt = await service.send_text(
-                            user_id,
-                            text_chunks[0],
-                            reference=reference,
+                        receipt = await send_media_unit(
+                            unit,
+                            item_reference=reference,
                         )
                     except Exception as exc:
                         if not is_definitive_weixin_delivery_rejection(exc):
                             raise
                         logger.warning(
-                            "[微信引用] 原生引用被明确拒绝，降级为 Markdown: "
+                            "[微信引用] 原生媒体引用被明确拒绝，降级为 Markdown: "
                             "user=%s target=%s error=%s",
                             user_id,
                             reply_to,
                             type(exc).__name__,
                         )
                         assert reply_context is not None
-                        fallback_text = format_markdown_reply(
-                            reply_context,
-                            unit.text,
-                        )
+                        fallback_text = format_markdown_reply(reply_context, "")
                         for chunk in _split_text_chunks(fallback_text):
                             record_sent(await service.send_text(user_id, chunk))
+                        record_sent(await send_media_unit(unit))
                         reply_mode = "markdown_fallback"
                     else:
                         record_sent(receipt)
-                        for chunk in text_chunks[1:]:
-                            record_sent(await service.send_text(user_id, chunk))
                         reply_mode = "native"
                     reference_pending = False
                 else:
-                    for chunk in text_chunks:
-                        record_sent(await service.send_text(user_id, chunk))
-                continue
-
-            if reference_pending:
-                assert reference is not None
-                try:
-                    receipt = await send_media_unit(
-                        unit,
-                        item_reference=reference,
-                    )
-                except Exception as exc:
-                    if not is_definitive_weixin_delivery_rejection(exc):
-                        raise
-                    logger.warning(
-                        "[微信引用] 原生媒体引用被明确拒绝，降级为 Markdown: "
-                        "user=%s target=%s error=%s",
-                        user_id,
-                        reply_to,
-                        type(exc).__name__,
-                    )
-                    assert reply_context is not None
-                    fallback_text = format_markdown_reply(reply_context, "")
-                    for chunk in _split_text_chunks(fallback_text):
-                        record_sent(await service.send_text(user_id, chunk))
                     record_sent(await send_media_unit(unit))
-                    reply_mode = "markdown_fallback"
-                else:
-                    record_sent(receipt)
-                    reply_mode = "native"
-                reference_pending = False
-            else:
-                record_sent(await send_media_unit(unit))
         if not sent_any and message.strip():
             raise ValueError("微信消息中没有可投递的文本或本地媒体")
 
@@ -2042,30 +2057,35 @@ class AddressBoundSender:
 
         receipts: list[str] = []
         sequential_fallback = False
-        for batch in batches:
-            if sequential_fallback:
-                receipts.extend(await self._send_weixin_forward_units(batch))
-                continue
-            items = await self._weixin_outbound_items(batch)
-            try:
-                receipt = str(
-                    await service.send_items(self._address.target_id, items) or ""
-                ).strip()
-            except Exception as exc:
-                if not self._is_definitive_multi_item_rejection(exc):
-                    raise
-                logger.warning(
-                    "[微信转发] 多项消息被上游明确拒绝，回退顺序发送: "
-                    "address=%s error=%s",
-                    self._address.canonical,
-                    type(exc).__name__,
-                )
-                sequential_fallback = True
-                receipts.extend(await self._send_weixin_forward_units(batch))
-            else:
-                mark_message_sent_this_turn()
-                if receipt:
-                    receipts.append(receipt)
+        sent_any = False
+        with _weixin_partial_delivery_guard(lambda: sent_any):
+            for batch in batches:
+                if sequential_fallback:
+                    receipts.extend(await self._send_weixin_forward_units(batch))
+                    sent_any = True
+                    continue
+                items = await self._weixin_outbound_items(batch)
+                try:
+                    receipt = str(
+                        await service.send_items(self._address.target_id, items) or ""
+                    ).strip()
+                except Exception as exc:
+                    if not self._is_definitive_multi_item_rejection(exc):
+                        raise
+                    logger.warning(
+                        "[微信转发] 多项消息被上游明确拒绝，回退顺序发送: "
+                        "address=%s error=%s",
+                        self._address.canonical,
+                        type(exc).__name__,
+                    )
+                    sequential_fallback = True
+                    receipts.extend(await self._send_weixin_forward_units(batch))
+                    sent_any = True
+                else:
+                    mark_message_sent_this_turn()
+                    sent_any = True
+                    if receipt:
+                        receipts.append(receipt)
         return receipts
 
     async def _weixin_outbound_items(
@@ -2116,40 +2136,45 @@ class AddressBoundSender:
         units: list[_WeixinDeliveryUnit],
     ) -> list[str]:
         receipts: list[str] = []
-        for unit in units:
-            if unit.kind == "text":
-                for chunk in _split_text_chunks(unit.text):
-                    receipt = await self._sender.send_address_message(
+        sent_any = False
+        with _weixin_partial_delivery_guard(lambda: sent_any):
+            for unit in units:
+                if unit.kind == "text":
+                    for chunk in _split_text_chunks(unit.text):
+                        receipt = await self._sender.send_address_message(
+                            self._address,
+                            chunk,
+                            auto_history=False,
+                        )
+                        sent_any = True
+                        receipt_text = str(receipt or "").strip()
+                        if receipt_text:
+                            receipts.append(receipt_text)
+                    continue
+                if unit.path is None:
+                    raise ValueError("微信转发媒体消息缺少本地文件")
+                if unit.kind == "voice":
+                    if unit.voice is None:
+                        raise ValueError("微信转发语音尚未完成发送前编码")
+                    receipt = await self._sender._send_weixin_prepared_voice(
                         self._address,
-                        chunk,
+                        unit.path,
+                        unit.voice,
+                        name=unit.path.name,
                         auto_history=False,
                     )
-                    receipt_text = str(receipt or "").strip()
-                    if receipt_text:
-                        receipts.append(receipt_text)
-                continue
-            if unit.path is None:
-                raise ValueError("微信转发媒体消息缺少本地文件")
-            if unit.kind == "voice":
-                if unit.voice is None:
-                    raise ValueError("微信转发语音尚未完成发送前编码")
-                receipt = await self._sender._send_weixin_prepared_voice(
+                    sent_any = True
+                    if receipt:
+                        receipts.append(receipt)
+                    continue
+                await self._sender.send_address_file(
                     self._address,
-                    unit.path,
-                    unit.voice,
+                    str(unit.path),
                     name=unit.path.name,
+                    kind=unit.kind,
                     auto_history=False,
                 )
-                if receipt:
-                    receipts.append(receipt)
-                continue
-            await self._sender.send_address_file(
-                self._address,
-                str(unit.path),
-                name=unit.path.name,
-                kind=unit.kind,
-                auto_history=False,
-            )
+                sent_any = True
         return receipts
 
     @staticmethod
