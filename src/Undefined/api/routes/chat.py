@@ -424,6 +424,7 @@ class ChatJobManager:
             if self._closing:
                 raise ChatJobManagerClosingError("Chat service is stopping")
             # 会话存在性检查与 job 接受必须和删除共用同一串行边界。
+            # 历史写入也在锁内，其他会话需等待写入完成，确保 stop/删除不会漏掉在途创建。
             conversation = await self.conversation_store.get_conversation(
                 resolved_conversation_id
             )

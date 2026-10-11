@@ -258,6 +258,8 @@ class WeixinService:
         self._confirmations: dict[str, _Confirmation] = {}
         self._runtimes: dict[str, _AccountRuntime] = {}
         self._login_lock = asyncio.Lock()
+        # 帐号文件提交与客户端启停共用锁，避免删除/改绑与运行时发布交错；
+        # 管理操作会等待彼此的 I/O，消息发送不依赖这把生命周期锁。
         self._lifecycle_lock = asyncio.Lock()
         self._running = False
         self._closed = False

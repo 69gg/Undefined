@@ -73,6 +73,8 @@ class AutomationStorage:
                 await io.write_json(self.path, data_to_save, use_lock=True)
                 logger.info("[自动化] 已保存 %s 条到 %s", len(data_to_save), self.path)
 
+        # 调用方在保存前已修改共享 tasks；等锁时取消也不能丢掉这次持久化，
+        # 否则旧写入完成后，重启可能恢复内存中已经删除的任务。
         await io.run_cancellation_safe(save_snapshot())
 
     def _write_json_sync(self, path: Path, data: dict[str, Any]) -> None:
