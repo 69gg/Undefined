@@ -14,6 +14,7 @@ from weixin_ilink_client import (
     AsyncWeixinIlinkClient,
     ClientOptions,
     ConfigurationError,
+    HttpError,
     MediaKind,
     OutboundMediaItem,
     RequestTimeoutError,
@@ -26,7 +27,7 @@ from weixin_ilink_client.constants import STALE_TOKEN_ERROR_CODE
 from Undefined.config import Config
 from Undefined.jm.sender import _send_result
 from Undefined.utils.message_targets import DeliveryAddress
-from Undefined.utils.sender import AddressBoundSender, MessageSender
+from Undefined.utils.sender import MAX_MESSAGE_LENGTH, AddressBoundSender, MessageSender
 from Undefined.weixin.models import WeixinAccount
 from Undefined.weixin.service import WeixinService
 from Undefined.weixin.store import UndefinedIlinkStateStore
@@ -186,6 +187,111 @@ async def test_sdk_dispatch_error_controls_jm_fallback(
         assert len(requests) == 1
         assert len(requests[0]["item_list"]) == 2
         assert "投递结果未确认" in status
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status_code", [400, 408, 425, 429, 503])
+async def test_sdk_http_rejection_preserves_delivery_classification(
+    status_code: int,
+) -> None:
+    requests: list[httpx.Request] = []
+
+    def reject(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(status_code, request=request)
+
+    credentials = WeixinCredentials(
+        "account", "token", "https://isolated.invalid", "user"
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(reject)) as http_client:
+        client = AsyncWeixinIlinkClient(
+            credentials,
+            transport=UndefinedIlinkTransport(http_client=http_client),
+        )
+        error_type = WeixinDeliveryUncertainError if status_code == 503 else HttpError
+        with pytest.raises(error_type) as raised:
+            await client.send_text("peer", "message")
+
+    assert len(requests) == 1
+    assert bool(getattr(raised.value, "delivery_uncertain", False)) is (
+        status_code == 503
+    )
+    assert is_definitive_weixin_delivery_rejection(raised.value) is (status_code == 400)
+    http_error = raised.value.__cause__ if status_code == 503 else raised.value
+    assert isinstance(http_error, HttpError)
+    assert http_error.status_code == status_code
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status_code", [408, 425, 429, 503])
+@pytest.mark.parametrize("partial", [False, True])
+async def test_sdk_http_rejection_blocks_reply_fallback_and_partial_resend(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    status_code: int,
+    partial: bool,
+) -> None:
+    requests: list[dict[str, Any]] = []
+
+    def reject(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content)["msg"])
+        if partial and len(requests) == 1:
+            return httpx.Response(200, json={"ret": 0}, request=request)
+        return httpx.Response(status_code, request=request)
+
+    config = Config.from_mapping(
+        {"weixin": {"enabled": True, "state_dir": str(tmp_path)}}, strict=False
+    )
+    service = WeixinService(config)
+    history = MagicMock()
+    history.find_private_message_by_id = AsyncMock(
+        return_value={
+            "message_id": "inbound-1",
+            "display_name": "微信用户",
+            "message": "旧消息",
+            "transport": {"channel": "wechat", "address": "wechat:12345"},
+        }
+    )
+    sender = MessageSender(MagicMock(), history, bot_qq=999, config=MagicMock())
+    sender.set_weixin_service(service)
+    credentials = WeixinCredentials(
+        "account", "token", "https://isolated.invalid", "user"
+    )
+    message = "x" * (MAX_MESSAGE_LENGTH + 1) if partial else "message"
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(reject)
+        ) as http_client:
+            client = AsyncWeixinIlinkClient(
+                credentials,
+                transport=UndefinedIlinkTransport(http_client=http_client),
+            )
+            monkeypatch.setattr(
+                service,
+                "_resolve_runtime",
+                AsyncMock(
+                    return_value=(
+                        SimpleNamespace(peer_id="peer"),
+                        SimpleNamespace(client=client),
+                    )
+                ),
+            )
+            uncertain = partial or status_code == 503
+            error_type = WeixinDeliveryUncertainError if uncertain else HttpError
+            with pytest.raises(error_type) as raised:
+                await sender.send_address_message(
+                    DeliveryAddress("wechat", 12345),
+                    message,
+                    auto_history=False,
+                    reply_to="inbound-1",
+                )
+        assert bool(getattr(raised.value, "delivery_uncertain", False)) is uncertain
+        assert len(requests) == (2 if partial else 1)
+        if partial and status_code != 503:
+            assert isinstance(raised.value.__cause__, HttpError)
+            assert raised.value.__cause__.status_code == status_code
+    finally:
+        await service.stop()
 
 
 @pytest.mark.asyncio

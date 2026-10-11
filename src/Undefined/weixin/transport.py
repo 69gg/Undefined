@@ -63,6 +63,11 @@ class UndefinedIlinkTransport(IlinkTransport):
                 (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout),
             ):
                 raise
+            # 408/425/429 是服务端明确拒绝（超时未收全、过早数据、限流），
+            # 请求肯定未被正常投递，可整体重试；不能按“结果未确认”禁止重发，
+            # 也不属于可用移除引用/拆分解决的结构性拒绝（sender 侧不做 markdown 降级）。
+            if isinstance(exc, HttpError) and exc.status_code in {408, 425, 429}:
+                raise
             raise WeixinDeliveryUncertainError(
                 "微信投递结果未确认，禁止自动重发"
             ) from exc
