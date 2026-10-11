@@ -1042,6 +1042,199 @@ async def test_naga_uncertain_delivery_does_not_become_confirmed_success(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("cancel_cleanup", [False, True])
+async def test_naga_failed_uuid_cleanup_survives_cancellation_and_waiters(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    cancel_cleanup: bool,
+) -> None:
+    entered = asyncio.Event()
+    release_moderation = asyncio.Event()
+    cleanup_started = asyncio.Event()
+
+    class _Security:
+        calls = 0
+
+        async def moderate_naga_message(
+            self, *, message_format: str, content: str
+        ) -> NagaModerationResult:
+            self.calls += 1
+            if self.calls == 1:
+                entered.set()
+                await release_moderation.wait()
+                raise RuntimeError("moderation failed before delivery")
+            return NagaModerationResult(
+                blocked=False,
+                status="passed",
+                categories=[],
+                message="ok",
+                model_name="naga-moderation",
+            )
+
+    store = NagaStore(tmp_path / "naga_bindings.json")
+    await store.submit_binding("alice", qq_id=123, group_id=456, bind_uuid="uuid_a")
+    await store.activate_binding(
+        bind_uuid="uuid_a", naga_id="alice", delivery_signature="sig_1"
+    )
+    sender = _FakeSender()
+    security = _Security()
+    server = _make_server(store=store, sender=sender, security=security)
+    state = server._naga_state
+    fail_request_uuid = state.fail_request_uuid
+    cleanup_calls = 0
+
+    async def tracked_failure(
+        request_uuid: str, payload_hash: str, exc: BaseException
+    ) -> None:
+        nonlocal cleanup_calls
+        cleanup_calls += 1
+        cleanup_started.set()
+        await fail_request_uuid(request_uuid, payload_hash, exc)
+
+    monkeypatch.setattr(state, "fail_request_uuid", tracked_failure)
+    body: dict[str, Any] = {
+        "bind_uuid": "uuid_a",
+        "naga_id": "alice",
+        "delivery_signature": "sig_1",
+        "uuid": "req-failed-cleanup",
+        "target": {"qq_id": 123, "group_id": 456, "mode": "group"},
+        "message": {"format": "text", "content": "hello"},
+    }
+
+    async def send() -> Response:
+        return await server._naga_messages_send_handler(
+            _make_request(
+                json_body=body, headers={"Authorization": "Bearer shared-key"}
+            )
+        )
+
+    owner = asyncio.create_task(send())
+    waiter: asyncio.Task[Response] | None = None
+    lock_held = False
+    try:
+        await asyncio.wait_for(entered.wait(), 1)
+        waiter = asyncio.create_task(send())
+        await asyncio.sleep(0)
+        assert sum(state.send_inflight.values()) == 2
+        await state.request_uuid_lock.acquire()
+        lock_held = True
+        release_moderation.set()
+        await asyncio.wait_for(cleanup_started.wait(), 1)
+        if cancel_cleanup:
+            owner.cancel()
+            await asyncio.sleep(0)
+            owner.cancel()
+            await asyncio.sleep(0)
+        state.request_uuid_lock.release()
+        lock_held = False
+        expected_error = asyncio.CancelledError if cancel_cleanup else RuntimeError
+        with pytest.raises(expected_error):
+            await asyncio.wait_for(owner, 1)
+        assert not state.request_uuid_inflight
+        with pytest.raises(RuntimeError, match="moderation failed"):
+            await asyncio.wait_for(waiter, 1)
+        assert cleanup_calls == 1  # 等待者不拥有失败请求，不能再清理该 UUID。
+        assert not state.send_inflight
+        assert not store._active_deliveries
+        assert sender.group_messages == []
+        retry = await send()
+        assert retry.status == 200
+        assert sender.group_messages == [(456, "hello")]
+        assert security.calls == 2
+    finally:
+        release_moderation.set()
+        if lock_held:
+            state.request_uuid_lock.release()
+        pending = [owner, *([waiter] if waiter is not None else [])]
+        for task in pending:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+        await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_naga_cancelled_uuid_waiter_keeps_owner_and_other_waiters(
+    tmp_path: Path,
+) -> None:
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    class _Security:
+        calls = 0
+
+        async def moderate_naga_message(
+            self, *, message_format: str, content: str
+        ) -> NagaModerationResult:
+            self.calls += 1
+            entered.set()
+            await release.wait()
+            return NagaModerationResult(
+                blocked=False,
+                status="passed",
+                categories=[],
+                message="ok",
+                model_name="naga-moderation",
+            )
+
+    store = NagaStore(tmp_path / "naga_bindings.json")
+    await store.submit_binding("alice", qq_id=123, group_id=456, bind_uuid="uuid_a")
+    await store.activate_binding(
+        bind_uuid="uuid_a", naga_id="alice", delivery_signature="sig_1"
+    )
+    sender = _FakeSender()
+    security = _Security()
+    server = _make_server(store=store, sender=sender, security=security)
+    body: dict[str, Any] = {
+        "bind_uuid": "uuid_a",
+        "naga_id": "alice",
+        "delivery_signature": "sig_1",
+        "uuid": "req-cancelled-waiter",
+        "target": {"qq_id": 123, "group_id": 456, "mode": "group"},
+        "message": {"format": "text", "content": "hello"},
+    }
+
+    async def send() -> Response:
+        return await server._naga_messages_send_handler(
+            _make_request(
+                json_body=body, headers={"Authorization": "Bearer shared-key"}
+            )
+        )
+
+    owner = asyncio.create_task(send())
+    tasks = [owner]
+    try:
+        await asyncio.wait_for(entered.wait(), 1)
+        cancelled_waiter = asyncio.create_task(send())
+        tasks.append(cancelled_waiter)
+        await asyncio.sleep(0)
+        cancelled_waiter.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(cancelled_waiter, 1)
+        future = server._naga_state.request_uuid_inflight[body["uuid"]][1]
+        assert not future.done()
+        assert not owner.done()
+        other_waiter = asyncio.create_task(send())
+        tasks.append(other_waiter)
+        await asyncio.sleep(0)
+        release.set()
+        first, second = await asyncio.wait_for(asyncio.gather(owner, other_waiter), 1)
+        assert first.status == second.status == 200
+        assert _json(first) == _json(second)
+        assert sender.group_messages == [(456, "hello")]
+        assert security.calls == 1
+        assert not server._naga_state.request_uuid_inflight
+        assert not server._naga_state.send_inflight
+    finally:
+        release.set()
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        await server.stop()
+
+
+@pytest.mark.asyncio
 async def test_naga_messages_send_deduplicates_inflight_uuid(
     tmp_path: Path,
 ) -> None:

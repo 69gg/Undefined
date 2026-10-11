@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 import logging
 import os
@@ -148,6 +149,7 @@ async def naga_messages_send_handler(
             inflight_count,
         )
     result_committed = False
+    owns_request_uuid = False
 
     async def commit_result(response: Response) -> None:
         nonlocal result_committed
@@ -200,11 +202,13 @@ async def naga_messages_send_handler(
                     request_uuid,
                     message_key,
                 )
-                cached_status, cached_payload = await wait_future
+                # 等待者取消只结束自己的请求，不能取消 owner 的共享结果。
+                cached_status, cached_payload = await asyncio.shield(wait_future)
                 return web.json_response(
                     deepcopy(cached_payload),
                     status=int(cached_status),
                 )
+            owns_request_uuid = dedupe_action == "owner"
 
         response = await naga_messages_send_impl(
             ctx,
@@ -224,8 +228,11 @@ async def naga_messages_send_handler(
             await run_cancellation_safe(commit_result(response))
         return response
     except Exception as exc:
-        if request_uuid and not result_committed:
-            await naga_state.fail_request_uuid(request_uuid, message_key, exc)
+        if owns_request_uuid and not result_committed:
+            # 只有 owner 能终结该 UUID；错误清理等锁时也必须抵抗调用方取消。
+            await run_cancellation_safe(
+                naga_state.fail_request_uuid(request_uuid, message_key, exc)
+            )
         raise
     finally:
         remaining = await run_cancellation_safe(naga_state.track_send_done(message_key))
