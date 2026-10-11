@@ -1358,7 +1358,14 @@ async def test_wechat_ack_survives_history_failure_without_swallowing_cancel(
                 await send()
         else:
             await send()
-            assert "记录微信发送失败" in caplog.text
+            failures = [
+                record
+                for record in caplog.records
+                if "微信消息已送达，但发送后历史或附件记录失败" in record.message
+            ]
+            assert len(failures) == 1
+            assert failures[0].levelno == logging.ERROR
+            assert failures[0].exc_info is not None
         assert ctx.get_resource("message_sent_this_turn") is True
     history.assert_awaited_once()
     assert (

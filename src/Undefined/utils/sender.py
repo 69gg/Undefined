@@ -74,7 +74,10 @@ def _weixin_history_guard(user_id: int) -> Iterator[None]:
     try:
         yield
     except Exception:
-        logger.exception("[历史记录] 记录微信发送失败: user=%s", user_id)
+        logger.exception(
+            "[历史记录] 微信消息已送达，但发送后历史或附件记录失败（不重发）: user=%s",
+            user_id,
+        )
 
 
 @contextmanager
