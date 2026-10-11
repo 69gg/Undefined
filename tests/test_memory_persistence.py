@@ -19,7 +19,14 @@ from Undefined.api.routes.memory import (
     memory_update_handler,
 )
 from Undefined.memory import MemoryStorage
+from Undefined.skills.tools import ToolRegistry
 from Undefined.skills.toolsets.memory.add.handler import execute as add_memory_tool
+from Undefined.skills.toolsets.memory.delete.handler import (
+    execute as delete_memory_tool,
+)
+from Undefined.skills.toolsets.memory.update.handler import (
+    execute as update_memory_tool,
+)
 from Undefined.utils import io
 
 
@@ -130,6 +137,56 @@ async def test_memory_failure_is_not_deduplicated_on_healthy_retry(
     result = await add_memory_tool({"fact": "retry"}, {"memory_storage": storage})
     assert result.startswith("已保存记忆:")
     assert _facts(MemoryStorage()) == ["retry"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["add", "update", "delete"])
+@pytest.mark.parametrize("strict", [False, True])
+async def test_memory_tools_report_persistence_failure_through_registry(
+    memory_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+    strict: bool,
+) -> None:
+    storage = MemoryStorage()
+    memory_uuid = await storage.add("original")
+    before = memory_path.read_bytes()
+    tool_name = f"memory.{operation}"
+    registry = ToolRegistry(tools_dir=memory_path.parent / "tools")
+    handlers = {
+        "add": add_memory_tool,
+        "update": update_memory_tool,
+        "delete": delete_memory_tool,
+    }
+    registry.register_external_item(
+        tool_name,
+        {"type": "function", "function": {"name": tool_name}},
+        handlers[operation],
+    )
+    args = {"uuid": memory_uuid, "fact": "new"}
+    context = {"memory_storage": storage}
+    real_write = io.write_json
+    monkeypatch.setattr(
+        io, "write_json", AsyncMock(side_effect=OSError("isolated ENOSPC"))
+    )
+    if strict:
+        with pytest.raises(OSError, match="ENOSPC"):
+            await registry.execute_tool_strict(tool_name, args, context)
+    else:
+        result = await registry.execute_tool(tool_name, args, context)
+        assert result == f"执行 {tool_name} 时出错: isolated ENOSPC"
+    assert _facts(storage) == ["original"]
+    assert memory_path.read_bytes() == before
+    stats = registry.get_stats()[tool_name]
+    assert (stats.count, stats.success, stats.failure) == (1, 0, 1)
+    assert stats.last_error == "isolated ENOSPC"
+
+    monkeypatch.setattr(io, "write_json", real_write)
+    result = await registry.execute_tool(tool_name, args, context)
+    assert result.startswith("已")
+    assert (stats.count, stats.success, stats.failure) == (2, 1, 1)
+    expected = {"add": ["original", "new"], "update": ["new"], "delete": []}
+    assert _facts(storage) == _facts(MemoryStorage()) == expected[operation]
 
 
 @pytest.mark.asyncio
