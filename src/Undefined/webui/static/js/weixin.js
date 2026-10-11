@@ -18,6 +18,7 @@
         qrObjectUrl: "",
         qrRevision: 0,
         dialogPreviousFocus: null,
+        dialogGeneration: 0,
     };
 
     class WeixinRequestError extends Error {
@@ -393,6 +394,7 @@
 
     async function loadAll(force = false) {
         if (weixinState.busy || (!force && weixinState.loaded)) return;
+        const generation = weixinState.dialogGeneration;
         setBusy(true);
         setPageStatus(t("common.loading"));
         try {
@@ -415,7 +417,27 @@
                 "error",
             );
         } finally {
-            setBusy(false);
+            if (generation === weixinState.dialogGeneration) setBusy(false);
+        }
+    }
+
+    function isCurrentDialog(generation, sessionId) {
+        return (
+            generation === weixinState.dialogGeneration &&
+            !get("weixinDialogBackdrop")?.hidden &&
+            (sessionId === undefined || sessionId === weixinState.sessionId)
+        );
+    }
+
+    async function cancelLoginSession(sessionId) {
+        if (!sessionId) return;
+        try {
+            await requestJson(
+                `${ENDPOINT}/login/${encodeURIComponent(sessionId)}`,
+                { method: "DELETE" },
+            );
+        } catch (_error) {
+            // The session may already be confirmed or expired.
         }
     }
 
@@ -430,7 +452,10 @@
     function schedulePoll(delay = POLL_DELAY_MS) {
         stopPolling();
         if (!weixinState.sessionId) return;
+        const generation = weixinState.dialogGeneration;
+        const sessionId = weixinState.sessionId;
         weixinState.pollTimer = window.setTimeout(() => {
+            if (!isCurrentDialog(generation, sessionId)) return;
             pollLogin().catch(() => undefined);
         }, delay);
     }
@@ -470,8 +495,13 @@
     }
 
     async function loadQrImage() {
+        const generation = weixinState.dialogGeneration;
         const sessionId = weixinState.sessionId;
+        const revision = weixinState.qrRevision;
         if (!sessionId) return;
+        const isCurrent = () =>
+            isCurrentDialog(generation, sessionId) &&
+            revision === weixinState.qrRevision;
         clearQrImage();
         setQrFrameState("loading");
         try {
@@ -487,7 +517,7 @@
                 );
             }
             const blob = await response.blob();
-            if (sessionId !== weixinState.sessionId) return;
+            if (!isCurrent()) return;
             const image = get("weixinQrImage");
             if (!(image instanceof HTMLImageElement)) {
                 throw new Error(t("weixin.qr_load_failed"));
@@ -495,10 +525,10 @@
             weixinState.qrObjectUrl = URL.createObjectURL(blob);
             image.src = weixinState.qrObjectUrl;
             await image.decode();
-            if (sessionId !== weixinState.sessionId) return;
+            if (!isCurrent()) return;
             setQrFrameState("ready");
         } catch (error) {
-            if (sessionId !== weixinState.sessionId) return;
+            if (!isCurrent()) return;
             clearQrImage();
             setQrFrameState("error");
             throw error;
@@ -523,13 +553,18 @@
 
     async function pollLogin() {
         if (!weixinState.sessionId || weixinState.polling) return;
-        weixinState.polling = true;
+        const generation = weixinState.dialogGeneration;
         const sessionId = weixinState.sessionId;
+        const request = { generation, sessionId };
+        weixinState.polling = request;
+        const isCurrent = () =>
+            isCurrentDialog(generation, sessionId) &&
+            weixinState.polling === request;
         try {
             const payload = await requestJson(
                 `${ENDPOINT}/login/${encodeURIComponent(sessionId)}`,
             );
-            if (sessionId !== weixinState.sessionId) return;
+            if (!isCurrent()) return;
             const status = String(payload.status || "wait");
             const message = String(payload.message || "");
             if (status === "confirmed") {
@@ -537,7 +572,11 @@
                 stopPolling();
                 weixinState.loaded = false;
                 await loadAll(true);
-                window.setTimeout(() => closeDialog(false), 500);
+                if (!isCurrentDialog(generation, sessionId)) return;
+                window.setTimeout(() => {
+                    if (isCurrentDialog(generation, sessionId))
+                        closeDialog(false);
+                }, 500);
                 return;
             }
             if (status === "need_verifycode") {
@@ -555,7 +594,7 @@
             }
             if (schedulePollForStatus(status)) schedulePoll();
         } catch (error) {
-            if (sessionId !== weixinState.sessionId) return;
+            if (!isCurrent()) return;
             setQrView(
                 "weixin.poll_failed",
                 error instanceof Error ? error.message : String(error),
@@ -564,7 +603,7 @@
                 schedulePoll(3000);
             }
         } finally {
-            weixinState.polling = false;
+            if (weixinState.polling === request) weixinState.polling = false;
         }
     }
 
@@ -600,6 +639,9 @@
     }
 
     function openBindingDialog(mode, account = null) {
+        closeDialog(true);
+        weixinState.dialogGeneration += 1;
+        const generation = weixinState.dialogGeneration;
         weixinState.dialogMode = mode;
         weixinState.dialogAlias = account ? String(account.alias || "") : "";
         weixinState.confirmationToken = "";
@@ -625,6 +667,7 @@
         updateDialogLabels();
         showDialog();
         window.requestAnimationFrame(() => {
+            if (!isCurrentDialog(generation)) return;
             const focusTarget = mode === "rebind" ? qqInput : aliasInput;
             if (focusTarget) focusTarget.focus();
         });
@@ -632,19 +675,11 @@
 
     async function closeDialog(cancelLogin = true) {
         const sessionId = weixinState.sessionId;
+        weixinState.dialogGeneration += 1;
         weixinState.sessionId = "";
         stopPolling();
         clearQrImage();
-        if (cancelLogin && sessionId) {
-            try {
-                await requestJson(
-                    `${ENDPOINT}/login/${encodeURIComponent(sessionId)}`,
-                    { method: "DELETE" },
-                );
-            } catch (_error) {
-                // The session may already be confirmed or expired.
-            }
-        }
+        setBusy(false);
         const backdrop = get("weixinDialogBackdrop");
         const dialog = get("weixinDialog");
         if (dialog) releaseFocus(dialog);
@@ -658,6 +693,7 @@
         if (previousFocus && typeof previousFocus.focus === "function") {
             previousFocus.focus();
         }
+        if (cancelLogin) await cancelLoginSession(sessionId);
     }
 
     function showConfirmation(payload) {
@@ -673,6 +709,7 @@
     async function submitBinding(event) {
         event.preventDefault();
         if (weixinState.busy) return;
+        const generation = weixinState.dialogGeneration;
         const alias = String(get("weixinAliasInput")?.value || "").trim();
         const qqId = Number.parseInt(
             String(get("weixinQqInput")?.value || ""),
@@ -694,10 +731,12 @@
                     `${ENDPOINT}/accounts/${encodeURIComponent(alias)}`,
                     { method: "PATCH", body: JSON.stringify(payload) },
                 );
+                if (!isCurrentDialog(generation)) return;
                 setDialogStatus(t("weixin.rebind_saved"), "success");
                 weixinState.loaded = false;
                 setBusy(false);
                 await loadAll(true);
+                if (!isCurrentDialog(generation)) return;
                 await closeDialog(false);
                 return;
             }
@@ -705,6 +744,10 @@
                 method: "POST",
                 body: JSON.stringify(payload),
             });
+            if (!isCurrentDialog(generation)) {
+                await cancelLoginSession(String(result.session_id || ""));
+                return;
+            }
             weixinState.sessionId = String(result.session_id || "");
             weixinState.qrRevision += 1;
             const form = get("weixinBindingForm");
@@ -713,8 +756,10 @@
             if (qrStep) qrStep.hidden = false;
             setQrView("weixin.wait_scan", "");
             await loadQrImage();
+            if (!isCurrentDialog(generation)) return;
             schedulePoll(200);
         } catch (error) {
+            if (!isCurrentDialog(generation)) return;
             if (
                 error instanceof WeixinRequestError &&
                 error.status === 409 &&
@@ -735,55 +780,65 @@
                 );
             }
         } finally {
-            setBusy(false);
+            if (isCurrentDialog(generation)) setBusy(false);
         }
     }
 
     async function refreshQr() {
         if (!weixinState.sessionId || weixinState.busy) return;
+        const generation = weixinState.dialogGeneration;
+        const sessionId = weixinState.sessionId;
         setBusy(true);
         try {
             await requestJson(
-                `${ENDPOINT}/login/${encodeURIComponent(weixinState.sessionId)}/refresh`,
+                `${ENDPOINT}/login/${encodeURIComponent(sessionId)}/refresh`,
                 { method: "POST", body: "{}" },
             );
+            if (!isCurrentDialog(generation, sessionId)) return;
+            stopPolling();
             weixinState.qrRevision += 1;
             await loadQrImage();
+            if (!isCurrentDialog(generation, sessionId)) return;
             setQrView("weixin.wait_scan", "");
             schedulePoll(200);
         } catch (error) {
+            if (!isCurrentDialog(generation, sessionId)) return;
             setQrView(
                 "weixin.refresh_failed",
                 error instanceof Error ? error.message : String(error),
             );
         } finally {
-            setBusy(false);
+            if (isCurrentDialog(generation, sessionId)) setBusy(false);
         }
     }
 
     async function submitVerifyCode(event) {
         event.preventDefault();
         if (!weixinState.sessionId || weixinState.busy) return;
+        const generation = weixinState.dialogGeneration;
+        const sessionId = weixinState.sessionId;
         const input = get("weixinVerifyInput");
         const code = String(input?.value || "").trim();
         if (!code) return;
         setBusy(true);
         try {
             await requestJson(
-                `${ENDPOINT}/login/${encodeURIComponent(weixinState.sessionId)}/verify`,
+                `${ENDPOINT}/login/${encodeURIComponent(sessionId)}/verify`,
                 { method: "POST", body: JSON.stringify({ code }) },
             );
+            if (!isCurrentDialog(generation, sessionId)) return;
             if (input) input.value = "";
             setQrView("weixin.verify_submitted", "");
             schedulePoll(200);
         } catch (error) {
+            if (!isCurrentDialog(generation, sessionId)) return;
             setQrView(
                 "weixin.verify_failed",
                 error instanceof Error ? error.message : String(error),
                 true,
             );
         } finally {
-            setBusy(false);
+            if (isCurrentDialog(generation, sessionId)) setBusy(false);
         }
     }
 

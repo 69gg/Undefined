@@ -9,6 +9,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Callable, Coroutine
 
+from Undefined.config.models import DEFAULT_GROUP_LLM_QUEUE_MAX_PENDING
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +20,7 @@ QUEUE_LANE_PRIVATE = "private"
 QUEUE_LANE_GROUP_MENTION = "group_mention"
 QUEUE_LANE_GROUP_NORMAL = "group_normal"
 QUEUE_LANE_BACKGROUND = "background"
+LLM_CALL_REQUEST_TYPES = frozenset({"queued_llm_call", "background_llm_call"})
 
 STRICT_PRIORITY_QUEUE_LANES = (
     QUEUE_LANE_SUPERADMIN,
@@ -90,6 +92,11 @@ class LaneQueue:
             1 for item in self._items if int(item.get("_retry_count", 0) or 0) > 0
         )
 
+    def llm_call_count(self) -> int:
+        return sum(
+            1 for item in self._items if item.get("type") in LLM_CALL_REQUEST_TYPES
+        )
+
 
 @dataclass
 class ModelQueue:
@@ -117,21 +124,26 @@ class ModelQueue:
         return sum(queue.retry_count() for queue in self.lane_queues().values())
 
     def trim_normal_queue(self) -> None:
-        """如果群聊普通队列超过10个，仅保留最新的2个"""
+        """普通队列过长时只裁剪外围请求，保留所有 LLM 子请求和重试。"""
         queue_size = self.group_normal_queue.qsize()
         if queue_size > 10:
+            requests = self.group_normal_queue.drain()
+            outer_indices = [
+                index
+                for index, request in enumerate(requests)
+                if request.get("type") not in LLM_CALL_REQUEST_TYPES
+            ]
+            discarded_indices = set(outer_indices[:-2])
+            for index, request in enumerate(requests):
+                if index not in discarded_indices:
+                    self.group_normal_queue.put_nowait(request)
+            if not discarded_indices:
+                return
             logger.warning(
-                "[队列修剪][%s] 群聊普通队列长度=%s 超过阈值(10)，将丢弃旧请求",
+                "[队列修剪][%s] 群聊普通队列长度=%s 超过阈值(10)，丢弃旧外围请求=%s，保留全部LLM子请求",
                 self.model_name,
                 queue_size,
-            )
-            latest_requests = self.group_normal_queue.drain()[-2:]
-            for req in latest_requests:
-                self.group_normal_queue.put_nowait(req)
-            logger.info(
-                "[队列修剪][%s] 修剪完成，保留最新=%s",
-                self.model_name,
-                len(latest_requests),
+                len(discarded_indices),
             )
 
 
@@ -151,12 +163,14 @@ class QueueManager:
         ai_request_interval: float = 1.0,
         model_intervals: dict[str, float] | None = None,
         max_retries: int = 2,
+        group_llm_queue_max_pending: int = DEFAULT_GROUP_LLM_QUEUE_MAX_PENDING,
     ) -> None:
         if ai_request_interval < 0:
             ai_request_interval = 0.0
         self.ai_request_interval = ai_request_interval
         self._default_interval = ai_request_interval
         self._max_retries = max(0, max_retries)
+        self.update_group_llm_queue_max_pending(group_llm_queue_max_pending)
         self._model_intervals: dict[str, float] = {}
         self._model_queues: dict[str, ModelQueue] = {}
         self._model_work_events: dict[str, asyncio.Event] = {}
@@ -400,6 +414,17 @@ class QueueManager:
         self._max_retries = max(0, int(max_retries))
         logger.info("[队列服务] 已更新最大重试次数: max_retries=%s", self._max_retries)
 
+    def update_group_llm_queue_max_pending(self, max_pending: int) -> None:
+        """只更新普通群聊新 LLM 请求的准入上限，保留已接收请求及重试。"""
+        if (
+            isinstance(max_pending, bool)
+            or not isinstance(max_pending, int)
+            or max_pending < 1
+        ):
+            raise ValueError("core.group_llm_queue_max_pending 必须为正整数")
+        self._group_llm_queue_max_pending = max_pending
+        logger.info("[队列服务] 普通群聊 LLM 排队准入上限=%s", max_pending)
+
     def estimate_wait_seconds(self, model_name: str, lane: str) -> float:
         model_queue = self._model_queues.get(model_name)
         if model_queue is None:
@@ -437,6 +462,20 @@ class QueueManager:
         request["_queue_lane"] = lane
         lane_queue = self._get_lane_queue(queue, lane)
         if lane == QUEUE_LANE_GROUP_NORMAL and not insert_second:
+            if (
+                request.get("type") in LLM_CALL_REQUEST_TYPES
+                and lane_queue.llm_call_count() >= self._group_llm_queue_max_pending
+            ):
+                logger.warning(
+                    "[队列拒绝][%s] 普通群聊 LLM 等待队列已满: limit=%s %s",
+                    model_name,
+                    self._group_llm_queue_max_pending,
+                    self._format_request_meta(request),
+                )
+                raise asyncio.QueueFull(
+                    f"普通群聊 LLM 等待队列已满（模型 {model_name}，"
+                    f"上限 {self._group_llm_queue_max_pending}），请稍后重试"
+                )
             queue.trim_normal_queue()
         if insert_second:
             await lane_queue.put_second(request)

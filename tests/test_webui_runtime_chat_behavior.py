@@ -117,6 +117,33 @@ def test_final_message_reuses_streaming_node() -> None:
     assert [node["contentTexts"] for node in _user_nodes(result)] == [["hi"]]
 
 
+@pytest.mark.parametrize("status", ["done", "error", "cancelled"])
+def test_terminal_job_keeps_polling_until_history_is_finalized(status: str) -> None:
+    result = run_scenario(f"history_finalization_{status}")
+    assert result["beforeFinalization"] == {
+        "disabled": True,
+        "jobPosts": 1,
+        "historyReads": 1,
+    }
+    assert result["afterFinalization"]["disabled"] is False
+    assert result["afterFinalization"]["historyReads"] == 2
+    assert result["afterFinalization"]["botTexts"] == ["persisted answer"]
+    assert result["jobPosts"] == 2
+    assert result["eventRequests"] >= 2
+
+
+def test_history_refresh_keeps_send_locked_until_success_and_retries_failure() -> None:
+    result = run_scenario("history_finalization_slow_history")
+    assert result["slowHistory"] == {
+        "whilePending": {"disabled": True, "jobPosts": 1, "historyAttempts": 1},
+        "afterFailure": {"disabled": True, "jobPosts": 1, "historyAttempts": 2},
+    }
+    assert result["afterFinalization"]["disabled"] is False
+    assert result["afterFinalization"]["historyReads"] == 2
+    assert result["afterFinalization"]["botTexts"] == ["persisted answer"]
+    assert result["jobPosts"] == 2
+
+
 # --------------------------------------------------------------------------- #
 # 工具生命周期
 # --------------------------------------------------------------------------- #
@@ -259,6 +286,43 @@ def test_lazy_loading_older_history_keeps_viewport_position() -> None:
     # 高度确实增长了，否则「补偿」无从谈起
     assert result["lazyLoadHeight"] > 2000, result
     assert result["lazyLoadScrollTop"] == result["lazyLoadExpectedTop"], result
+
+
+@pytest.mark.parametrize("target", ["other", "same"])
+@pytest.mark.parametrize("outcome", ["success", "failure"])
+def test_late_history_page_cannot_modify_current_view_or_its_loading_state(
+    target: str, outcome: str
+) -> None:
+    result = run_scenario(f"stale_history_page_{target}_{outcome}")
+
+    assert result["afterLate"] == result["beforeLate"], result
+    assert result["beforeLate"]["loader"], result
+    assert result["requestsWhileCurrentPagePending"] == 2, result
+    conversation_id = "A" if target == "same" else "B"
+    current_text = f"{conversation_id}-current-{2 if target == 'same' else 1}"
+    assert result["beforeLate"]["texts"] == [current_text], result
+    assert result["afterCurrentPage"]["texts"] == [
+        f"{conversation_id}-legitimate-older",
+        current_text,
+    ], result
+    assert result["afterCurrentPage"]["loader"] == "", result
+    assert len(result["pageUrls"]) == 3, result
+    assert f"conversation_id={conversation_id}" in result["pageUrls"][-1], result
+    assert "before=3" in result["pageUrls"][-1], result
+    assert "obsolete history page failure" not in result["toastText"], result
+
+
+@pytest.mark.parametrize("loading", ["initial", "forced"])
+@pytest.mark.parametrize("failure", ["network", "parse"])
+def test_late_latest_history_failure_cannot_trigger_current_view_recovery(
+    loading: str, failure: str
+) -> None:
+    result = run_scenario(f"stale_latest_history_{loading}_{failure}")
+
+    assert result["beforeLate"]["title"] == "A", result
+    assert result["afterLate"] == result["beforeLate"], result
+    assert result["afterCurrent"]["texts"] == ["A-current-latest"], result
+    assert result["afterCurrent"]["toasts"] == 0, result
 
 
 # --------------------------------------------------------------------------- #
@@ -627,6 +691,123 @@ def test_auto_scroll_toggle_persists_preference() -> None:
 # --------------------------------------------------------------------------- #
 # 跨会话隔离
 # --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("boundary", ["upload", "post"])
+@pytest.mark.parametrize("target", ["other", "same"])
+@pytest.mark.parametrize("outcome", ["success", "failure"])
+@pytest.mark.parametrize("newer_job", [False, True])
+def test_late_send_preserves_current_editor_and_job(
+    boundary: str, target: str, outcome: str, newer_job: bool
+) -> None:
+    result = run_scenario(
+        f"stale_send_{boundary}_{target}_{outcome}_{str(newer_job).lower()}"
+    )
+    assert result["afterLate"] == result["beforeLate"], result
+    assert result["afterLate"]["draft"] == "later-draft", result
+    assert "later.txt" in result["afterLate"]["attachments"], result
+    original_posts = [
+        body for body in result["posts"] if body["message"].startswith("original")
+    ]
+    assert len(original_posts) == (
+        0 if boundary == "upload" and outcome == "failure" else 1
+    ), result
+    assert all(body["conversation_id"] == "A" for body in original_posts), result
+    assert all("/jobs/old/events" not in url for url in result["polls"]), result
+    assert result["afterLate"]["cancelIds"] == (["new"] if newer_job else []), result
+
+
+@pytest.mark.parametrize("boundary", ["upload", "post"])
+def test_current_send_still_attaches_its_job(boundary: str) -> None:
+    result = run_scenario(f"stale_send_{boundary}_normal")
+    assert result["posts"][0]["conversation_id"] == "A", result
+    assert result["afterLate"]["draft"] == "", result
+    assert result["afterLate"]["disabled"] is True, result
+    assert result["afterLate"]["cancelIds"] == ["old"], result
+    assert any("/jobs/old/events" in url for url in result["polls"]), result
+
+
+def test_upload_completion_preserves_new_input_and_attachments_in_same_view() -> None:
+    result = run_scenario("stale_send_upload_edited")
+    assert result["posts"][0]["conversation_id"] == "A", result
+    assert result["afterLate"]["draft"] == "later-draft", result
+    assert "later.txt" in result["afterLate"]["attachments"], result
+    assert "original.txt" not in result["afterLate"]["attachments"], result
+    assert result["afterLate"]["cancelIds"] == ["old"], result
+
+
+@pytest.mark.parametrize("target", ["other", "same"])
+@pytest.mark.parametrize("outcome", ["running", "empty", "failure"])
+def test_late_active_job_resume_cannot_replace_current_conversation_or_job(
+    target: str, outcome: str
+) -> None:
+    result = run_scenario(f"stale_active_job_resume_{target}_{outcome}")
+
+    before = result["beforeLate"]
+    assert before["title"] == ("A" if target == "same" else "B"), result
+    assert before["nodes"][0]["text"] == (
+        "A-history" if target == "same" else "B-history"
+    ), result
+    assert before["disabled"] is (target == "same"), result
+    assert before["cancelIds"] == (["current-A"] if target == "same" else []), result
+    assert result["afterLate"] == before, result
+    assert result["afterRetryWindow"] == before, result
+    assert result["resumeCountAfterLate"] == result["resumeCountBeforeLate"], result
+    assert result["obsoletePolls"] == [], result
+
+
+@pytest.mark.parametrize("outcome", ["events", "done", "failure"])
+def test_late_old_job_poll_cannot_replace_or_stop_new_job(outcome: str) -> None:
+    result = run_scenario(f"stale_job_poll_{outcome}")
+
+    assert result["oldUnlocked"] is True, result
+    assert result["jobPosts"] == 2, result
+    assert result["beforeLate"]["disabled"] is True, result
+    assert result["beforeLate"]["cancelIds"] == ["new"], result
+    assert result["afterLate"] == result["beforeLate"], result
+    assert result["newPolls"] >= 2, result
+    assert any("after=2&" in url for url in result["nextPollUrls"]), result
+    assert "obsolete poll failure" not in result["toastText"], result
+    bots = _bot_nodes(result)
+    assert [node["jobId"] for node in bots] == ["", "new"], bots
+    assert bots[-1]["contentTexts"] == ["new-live", "new-followup"], bots
+
+
+@pytest.mark.parametrize("outcome", ["events", "failure"])
+def test_late_same_job_poll_cannot_replay_events_or_replace_current_retry(
+    outcome: str,
+) -> None:
+    result = run_scenario(f"stale_job_poll_same-{outcome}")
+
+    assert result["beforeLate"]["nodes"][0]["content"] == ["old-live"], result
+    assert result["afterLate"] == result["beforeLate"], result
+    assert len(result["pollUrls"]) == 3, result
+    assert "after=3&" in result["pollUrls"][-1], result
+
+
+@pytest.mark.parametrize("outcome", ["success", "failure"])
+def test_late_history_cannot_erase_a_new_job_started_while_loading(
+    outcome: str,
+) -> None:
+    result = run_scenario(f"history_response_after_new_job_{outcome}")
+
+    assert result["beforeLate"] == {
+        "nodes": [{"role": "user", "content": ["new-question"]}]
+        + (
+            [{"role": "bot", "content": ["new-live-reply"]}]
+            if outcome == "success"
+            else []
+        ),
+        "disabled": outcome == "success",
+    }, result
+    assert result["afterLate"] == result["beforeLate"], result
+    if outcome == "success":
+        assert result["afterReopen"] == result["beforeLate"], result
+    else:
+        assert result["afterReopen"] == {
+            "nodes": [{"role": "bot", "content": ["persisted-after-failed-send"]}],
+            "disabled": False,
+        }, result
 
 
 def test_foreign_conversation_events_are_ignored() -> None:

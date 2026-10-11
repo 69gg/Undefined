@@ -12,6 +12,7 @@ from Undefined.arxiv.client import get_paper_info
 from Undefined.arxiv.downloader import cleanup_download_path, download_paper_pdf
 from Undefined.arxiv.models import PaperInfo
 from Undefined.arxiv.parser import normalize_arxiv_id
+from Undefined.utils.message_targets import DeliveryAddress
 
 if TYPE_CHECKING:
     from Undefined.utils.sender import MessageSender
@@ -21,7 +22,7 @@ logger = logging.getLogger(__name__)
 _INFLIGHT_LOCK = asyncio.Lock()
 _INFLIGHT_SENDS: dict[tuple[str, int, str], asyncio.Future[str]] = {}
 
-# Time-based dedup: maps (target_type, target_id, paper_id) → monotonic timestamp
+# Time-based dedup: maps (delivery_channel, target_id, paper_id) → monotonic timestamp
 _RECENT_SENDS: dict[tuple[str, int, str], float] = {}
 _DEDUP_COOLDOWN_SECONDS: float = 3600.0  # 1 hour
 _RECENT_SENDS_MAX_SIZE: int = 1000
@@ -332,7 +333,17 @@ async def send_arxiv_paper(
     if normalized is None:
         return f"无法解析 arXiv 标识: {paper_id}"
 
-    key = (target_type, int(target_id), normalized)
+    address = DeliveryAddress(
+        "group" if target_type == "group" else "qq", int(target_id)
+    )
+    bound_address = getattr(sender, "delivery_address", None)
+    if (
+        isinstance(bound_address, DeliveryAddress)
+        and bound_address.target_type == target_type
+        and bound_address.target_id == address.target_id
+    ):
+        address = bound_address
+    key = (address.channel, address.target_id, normalized)
     created = False
 
     async with _INFLIGHT_LOCK:
@@ -348,7 +359,7 @@ async def send_arxiv_paper(
             logger.info(
                 "[arXiv] 论文近期已发送，跳过: paper=%s target=%s:%s",
                 normalized,
-                target_type,
+                address.channel,
                 target_id,
             )
             return f"论文 {normalized} 近期已发送过，已跳过"
@@ -364,7 +375,7 @@ async def send_arxiv_paper(
         logger.info(
             "[arXiv] 复用在途发送任务: paper=%s target=%s:%s",
             normalized,
-            target_type,
+            address.channel,
             target_id,
         )
         return await asyncio.shield(future)
@@ -380,6 +391,10 @@ async def send_arxiv_paper(
             summary_preview_chars=summary_preview_chars,
             context=context,
         )
+    except asyncio.CancelledError:
+        if not future.done():
+            future.cancel()
+        raise
     except Exception as exc:
         if not future.done():
             future.set_exception(exc)

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
@@ -19,6 +21,7 @@ from Undefined.utils.self_update import (
     apply_git_release_update,
 )
 from Undefined.webui.routes import _bot
+from Undefined.webui import core
 from Undefined.webui.routes._shared import BOT_APP_KEY, SETTINGS_APP_KEY
 
 
@@ -61,6 +64,81 @@ def _release(tag: str = "v3.8.0") -> GitHubReleaseInfo:
         draft=False,
         prerelease=False,
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(os.name == "nt", reason="POSIX SIGTERM child fixture")
+async def test_update_waits_for_bot_shutdown_beyond_old_outer_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    child = tmp_path / "child.py"
+    child.write_text(
+        "import asyncio, signal\n"
+        "from pathlib import Path\n"
+        "async def main() -> None:\n"
+        "    root = Path(__file__).parent\n"
+        "    stop = asyncio.Event()\n"
+        "    asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, stop.set)\n"
+        "    (root / 'ready').touch()\n"
+        "    await stop.wait()\n"
+        "    await asyncio.sleep(9)\n"
+        "    (root / 'finished').touch()\n"
+        "asyncio.run(main())\n"
+    )
+    monkeypatch.setattr(core, "BOT_COMMAND", (sys.executable, str(child)))
+    controller = core.BotProcessController()
+    monkeypatch.setattr(_bot, "check_auth", lambda _request: True)
+    monkeypatch.setattr(
+        _bot,
+        "_load_release_payload",
+        AsyncMock(
+            return_value=({"latest_version": "v3.8.0", "update_available": True}, None)
+        ),
+    )
+    monkeypatch.setattr(
+        _bot,
+        "_check_git_eligibility",
+        AsyncMock(
+            return_value=GitUpdateResult(
+                eligible=True, updated=False, repo_root=tmp_path, reason="eligible"
+            )
+        ),
+    )
+
+    def apply_after_shutdown(*_args: object, **_kwargs: object) -> GitUpdateResult:
+        assert (tmp_path / "finished").exists()
+        assert not controller.status()["running"]
+        return GitUpdateResult(
+            eligible=True, updated=True, repo_root=tmp_path, reason="updated"
+        )
+
+    monkeypatch.setattr(_bot, "apply_git_release_update", apply_after_shutdown)
+    restart = MagicMock()
+    monkeypatch.setattr(_bot, "restart_process", restart)
+    await controller.start()
+    process = controller._process
+    assert process is not None
+
+    async def ready() -> None:
+        while not (tmp_path / "ready").exists():
+            await asyncio.sleep(0.01)
+
+    try:
+        await asyncio.wait_for(ready(), 3)
+        request = cast(
+            web.Request,
+            _DummyRequest(app={BOT_APP_KEY: controller}, can_read_body=False),
+        )
+        response = await asyncio.wait_for(_bot.update_restart_handler(request), 12)
+        assert _payload(response)["will_restart"] is True
+        assert process.returncode == 0
+        assert _bot._release_restart_task is not None
+        await _bot._release_restart_task
+        restart.assert_called_once()
+    finally:
+        if process.returncode is None:
+            process.kill()
+            await process.wait()
 
 
 @pytest.fixture(autouse=True)
@@ -389,7 +467,7 @@ async def test_update_restart_timeout_restores_bot_and_repo_marker(
 
     bot = MagicMock()
     bot.status.return_value = {"running": True}
-    bot.stop = AsyncMock()
+    bot.stop = AsyncMock(return_value={"running": False})
     bot.start = AsyncMock()
     policy = GitUpdatePolicy(update_timeout_seconds=0.01)
     monkeypatch.setattr(_bot, "GitUpdatePolicy", lambda: policy)

@@ -133,6 +133,7 @@ allow_cancel_after_send = false
   - inflight **尚未发消息** → 调 `inflight_task.cancel()`，桶回到 `TYPING`，新消息追加进去，重置 T1/T2；inflight 协程在 `RequestContext` 里清理后退出，**不写入回复历史**。
   - T2 已经把请求入队但 coordinator 还没注册 inflight → 取消旧 `BatchDispatchToken`；旧请求即使稍后被队列取出，也会在 `execute_reply` 入口跳过，新消息继续合并进重新计时的 batch。
   - inflight **已经发过消息** 且 `allow_cancel_after_send=False`（默认安全） → 不取消 inflight，**新消息开新 batch**（旧桶在 inflight 自然结束后清理）。
+  - 投机调用已经回复并完成 → 立即结束旧 batch；窗口内后续消息也会开启新 batch，不再把已回答的旧消息合并重放。此时任务已经完成，`allow_cancel_after_send` 不改变该行为。尚未回复就完成的投机仍保留原消息，允许后续补充重新合并。
 - **FINALIZING**：旧 batch 已到 T1，若此时又来新消息，直接开新桶，不阻塞旧 inflight 收尾。
 - `allow_cancel_after_send=True` 会在 inflight 已发过消息后仍取消，可能造成半截回复、重复回复或上下文撕裂，仅极端场景启用。
 
@@ -144,10 +145,12 @@ allow_cancel_after_send = false
 - T2 预发送会给队列请求附带 `BatchDispatchToken`。新消息抢占时先取消旧 token；若旧请求已入队但尚未执行，`AICoordinator.execute_reply()` 会直接跳过，避免队列拥堵窗口里的陈旧回复。
 - T2 的 `flush_callback` 若异常或被取消，桶会从 `SPECULATING` 回滚到 `TYPING` 并换新 token，保留原 items 等 T1 正常重试，避免静默丢消息。
 - T1 到期时如果 batch 已经被 T2 投机发出，只负责结束 bucket/等待已知 inflight，不会再次调用 `flush_callback`，避免同一批消息重复入队。
-- `unregister_inflight(scope, sender_id, task)` 必须携带 task 身份并校验；旧任务的 `finally` 不会误清理新一轮已注册的 inflight。
+- inflight 注册必须携带当前批次的 `BatchDispatchToken`，并校验 token 对象身份与取消状态；同一发送者独立旁路的 `@bot`、拍一拍回复不会覆盖投机任务，也不会被后续批次补充误取消。
+- `unregister_inflight(scope, sender_id, task, token=...)` 同时校验 token 和 task 身份；旧任务的 `finally` 不会误清理新一轮已注册的 inflight。
 - `flush_all()` 在关停时设置 shutdown 标记，循环遍历所有桶执行等价 T1 路径，并 `await` 所有未完成的 flush task；若收尾过程中又出现新桶，会继续清空直到没有 pending bucket。shutdown 之后的新消息直接发车，不再开缓冲桶。
 - `MessageHandler.close()` 的顺序是：停止自动管线热重载 → `message_batcher.flush_all()` → `queue_manager.drain()` 等待已入队/在途回复自然收敛 → `queue_manager.stop()` → flush 历史落盘。
-- coordinator 在 `execute_reply` 入口调用 `register_inflight(scope, sender_id, task, ctx)`，在 `finally` 调 `unregister_inflight(...)`；`asyncio.CancelledError` 被识别为 "投机抢占"，仅记录信息日志且不重试。
+- coordinator 在执行回复时调用 `register_inflight(scope, sender_id, task, ctx, token=...)`，仅注册成功后才在 `finally` 注销同一 token 的任务；`asyncio.CancelledError` 被识别为 "投机抢占"，仅记录信息日志且不重试。
+- 主调用取消或等待超时会同步取消其 LLM 子请求：尚未执行或正在等待重试的子请求会跳过模型调用，已执行的模型任务会收到取消。已经发到上游的请求无法撤回，但不会继续排队重试或产生无人消费的新调用。
 
 ### 兼容回退
 

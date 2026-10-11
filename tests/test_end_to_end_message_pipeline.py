@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any, cast
 from unittest.mock import AsyncMock
@@ -25,6 +26,7 @@ from Undefined.config import ConfigBuilder
 from Undefined.config.loader import Config
 from Undefined.faq import FAQStorage
 from Undefined.handlers import MessageHandler
+from Undefined.services.queue_manager import QUEUE_LANE_GROUP_NORMAL
 
 _BASE_MAPPING: dict[str, Any] = {
     "onebot": {"ws_url": "ws://127.0.0.1:3001", "token": ""},
@@ -185,6 +187,29 @@ def _group_event(
         },
         "message": message,
     }
+
+
+@pytest.mark.asyncio
+async def test_message_handler_applies_configured_group_llm_queue_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setitem(_BASE_MAPPING["core"], "group_llm_queue_max_pending", 2)
+    handler, _ = _build_handler(tmp_path)
+    monkeypatch.setattr(handler.ai, "request_model", AsyncMock(return_value={}))
+    monkeypatch.setattr(handler.ai, "set_llm_call_result", lambda *_args: None)
+    try:
+        for _ in range(2):
+            await handler.queue_manager.add_queued_llm_request(
+                {"model_config": handler.config.chat_model, "messages": []},
+                lane=QUEUE_LANE_GROUP_NORMAL,
+                model_name="chat-model",
+            )
+        with pytest.raises(asyncio.QueueFull, match="上限 2"):
+            await handler.queue_manager.add_queued_llm_request(
+                {}, lane=QUEUE_LANE_GROUP_NORMAL, model_name="chat-model"
+            )
+    finally:
+        await handler.close()
 
 
 @pytest.mark.asyncio

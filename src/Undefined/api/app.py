@@ -44,6 +44,8 @@ from .routes import (
 
 logger = logging.getLogger(__name__)
 
+RUNTIME_API_CONTEXT_APP_KEY = web.AppKey("runtime_api_context", RuntimeAPIContext)
+
 
 class RuntimeAPIServer:
     def __init__(
@@ -60,6 +62,8 @@ class RuntimeAPIServer:
         self._runner: web.AppRunner | None = None
         self._sites: list[web.TCPSite] = []
         self._background_tasks: set[asyncio.Task[Any]] = set()
+        self._request_tasks: set[asyncio.Task[Any]] = set()
+        self._stopping = False
         self._naga_state = NagaState()
         self._chat_job_manager = chat.ChatJobManager(context)
         transport = getattr(context.onebot, "file_transport", None)
@@ -94,10 +98,22 @@ class RuntimeAPIServer:
         cfg = self._context.config_getter()
         logger.info("[RuntimeAPI] 已启动: %s", cfg.api.display_url)
 
+    def begin_shutdown(self) -> None:
+        """关闭普通 API 接入，但保留待发 OneBot 文件的 HTTP 服务。"""
+        self._stopping = True
+        self._chat_job_manager.begin_shutdown()
+
+    async def drain_requests(self) -> None:
+        await self._chat_job_manager.stop()
+        tasks = self._request_tasks - {asyncio.current_task()}
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
     async def stop(self) -> None:
+        self.begin_shutdown()
+        await self.drain_requests()
         if self._file_store is not None:
             self._file_store.unavailable()
-        await self._chat_job_manager.stop()
 
         for task in self._background_tasks:
             task.cancel()
@@ -140,12 +156,24 @@ class RuntimeAPIServer:
                         response = _json_error("Unauthorized", status=401)
                         _apply_cors_headers(request, response)
                         return response
-            response = await handler(request)
+            is_file_request = onebot_files.is_file_request(request)
+            if self._stopping and not is_file_request:
+                response = _json_error("Runtime is shutting down", status=503)
+                _apply_cors_headers(request, response)
+                return response
+            task = asyncio.current_task()
+            if task is not None and not is_file_request:
+                self._request_tasks.add(task)
+            try:
+                response = await handler(request)
+            finally:
+                if task is not None:
+                    self._request_tasks.discard(task)
             _apply_cors_headers(request, response)
             return response
 
         app = web.Application(middlewares=[_auth_middleware])
-        app["runtime_api_context"] = self._context
+        app[RUNTIME_API_CONTEXT_APP_KEY] = self._context
         app.add_routes(
             [
                 web.get("/health", self._health_handler),

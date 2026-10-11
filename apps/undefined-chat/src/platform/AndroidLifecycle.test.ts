@@ -1,4 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
+import { createChatStore } from "../chat-store/store";
+import {
+	conversation,
+	historyItem,
+	job,
+	runtimeClientStub,
+} from "../test-fixtures";
 import { isAndroid, setupAndroidLifecycle } from "./AndroidLifecycle";
 
 const listeners = new Map<string, () => void | Promise<void>>();
@@ -69,6 +76,62 @@ describe("AndroidLifecycle", () => {
 	});
 
 	describe("setupAndroidLifecycle", () => {
+		it("cleans registrations resolved after teardown and ignores queued resume callbacks", async () => {
+			const client = runtimeClientStub();
+			const store = createChatStore({ client });
+			const cleanup = setupAndroidLifecycle(store);
+			const queuedResume = listeners.get("tauri://resumed");
+			cleanup();
+			await Promise.resolve();
+			expect(unlisten).toHaveBeenCalledTimes(2);
+			await queuedResume?.();
+			expect(client.getRuntimeConfig).not.toHaveBeenCalled();
+		});
+
+		it("reloads a completed background conversation through the real resume listener", async () => {
+			let completed = false;
+			const client = runtimeClientStub({
+				listConversations: vi.fn(async () => ({
+					conversations: [conversation({ id: "A" }), conversation({ id: "B" })],
+					activeJob: null,
+					defaultConversationId: "A",
+					virtualUserId: "webchat",
+				})),
+				sendMessage: vi.fn(async () => job({ conversationId: "A" })),
+			});
+			const getHistory = client.getHistory;
+			client.getHistory = vi.fn(async (input) => {
+				const history = await getHistory(input);
+				const items =
+					completed && input.conversationId === "A"
+						? [historyItem({ role: "bot", content: "后台已完成" })]
+						: [];
+				return {
+					...history,
+					conversationId: input.conversationId,
+					items,
+					total: items.length,
+				};
+			});
+			const store = createChatStore({ client });
+			await store.bootstrap();
+			store.updateDraft("A", "question");
+			await store.sendSelectedMessage();
+			await store.selectConversation("B");
+			const cleanup = setupAndroidLifecycle(store);
+			await vi.waitFor(() =>
+				expect(listeners.has("tauri://resumed")).toBe(true),
+			);
+			completed = true;
+			await listeners.get("tauri://resumed")?.();
+			expect(store.getSnapshot().selectedConversationId).toBe("B");
+			await store.selectConversation("A");
+			expect(store.getSnapshot().historyByConversation.A.items[0].content).toBe(
+				"后台已完成",
+			);
+			cleanup();
+		});
+
 		it("re-bootstraps on android resume and cleans listeners", async () => {
 			const mockStore = {
 				bootstrap: vi.fn(async () => undefined),

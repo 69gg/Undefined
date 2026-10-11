@@ -35,6 +35,7 @@ from Undefined.weixin.models import WeixinAccount
 from Undefined.weixin.service import (
     WeixinClientProtocol,
     WeixinConfirmationRequired,
+    WeixinNotFoundError,
     WeixinService,
     WeixinServiceError,
 )
@@ -236,6 +237,63 @@ def _account() -> WeixinAccount:
         created_at="2026-01-01T00:00:00+08:00",
         updated_at="2026-01-01T00:00:00+08:00",
     )
+
+
+@pytest.mark.asyncio
+async def test_quiesce_keeps_sending_available_until_accepted_inbound_finishes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _config(tmp_path)
+    store = WeixinStore(config.weixin)
+    await store.save_account(_account())
+    client = FakeClient()
+
+    def factory(
+        account: WeixinAccount,
+        state: UndefinedIlinkStateStore,
+        options: ClientOptions,
+    ) -> WeixinClientProtocol:
+        return client
+
+    service = WeixinService(
+        config,
+        store=store,
+        login_manager=cast(QrLoginManager, FakeLoginManager()),
+        client_factory=factory,
+    )
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def process(
+        alias: str, current_client: WeixinClientProtocol, message: InboundMessage
+    ) -> None:
+        entered.set()
+        await release.wait()
+        await service.send_text(10001, "accepted reply")
+
+    monkeypatch.setattr(service, "_process_inbound", process)
+    message = InboundMessage.from_mapping("bot-account", {"from_user_id": "peer-1"})
+    await service.start()
+    await asyncio.wait_for(client.run_started.wait(), 1)
+    task = asyncio.create_task(service._handle_inbound("primary", client, message))
+    await asyncio.wait_for(entered.wait(), 1)
+    service.stop_accepting_messages()
+    drain = asyncio.create_task(service.drain_message_tasks())
+    try:
+        await service._handle_inbound("primary", client, message)
+        await asyncio.sleep(0)
+        assert not drain.done()
+        assert not client.closed
+        release.set()
+        await asyncio.wait_for(drain, 1)
+        await task
+        assert client.sent_text == [("peer-1", "accepted reply")]
+    finally:
+        release.set()
+        await asyncio.gather(task, drain, return_exceptions=True)
+        await service.stop()
+    assert client.closed
 
 
 @pytest.mark.asyncio
@@ -738,6 +796,198 @@ async def test_remove_account_purges_sdk_runtime_state(tmp_path: Path) -> None:
             == ""
         )
     finally:
+        await service.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("first_operation", ["remove", "enable"])
+async def test_account_remove_and_enable_share_lifecycle_boundary(
+    tmp_path: Path, first_operation: str
+) -> None:
+    config = _config(tmp_path)
+    store = WeixinStore(config.weixin)
+    await store.save_account(_account())
+    clients: list[FakeClient] = []
+
+    def factory(
+        account: WeixinAccount,
+        state: UndefinedIlinkStateStore,
+        options: ClientOptions,
+    ) -> WeixinClientProtocol:
+        client = FakeClient()
+        clients.append(client)
+        return client
+
+    login_manager = FakeLoginManager()
+    service = WeixinService(
+        config,
+        store=store,
+        login_manager=cast(QrLoginManager, login_manager),
+        client_factory=factory,
+    )
+    await service.start()
+    await asyncio.wait_for(clients[0].run_started.wait(), timeout=1)
+    await store._lock.acquire()
+    try:
+        if first_operation == "remove":
+            removal = asyncio.create_task(service.remove_account("primary"))
+            await asyncio.sleep(0)
+            enabling = asyncio.create_task(service.set_account_enabled("primary", True))
+        else:
+            enabling = asyncio.create_task(service.set_account_enabled("primary", True))
+            await asyncio.sleep(0)
+            removal = asyncio.create_task(service.remove_account("primary"))
+        await asyncio.sleep(0)
+        store._lock.release()
+        assert await asyncio.wait_for(removal, timeout=2) is True
+        if first_operation == "remove":
+            with pytest.raises(WeixinNotFoundError):
+                await asyncio.wait_for(enabling, timeout=2)
+        else:
+            assert (await asyncio.wait_for(enabling, timeout=2))["alias"] == "primary"
+        assert await store.get_account("primary") is None
+        assert service._runtimes == {}
+        assert len(clients) == 1
+        assert clients[0].closed
+
+        # 同别名重新绑定只能使用新扫码凭据，不能复活已删除的客户端。
+        started = await service.start_login(alias="primary", qq_id=10002)
+        credentials = WeixinCredentials(
+            "replacement-account",
+            "replacement-secret",
+            "https://ilink.example.test",
+            "peer-2",
+        )
+        login_manager.poll_result = QrPollResult(
+            QrStatus.CONFIRMED, "confirmed", credentials
+        )
+        result = await service.poll_login(started.session_id)
+        assert result.account is not None
+        assert len(clients) == 2
+        persisted = await store.get_account("primary")
+        assert persisted is not None
+        assert persisted.credentials.account_id == "replacement-account"
+        assert persisted.qq_id == 10002
+        assert service._runtimes["primary"].client is clients[1]
+    finally:
+        if store._lock.locked():
+            store._lock.release()
+        await service.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["remove", "stop"])
+@pytest.mark.parametrize("account_operation", ["enable", "rebind"])
+async def test_delayed_account_close_cannot_be_followed_by_stale_enable(
+    tmp_path: Path, operation: str, account_operation: str
+) -> None:
+    config = _config(tmp_path)
+    store = WeixinStore(config.weixin)
+    account = _account()
+    await store.save_account(account)
+    close_entered = asyncio.Event()
+    release_close = asyncio.Event()
+
+    class DelayedCloseClient(FakeClient):
+        async def aclose(self) -> None:
+            close_entered.set()
+            await release_close.wait()
+            await super().aclose()
+
+    client = DelayedCloseClient()
+
+    def factory(
+        current: WeixinAccount,
+        state: UndefinedIlinkStateStore,
+        options: ClientOptions,
+    ) -> WeixinClientProtocol:
+        assert current.credentials.account_id == account.credentials.account_id
+        return client
+
+    service = WeixinService(
+        config,
+        store=store,
+        login_manager=cast(QrLoginManager, FakeLoginManager()),
+        client_factory=factory,
+    )
+    await service.start()
+    await asyncio.wait_for(client.run_started.wait(), timeout=1)
+    closing = asyncio.create_task(
+        service.remove_account("primary") if operation == "remove" else service.stop()
+    )
+    try:
+        await asyncio.wait_for(close_entered.wait(), timeout=1)
+        enabling = asyncio.create_task(
+            service.set_account_enabled("primary", True)
+            if account_operation == "enable"
+            else service.rebind_account("primary", 10002)
+        )
+        await asyncio.sleep(0)
+        assert await store.get_account("primary") is account
+        release_close.set()
+        await asyncio.wait_for(closing, timeout=2)
+        error_type = (
+            WeixinNotFoundError if operation == "remove" else WeixinServiceError
+        )
+        with pytest.raises(error_type):
+            await asyncio.wait_for(enabling, timeout=2)
+        assert not service._runtimes
+        assert (await service.status())["accounts"] == (
+            [] if operation == "remove" else [account.to_public_dict()]
+        )
+    finally:
+        release_close.set()
+        await service.stop()
+
+
+@pytest.mark.asyncio
+async def test_login_completion_and_removal_cannot_leave_an_orphan_runtime(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path)
+    store = WeixinStore(config.weixin)
+    login_manager = FakeLoginManager()
+    clients: list[FakeClient] = []
+
+    def factory(
+        account: WeixinAccount,
+        state: UndefinedIlinkStateStore,
+        options: ClientOptions,
+    ) -> WeixinClientProtocol:
+        client = FakeClient()
+        clients.append(client)
+        return client
+
+    service = WeixinService(
+        config,
+        store=store,
+        login_manager=cast(QrLoginManager, login_manager),
+        client_factory=factory,
+    )
+    await service.start()
+    started = await service.start_login(alias="primary", qq_id=10001)
+    login_manager.poll_result = QrPollResult(
+        QrStatus.CONFIRMED, "confirmed", _account().credentials
+    )
+    await store._lock.acquire()
+    try:
+        completing = asyncio.create_task(service.poll_login(started.session_id))
+        await asyncio.sleep(0)
+        removal = asyncio.create_task(service.remove_account("primary"))
+        await asyncio.sleep(0)
+        store._lock.release()
+        completed, removed = await asyncio.wait_for(
+            asyncio.gather(completing, removal), timeout=2
+        )
+        assert completed.account is not None
+        assert removed is True
+        assert await store.get_account("primary") is None
+        assert not service._runtimes
+        assert len(clients) == 1
+        assert clients[0].closed
+    finally:
+        if store._lock.locked():
+            store._lock.release()
         await service.stop()
 
 

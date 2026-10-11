@@ -176,7 +176,6 @@ class WebChatConversationStore:
             existing = self._cache.get(conv_id)
             if existing is not None:
                 return _copy_json(existing)
-            self._cache[conv_id] = conv
             await self._save_conversation_locked(conv)
             logger.info(
                 "[WebChat] 创建会话: conversation_id=%s title_source=%s",
@@ -193,7 +192,7 @@ class WebChatConversationStore:
         if not clean_title:
             raise ValueError("title is required")
         async with self._get_lock(conv_id):
-            conv = self._require_conversation_locked(conv_id)
+            conv = _copy_json(self._require_conversation_locked(conv_id))
             conv["title"] = clean_title
             conv["title_source"] = "manual"
             conv["title_status"] = _TITLE_STATUS_MANUAL
@@ -211,13 +210,16 @@ class WebChatConversationStore:
         conv_id = _normalize_conversation_id(conversation_id)
         async with self._get_lock(conv_id):
             existed = conv_id in self._cache or self._path_for(conv_id).exists()
-            self._cache.pop(conv_id, None)
             path = self._path_for(conv_id)
-            if path.exists():
-                await asyncio.to_thread(path.unlink)
-            task = self._title_tasks.pop(conv_id, None)
-            if task is not None:
-                task.cancel()
+
+            async def commit_delete() -> None:
+                await io.delete_file(path)
+                self._cache.pop(conv_id, None)
+                task = self._title_tasks.pop(conv_id, None)
+                if task is not None:
+                    task.cancel()
+
+            await io.run_cancellation_safe(commit_delete())
             logger.info(
                 "[WebChat] 删除会话: conversation_id=%s existed=%s",
                 conv_id,
@@ -228,7 +230,7 @@ class WebChatConversationStore:
     async def clear_conversation(self, conversation_id: str) -> int:
         conv_id = _normalize_conversation_id(conversation_id)
         async with self._get_lock(conv_id):
-            conv = self._require_conversation_locked(conv_id)
+            conv = _copy_json(self._require_conversation_locked(conv_id))
             previous = len(_messages(conv))
             conv["messages"] = []
             conv["updated_at"] = _now_iso()
@@ -257,7 +259,7 @@ class WebChatConversationStore:
     ) -> dict[str, Any]:
         conv_id = _normalize_conversation_id(conversation_id)
         async with self._get_lock(conv_id):
-            conv = self._require_conversation_locked(conv_id)
+            conv = _copy_json(self._require_conversation_locked(conv_id))
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             normalized_role = "bot" if role == "bot" else "user"
             record: dict[str, Any] = {
@@ -375,6 +377,7 @@ class WebChatConversationStore:
             first_pair = _first_question_answer_from_conv(conv)
             if first_pair is None:
                 return False
+            conv = _copy_json(conv)
             conv["title_status"] = _TITLE_STATUS_PENDING
             conv["title_basis_hash"] = _title_basis_hash(*first_pair)
             conv["title_requested_at"] = _now_iso()
@@ -407,6 +410,7 @@ class WebChatConversationStore:
             first_pair = _first_question_answer_from_conv(conv)
             if first_pair is None or _title_basis_hash(*first_pair) != basis_hash:
                 return False
+            conv = _copy_json(conv)
             conv["title"] = clean_title
             conv["title_source"] = "model"
             conv["title_status"] = _TITLE_STATUS_GENERATED
@@ -430,6 +434,7 @@ class WebChatConversationStore:
                 return
             if str(conv.get("title_basis_hash") or "") != basis_hash:
                 return
+            conv = _copy_json(conv)
             conv["title_status"] = _TITLE_STATUS_FAILED
             conv["title_failed_at"] = _now_iso()
             await self._save_conversation_locked(conv)
@@ -500,7 +505,7 @@ class WebChatConversationStore:
                 )
                 conv_id = str(conv["id"])
                 async with self._get_lock(conv_id):
-                    cached = self._require_conversation_locked(conv_id)
+                    cached = _copy_json(self._require_conversation_locked(conv_id))
                     cached["messages"] = [
                         _normalize_history_record(
                             item,
@@ -554,10 +559,14 @@ class WebChatConversationStore:
 
     async def _save_conversation_locked(self, conv: dict[str, Any]) -> None:
         normalized = _normalize_conversation(conv, str(conv.get("id") or uuid4().hex))
-        self._cache[str(normalized["id"])] = normalized
-        await io.write_json(
-            self._path_for(str(normalized["id"])), normalized, use_lock=True
-        )
+
+        async def commit() -> None:
+            await io.write_json(
+                self._path_for(str(normalized["id"])), normalized, use_lock=True
+            )
+            self._cache[str(normalized["id"])] = normalized
+
+        await io.run_cancellation_safe(commit())
 
     def _conversation_summary(self, conv: dict[str, Any]) -> dict[str, Any]:
         messages = _messages(conv)

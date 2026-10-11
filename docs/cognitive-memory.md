@@ -98,7 +98,9 @@ end → pending（持久化入队顺序）
 
 等待顺位的任务留在磁盘队列，不创建等待协程、不占执行名额。群侧写与发送者侧写分别调度，某个用户目标被阻塞时，同一任务已经轮到的群目标可以先执行。不同实体的 LLM 合并可以同时进行；Chroma 的实际数据库访问仍使用下文的共享单 worker 调度。昵称刷新和侧写恢复复用同一实体锁，避免基于旧副本覆盖正文。
 
-**进度与恢复**：任务保存 `_enqueue_order` 以及 `_historian_progress`（已改写文本、已入库事件数、已完成侧写目标）。自动重试只处理未完成部分，阶段切换不增加 `_retry_count`。文件、向量和目标进度均提交后才放行下一个同实体更新；明确 `skip=true` 也会完成目标。没有有效更新或明确跳过的模型结束按失败处理。
+昵称刷新先更新侧写向量，再提交 Markdown 文件中的新名称。向量暂时不可写时，文件仍保留旧名称，后续同名消息可继续重试，重启后也不会因名称已更新而跳过。文件写入失败时向量可能已更新，但下一次刷新仍按实际文件重试；名称相同且无需刷新时不重复写入。
+
+**进度与恢复**：任务保存 `_enqueue_order` 以及 `_historian_progress`（已改写文本、已入库事件数、已完成侧写目标）。自动重试只处理未完成部分，阶段切换不增加 `_retry_count`。文件、向量和目标进度均提交后才放行下一个同实体更新。明确 `skip=true` 时不改写文件，但仍从当前侧写快照补齐向量索引，再保存目标完成进度；向量失败继续重试，不能因模型判定无需修改而提前确认任务。没有 frontmatter 的旧侧写以原文正文兼容索引；没有侧写文件时无需写入向量。没有有效更新或明确跳过的模型结束按失败处理。
 
 失败不会自动回滚已经写入的侧写文件。向量写入或进度保存失败时，重试会重新读取当前实际文件；重试耗尽后，后续任务同样基于当前实际版本继续。正常停止等待在途阶段结束；外层取消或停止超时触发取消时，事件改写和侧写合并的模型调用可立即中断，只等待已经开始的文件、向量、对应进度及队列状态提交收敛，再释放实体占用。取消后尚未完成队列切换的任务保留 `processing` 与已保存进度，后续恢复时不重做已提交部分。启动及轮询恢复超过 `stale_job_timeout_seconds` 的遗留 `processing`，排除活跃任务；未达到恢复阈值的遗留任务仍占其未完成实体的顺位，不阻塞其他实体。
 
@@ -445,7 +447,9 @@ data/cognitive/
 
 更换嵌入模型（维度变化或模型升级）后，需要对向量库进行全量重嵌入。详见 [`scripts/reembed_cognitive.py`](../scripts/reembed_cognitive.py)。
 
-向量维度发生变化时脚本会先读全量记录、再删除并重建 collection 后写回（ChromaDB 定维后无法原地改维，直接 upsert 异维向量会失败）；建议先 `--dry-run` 确认维度变化与记录数。
+重嵌入读取 Chroma 中现有的检索正文，不从侧写 Markdown 重建内容。恢复历史侧写或补同步当前侧写时，使用下方的 `restore_profile.py restore` / `sync`。
+
+向量维度发生变化时脚本先把新向量写入临时 collection，全部完成并校验后才删除旧库并换名（ChromaDB 定维后无法原地改维，直接 upsert 异维向量会失败）。建议先 `--dry-run` 确认维度变化与记录数：预览在系统临时目录的完整副本上读取，源 Chroma 文件和 collection 不会被修改，也不会清理或换名遗留的临时 collection；仍会调用嵌入 API，并可能记录 token 用量。请预留副本所需的临时磁盘空间，并按以下步骤停止写入后运行。
 
 ```bash
 # 1. 先在 config.toml 中更新 [models.embedding] 为新模型配置
@@ -480,13 +484,18 @@ uv run python scripts/restore_profile.py list --entity-type user --entity-id {us
 # 预览某个版本内容（不改动文件）
 uv run python scripts/restore_profile.py show --entity-type user --entity-id {user_id} --revision {timestamp}.md
 
-# 恢复该版本（先 dry-run 确认，再实际恢复）
+# 停止机器人及其他写入侧写/向量库的进程后，先预览，再恢复并同步检索
 uv run python scripts/restore_profile.py restore --entity-type user --entity-id {user_id} --revision {timestamp}.md --dry-run
 uv run python scripts/restore_profile.py restore --entity-type user --entity-id {user_id} --revision {timestamp}.md
+
+# 若向量同步失败，修复错误后从当前 Markdown 重试，不必再次恢复快照
+uv run python scripts/restore_profile.py sync --entity-type user --entity-id {user_id} --dry-run
+uv run python scripts/restore_profile.py sync --entity-type user --entity-id {user_id}
 ```
 
-恢复只改侧写 Markdown 与历史快照，不会更新 ChromaDB 中的侧写向量；若同一实体在
-`cognitive_profiles` 里有旧向量，请按[更换嵌入模型](#更换嵌入模型)的方式重嵌入侧写。
+`restore` 默认同时恢复 Markdown、保存当前内容的历史快照，并用当前 cognitive 嵌入模型同步 `cognitive_profiles` 中该实体的检索正文和向量，其他实体保持不变。检索正文沿用运行时格式，包含恢复版本中的名称、标签、评价、锐评与正文。模型调用失败时尚未恢复文件；若文件已恢复而向量写入失败，命令会报错，可用 `sync` 从当前文件补同步。文件和向量库之间没有跨存储事务，请保持机器人及其他写入进程停止，直到同步成功。
+
+`--dry-run` 只展示将恢复的内容、检索正文和两个目录，不写盘、不打开 Chroma、不调用模型。目录默认读取 TOML 配置的 `cognitive.profile.path` 与 `cognitive.vector_store.path`；操作独立副本时同时指定 `--profiles-path` 和 `--db-path`。实际恢复/同步可能调用嵌入 API 并记录 token 用量；若已更换嵌入模型维度，请先按[更换嵌入模型](#更换嵌入模型)重建整个向量库，再恢复或同步单个侧写。
 
 **级别 3：完整移除**
 

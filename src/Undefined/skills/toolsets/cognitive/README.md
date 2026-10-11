@@ -7,7 +7,9 @@
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `entity_type` | `string(user/group)` | 是 | 实体类型 |
-| `entity_id` | `string` | 是 | 用户ID或群ID |
+| `entity_id` | `string` | 是 | 用户ID或群ID，不接受路径、空值或 Windows 盘符 |
+
+实体类型仅支持 `user` / `group`。侧写与历史版本都只能访问配置的侧写存储目录；指向目录外的符号链接会被拒绝。非法查询在工具中返回参数错误，在 Runtime API 中返回 HTTP 400。
 
 ## search_events
 
@@ -33,4 +35,3 @@
 | `query` | `string` | 是 | 搜索关键词 |
 | `entity_type` | `string(user/group)` | 否 | 限定类型（可选） |
 | `top_k` | `integer` | 否 | 返回条数，默认8 |
-

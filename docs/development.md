@@ -26,6 +26,7 @@ src/Undefined/
 ├── handlers/      # OneBot 消息分流（message_flow / poke / repeat / auto_extract）
 ├── jm/            # 禁漫（JM / 18comic）车号解析、关键词搜索、逐章 PDF 下载合成与 zip 打包
 ├── onebot/        # OneBot WebSocket 客户端
+├── weixin/        # 微信 iLink：service 账号生命周期、store 凭据/映射、audio 语音准备、transport 投递状态适配
 ├── skills/        # 技能插件核心目录 (存放所有的工具与智能体)
 │   ├── tools/           # 基础原子的工具 (独立的功能单元，如读写文件、网络请求等)
 │   ├── toolsets/        # 聚合工具集 (分组后的工具组)
@@ -62,6 +63,10 @@ src/Undefined/
 - **Tools 开发专版**：[tools/README.md](../src/Undefined/skills/tools/README.md)
 - **Toolsets 开发专版**：[toolsets/README.md](../src/Undefined/skills/toolsets/README.md)
 - **Commands 开发专版**：[详细斜杠指令开发指南](slash-commands.md)
+
+Runtime API 和 WebUI 向 aiohttp `Application` 存储上下文等共享对象时，使用模块级 `web.AppKey` 常量并在所有读写处复用，保持类型安全并避免 `NotAppKeyWarning`。Runtime API 的应用构造回归测试会将该警告视为错误。
+
+普通群聊 lane 超过 10 项时，只对尚未发车的外围请求保留最新 2 项；已启动 AI 调用的 `queued_llm_call` 子请求及其重试始终保留原相对顺序。调用方取消和超时仍通过共享取消状态阻止后续模型执行，队列裁剪不能丢弃内部等待者。
 
 ### CHANGELOG 维护约定
 

@@ -332,6 +332,48 @@ def test_validate_loop_iterations_follow_configured_cap() -> None:
         validate_automation(invalid, loop_max_iterations=200)
 
 
+@pytest.mark.parametrize("count", [-1, True, False, "0", "3", 0.0, 1.5, None, [], {}])
+def test_validate_rejects_invalid_loop_count(count: Any) -> None:
+    task = _loop_cap_task(count=1, max_iterations=25)
+    task["nodes"][1]["count"] = count
+    issues = collect_automation_issues(task)
+    assert any(issue["path"] == "nodes.loop.count" for issue in issues)
+    with pytest.raises(AutomationValidationError, match="non-negative integer"):
+        validate_automation(task)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("count,expected_calls", [(0, 0), (1, 1), (None, 4)])
+async def test_loop_times_zero_skips_body_and_missing_count_uses_cap(
+    count: int | None, expected_calls: int
+) -> None:
+    execute_tool = AsyncMock(return_value="loop body")
+    send_message = AsyncMock()
+    task = _loop_cap_task(count=0 if count is None else count, max_iterations=4)
+    if count is None:
+        task["nodes"][1].pop("count")
+    task["nodes"][2] = {"id": "body", "type": "tool", "tool_name": "audit", "args": {}}
+    task["nodes"].append(
+        {"id": "after", "type": "template", "template": "after", "emit": True}
+    )
+    task["edges"].append({"from": "loop", "to": "after", "kind": "exit"})
+    validate_automation(task, loop_max_iterations=4)
+    runner = _runner(
+        execute_tool=execute_tool, send_message=send_message, loop_max_iterations=4
+    )
+    event = AutomationEvent(kind="time", channel="group")
+    await runner.run(
+        task,
+        event=event,
+        pass_text="",
+        consume_mentions=(),
+        consume_stripped="",
+        mentions_all=(),
+    )
+    assert execute_tool.await_count == expected_calls
+    send_message.assert_awaited_once_with("after")
+
+
 def _runner(
     *,
     execute_tool: Any = None,

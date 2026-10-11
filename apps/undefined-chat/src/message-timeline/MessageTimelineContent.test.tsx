@@ -40,6 +40,91 @@ describe("hasRenderableTimeline", () => {
 });
 
 describe("MessageTimelineContent", () => {
+	test("uses Runtime snake_case IDs to render one child shared by children and timeline", () => {
+		const child = {
+			webchat_call_id: "agent/search",
+			name: "search",
+			status: "done",
+			timeline: [{ type: "message", content: "Nested completed body" }],
+		};
+		renderContent(
+			<MessageTimelineContent
+				onPreviewHtml={vi.fn()}
+				completeTimeline
+				timeline={[
+					{
+						type: "call",
+						call: {
+							webchat_call_id: "agent",
+							name: "research",
+							is_agent: true,
+							status: "done",
+							children: [child],
+							timeline: [
+								{ type: "message", content: "Before child" },
+								{ type: "call", call: child },
+							],
+						},
+					},
+				]}
+			/>,
+		);
+		expect(screen.getAllByText("search")).toHaveLength(1);
+		expect(screen.getAllByText("Nested completed body")).toHaveLength(1);
+		expect(
+			screen
+				.getByText("search")
+				.closest("details")
+				?.getAttribute("data-call-id"),
+		).toBe("agent/search");
+	});
+
+	test("keeps historical Agent messages and nested calls inside the Agent in order", () => {
+		renderContent(
+			<MessageTimelineContent
+				onPreviewHtml={vi.fn()}
+				fallbackContent="Before After Final"
+				timeline={[
+					{
+						type: "call",
+						call: {
+							id: "agent",
+							name: "research",
+							is_agent: true,
+							status: "done",
+							timeline: [
+								{ type: "message", content: "Before" },
+								{
+									type: "call",
+									call: { id: "nested", name: "search", status: "done" },
+								},
+								{ type: "message", content: "After" },
+							],
+						},
+					},
+					{ type: "message", content: "Final" },
+				]}
+			/>,
+		);
+		const agent = screen.getByText("research").closest("details");
+		expect(agent?.contains(screen.getByText("Before"))).toBe(true);
+		expect(agent?.contains(screen.getByText("After"))).toBe(true);
+		expect(agent?.contains(screen.getByText("Final"))).toBe(false);
+		expect(screen.getAllByText("Before")).toHaveLength(1);
+		expect(
+			screen
+				.getByText("Before")
+				.compareDocumentPosition(screen.getByText("search")) &
+				Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+		expect(
+			screen
+				.getByText("search")
+				.compareDocumentPosition(screen.getByText("After")) &
+				Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+	});
+
 	test("renders message text and tool calls in order without duplicating content", () => {
 		renderContent(
 			<MessageTimelineContent

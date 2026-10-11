@@ -16,8 +16,10 @@ from Undefined.memes.models import (
 )
 from Undefined.utils.message_targets import resolve_delivery_address
 from Undefined.utils.coerce import safe_int
+from Undefined.utils.io import run_cancellation_safe
 
 if TYPE_CHECKING:
+    from contextlib import AbstractAsyncContextManager
     import threading
 
     from Undefined.memes.store import MemeStore
@@ -31,44 +33,54 @@ class MemeSearchMixin:
         _cfg: Any
         _global_image_cache: dict[str, AttachmentRecord]
         _global_image_cache_lock: threading.Lock
+        _global_image_cache_generation: int
         _job_queue: Any | None
         _retrieval_runtime: Any | None
         _store: MemeStore
         _vector_store: MemeVectorStore
+
+        def _meme_mutation_lock(
+            self, digest: str
+        ) -> AbstractAsyncContextManager[None]: ...
 
     def resolve_global_image_sync(self, uid: str) -> AttachmentRecord | None:
         normalized_uid = str(uid or "").strip()
         if not normalized_uid:
             return None
 
-        with self._global_image_cache_lock:
-            cached = self._global_image_cache.get(normalized_uid)
-        if cached is not None:
-            return cached
+        while True:
+            with self._global_image_cache_lock:
+                cached = self._global_image_cache.get(normalized_uid)
+                generation = self._global_image_cache_generation
+            if cached is not None:
+                return cached
 
-        record = self._store.get_sync(normalized_uid)
-        if record is None or not record.enabled or record.status != "ready":
-            return None
-        # scope_key 留空：表情库 UID 全局可解析，不受会话 scope 限制
-        attachment = AttachmentRecord(
-            uid=record.uid,
-            scope_key="",
-            kind="image",
-            media_type="image",
-            display_name=Path(record.blob_path).name,
-            source_kind="meme_library",
-            source_ref=Path(record.blob_path).resolve().as_uri(),
-            local_path=record.blob_path,
-            mime_type=record.mime_type,
-            sha256=record.content_sha256,
-            created_at=record.created_at,
-            segment_data={"subType": "1"},
-            semantic_kind="meme",
-            description=record.description,
-        )
-        with self._global_image_cache_lock:
-            self._global_image_cache[normalized_uid] = attachment
-        return attachment
+            # 数据库读取在线程中完成；读期间的失效不能被迟到回填覆盖。
+            record = self._store.get_sync(normalized_uid)
+            with self._global_image_cache_lock:
+                if generation != self._global_image_cache_generation:
+                    continue
+                if record is None or not record.enabled or record.status != "ready":
+                    return None
+                # scope_key 留空：表情库 UID 全局可解析，不受会话 scope 限制
+                attachment = AttachmentRecord(
+                    uid=record.uid,
+                    scope_key="",
+                    kind="image",
+                    media_type="image",
+                    display_name=Path(record.blob_path).name,
+                    source_kind="meme_library",
+                    source_ref=Path(record.blob_path).resolve().as_uri(),
+                    local_path=record.blob_path,
+                    mime_type=record.mime_type,
+                    sha256=record.content_sha256,
+                    created_at=record.created_at,
+                    segment_data={"subType": "1"},
+                    semantic_kind="meme",
+                    description=record.description,
+                )
+                self._global_image_cache[normalized_uid] = attachment
+                return attachment
 
     async def resolve_global_image(self, uid: str) -> AttachmentRecord | None:
         return await asyncio.to_thread(self.resolve_global_image_sync, uid)
@@ -270,7 +282,11 @@ class MemeSearchMixin:
             existing = merged.get(uid)
             if existing is None:
                 stored_record = missing_records.get(uid)
-                if stored_record is None:
+                if (
+                    stored_record is None
+                    or stored_record.status != "ready"
+                    or (not include_disabled and not stored_record.enabled)
+                ):
                     continue
                 existing = {
                     "record": stored_record,
@@ -459,10 +475,26 @@ class MemeSearchMixin:
         else:
             return "发送失败：当前 sender 不支持微信投递地址"
 
-        now = _now_iso()
-        updated_record = await self._store.increment_use(uid, now)
-        if updated_record is not None:
-            await self._vector_store.upsert(updated_record)
+        async def record_usage() -> None:
+            current = await self._store.get(uid)
+            if current is None or current.generation != record.generation:
+                return
+            updated_record = await self._store.increment_use(uid, _now_iso())
+            if updated_record is not None:
+                await self._vector_store.upsert(updated_record)
+
+        try:
+            async with self._meme_mutation_lock(record.content_sha256):
+                await run_cancellation_safe(record_usage())
+        except Exception:
+            # 投递已经完成；统计失败不能使调用者据此重发同一张图片。
+            logger.warning(
+                "[memes] 已发送但使用统计/索引更新失败: uid=%s", uid, exc_info=True
+            )
+            task = asyncio.current_task()
+            if task is not None and task.cancelling():
+                # 收尾异常可能与外部取消同时发生，仍需保留任务的取消语义。
+                raise asyncio.CancelledError
         if sent_message_id is not None:
             return f"表情包已发送（message_id={sent_message_id}）"
         return "表情包已发送"

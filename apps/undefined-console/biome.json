@@ -5,6 +5,7 @@
     "files": {
         "includes": [
             "**/src/**/*.ts",
+            "**/src/**/*.cjs",
             "**/package.json",
             "**/tsconfig.json",
             "**/vite.config.ts",

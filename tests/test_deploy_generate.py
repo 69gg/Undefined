@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import pytest
 import yaml
@@ -126,6 +127,43 @@ def test_container_mode_publishes_bot_ports(tmp_path: Path) -> None:
     assert env["UNDEFINED_DEPLOY_PORT_BOT_WEBUI"] == "8787"
     assert env["UNDEFINED_DEPLOY_PORT_BOT_API"] == "8788"
     assert env["UNDEFINED_DEPLOY_PORT_BOT_WEBUI_BIND"] == catalog.DEFAULT_PORT_BIND
+
+
+def test_container_maps_python_interpreter_paths_to_existing_data_mount(
+    tmp_path: Path,
+) -> None:
+    ctx = _ctx(tmp_path)
+    config = generate.build(ctx)
+    bot = _compose_services(config.compose_text)["undefined-bot"]
+    environment = bot["environment"]
+    local_root = Path(config.env[generate.PYTHON_INTERPRETER_LOCAL_DIR_ENV])
+    host_root = Path(config.env[generate.PYTHON_INTERPRETER_HOST_DIR_ENV])
+
+    assert local_root != host_root
+    # 真实 host 来源必须由 data/ 挂载及同一相对路径推出，不能传 Bot 的绝对路径。
+    data_mount = next(
+        volume for volume in bot["volumes"] if volume.endswith(":/data/Undefined/data")
+    )
+    source, target = data_mount.split(":")
+    assert host_root == (ctx.layout.root / source).resolve() / local_root.relative_to(
+        target
+    )
+    assert environment["UNDEFINED_PYTHON_INTERPRETER_LOCAL_DIR"] == (
+        "${" + generate.PYTHON_INTERPRETER_LOCAL_DIR_ENV + "}"
+    )
+    assert environment["UNDEFINED_PYTHON_INTERPRETER_HOST_DIR"] == (
+        "${" + generate.PYTHON_INTERPRETER_HOST_DIR_ENV + "}"
+    )
+    assert not any(volume.endswith(":/tmp") for volume in bot["volumes"])
+
+
+def test_host_mode_leaves_python_interpreter_temp_paths_unchanged(
+    tmp_path: Path,
+) -> None:
+    config = generate.build(_ctx(tmp_path, mode=catalog.MODE_HOST))
+    assert generate.PYTHON_INTERPRETER_LOCAL_DIR_ENV not in config.env
+    assert generate.PYTHON_INTERPRETER_HOST_DIR_ENV not in config.env
+    assert "undefined-bot" not in _compose_services(config.compose_text)
 
 
 def test_unselected_service_ports_are_not_published(tmp_path: Path) -> None:
@@ -671,6 +709,37 @@ def test_lxmusic2api_config_has_mandatory_fields(tmp_path: Path) -> None:
 # --------------------------------------------------------------------------- #
 
 
+@pytest.mark.parametrize("mode", [catalog.MODE_CONTAINER, catalog.MODE_HOST])
+def test_lxmusic_config_digest_recreates_only_changed_service(
+    tmp_path: Path, mode: str
+) -> None:
+    services = ("lxmusic2api", "searxng")
+    first = generate.build(_ctx(tmp_path, mode=mode, services=services))
+    repeated = generate.build(
+        _ctx(tmp_path, mode=mode, services=services, previous_env=first.env)
+    )
+    assert _compose_services(repeated.compose_text) == _compose_services(
+        first.compose_text
+    )
+    previous = dict(first.env)
+    previous["UNDEFINED_DEPLOY_LXMUSIC2API_KEY"] = "isolated-rotated-key"
+    rotated = generate.build(
+        _ctx(tmp_path, mode=mode, services=services, previous_env=previous)
+    )
+    first_services = _compose_services(first.compose_text)
+    rotated_services = _compose_services(rotated.compose_text)
+    lx_name = generate.LXMUSIC2API_SERVICE_NAME
+    label = generate.SERVICE_CONFIG_DIGEST_LABEL
+    assert (
+        rotated_services[lx_name]["labels"][label]
+        != first_services[lx_name]["labels"][label]
+    )
+    assert {
+        key: value for key, value in rotated_services.items() if key != lx_name
+    } == {key: value for key, value in first_services.items() if key != lx_name}
+    assert "isolated-rotated-key" not in rotated.compose_text
+
+
 def test_container_mode_uses_compose_service_names(tmp_path: Path) -> None:
     urls = generate.compose_service_urls(_ctx(tmp_path))
     assert urls["searxng"] == "http://searxng:8080"
@@ -853,6 +922,45 @@ def test_host_mode_connect_urls_never_use_wildcard_bind(tmp_path: Path) -> None:
         assert "0.0.0.0" not in url, url
     assert "0.0.0.0" not in config.websocket_url
     assert "0.0.0.0" not in config.env["UNDEFINED_DEPLOY_SEARXNG_BASE_URL"]
+
+
+@pytest.mark.parametrize("bind", ["::1", "[::1]", "2001:db8::42"])
+def test_host_mode_ipv6_connect_urls_are_parseable(tmp_path: Path, bind: str) -> None:
+    ctx = _ctx(
+        tmp_path,
+        mode=catalog.MODE_HOST,
+        port_bind=bind,
+        services=("searxng", "firecrawl", "lxmusic2api"),
+        ports={"napcat_ws": 13001, "searxng": 18080},
+    )
+    config = generate.build(ctx)
+    expected_host = bind.removeprefix("[").removesuffix("]")
+    urls = generate.compose_service_urls(ctx)
+    for service, url in urls.items():
+        parsed = urlsplit(url)
+        assert parsed.hostname == expected_host
+        assert parsed.port == ctx.port(service)
+    websocket = urlsplit(config.websocket_url)
+    assert websocket.hostname == expected_host
+    assert websocket.port == 13001
+    searxng = urlsplit(config.env["UNDEFINED_DEPLOY_SEARXNG_BASE_URL"])
+    assert searxng.hostname == expected_host
+    assert searxng.port == 18080
+
+
+@pytest.mark.parametrize("bind", ["::", "[::]"])
+def test_host_mode_ipv6_wildcard_urls_use_loopback(tmp_path: Path, bind: str) -> None:
+    ctx = _ctx(tmp_path, mode=catalog.MODE_HOST, port_bind=bind)
+    config = generate.build(ctx)
+    assert urlsplit(config.websocket_url).hostname == "127.0.0.1"
+    assert (
+        urlsplit(config.env["UNDEFINED_DEPLOY_SEARXNG_BASE_URL"]).hostname
+        == "localhost"
+    )
+    assert all(
+        urlsplit(url).hostname == "127.0.0.1"
+        for url in generate.compose_service_urls(ctx).values()
+    )
 
 
 def test_bot_container_forbids_privilege_escalation(tmp_path: Path) -> None:

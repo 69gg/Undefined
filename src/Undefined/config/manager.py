@@ -24,6 +24,8 @@ class ConfigManager:
         self._watch_stop: asyncio.Event | None = None
         self._last_snapshot: dict[str, tuple[int, int]] = {}
         self._reload_lock = asyncio.Lock()
+        self._watch_restart_lock = asyncio.Lock()
+        self._pending_changes: dict[str, tuple[Any, Any]] = {}
 
     def load(self, strict: bool = True) -> Config:
         if self._config is None:
@@ -33,16 +35,32 @@ class ConfigManager:
     def replace(self, config: Config) -> None:
         """替换缓存的配置实例（库嵌入 ``set_config`` 注入时使用）。"""
         self._config = config
+        self._pending_changes.clear()
 
     def reload(self, strict: bool = False) -> dict[str, tuple[Any, Any]]:
         if self._config is None:
             self._config = Config.load(config_path=self.config_path, strict=strict)
             return {}
+        if not self.config_path.is_file():
+            raise FileNotFoundError(f"配置文件不存在，保留当前配置: {self.config_path}")
         new_config = Config.load(config_path=self.config_path, strict=strict)
-        changes = self._config.update_from(new_config)
+        changes = dict(self._pending_changes)
+        changes.update(self._config.update_from(new_config))
+        self._pending_changes.clear()
         if changes:
             self._notify(changes)
         return changes
+
+    def retry_failed_update(self, changes: dict[str, tuple[Any, Any]]) -> None:
+        """保留未应用的变更，下次保存时重试；忽略已被新配置取代的异步失败。"""
+        if self._config is None:
+            return
+        for key, change in changes.items():
+            current: Any = self._config
+            for part in key.split("."):
+                current = getattr(current, part, None)
+            if current == change[1]:
+                self._pending_changes[key] = change
 
     def subscribe(self, callback: ConfigChangeCallback) -> None:
         self._callbacks.append(callback)
@@ -75,16 +93,28 @@ class ConfigManager:
                     except asyncio.CancelledError:
                         pass
         finally:
-            self._watch_task = None
-            self._watch_stop = None
+            if self._watch_task is task:
+                self._watch_task = None
+                self._watch_stop = None
             logger.info("[配置] 热重载已停止")
+
+    async def restart_hot_reload(self, *, interval: float, debounce: float) -> None:
+        """按更新顺序完成停止与启动，避免并发重启丢失后续参数。"""
+        async with self._watch_restart_lock:
+            await self.stop_hot_reload()
+            self.start_hot_reload(interval=interval, debounce=debounce)
 
     async def _watch_loop(self, interval: float, debounce: float) -> None:
         self._last_snapshot = self._compute_snapshot()
+        # 启动和重启时追赶 load/上一监听器退出后发生的保存；先记快照，
+        # 保证读取期间另一进程的写入仍能在下一轮被发现。
+        await self._reload_from_disk()
         last_change = 0.0
         pending = False
         while self._watch_stop and not self._watch_stop.is_set():
             await asyncio.sleep(interval)
+            if self._watch_stop is None or self._watch_stop.is_set():
+                break
             snapshot = self._compute_snapshot()
             if snapshot != self._last_snapshot:
                 self._last_snapshot = snapshot
@@ -92,13 +122,16 @@ class ConfigManager:
                 pending = True
             if pending and (time.monotonic() - last_change) >= debounce:
                 pending = False
-                async with self._reload_lock:
-                    try:
-                        changes = self.reload(strict=False)
-                        if changes:
-                            logger.info("[配置] 已应用热更新: %s", ", ".join(changes))
-                    except Exception as exc:
-                        logger.warning("[配置] 热重载失败: %s", exc)
+                await self._reload_from_disk()
+
+    async def _reload_from_disk(self) -> None:
+        async with self._reload_lock:
+            try:
+                changes = self.reload(strict=False)
+                if changes:
+                    logger.info("[配置] 已应用热更新: %s", ", ".join(changes))
+            except Exception as exc:
+                logger.warning("[配置] 热重载失败: %s", exc)
 
     def _compute_snapshot(self) -> dict[str, tuple[int, int]]:
         snapshot: dict[str, tuple[int, int]] = {}
@@ -128,6 +161,7 @@ class ConfigManager:
             try:
                 callback(config, changes)
             except Exception:
+                self.retry_failed_update(changes)
                 name = getattr(callback, "__qualname__", repr(callback))
                 failed.append(name)
                 logger.error("[配置] 热更新回调执行失败: %s", name, exc_info=True)

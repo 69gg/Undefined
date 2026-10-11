@@ -8,7 +8,13 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 from aiohttp import web
 
-from Undefined.config import load_webui_settings, get_config_manager, get_config
+from Undefined.config import (
+    Config,
+    WebUISettings,
+    load_webui_settings,
+    get_config_manager,
+    get_config,
+)
 from Undefined.utils.cors import is_allowed_cors_origin, normalize_origin
 from Undefined.utils import io as async_io
 from Undefined.utils.self_update import resolve_repo_root
@@ -34,7 +40,7 @@ CSP_POLICY = (
     "script-src 'self' 'nonce-{nonce}'; "
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
     "font-src 'self' https://fonts.gstatic.com data:; "
-    "img-src 'self' data: blob:; "
+    "img-src 'self' data: blob: http: https:; "
     "connect-src 'self'; "
     "base-uri 'self'; "
     "frame-ancestors 'none'"
@@ -160,7 +166,11 @@ async def gzip_middleware(
                     mime = _GZIP_MIME.get(
                         file_path.suffix.lower(), "application/octet-stream"
                     )
-                    new_resp = web.Response(body=compressed, content_type=mime)
+                    new_resp = web.Response(
+                        body=compressed,
+                        status=response.status,
+                        headers={"Content-Type": mime},
+                    )
                     # 保留外层中间件已设置的 header（如安全头）
                     _skip = {
                         "content-length",
@@ -271,10 +281,9 @@ async def on_shutdown(app: web.Application) -> None:
         logger.info("[WebUI] 正在关闭，无运行中的机器人进程")
         return
     logger.info("[WebUI] 正在关闭，准备停止机器人进程...")
-    try:
-        await asyncio.wait_for(bot.stop(), timeout=5)
-    except asyncio.TimeoutError:
-        logger.warning("[WebUI] 关闭超时：机器人进程停止失败")
+    result = await bot.stop()
+    if result.get("running"):
+        logger.warning("[WebUI] 关闭时机器人进程仍未退出")
 
 
 async def on_cleanup(app: web.Application) -> None:
@@ -288,29 +297,35 @@ def create_app(*, redirect_to_config_once: bool = False) -> web.Application:
     )
 
     # 初始化核心组件
-    app[BOT_APP_KEY] = BotProcessController()
     app[SESSION_STORE_APP_KEY] = SessionStore()
 
     # 配置 WebUI 设置热重载
     config_manager = get_config_manager()
     app[SETTINGS_APP_KEY] = load_webui_settings()
+    app[BOT_APP_KEY] = BotProcessController(
+        stop_timeout_getter=lambda: app[SETTINGS_APP_KEY].stop_timeout_seconds
+    )
 
     # 一次性客户端重定向提示（由 index 处理）
     app[REDIRECT_TO_CONFIG_ONCE_APP_KEY] = redirect_to_config_once
 
-    def _on_config_change(config: Any, changes: dict[str, Any]) -> None:
+    def _on_config_change(config: Config, changes: dict[str, Any]) -> None:
         webui_keys = {
             "webui_url",
             "webui_port",
             "webui_password",
             "webui_autostart_bot",
             "webui_check_updates",
+            "webui_stop_timeout_seconds",
         }
         if any(key.startswith("webui.") for key in changes) or webui_keys.intersection(
             changes
         ):
             logger.info("[WebUI] 检测到 WebUI 配置变更，正在热重载设置...")
-            app[SETTINGS_APP_KEY] = load_webui_settings()
+            # 本次快照已成功读取；后续外部写入不能覆盖已验证的设置。
+            app[SETTINGS_APP_KEY] = WebUISettings.from_config(
+                config, config_exists=True
+            )
 
     config_manager.subscribe(_on_config_change)
 

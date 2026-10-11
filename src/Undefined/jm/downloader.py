@@ -26,8 +26,8 @@ jmcpy 的异步实现内部仍会同步执行图片解码与 PDF 合成（``_to_
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
-from concurrent.futures import ThreadPoolExecutor
+from collections.abc import Callable, Iterator, Sequence
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 import asyncio
 import functools
@@ -165,11 +165,33 @@ def _book_file_name(book: Book, suffix: str) -> str:
     return f"{_BOOK_ID_PREFIX}{book.book_id} {title}{suffix}"
 
 
+def _chapter_artifact_indices(
+    chapters: Sequence[tuple[int, int, str]],
+) -> Iterator[str]:
+    """生成递增且唯一的章节产物序号，保留正常序号与阅读顺序。"""
+    previous_index: int | None = None
+    for chapter_id, chapter_order, _title in chapters:
+        index = (
+            chapter_order
+            if previous_index is None
+            else max(chapter_order, previous_index + 1)
+        )
+        if index != chapter_order:
+            logger.warning(
+                "[JM] 章节产物序号冲突，顺延避免覆盖: chapter=%s order=%s → %s",
+                chapter_id,
+                chapter_order,
+                index,
+            )
+        previous_index = index
+        yield f"{index:0{_CHAPTER_INDEX_DIGITS}d}"
+
+
 def _chapter_pdf_name(stem: str, title: str) -> str:
     """章节 PDF 名：``<产物名主体>[ <章节标题>].pdf``。
 
-    ``stem`` 由 :func:`_download_archive_sync` 内的 ``artifact_stem`` 生成，已经保证
-    同一次下载内唯一。章节标题写在文件名里便于挑选章节；服务端没给标题时只留序号。
+    ``stem`` 使用 :func:`_chapter_artifact_indices` 的唯一序号。章节标题写在文件名里
+    便于挑选章节；服务端没给标题时只留序号。
     """
     chapter_title = sanitize_filename(title)
     return (
@@ -319,31 +341,10 @@ def _download_archive_sync(
     """逐章下载并各出一份加密 PDF，最后打包成无密码 zip。"""
     limit_bytes = _chapter_limit_bytes(chapter_max_file_size_mb)
     built: list[_ChapterPdf] = []
-    used_orders: set[int] = set()
     downloaded_chapters = 0
     skipped_chapters = 0
     failed_pages = 0
     page_count = 0
-
-    def artifact_index(chapter_order: int, local_index: int, chapter_id: int) -> str:
-        """章节产物的序号（补零字符串），用于下载目录名与 zip 条目名。
-
-        优先用服务端章节序号（与阅读顺序一致）；服务端返回重复序号（异常数据）时退回
-        本次下载的局部序号，否则两条章节会撞同一个下载目录与图片文件名
-        （``overwrite=False`` 会拿旧图），也会撞同一个 zip 条目名而丢掉一份 PDF。
-        """
-        index = chapter_order
-        if index in used_orders:
-            index = local_index
-            logger.warning(
-                "[JM] 服务端返回重复章节序号，改用局部序号避免覆盖: book=%s chapter=%s order=%s → %s",
-                book_id,
-                chapter_id,
-                chapter_order,
-                index,
-            )
-        used_orders.add(index)
-        return f"{index:0{_CHAPTER_INDEX_DIGITS}d}"
 
     with Client(settings) as client:
         book = client.get_book(book_id)
@@ -351,8 +352,8 @@ def _download_archive_sync(
         declared_chapters = len(book.chapters) or 1
         chapters = _ordered_chapters(book, max_chapters=max_chapters)
 
-        for local_index, (chapter_id, chapter_order, chapter_title) in enumerate(
-            chapters, start=1
+        for (chapter_id, chapter_order, chapter_title), index in zip(
+            chapters, _chapter_artifact_indices(chapters), strict=True
         ):
             chapter = client.get_chapter(chapter_id)
             if not len(chapter):
@@ -360,7 +361,6 @@ def _download_archive_sync(
                     "[JM] 章节没有图片，跳过: book=%s chapter=%s", book_id, chapter_id
                 )
                 continue
-            index = artifact_index(chapter_order, local_index, chapter_id)
             # 每章独立的目录：同名目录复用同名目录时，overwrite=False 会拿旧图。
             # decode=False 取服务端原始字节（无损），解扰与编码在写 PDF 时做一次。
             result = client.download(
@@ -481,7 +481,9 @@ def _download_plain_sync(
         failed_pages = 0
         downloaded_chapters = 0
 
-        for chapter_id, chapter_order, _title in chapters:
+        for (chapter_id, _chapter_order, _title), index in zip(
+            chapters, _chapter_artifact_indices(chapters), strict=True
+        ):
             chapter = client.get_chapter(chapter_id)
             if not len(chapter):
                 logger.info(
@@ -491,7 +493,7 @@ def _download_plain_sync(
             result = client.download(
                 chapter,
                 output=ExportFormat.PATH,
-                dest=task_dir / f"c{chapter_order:0{_CHAPTER_INDEX_DIGITS}d}",
+                dest=task_dir / f"c{index}",
                 decode=False,
                 concurrency=settings.concurrency,
             )
@@ -594,17 +596,18 @@ async def download_book(
         download = functools.partial(
             _download_archive_sync, book_id, task_dir, password=password, **options
         )
-    future: asyncio.Future[JmDownload] = loop.run_in_executor(_DOWNLOAD_POOL, download)
+    worker_future: Future[JmDownload] = _DOWNLOAD_POOL.submit(download)
+    future = asyncio.wrap_future(worker_future, loop=loop)
     try:
         # shield：协程被取消时不要把线程一起取消——同步下载停不下来，强行删目录
         # 只会被后续写入重新创建，所以等它跑完再清理
         result = await asyncio.shield(future)
     except BaseException:
-        if future.done():
+        if worker_future.done():
             # 异常路径下调用方拿不到 task_dir，必须在这里清掉已下载的原图
             await cleanup_download_dir(task_dir)
         else:
-            _cleanup_when_finished(future, task_dir, loop=loop)
+            _cleanup_when_finished(worker_future, task_dir, loop=loop)
         raise
     return result, task_dir
 
@@ -614,14 +617,14 @@ def _remove_dir_now(path: Path) -> None:
 
 
 def _cleanup_when_finished(
-    future: "asyncio.Future[JmDownload]",
+    future: Future[JmDownload],
     task_dir: Path,
     *,
     loop: asyncio.AbstractEventLoop,
 ) -> None:
     """线程仍在写盘时，等它结束后再删任务目录（取消/超时路径）。"""
 
-    def _on_done(_future: "asyncio.Future[JmDownload]") -> None:
+    def _on_done(_future: Future[JmDownload]) -> None:
         try:
             loop.run_in_executor(None, _remove_dir_now, task_dir)
         except RuntimeError:

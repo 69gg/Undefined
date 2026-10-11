@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from weixin_ilink_client import OutboundMessageItem, OutboundTextItem
 
 import Undefined.bilibili.opus_sender as opus_sender
 from Undefined.bilibili.errors import OpusUnavailableError
@@ -23,6 +24,9 @@ from Undefined.bilibili.models import (
     VideoStats,
 )
 from Undefined.onebot.client import OneBotDeliveryUncertainError
+from Undefined.utils.history import MessageHistoryManager
+from Undefined.utils.message_targets import DeliveryAddress
+from Undefined.utils.sender import AddressBoundSender, MessageSender
 
 
 def _author(name: str = "测试UP") -> OpusAuthor:
@@ -532,6 +536,73 @@ async def test_send_opus_sends_forward_with_history(
     assert call.args[0] == 20001
     assert len(call.args[1]) == 2
     assert call.kwargs["history_message"].startswith("[Bilibili 图文] 「测试图文」")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("multi_item_enabled", [False, True])
+async def test_send_opus_to_wechat_preserves_nested_long_body(
+    monkeypatch: pytest.MonkeyPatch,
+    multi_item_enabled: bool,
+) -> None:
+    body = "A" * NODE_TEXT_BUDGET + "B" * NODE_TEXT_BUDGET + "C" * 80
+    info = _info(TextBlock(body), cover_url="")
+    monkeypatch.setattr(opus_sender, "_fetch_opus_info", AsyncMock(return_value=info))
+    config = _config()
+    config.weixin = SimpleNamespace(
+        multi_item_messages_enabled=multi_item_enabled,
+        multi_item_max_items=2,
+        media_max_size_mb=100,
+    )
+
+    def is_private_allowed(_user_id: int) -> bool:
+        return True
+
+    config.is_private_allowed = is_private_allowed
+    history = SimpleNamespace(add_private_message=AsyncMock())
+    sender = MessageSender(
+        MagicMock(), cast(MessageHistoryManager, history), bot_qq=10000, config=config
+    )
+    delivered: list[str] = []
+
+    async def send_text(_user_id: int, text: str, **_kwargs: Any) -> str:
+        delivered.append(text)
+        return f"client-{len(delivered)}"
+
+    async def send_items(_user_id: int, items: Sequence[OutboundMessageItem]) -> str:
+        for item in items:
+            assert isinstance(item, OutboundTextItem)
+            delivered.append(item.text)
+        return f"client-{len(delivered)}"
+
+    sender.set_weixin_service(
+        SimpleNamespace(send_text=send_text, send_items=send_items)
+    )
+    bound_sender = AddressBoundSender(sender, DeliveryAddress("wechat", 20001))
+
+    result = await opus_sender.send_opus(
+        info.opus_id,
+        sender=cast(MessageSender, bound_sender),
+        target_type="private",
+        target_id=20001,
+        config=config,
+    )
+
+    assert result.startswith("已发送 Bilibili 图文合并转发")
+    assert "图文信息" in delivered[0]
+    joined = "".join(delivered)
+    assert joined.count("A") == NODE_TEXT_BUDGET
+    assert joined.count("B") == NODE_TEXT_BUDGET
+    assert joined.count("C") == 80
+    assert (
+        joined.index("A" * NODE_TEXT_BUDGET)
+        < joined.index("B" * NODE_TEXT_BUDGET)
+        < joined.index("C" * 80)
+    )
+    history.add_private_message.assert_awaited_once()
+    assert (
+        history.add_private_message.await_args.kwargs["transport"]["channel"]
+        == "wechat"
+    )
 
 
 @pytest.mark.asyncio

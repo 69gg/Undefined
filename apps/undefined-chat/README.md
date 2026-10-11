@@ -7,15 +7,19 @@ Undefined Chat 是 `apps/undefined-chat/` 下的 Tauri v2 + React 19 原生聊�
 ## 当前能力
 
 - 会话管理：创建、删除、重命名、切换会话。当前没有置顶字段/API。
-- 消息历史：初始加载、cursor-based 加载更早消息、滚动锚点保持和长历史窗口化渲染。
-- 消息渲染：Markdown、表格、任务列表、引用块、代码高亮、代码块复制；正文 HTML 经 sanitize 内联渲染，HTML 代码块可在独立预览窗口中运行。
+- 消息历史：初始加载、cursor-based 加载更早消息、滚动锚点保持和长历史窗口化渲染。同一会话的重载与分页共用请求顺序保护；发送新消息、完成任务刷新或删除会话后，迟到的旧响应不会覆盖正文、游标或加载状态。
+- 消息渲染：Markdown、表格、任务列表、引用块、代码高亮、代码块复制；未知语言或高亮失败时保留为纯文本代码，代码中的 HTML 不会插入正文。正文 HTML 经 sanitize 内联渲染，HTML 代码块可在独立预览窗口中运行。
 - 附件：系统文件选择器、上传状态队列、Tauri 流式上传、下载和预览。当前显示上传中/成功/失败状态，不显示百分比进度。
-- 图片：正文 `<attachment uid/>` 内联图、附件缩略图、blob 缓存、全屏查看、缩放、旋转和可滚动查看区域。
+- 保存连接配置会把尚未完成的附件上传转为失败状态，恢复连接后可移除并重新选择文件；旧上传结果不能恢复已移除条目。同一 Runtime 已上传成功的附件保留，切换 Runtime 清理旧附件。
+- 图片：正文 `<attachment uid/>` 内联图、附件缩略图、blob 缓存、全屏查看、缩放、旋转和可滚动查看区域。LRU 目标缓存 60 张；挂载中的图片和已打开的大图持有 blob 引用，超过目标时只淘汰无人使用的项，关闭或卸载消费者后再释放多余缓存。
 - 命令：斜杠命令、子命令提示、方向键导航、Tab/Enter 补全；空态反馈（加载中/无匹配/不可用）；窗口聚焦按 TTL 刷新命令列表。
 - 引用：引用 bot 消息、划词引用选中文本、发送引用、引用芯片跳转当前已加载源消息；源消息不在当前页时会自动加载一页更早历史，仍未命中需手动继续加载更早历史。
 - 工具调用块：层级展示、状态、运行中实时计时、阶段明细（stage detail）、与 WebUI 一致的输入/输出预览（JSON/Python 风格结构化、Markdown 输出、附件图片预览）；历史回放支持 timeline/calls/events 多级回退。
 - 自动滚动：智能跟随底部，可在设置面板开关，偏好持久化到 localStorage。
-- 事件：SSE 优先，断开时 JSON fallback（指数退避重连，活跃任务持续重试）。
+- 重命名只更新目标会话标题，保留当前会话、输入草稿与移动端面板；请求期间切换会话也不会被迟到响应切回。
+- 事件：SSE 优先，断开时 JSON fallback（指数退避重连，活跃任务持续重试）；完整任务快照恢复消息与已结束调用，并按快照游标续接，旧 Runtime 的正文前缀也会保留。
+- 恢复连接时，已从 active 列表消失的本地任务会补刷所属会话的权威历史，包括非当前会话；仍在历史落盘的终态任务继续保留发送锁，已删除会话不再请求。刷新期间刚获发送确认的新任务不会被较早取得的空列表删除，也会继续订阅事件。
+- SSE 订阅按任务去重在途启动；恢复或结束任务后，迟到的旧订阅会被关闭，旧启动失败不会覆盖当前订阅或启动额外轮询。
 - 快捷键：Ctrl/Cmd+N 新会话，Ctrl/Cmd+K 聚焦输入并打开命令模式，Ctrl/Cmd+/ 切换侧栏，Ctrl/Cmd+, 打开设置，Escape 关闭当前弹层/抽屉。
 - i18n：中英双语运行时切换，提供语言切换 UI，并按系统语言自动检测默认语言。
 
@@ -30,7 +34,7 @@ Undefined Chat 是 `apps/undefined-chat/` 下的 Tauri v2 + React 19 原生聊�
 Android：
 
 - 文件选择器返回的 `content://` URI 通过 Tauri fs plugin 打开，上传链路仍需要真机/模拟器 smoke 覆盖。
-- 生命周期监听使用 Tauri `tauri://suspended` / `tauri://resumed` 事件；恢复前台时重新 bootstrap 并恢复 Runtime 订阅。逐 job 主动补齐仍依赖 store 的 SSE 断线 fallback 行为。
+- 生命周期监听使用 Tauri `tauri://suspended` / `tauri://resumed` 事件；恢复前台时重新 bootstrap，接受 Runtime 的完整任务时间线与对应游标后恢复订阅；快照内已有事件不会重复追加。卸载或重新注册时会清理尚在异步注册中的监听，已排队的旧恢复回调不会再发起请求。
 - Android 通过生成工程注入的 `SecretPlugin` 使用 Android Keystore + AES-GCM 保存 API Key：密钥在 AndroidKeyStore 中生成且不可导出，加密后的密文存放在 `MODE_PRIVATE` 的 SharedPreferences 中。Android 生成插件已接入并有脚本/Rust 测试覆盖，真实设备仍需 smoke 验证；只有平台安全存储不可用且用户显式确认时，才允许不安全文件降级。
 
 iOS：
@@ -45,7 +49,9 @@ npm run check
 npm run tauri:dev
 ```
 
-`npm run check` 当前包含 Biome、TypeScript、unit/jsdom integration tests、cargo fmt、cargo check 和 cargo test。
+`npm run check` 当前包含 Biome、TypeScript、unit/jsdom integration tests、独立 Node production build 回归、cargo fmt、cargo check 和 cargo test。
+
+`npm run build` 将应用、React、其余依赖与代码高亮模块分别打包。highlight.js 的全部语言定义按文件名区间拆成四组，仍同步注册并保留自动检测；分包控制单个 chunk 的体积并细化缓存粒度，全部语言支持保持一致。总下载体积基本不变，独立 gzip 压缩会因减少字典复用而增加压缩体积。`npm run test:build` 在临时目录构建，检查默认 500 kB 限制、chunk 导入图，并执行生产高亮模块，核对完整语言列表、各语言高亮和自动检测结果。
 
 Biome 固定为 **2.5.10**，与 Console 和根目录 WebUI 配置保持一致；使用 `npm ci` 安装锁定版本。App 的 `biome.json` 使用独立嵌套配置（`root: false`），不继承 WebUI 格式规则，并显式启用 React 的 `noArrayIndexKey` 检查，避免依赖自动检测造成漏检；升级约定见 [构建文档](../../docs/build.md#6-git-hook-集成)。
 

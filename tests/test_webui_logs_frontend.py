@@ -170,3 +170,77 @@ def test_log_view_delegates_all_filters_to_record_parser() -> None:
     assert "timeFrom:" in filter_fn
     assert "timeTo:" in filter_fn
     assert "const LOG_TAIL_LINES = 5000;" in source
+
+
+def test_log_category_switch_closes_old_stream_and_ignores_stale_responses() -> None:
+    from test_webui_runtime_chat_behavior import REPO_ROOT, _require_env
+
+    _require_env()
+    script = r"""
+const fs = require('node:fs');
+const vm = require('node:vm');
+const {JSDOM} = require(process.argv[1] + '/tests/frontend/node_modules/jsdom');
+const root = process.argv[1];
+const dom = new JSDOM(fs.readFileSync(root + '/src/Undefined/webui/templates/index.html', 'utf8'), {pretendToBeVisual: true});
+const state = {view: 'app', tab: 'logs', authenticated: true, logType: 'bot',
+  logFile: '', logFiles: {}, logFileCurrent: '', logsRaw: '', logStreamEnabled: true,
+  logAutoRefresh: true, logSearch: '', logLevel: 'all', logAtBottom: true};
+const pending = [];
+const streams = [];
+let activePollTimers = 0;
+class EventSource {
+  constructor(url) { this.url = url; this.closed = false; streams.push(this); }
+  close() { this.closed = true; }
+}
+const context = vm.createContext({state, URLSearchParams, Map, EventSource,
+  window: {EventSource}, document: dom.window.document,
+  get: id => dom.window.document.getElementById(id), t: key => key,
+  escapeHtml: text => text, shouldFetch: () => true,
+  recordFetchSuccess: () => {}, recordFetchError: () => {},
+  startLogTimer: () => {activePollTimers=1;}, stopLogTimer: () => {activePollTimers=0;},
+  api: async path => new Promise(resolve => pending.push({path, resolve})),
+});
+vm.runInContext(fs.readFileSync(root + '/src/Undefined/webui/static/js/ui.js', 'utf8'), context);
+vm.runInContext(fs.readFileSync(root + '/src/Undefined/webui/static/js/log-view.js', 'utf8'), context);
+const tick = async () => { for(let i=0;i<5;i++) await new Promise(r=>setImmediate(r)); };
+const answer = (path, data) => pending.find(item => item.path === path).resolve({
+  json: async () => data, text: async () => data});
+(async () => {
+  vm.runInContext('startLogStream(); fetchLogs(true); setLogType("webui"); setLogType("bot")', context);
+  if (!streams[0].closed || !streams[1].closed || streams.length !== 3)
+    throw new Error('category switch must replace the stream');
+  streams[2].onmessage({data: 'CURRENT_BOT'});
+  answer('/api/logs/files?type=bot', {files: [{name:'bot.log',current:true}],current:'bot.log'});
+  await tick();
+  answer('/api/logs/files?type=webui', {files: [{name:'webui.log',current:true}],current:'webui.log'});
+  answer('/api/logs?lines=5000&type=bot', 'STALE_BOT_SNAPSHOT');
+  await tick();
+  vm.runInContext('fetchLogs(true)', context);
+  streams[2].onmessage({data:'NEWER_LIVE_BOT'});
+  answer('/api/logs?lines=5000&type=bot&file=bot.log', 'STALE_CURRENT_VIEW_GET');
+  await tick();
+  const select = dom.window.document.getElementById('logFileSelect');
+  console.log(JSON.stringify({closed: streams.slice(0,2).map(item=>item.closed),
+    activeUrl: state.logStream.url, logsRaw:state.logsRaw, activePollTimers,
+    options:Array.from(select.options).map(item=>item.value), selected:select.value,
+    botCache:state.logFiles.bot.map(item=>item.name),
+    webuiCache:state.logFiles.webui.map(item=>item.name)}));
+  dom.window.close();
+})().catch(error=>{console.error(error);process.exitCode=1;});
+"""
+    completed = subprocess.run(
+        ["node", "-e", script, str(REPO_ROOT)],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    result = json.loads(completed.stdout.strip().splitlines()[-1])
+    assert result["closed"] == [True, True]
+    assert result["activeUrl"].endswith("type=bot")
+    assert result["logsRaw"] == "NEWER_LIVE_BOT"
+    assert result["activePollTimers"] == 0
+    assert result["options"] == result["botCache"] == ["bot.log"]
+    assert result["selected"] == "bot.log"
+    assert result["webuiCache"] == ["webui.log"]

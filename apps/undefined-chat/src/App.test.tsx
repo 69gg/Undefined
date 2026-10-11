@@ -1,5 +1,6 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import {
+	act,
 	fireEvent,
 	render,
 	screen,
@@ -12,6 +13,11 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { App } from "./App";
 import { LanguageProvider, LOCALE_STORAGE_KEY } from "./i18n";
 import { createTauriRuntimeClient } from "./runtime-client/tauri";
+import type {
+	Attachment,
+	AttachmentPreviewResult,
+	RuntimeConfig,
+} from "./runtime-client/types";
 import { conversation, historyItem, runtimeClientStub } from "./test-fixtures";
 
 vi.mock("./runtime-client/tauri", () => ({
@@ -28,6 +34,14 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
  */
 function renderApp(ui: ReactElement = <App />) {
 	return render(<LanguageProvider>{ui}</LanguageProvider>);
+}
+
+async function connectRuntime(runtimeUrl: string): Promise<void> {
+	fireEvent.keyDown(window, { key: ",", ctrlKey: true });
+	await userEvent.clear(screen.getByLabelText("Runtime URL"));
+	await userEvent.type(screen.getByLabelText("Runtime URL"), runtimeUrl);
+	await userEvent.click(screen.getByRole("button", { name: "保存并连接" }));
+	await screen.findByText(runtimeUrl);
 }
 
 describe("App", () => {
@@ -152,12 +166,14 @@ describe("App", () => {
 	test("saves initial Runtime config and API key before reconnecting", async () => {
 		const client = runtimeClientStub({
 			getRuntimeConfig: vi
-				.fn()
+				.fn(
+					async (): Promise<RuntimeConfig | null> => ({
+						runtimeUrl: "http://127.0.0.1:8788",
+						hasApiKey: true,
+					}),
+				)
 				.mockResolvedValueOnce(null)
-				.mockResolvedValueOnce({
-					runtimeUrl: "http://127.0.0.1:8788",
-					hasApiKey: true,
-				}),
+				.mockResolvedValueOnce(null),
 		});
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
@@ -182,12 +198,14 @@ describe("App", () => {
 	test("requires an explicit opt-in before confirming insecure API key storage fallback", async () => {
 		const client = runtimeClientStub({
 			getRuntimeConfig: vi
-				.fn()
+				.fn(
+					async (): Promise<RuntimeConfig | null> => ({
+						runtimeUrl: "http://127.0.0.1:8788",
+						hasApiKey: true,
+					}),
+				)
 				.mockResolvedValueOnce(null)
-				.mockResolvedValueOnce({
-					runtimeUrl: "http://127.0.0.1:8788",
-					hasApiKey: true,
-				}),
+				.mockResolvedValueOnce(null),
 		});
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
@@ -217,6 +235,137 @@ describe("App", () => {
 
 		expect(client.createConversation).toHaveBeenCalledOnce();
 		expect(await screen.findByRole("button", { name: /新会话/ })).toBeTruthy();
+	});
+
+	test("restores the previous Native target and blocks sending after key storage fails", async () => {
+		let nativeConfig: RuntimeConfig = {
+			runtimeUrl: "http://runtime-a.test",
+			hasApiKey: true,
+		};
+		const client = runtimeClientStub({
+			getRuntimeConfig: vi.fn(async () => nativeConfig),
+			saveRuntimeConfig: vi.fn(async (runtimeUrl) => {
+				nativeConfig = { ...nativeConfig, runtimeUrl };
+				return nativeConfig;
+			}),
+			saveApiKey: vi.fn(async () => {
+				throw new Error("keyring denied");
+			}),
+		});
+		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
+		renderApp();
+		await screen.findByLabelText("消息输入");
+		await userEvent.type(screen.getByLabelText("消息输入"), "A draft");
+		fireEvent.keyDown(window, { key: ",", ctrlKey: true });
+		await userEvent.type(screen.getByLabelText("API Key"), "B-key");
+		await userEvent.clear(screen.getByLabelText("Runtime URL"));
+		await userEvent.type(
+			screen.getByLabelText("Runtime URL"),
+			"http://runtime-b.test",
+		);
+		await userEvent.click(screen.getByRole("button", { name: "保存并连接" }));
+		await screen.findByText(/keyring denied/);
+		expect(nativeConfig.runtimeUrl).toBe("http://runtime-a.test");
+		expect(client.saveRuntimeConfig).toHaveBeenLastCalledWith(
+			"http://runtime-a.test",
+		);
+		expect(screen.getByLabelText("Runtime URL")).toHaveValue(
+			"http://runtime-a.test",
+		);
+		expect(screen.getByLabelText("消息输入")).toHaveValue("A draft");
+		expect(screen.getByLabelText("消息输入")).toBeDisabled();
+		fireEvent.keyDown(window, { key: "Escape" });
+		expect(screen.getByLabelText("Runtime URL")).toBeInTheDocument();
+		expect(client.sendMessage).not.toHaveBeenCalled();
+		expect(client.listConversations).toHaveBeenCalledTimes(1);
+		// 恢复界面不能留空沿用未知状态的密钥；明确重新保存后才解除暂停。
+		await userEvent.click(screen.getByRole("button", { name: "保存并连接" }));
+		expect(await screen.findByText("请输入 API Key")).toBeInTheDocument();
+		client.saveApiKey = vi.fn(async () => client.loadApiKeyStatus());
+		await userEvent.type(screen.getByLabelText("API Key"), "A-key");
+		await userEvent.click(screen.getByRole("button", { name: "保存并连接" }));
+		await waitFor(() => {
+			expect(screen.queryByLabelText("Runtime URL")).toBeNull();
+			expect(screen.getByLabelText("消息输入")).toBeEnabled();
+		});
+		expect(screen.getByLabelText("消息输入")).toHaveValue("A draft");
+		await userEvent.click(screen.getByRole("button", { name: "发送" }));
+		expect(client.sendMessage).toHaveBeenCalledWith({
+			conversationId: "default",
+			message: { text: "A draft", attachmentIds: [], references: [] },
+		});
+	});
+
+	test("clears a first configuration after key storage fails", async () => {
+		let nativeConfig: RuntimeConfig | null = null;
+		const client = runtimeClientStub({
+			getRuntimeConfig: vi.fn(async () => nativeConfig),
+			saveRuntimeConfig: vi.fn(async (runtimeUrl) => {
+				nativeConfig = { runtimeUrl, hasApiKey: false };
+				return nativeConfig;
+			}),
+			clearRuntimeConfig: vi.fn(async () => {
+				nativeConfig = null;
+			}),
+			saveApiKey: vi.fn(async () => {
+				throw new Error("keyring denied");
+			}),
+		});
+		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
+		renderApp();
+		await screen.findByLabelText("Runtime URL");
+		await userEvent.type(screen.getByLabelText("API Key"), "B-key");
+		await userEvent.click(screen.getByRole("button", { name: "保存并连接" }));
+		await screen.findByText(/keyring denied/);
+		expect(nativeConfig).toBeNull();
+		expect(client.clearRuntimeConfig).toHaveBeenCalledOnce();
+		expect(client.listConversations).not.toHaveBeenCalled();
+		expect(screen.getByLabelText("消息输入")).toBeDisabled();
+	});
+
+	test("shows the actual Native target and requires recovery if URL rollback fails", async () => {
+		let nativeConfig: RuntimeConfig = {
+			runtimeUrl: "http://runtime-a.test",
+			hasApiKey: true,
+		};
+		const client = runtimeClientStub({
+			getRuntimeConfig: vi.fn(async () => nativeConfig),
+			saveRuntimeConfig: vi.fn(async (runtimeUrl) => {
+				if (runtimeUrl === "http://runtime-a.test") {
+					throw new Error("restore denied");
+				}
+				nativeConfig = { ...nativeConfig, runtimeUrl };
+				return nativeConfig;
+			}),
+			saveApiKey: vi.fn(async () => {
+				// 模拟底层已经更新密钥但回执失败；客户端不得推断旧密钥仍安全。
+				nativeConfig = { ...nativeConfig, hasApiKey: true };
+				throw new Error("key write receipt failed");
+			}),
+		});
+		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
+		renderApp();
+		await screen.findByLabelText("消息输入");
+		await userEvent.type(screen.getByLabelText("消息输入"), "private A draft");
+		fireEvent.keyDown(window, { key: ",", ctrlKey: true });
+		await userEvent.type(screen.getByLabelText("API Key"), "B-key");
+		await userEvent.clear(screen.getByLabelText("Runtime URL"));
+		await userEvent.type(
+			screen.getByLabelText("Runtime URL"),
+			"http://runtime-b.test",
+		);
+		await userEvent.click(screen.getByRole("button", { name: "保存并连接" }));
+		await screen.findByText(/restore denied/);
+		expect(nativeConfig.runtimeUrl).toBe("http://runtime-b.test");
+		expect(screen.getByLabelText("Runtime URL")).toHaveValue(
+			"http://runtime-b.test",
+		);
+		expect(screen.getByLabelText("消息输入")).toHaveValue("");
+		expect(screen.getByLabelText("消息输入")).toBeDisabled();
+		fireEvent.keyDown(window, { key: "Escape" });
+		expect(screen.getByLabelText("API Key")).toBeInTheDocument();
+		expect(client.sendMessage).not.toHaveBeenCalled();
+		expect(client.listConversations).toHaveBeenCalledTimes(1);
 	});
 
 	test("opens and closes the mobile conversation drawer with accessible state", async () => {
@@ -423,6 +572,184 @@ describe("App", () => {
 				filePath: "/tmp/trace.log",
 			});
 		});
+	});
+
+	test.each(["success", "failure"])(
+		"same-URL settings turn in-flight attachments into removable errors after late %s",
+		async (outcome) => {
+			let resolveUpload!: (value: Attachment) => void;
+			let rejectUpload!: (reason: Error) => void;
+			const pendingUpload = new Promise<Attachment>((resolve, reject) => {
+				resolveUpload = resolve;
+				rejectUpload = reject;
+			});
+			let config: RuntimeConfig = {
+				runtimeUrl: "http://same-runtime.test",
+				hasApiKey: true,
+			};
+			const attachment: Attachment = {
+				id: "file-A",
+				name: "A.txt",
+				size: 4,
+				kind: "file",
+				mediaType: "text/plain",
+				downloadUrl: "/attachment/file-A",
+				previewUrl: null,
+				discarded: false,
+			};
+			const client = runtimeClientStub({
+				getRuntimeConfig: vi.fn(async () => config),
+				saveRuntimeConfig: vi.fn(
+					async (runtimeUrl) => (config = { ...config, runtimeUrl }),
+				),
+				uploadAttachment: vi
+					.fn()
+					.mockImplementationOnce(() => pendingUpload)
+					.mockResolvedValue({ ...attachment, id: "reselected" }),
+			});
+			vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
+			vi.mocked(open).mockResolvedValue("/isolated/A.txt");
+			renderApp();
+			await screen.findByLabelText("消息输入");
+			await userEvent.click(screen.getByRole("button", { name: "添加附件" }));
+			await waitFor(() =>
+				expect(client.uploadAttachment).toHaveBeenCalledTimes(1),
+			);
+			fireEvent.keyDown(window, { key: ",", ctrlKey: true });
+			await screen.findByLabelText("Runtime URL");
+			await userEvent.click(screen.getByRole("button", { name: "保存并连接" }));
+			await waitFor(() =>
+				expect(screen.queryByLabelText("Runtime URL")).toBeNull(),
+			);
+			await act(async () => {
+				if (outcome === "success") resolveUpload(attachment);
+				else rejectUpload(new Error("obsolete upload failure"));
+				await Promise.resolve();
+			});
+			await userEvent.type(screen.getByLabelText("消息输入"), "after-settings");
+			fireEvent.keyDown(screen.getByLabelText("消息输入"), { key: "Enter" });
+			expect(await screen.findByText("请先移除上传失败的附件")).toBeTruthy();
+			expect(client.sendMessage).not.toHaveBeenCalled();
+			await userEvent.click(screen.getByRole("button", { name: "移除 A.txt" }));
+			await userEvent.click(screen.getByRole("button", { name: "添加附件" }));
+			await waitFor(() =>
+				expect(client.uploadAttachment).toHaveBeenCalledTimes(2),
+			);
+			await waitFor(() =>
+				expect(
+					screen.getByRole("list", { name: "附件队列" }).textContent,
+				).toContain("4 B"),
+			);
+			fireEvent.keyDown(screen.getByLabelText("消息输入"), { key: "Enter" });
+			await waitFor(() =>
+				expect(client.sendMessage).toHaveBeenCalledWith({
+					conversationId: "default",
+					message: {
+						text: "after-settings",
+						attachmentIds: ["reselected"],
+						references: [],
+					},
+				}),
+			);
+		},
+	);
+
+	test("ignores a file picker opened on the previous Runtime", async () => {
+		let resolvePicker!: (path: string) => void;
+		vi.mocked(open).mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					resolvePicker = resolve;
+				}),
+		);
+		let config: RuntimeConfig = {
+			runtimeUrl: "http://runtime-a.test",
+			hasApiKey: true,
+		};
+		const client = runtimeClientStub({
+			getRuntimeConfig: vi.fn(async () => config),
+			saveRuntimeConfig: vi.fn(async (runtimeUrl) => {
+				config = { ...config, runtimeUrl };
+				return config;
+			}),
+		});
+		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
+		renderApp();
+		await screen.findByLabelText("消息输入");
+		await userEvent.click(screen.getByRole("button", { name: "添加附件" }));
+		await connectRuntime("http://runtime-b.test");
+		await waitFor(() => {
+			expect(client.getHistory).toHaveBeenCalledTimes(2);
+		});
+		resolvePicker("/tmp/runtime-a-private.txt");
+		await waitFor(() => {
+			expect(screen.getByLabelText("消息输入")).toHaveValue("");
+		});
+		expect(client.uploadAttachment).not.toHaveBeenCalled();
+	});
+
+	test("ignores a direct attachment preview returned from the previous Runtime", async () => {
+		let resolvePreview!: (result: AttachmentPreviewResult) => void;
+		let config: RuntimeConfig = {
+			runtimeUrl: "http://runtime-a.test",
+			hasApiKey: true,
+		};
+		const client = runtimeClientStub();
+		const getHistory = client.getHistory;
+		client.getRuntimeConfig = vi.fn(async () => config);
+		client.saveRuntimeConfig = vi.fn(async (runtimeUrl) => {
+			config = { ...config, runtimeUrl };
+			return config;
+		});
+		client.getHistory = vi.fn(async (request) => ({
+			...(await getHistory(request)),
+			items:
+				config.runtimeUrl === "http://runtime-a.test"
+					? [
+							historyItem({
+								attachments: [
+									{
+										id: "pic_a",
+										name: "private-a.png",
+										kind: "image",
+										mediaType: "image/png",
+										size: 20 * 1024 * 1024,
+										downloadUrl: "/api/v1/chat/attachments/pic_a",
+										previewUrl: "/api/v1/chat/attachments/pic_a/preview",
+										discarded: false,
+									},
+								],
+							}),
+						]
+					: [],
+		}));
+		client.previewAttachment = vi.fn(
+			() =>
+				new Promise<AttachmentPreviewResult>((resolve) => {
+					resolvePreview = resolve;
+				}),
+		);
+		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
+		const createSpy = vi.spyOn(URL, "createObjectURL");
+		renderApp();
+		await screen.findByText("private-a.png");
+		await userEvent.click(screen.getByRole("button", { name: "预览" }));
+		await connectRuntime("http://runtime-b.test");
+		await waitFor(() => {
+			expect(screen.queryByText("private-a.png")).toBeNull();
+		});
+		await act(async () => {
+			resolvePreview({
+				status: 200,
+				ok: true,
+				mediaType: "image/png",
+				bytes: [1, 2, 3, 4],
+				body: null,
+			});
+		});
+		expect(screen.queryByRole("dialog", { name: "图片查看器" })).toBeNull();
+		expect(createSpy).not.toHaveBeenCalled();
+		createSpy.mockRestore();
 	});
 
 	test("uses native attachment bridges for timeline actions", async () => {

@@ -159,6 +159,7 @@ _BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
 def _spawn_hot_reload_task(
     coro: Coroutine[Any, Any, None],
     description: str,
+    on_failure: Callable[[], None] | None = None,
 ) -> None:
     """创建热更新后台任务并回收异常，避免静默失败。"""
     task = asyncio.create_task(coro, name=f"config-hot-reload:{description}")
@@ -170,6 +171,8 @@ def _spawn_hot_reload_task(
             return
         exc = finished.exception()
         if exc is not None:
+            if on_failure is not None:
+                on_failure()
             logger.error(
                 "[配置] 热更新后台任务失败: %s（该部分配置未生效）",
                 description,
@@ -198,11 +201,19 @@ def apply_config_updates(
 
     handler = context.message_handler
 
+    def _retry_failed_update() -> None:
+        context.config_manager.retry_failed_update(changes)
+
     def _apply_security() -> None:
         context.security_service.apply_config(updated)
 
     def _apply_retries() -> None:
         context.queue_manager.update_max_retries(updated.ai_request_max_retries)
+
+    def _apply_group_llm_queue_limit() -> None:
+        context.queue_manager.update_group_llm_queue_max_pending(
+            updated.group_llm_queue_max_pending
+        )
 
     def _apply_queue_intervals() -> None:
         context.queue_manager.update_model_intervals(
@@ -244,6 +255,7 @@ def apply_config_updates(
         _spawn_hot_reload_task(
             _apply_message_handler_automations_hot_reload(updated, handler),
             "automations",
+            on_failure=_retry_failed_update,
         )
 
     def _apply_model_configs() -> None:
@@ -261,10 +273,12 @@ def apply_config_updates(
         _spawn_hot_reload_task(
             _apply_skills_hot_reload(updated, context.ai_client),
             "skills",
+            on_failure=_retry_failed_update,
         )
         _spawn_hot_reload_task(
             _apply_message_handler_skills_hot_reload(updated, handler),
             "message-handler-skills",
+            on_failure=_retry_failed_update,
         )
 
     def _apply_config_watcher() -> None:
@@ -275,6 +289,7 @@ def apply_config_updates(
                 updated.skills_hot_reload_debounce,
             ),
             "config-watcher",
+            on_failure=_retry_failed_update,
         )
 
     steps: list[tuple[str, Callable[[], None]]] = []
@@ -282,6 +297,8 @@ def apply_config_updates(
         steps.append(("security", _apply_security))
     if "ai_request_max_retries" in changed_keys:
         steps.append(("ai_request_max_retries", _apply_retries))
+    if "group_llm_queue_max_pending" in changed_keys:
+        steps.append(("group_llm_queue_max_pending", _apply_group_llm_queue_limit))
     if _needs_queue_interval_update(changed_keys):
         steps.append(("queue_intervals", _apply_queue_intervals))
     if _needs_intro_update(changed_keys):
@@ -319,6 +336,7 @@ def apply_config_updates(
             "如怀疑异步部分未生效，请检索『热更新后台任务失败』日志",
             ", ".join(failed),
         )
+        raise RuntimeError(f"热更新步骤失败: {', '.join(failed)}")
 
 
 def _log_restart_required(changed_keys: set[str]) -> None:
@@ -410,6 +428,7 @@ async def _apply_skills_hot_reload(updated: Config, ai_client: AIClient) -> None
         logger.info("[配置] 技能热重载已禁用")
         if failed:
             logger.error("[配置] 部分注册表热重载未停止: %s", ", ".join(failed))
+            raise RuntimeError(f"技能热重载未停止: {', '.join(failed)}")
         return
 
     for registry in registries:
@@ -426,7 +445,7 @@ async def _apply_skills_hot_reload(updated: Config, ai_client: AIClient) -> None
             )
     if failed:
         logger.error("[配置] 以下注册表热重载未生效: %s", ", ".join(failed))
-        return
+        raise RuntimeError(f"技能热重载未生效: {', '.join(failed)}")
     logger.info(
         "[配置] 技能热重载已更新: interval=%.2fs debounce=%.2fs",
         updated.skills_hot_reload_interval,
@@ -461,8 +480,7 @@ async def _apply_message_handler_automations_hot_reload(
 async def _restart_config_hot_reload(
     config_manager: ConfigManager, interval: float, debounce: float
 ) -> None:
-    await config_manager.stop_hot_reload()
-    config_manager.start_hot_reload(interval=interval, debounce=debounce)
+    await config_manager.restart_hot_reload(interval=interval, debounce=debounce)
     logger.info(
         "[配置] 配置热更新已重启: interval=%.2fs debounce=%.2fs",
         interval,

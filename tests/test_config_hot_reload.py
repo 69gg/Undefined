@@ -7,6 +7,7 @@ from typing import Any, cast
 
 import pytest
 
+from Undefined.config import Config
 from Undefined.config.hot_reload import HotReloadContext, apply_config_updates
 
 
@@ -104,6 +105,10 @@ class _FakeConfigManager:
 
     def start_hot_reload(self, *, interval: float, debounce: float) -> None:
         self.started.append((interval, debounce))
+
+    async def restart_hot_reload(self, *, interval: float, debounce: float) -> None:
+        await self.stop_hot_reload()
+        self.start_hot_reload(interval=interval, debounce=debounce)
 
 
 def test_apply_config_updates_propagates_to_security_service() -> None:
@@ -705,7 +710,7 @@ def test_apply_config_updates_isolates_failed_step(
         security_service=cast(Any, _BrokenSecurity()),
     )
 
-    with caplog.at_level("ERROR"):
+    with caplog.at_level("ERROR"), pytest.raises(RuntimeError, match="security"):
         apply_config_updates(
             updated,
             {"security_model.model_name": ("old", "new")},
@@ -763,6 +768,194 @@ def test_config_manager_notify_survives_failing_callback(
     assert "回调未完成" in caplog.text
 
 
+@pytest.mark.parametrize("broken", ["[core\n", "\xff"])
+def test_invalid_reload_preserves_access_and_authentication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, broken: str
+) -> None:
+    from Undefined.config.manager import ConfigManager
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("Undefined.config.config_class._load_env", lambda: None)
+    path = tmp_path / "config.toml"
+    valid = '[access]\nmode="allowlist"\nallowed_group_ids=[111]\n[api]\nauth_key="private-key"\n'
+    path.write_text(valid, encoding="utf-8")
+    manager = ConfigManager(path)
+    config = manager.load(strict=False)
+    calls: list[dict[str, Any]] = []
+    manager.subscribe(lambda _config, changes: calls.append(changes))
+
+    path.write_bytes(broken.encode("latin-1"))
+    with pytest.raises(ValueError):
+        manager.reload(strict=False)
+    assert manager.load(strict=False) is config
+    assert config.access_mode == "allowlist"
+    assert config.is_group_allowed(111)
+    assert not config.is_group_allowed(999)
+    assert config.api.auth_key == "private-key"
+    assert calls == []
+
+    path.write_text(valid.replace("[111]", "[222]"), encoding="utf-8")
+    assert manager.reload(strict=False)
+    assert config.is_group_allowed(222)
+    assert not config.is_group_allowed(111)
+    assert len(calls) == 1
+
+
+def test_failed_callback_retries_identical_saved_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from Undefined.config.manager import ConfigManager
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("Undefined.config.config_class._load_env", lambda: None)
+    path = tmp_path / "config.toml"
+    path.write_text('[models.chat]\nmodel_name="old"\n', encoding="utf-8")
+    manager = ConfigManager(path)
+    config = manager.load(strict=False)
+    attempts = 0
+    applied: list[str] = []
+
+    def _apply(updated: Config, changes: dict[str, Any]) -> None:
+        nonlocal attempts
+        attempts += 1
+        assert "chat_model.model_name" in changes
+        if attempts == 1:
+            raise RuntimeError("transient failure")
+        applied.append(updated.chat_model.model_name)
+
+    manager.subscribe(_apply)
+    path.write_text('[models.chat]\nmodel_name="new"\n', encoding="utf-8")
+    assert manager.reload(strict=False)
+    assert config.chat_model.model_name == "new"
+    assert applied == []
+    assert manager.reload(strict=False)
+    assert applied == ["new"]
+    assert manager.reload(strict=False) == {}
+    assert attempts == 2
+
+
+def test_runtime_step_failure_retries_identical_saved_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from Undefined.config.manager import ConfigManager
+
+    class _FlakyQueue(_FakeQueueManager):
+        def update_max_retries(self, max_retries: int) -> None:
+            if not self.max_retries:
+                self.max_retries.append(-1)
+                raise RuntimeError("queue temporarily unavailable")
+            super().update_max_retries(max_retries)
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("Undefined.config.config_class._load_env", lambda: None)
+    path = tmp_path / "config.toml"
+    path.write_text("[core]\nai_request_max_retries=2\n", encoding="utf-8")
+    manager = ConfigManager(path)
+    manager.load(strict=False)
+    queue = _FlakyQueue()
+    context = HotReloadContext(
+        ai_client=cast(Any, _FakeAIClient()),
+        queue_manager=cast(Any, queue),
+        config_manager=manager,
+        security_service=cast(Any, _FakeSecurityService()),
+    )
+    manager.subscribe(
+        lambda config, changes: apply_config_updates(config, changes, context)
+    )
+    path.write_text("[core]\nai_request_max_retries=7\n", encoding="utf-8")
+    manager.reload(strict=False)
+    assert queue.max_retries == [-1]
+    manager.reload(strict=False)
+    assert queue.max_retries == [-1, 7]
+    assert manager.reload(strict=False) == {}
+
+
+@pytest.mark.asyncio
+async def test_runtime_background_failure_retries_identical_saved_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from Undefined.config.manager import ConfigManager
+
+    class _FlakyHandler(_FakeMessageHandler):
+        async def apply_automations_hot_reload_config(
+            self, *, max_concurrent: int
+        ) -> None:
+            if not self.automation_updates:
+                self.automation_updates.append(-1)
+                raise RuntimeError("automation temporarily unavailable")
+            await super().apply_automations_hot_reload_config(
+                max_concurrent=max_concurrent
+            )
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("Undefined.config.config_class._load_env", lambda: None)
+    path = tmp_path / "config.toml"
+    path.write_text("[automations]\nmax_concurrent=2\n", encoding="utf-8")
+    manager = ConfigManager(path)
+    manager.load(strict=False)
+    handler = _FlakyHandler()
+    context = HotReloadContext(
+        ai_client=cast(Any, _FakeAIClient()),
+        queue_manager=cast(Any, _FakeQueueManager()),
+        config_manager=manager,
+        security_service=cast(Any, _FakeSecurityService()),
+        message_handler=cast(Any, handler),
+    )
+    manager.subscribe(
+        lambda config, changes: apply_config_updates(config, changes, context)
+    )
+    path.write_text("[automations]\nmax_concurrent=7\n", encoding="utf-8")
+    manager.reload(strict=False)
+    for _ in range(3):
+        await asyncio.sleep(0)
+    assert handler.automation_updates == [-1]
+    manager.reload(strict=False)
+    for _ in range(3):
+        await asyncio.sleep(0)
+    assert handler.automation_updates == [-1, 7]
+    assert manager.reload(strict=False) == {}
+
+
+@pytest.mark.asyncio
+async def test_background_failure_retries_without_replaying_stale_values(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from Undefined.config.hot_reload import _spawn_hot_reload_task
+    from Undefined.config.manager import ConfigManager
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("Undefined.config.config_class._load_env", lambda: None)
+    path = tmp_path / "config.toml"
+    path.write_text('[models.chat]\nmodel_name="old"\n', encoding="utf-8")
+    manager = ConfigManager(path)
+    manager.load(strict=False)
+    attempts: list[str] = []
+    release = asyncio.Event()
+
+    async def _fail() -> None:
+        await release.wait()
+        raise RuntimeError("background failure")
+
+    def _apply(updated: Config, changes: dict[str, Any]) -> None:
+        attempts.append(updated.chat_model.model_name)
+        if len(attempts) == 1:
+            _spawn_hot_reload_task(
+                _fail(), "retry-test", lambda: manager.retry_failed_update(changes)
+            )
+
+    manager.subscribe(_apply)
+    path.write_text('[models.chat]\nmodel_name="new"\n', encoding="utf-8")
+    manager.reload(strict=False)
+    release.set()
+    for _ in range(3):
+        await asyncio.sleep(0)
+    assert manager.reload(strict=False)
+    assert attempts == ["new", "new"]
+
+    manager.retry_failed_update({"chat_model.model_name": ("old", "obsolete")})
+    assert manager.reload(strict=False) == {}
+
+
 def test_weixin_config_updates_in_place_for_hot_reload(tmp_path: Path) -> None:
     """WeixinService 持有 config.weixin 对象，热更新必须原地改字段而非换身份。"""
     from dataclasses import replace as dc_replace
@@ -805,7 +998,7 @@ def test_security_step_skipped_when_unrelated_keys_change() -> None:
     )
     security_service = _FakeSecurityService()
     context = HotReloadContext(
-        ai_client=cast(Any, SimpleNamespace()),
+        ai_client=cast(Any, SimpleNamespace(apply_search_config=lambda _url: None)),
         queue_manager=cast(Any, _FakeQueueManager()),
         config_manager=cast(Any, SimpleNamespace()),
         security_service=cast(Any, security_service),

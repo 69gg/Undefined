@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 from pathlib import Path
 import sys
 from types import ModuleType
@@ -24,6 +25,16 @@ def _load_script() -> ModuleType:
 
 
 bump_version = _load_script()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_commands(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    def forbidden(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("tests must not run external commands")
+
+    monkeypatch.setattr(bump_version.subprocess, "run", forbidden)
 
 
 def _write_bump_project(root: Path, *, version: str = "1.2.3") -> None:
@@ -214,3 +225,295 @@ def test_bump_project_versions_rejects_invalid_version(tmp_path: Path) -> None:
             project_root=tmp_path,
             dry_run=True,
         )
+
+
+def _assert_all_versions(root: Path, version: str) -> None:
+    assert (
+        tomllib_loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"][
+            "version"
+        ]
+        == version
+    )
+    assert f'__version__: str = "{version}"' in (
+        root / "src" / "Undefined" / "__init__.py"
+    ).read_text(encoding="utf-8")
+    for app in bump_version.NATIVE_APPS:
+        app_root = app.app_root(root)
+        tauri_root = app.tauri_root(root)
+        assert _json_version(app_root / "package.json") == version
+        assert _package_lock_versions(app_root / "package-lock.json") == (
+            version,
+            version,
+        )
+        assert (
+            tomllib_loads((tauri_root / "Cargo.toml").read_text(encoding="utf-8"))[
+                "package"
+            ]["version"]
+            == version
+        )
+        assert _json_version(tauri_root / "tauri.conf.json") == version
+        assert (
+            _cargo_lock_root_version(tauri_root / "Cargo.lock", app.cargo_package)
+            == version
+        )
+
+
+@pytest.mark.parametrize(
+    "failed_path",
+    ["src/Undefined/__init__.py", "apps/undefined-chat/package.json"],
+)
+def test_same_version_retry_finishes_all_targets_after_partial_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failed_path: str
+) -> None:
+    _write_bump_project(tmp_path)
+    assert Path.cwd() == tmp_path
+    original_write = bump_version._write_if_changed
+    sync_calls: list[Path] = []
+    monkeypatch.setattr(
+        bump_version,
+        "sync_lock_files",
+        lambda root, *, dry_run: sync_calls.append(root),
+    )
+
+    def fail_write(path: Path, text: str, dry_run: bool) -> bool:
+        assert path.resolve().is_relative_to(tmp_path)
+        if path == tmp_path / failed_path:
+            raise OSError("temporarily unavailable")
+        result: bool = original_write(path, text, dry_run)
+        return result
+
+    monkeypatch.setattr(bump_version, "_write_if_changed", fail_write)
+    with pytest.raises(OSError, match="temporarily unavailable"):
+        bump_version.bump_project_versions(
+            "2.0.0", project_root=tmp_path, dry_run=False
+        )
+    assert bump_version._read_current_version(tmp_path) == "2.0.0"
+    assert not sync_calls
+    monkeypatch.setattr(bump_version, "_write_if_changed", original_write)
+
+    result = bump_version.bump_project_versions(
+        "2.0.0", project_root=tmp_path, dry_run=False
+    )
+
+    assert result.old_version == result.new_version == "2.0.0"
+    assert result.changed_paths
+    assert sync_calls == [tmp_path]
+    _assert_all_versions(tmp_path, "2.0.0")
+
+
+def test_same_version_retry_reruns_all_lock_commands_after_sync_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_bump_project(tmp_path)
+    calls: list[tuple[tuple[str, ...], Path]] = []
+    fail_next_npm = True
+    uv_runs = 0
+
+    def run(
+        command: list[str], *, cwd: Path, check: bool
+    ) -> subprocess.CompletedProcess[bytes]:
+        nonlocal fail_next_npm, uv_runs
+        assert cwd.resolve().is_relative_to(tmp_path)
+        assert check
+        calls.append((tuple(command), cwd))
+        if command[0] == "npm" and fail_next_npm:
+            fail_next_npm = False
+            raise subprocess.CalledProcessError(1, command)
+        if command[0] == "uv":
+            uv_runs += 1
+            (cwd / "uv.lock").write_text(f"sync_count={uv_runs}\n", encoding="utf-8")
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(bump_version.subprocess, "run", run)
+    with pytest.raises(subprocess.CalledProcessError):
+        bump_version.bump_project_versions(
+            "2.0.0", project_root=tmp_path, dry_run=False
+        )
+    _assert_all_versions(tmp_path, "2.0.0")
+    calls.clear()
+
+    result = bump_version.bump_project_versions(
+        "2.0.0", project_root=tmp_path, dry_run=False
+    )
+
+    assert [command for command, _ in calls] == [
+        ("uv", "sync"),
+        ("npm", "install", "--package-lock-only"),
+        ("cargo", "update", "--workspace"),
+        ("npm", "install", "--package-lock-only"),
+        ("cargo", "update", "--workspace"),
+    ]
+    assert result.changed_paths == ("uv.lock",)
+    _assert_all_versions(tmp_path, "2.0.0")
+
+
+def test_same_version_dry_run_detects_other_target_without_writing_or_syncing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_bump_project(tmp_path, version="2.0.0")
+    target = tmp_path / "src" / "Undefined" / "__init__.py"
+    target.write_text('__version__: str = "1.2.3"\n', encoding="utf-8")
+    before = {path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()}
+    monkeypatch.setattr(
+        bump_version,
+        "sync_lock_files",
+        lambda *args, **kwargs: pytest.fail("dry-run must not sync"),
+    )
+
+    result = bump_version.bump_project_versions(
+        "2.0.0", project_root=tmp_path, dry_run=True
+    )
+
+    assert result.changed_paths == ("src/Undefined/__init__.py",)
+    assert {
+        path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()
+    } == before
+
+
+def test_same_version_cli_reports_completed_lock_sync(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _write_bump_project(tmp_path, version="2.0.0")
+    sync_calls: list[Path] = []
+    monkeypatch.setattr(bump_version, "_PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        bump_version,
+        "sync_lock_files",
+        lambda root, *, dry_run: sync_calls.append(root),
+    )
+
+    assert bump_version.main(["2.0.0"]) == 0
+
+    assert sync_calls == [tmp_path]
+    output = capsys.readouterr().out
+    assert "lock 文件同步完成" in output
+    assert "无需更新" not in output
+
+
+def _record_git(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    staged_difference: bool,
+) -> list[list[str]]:
+    calls: list[list[str]] = []
+
+    def run(
+        command: list[str], *, cwd: Path, check: bool
+    ) -> subprocess.CompletedProcess[bytes]:
+        assert cwd == tmp_path
+        assert command[0] == "git"
+        calls.append(command)
+        code = int(staged_difference) if command[1] == "diff" else 0
+        return subprocess.CompletedProcess(command, code)
+
+    monkeypatch.setattr(bump_version.subprocess, "run", run)
+    return calls
+
+
+def _assert_complete_git_scope(calls: list[list[str]]) -> None:
+    expected = {"pyproject.toml", "src/Undefined/__init__.py", "uv.lock"}
+    for app in bump_version.NATIVE_APPS:
+        expected.update(
+            [
+                app.package_json,
+                app.package_lock,
+                app.cargo_toml,
+                app.tauri_conf,
+                app.cargo_lock,
+            ]
+        )
+    assert [command[1] for command in calls] == ["add", "diff", "commit"]
+    for command in calls:
+        assert set(command[command.index("--") + 1 :]) == expected
+    assert "--cached" in calls[1] and "--quiet" in calls[1]
+    assert "--only" in calls[2]
+
+
+def test_main_partial_failure_retry_commits_prior_pyproject_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_bump_project(tmp_path)
+    monkeypatch.setattr(bump_version, "_PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(bump_version, "sync_lock_files", lambda *args, **kwargs: None)
+    calls = _record_git(tmp_path, monkeypatch, staged_difference=True)
+    original_write = bump_version._write_if_changed
+
+    def fail_init(path: Path, text: str, dry_run: bool) -> bool:
+        assert path.resolve().is_relative_to(tmp_path)
+        if path.name == "__init__.py":
+            raise OSError("controlled write failure")
+        result: bool = original_write(path, text, dry_run)
+        return result
+
+    monkeypatch.setattr(bump_version, "_write_if_changed", fail_init)
+    assert bump_version.main(["2.0.0", "--commit"]) == 1
+    assert bump_version._read_current_version(tmp_path) == "2.0.0"
+    assert not calls
+    monkeypatch.setattr(bump_version, "_write_if_changed", original_write)
+
+    assert bump_version.main(["2.0.0", "--commit"]) == 0
+
+    _assert_all_versions(tmp_path, "2.0.0")
+    _assert_complete_git_scope(calls)
+
+
+def test_main_lock_failure_retry_commits_when_this_run_changes_no_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_bump_project(tmp_path)
+    monkeypatch.setattr(bump_version, "_PROJECT_ROOT", tmp_path)
+    calls = _record_git(tmp_path, monkeypatch, staged_difference=True)
+    sync_count = 0
+
+    def sync(root: Path, *, dry_run: bool) -> None:
+        nonlocal sync_count
+        assert root == tmp_path and not dry_run
+        sync_count += 1
+        if sync_count == 1:
+            raise subprocess.CalledProcessError(
+                1, ["npm", "install", "--package-lock-only"]
+            )
+
+    monkeypatch.setattr(bump_version, "sync_lock_files", sync)
+    assert bump_version.main(["2.0.0", "--commit"]) == 1
+    _assert_all_versions(tmp_path, "2.0.0")
+    before = {path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()}
+    assert not calls
+
+    assert bump_version.main(["2.0.0", "--commit"]) == 0
+
+    assert {
+        path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()
+    } == before
+    assert sync_count == 2
+    _assert_complete_git_scope(calls)
+
+
+def test_main_commit_skips_creation_without_managed_git_differences(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_bump_project(tmp_path, version="2.0.0")
+    monkeypatch.setattr(bump_version, "_PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(bump_version, "sync_lock_files", lambda *args, **kwargs: None)
+    calls = _record_git(tmp_path, monkeypatch, staged_difference=False)
+
+    assert bump_version.main(["2.0.0", "--commit"]) == 0
+
+    assert [command[1] for command in calls] == ["add", "diff"]
+
+
+def test_main_dry_run_commit_never_calls_git_or_lock_sync(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_bump_project(tmp_path)
+    monkeypatch.setattr(bump_version, "_PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        bump_version, "sync_lock_files", lambda *args, **kwargs: pytest.fail("dry-run")
+    )
+
+    # autouse fixture also forbids every actual subprocess.
+    assert bump_version.main(["2.0.0", "--commit", "--dry-run"]) == 0
+    _assert_all_versions(tmp_path, "1.2.3")

@@ -53,6 +53,8 @@ export type TranslationKey =
 	| "setup.error.needUrl"
 	| "setup.error.needApiKey"
 	| "setup.error.invalidUrl"
+	| "setup.error.reconfigure"
+	| "setup.error.rollbackFailed"
 	// 附件操作（App 级 alert / 选择器）
 	| "attachment.saveFailed"
 	| "attachment.saved"
@@ -224,6 +226,10 @@ export const dictionaries: Record<Locale, TranslationDictionary> = {
 		"setup.error.needUrl": "请输入 Runtime URL",
 		"setup.error.needApiKey": "请输入 API Key",
 		"setup.error.invalidUrl": "URL 格式不正确",
+		"setup.error.reconfigure":
+			"连接配置保存失败，请重新输入 API Key 并连接。{error}",
+		"setup.error.rollbackFailed":
+			"{error}；恢复旧 Runtime URL 失败：{rollbackError}",
 		"attachment.saveFailed": "附件保存失败",
 		"attachment.saved": "已保存 {name}",
 		"attachment.previewFailed": "附件无法预览",
@@ -377,6 +383,10 @@ export const dictionaries: Record<Locale, TranslationDictionary> = {
 		"setup.error.needUrl": "Please enter the Runtime URL",
 		"setup.error.needApiKey": "Please enter the API Key",
 		"setup.error.invalidUrl": "Invalid URL format",
+		"setup.error.reconfigure":
+			"Connection settings were not saved. Enter the API key and reconnect. {error}",
+		"setup.error.rollbackFailed":
+			"{error}; restoring the previous Runtime URL failed: {rollbackError}",
 		"attachment.saveFailed": "Failed to save attachment",
 		"attachment.saved": "Saved {name}",
 		"attachment.previewFailed": "Attachment cannot be previewed",

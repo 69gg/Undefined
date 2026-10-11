@@ -11,8 +11,46 @@ from Undefined.config.loader import Config
 from Undefined.services.queue_manager import (
     QUEUE_LANE_BACKGROUND,
     QUEUE_LANE_PRIVATE,
+    ModelQueue,
     QueueManager,
 )
+
+
+@pytest.mark.parametrize("llm_type", ["queued_llm_call", "background_llm_call"])
+def test_normal_trim_retains_llm_calls_and_retries_in_original_order(
+    llm_type: str,
+) -> None:
+    queue = ModelQueue("chat")
+    first = {"type": llm_type, "request_id": "first"}
+    retry = {"type": llm_type, "request_id": "retry", "_retry_count": 1}
+    queue.group_normal_queue.put_nowait(first)
+    for index in range(11):
+        queue.group_normal_queue.put_nowait(
+            {"type": "auto_reply", "request_id": str(index)}
+        )
+        if index == 9:
+            queue.group_normal_queue.put_nowait(retry)
+    queue.trim_normal_queue()
+    remaining = queue.group_normal_queue.drain()
+    assert [request["request_id"] for request in remaining] == [
+        "first",
+        "9",
+        "retry",
+        "10",
+    ]
+    assert remaining[0] is first
+    assert remaining[2] is retry
+
+
+def test_normal_trim_with_only_llm_calls_does_not_discard_any() -> None:
+    queue = ModelQueue("chat")
+    requests = [
+        {"type": "queued_llm_call", "request_id": str(index)} for index in range(15)
+    ]
+    for request in requests:
+        queue.group_normal_queue.put_nowait(request)
+    queue.trim_normal_queue()
+    assert queue.group_normal_queue.drain() == requests
 
 
 class _CountingEvent(asyncio.Event):

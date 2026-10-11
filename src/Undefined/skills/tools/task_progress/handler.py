@@ -61,7 +61,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     if not isinstance(tasks_input, list) or len(tasks_input) == 0:
         return "tasks 必须是非空数组"
 
-    task_store: list[dict[str, Any]] = context.get("_task_progress", [])
+    task_store: list[dict[str, Any]] = context.setdefault("_task_progress", [])
 
     if action == "plan":
         new_tasks: list[dict[str, Any]] = []
@@ -79,8 +79,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             new_tasks.append({"id": tid, "description": desc, "status": status})
 
         new_tasks.sort(key=lambda t: t.get("id", 0))
-        task_store = new_tasks
-        context["_task_progress"] = task_store
+        task_store[:] = new_tasks
 
         logger.info(f"[task_progress] 创建计划，共 {len(task_store)} 个步骤")
         return f"计划已创建\n{_format_task_list(task_store)}"

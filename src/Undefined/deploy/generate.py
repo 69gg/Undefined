@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import secrets
 import string
@@ -19,6 +20,7 @@ import yaml
 from Undefined.deploy import catalog, images, nagaagent
 from Undefined.deploy.config_patch import PatchPlan
 from Undefined.deploy.state import DeployLayout
+from Undefined.config.models import format_netloc
 
 #: 本体在 compose 里的服务名（与 compose.bot.yaml 一致）。
 BOT_SERVICE_NAME: Final[str] = "undefined-bot"
@@ -28,6 +30,7 @@ NAPCAT_SERVICE_NAME: Final[str] = "napcat"
 SEARXNG_SERVICE_NAME: Final[str] = "searxng"
 FIRECRAWL_SERVICE_NAME: Final[str] = "firecrawl-api"
 LXMUSIC2API_SERVICE_NAME: Final[str] = "lxmusic2api"
+SERVICE_CONFIG_DIGEST_LABEL: Final[str] = "io.undefined.config-sha256"
 #: 本体容器内的工作目录（与 compose.bot.yaml 的 working_dir 一致）。
 CONTAINER_REPO_PATH: Final[str] = "/data/Undefined"
 
@@ -67,6 +70,10 @@ IMAGE_ENV_PREFIX = "UNDEFINED_DEPLOY_"
 
 #: 挂进本体容器的宿主机 Docker socket（DooD）。
 DOCKER_SOCKET_ENV = "UNDEFINED_DEPLOY_DOCKER_SOCKET"
+#: Python 解释器在已挂载 data/ 下共享文件；两端路径允许不同。
+PYTHON_INTERPRETER_TMP_SUBDIR = Path("cache") / "python_interpreter"
+PYTHON_INTERPRETER_LOCAL_DIR_ENV = "UNDEFINED_DEPLOY_PYTHON_INTERPRETER_LOCAL_DIR"
+PYTHON_INTERPRETER_HOST_DIR_ENV = "UNDEFINED_DEPLOY_PYTHON_INTERPRETER_HOST_DIR"
 
 
 class GenerateError(RuntimeError):
@@ -179,7 +186,8 @@ def _connect_host(bind: str) -> str:
     ``0.0.0.0`` / ``::`` 是监听语义（所有网卡），拿去当连接目标在部分平台上并
     不可用；本体与依赖服务都在本机时应当连回环。
     """
-    return "127.0.0.1" if bind in ("0.0.0.0", "::") else bind
+    host = bind.removeprefix("[").removesuffix("]")
+    return "127.0.0.1" if host in ("0.0.0.0", "::") else host
 
 
 def compose_service_urls(ctx: GenerateContext) -> dict[str, str]:
@@ -204,9 +212,8 @@ def compose_service_urls(ctx: GenerateContext) -> dict[str, str]:
     if mode == catalog.MODE_HOST:
         host = _connect_host(ctx.port_bind)
         return {
-            "searxng": f"http://{host}:{ctx.port('searxng')}",
-            "firecrawl": f"http://{host}:{ctx.port('firecrawl')}",
-            "lxmusic2api": f"http://{host}:{ctx.port('lxmusic2api')}",
+            key: f"http://{format_netloc(host, ctx.port(key))}"
+            for key in ("searxng", "firecrawl", "lxmusic2api")
         }
     raise GenerateError(f"未知部署模式 {mode!r}")
 
@@ -220,7 +227,7 @@ def _websocket_url(ctx: GenerateContext) -> str:
     """
     if ctx.mode == catalog.MODE_CONTAINER:
         return f"ws://{NAPCAT_SERVICE_NAME}:{catalog.container_port('napcat_ws')}"
-    return f"ws://{_connect_host(ctx.port_bind)}:{ctx.port('napcat_ws')}"
+    return f"ws://{format_netloc(_connect_host(ctx.port_bind), ctx.port('napcat_ws'))}"
 
 
 def build_env(ctx: GenerateContext) -> dict[str, str]:
@@ -264,6 +271,13 @@ def build_env(ctx: GenerateContext) -> dict[str, str]:
         "UNDEFINED_DEPLOY_LXMUSIC2API_UID": str(_current_uid()),
         "UNDEFINED_DEPLOY_LXMUSIC2API_GID": str(_current_gid()),
     }
+    if ctx.mode == catalog.MODE_CONTAINER:
+        env[PYTHON_INTERPRETER_LOCAL_DIR_ENV] = str(
+            Path(CONTAINER_REPO_PATH) / "data" / PYTHON_INTERPRETER_TMP_SUBDIR
+        )
+        env[PYTHON_INTERPRETER_HOST_DIR_ENV] = str(
+            ctx.layout.data_dir / PYTHON_INTERPRETER_TMP_SUBDIR
+        )
 
     # 端口与绑定：默认只绑回环，远程访问需显式改 --port-bind
     for key, spec in catalog.port_specs().items():
@@ -323,11 +337,10 @@ def build_env(ctx: GenerateContext) -> dict[str, str]:
 
 def _searxng_base_url(ctx: GenerateContext) -> str:
     port = ctx.port("searxng")
-    if ctx.port_bind in ("0.0.0.0", "::"):
+    host = ctx.port_bind.removeprefix("[").removesuffix("]")
+    if host in ("0.0.0.0", "::"):
         host = "localhost"
-    else:
-        host = ctx.port_bind
-    return f"http://{host}:{port}"
+    return f"http://{format_netloc(host, port)}"
 
 
 def _selected_port_keys(ctx: GenerateContext) -> set[str]:
@@ -626,8 +639,21 @@ def _mount_napcat_ws_template(ctx: GenerateContext, fragments: dict[str, Any]) -
 def build(ctx: GenerateContext) -> GeneratedConfiguration:
     """组装一次 ``up`` 的全部生成物。"""
     env = build_env(ctx)
+    lxmusic2api_config = (
+        render_lxmusic2api_config(env)
+        if catalog.LXMUSIC2API.key in ctx.services
+        else None
+    )
     fragments = load_compose_fragments(compose_fragment_names(ctx))
     apply_context_overrides(ctx, fragments)
+    if lxmusic2api_config is not None:
+        # 单文件 bind mount 持有旧 inode；配置变化必须参与该服务的重建判断。
+        labels = fragments["services"][LXMUSIC2API_SERVICE_NAME].setdefault(
+            "labels", {}
+        )
+        labels[SERVICE_CONFIG_DIGEST_LABEL] = hashlib.sha256(
+            lxmusic2api_config.encode("utf-8")
+        ).hexdigest()
     compose_text = render_compose(fragments, project_name=catalog.COMPOSE_PROJECT_NAME)
     patch_plan = build_patch_plan(ctx, env)
 
@@ -643,11 +669,7 @@ def build(ctx: GenerateContext) -> GeneratedConfiguration:
         firecrawl_env=(
             render_firecrawl_env(env) if catalog.FIRECRAWL.key in ctx.services else None
         ),
-        lxmusic2api_config=(
-            render_lxmusic2api_config(env)
-            if catalog.LXMUSIC2API.key in ctx.services
-            else None
-        ),
+        lxmusic2api_config=lxmusic2api_config,
         napcat_ws_config=render_napcat_ws_config(ctx, env),
         napcat_ws_token=env["UNDEFINED_DEPLOY_NAPCAT_WS_TOKEN"],
         websocket_url=str(patch_plan.desired["onebot.ws_url"]),

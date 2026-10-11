@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Awaitable, Callable
 import logging
 import os
 import uuid as _uuid
@@ -26,6 +28,7 @@ from Undefined.config.naga_policy import (
     is_nagaagent_active_for_group,
     is_nagaagent_active_for_private,
 )
+from Undefined.utils.io import run_cancellation_safe
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +148,20 @@ async def naga_messages_send_handler(
             message_key,
             inflight_count,
         )
+    result_committed = False
+    owns_request_uuid = False
+
+    async def commit_result(response: Response) -> None:
+        nonlocal result_committed
+        if request_uuid:
+            await naga_state.finish_request_uuid(
+                request_uuid,
+                message_key,
+                status=response.status,
+                payload=_parse_response_payload(response),
+            )
+        result_committed = True
+
     try:
         if request_uuid:
             # 可选 uuid 启用幂等：冲突/缓存/等待/owner 四态由 NagaState 协调。
@@ -185,11 +202,13 @@ async def naga_messages_send_handler(
                     request_uuid,
                     message_key,
                 )
-                cached_status, cached_payload = await wait_future
+                # 等待者取消只结束自己的请求，不能取消 owner 的共享结果。
+                cached_status, cached_payload = await asyncio.shield(wait_future)
                 return web.json_response(
                     deepcopy(cached_payload),
                     status=int(cached_status),
                 )
+            owns_request_uuid = dedupe_action == "owner"
 
         response = await naga_messages_send_impl(
             ctx,
@@ -203,21 +222,20 @@ async def naga_messages_send_handler(
             content=content,
             trace_id=trace_id,
             message_key=message_key,
+            commit_result=commit_result,
         )
-        if request_uuid:
-            await naga_state.finish_request_uuid(
-                request_uuid,
-                message_key,
-                status=response.status,
-                payload=_parse_response_payload(response),
-            )
+        if not result_committed:
+            await run_cancellation_safe(commit_result(response))
         return response
     except Exception as exc:
-        if request_uuid:
-            await naga_state.fail_request_uuid(request_uuid, message_key, exc)
+        if owns_request_uuid and not result_committed:
+            # 只有 owner 能终结该 UUID；错误清理等锁时也必须抵抗调用方取消。
+            await run_cancellation_safe(
+                naga_state.fail_request_uuid(request_uuid, message_key, exc)
+            )
         raise
     finally:
-        remaining = await naga_state.track_send_done(message_key)
+        remaining = await run_cancellation_safe(naga_state.track_send_done(message_key))
         logger.info(
             "[NagaSend] 请求退出: trace=%s naga_id=%s bind_uuid=%s request_uuid=%s key=%s inflight_remaining=%s",
             trace_id,
@@ -247,6 +265,7 @@ async def naga_messages_send_impl(
     content: str,
     trace_id: str,
     message_key: str,
+    commit_result: Callable[[Response], Awaitable[None]] | None = None,
 ) -> Response:
     from Undefined.api.naga_store import mask_token
 
@@ -697,7 +716,6 @@ async def naga_messages_send_impl(
                 status=502,
             )
 
-        await naga_store.record_usage(naga_id, bind_uuid=bind_uuid)
         partial_success = mode == "both" and (sent_private != sent_group)
         logger.info(
             "[NagaSend] 请求完成: trace=%s naga_id=%s bind_uuid=%s key=%s sent_private=%s sent_group=%s partial=%s rendered=%s fallback=%s",
@@ -711,7 +729,7 @@ async def naga_messages_send_impl(
             rendered,
             render_fallback,
         )
-        return web.json_response(
+        response = web.json_response(
             {
                 "ok": True,
                 "naga_id": naga_id,
@@ -727,5 +745,23 @@ async def naga_messages_send_impl(
                 "moderation": moderation,
             }
         )
+
+        async def complete_delivery() -> Response:
+            # 仅保护已经确认的结果；审核与实际发送仍可正常取消。
+            if commit_result is not None:
+                await commit_result(response)
+            try:
+                await naga_store.record_usage(naga_id, bind_uuid=bind_uuid)
+            except Exception:
+                logger.exception(
+                    "[NagaSend] 投递完成但使用统计保存失败: trace=%s naga_id=%s bind_uuid=%s key=%s",
+                    trace_id,
+                    naga_id,
+                    bind_uuid,
+                    message_key,
+                )
+            return response
+
+        return await run_cancellation_safe(complete_delivery())
     finally:
-        await naga_store.release_delivery(bind_uuid=bind_uuid)
+        await run_cancellation_safe(naga_store.release_delivery(bind_uuid=bind_uuid))

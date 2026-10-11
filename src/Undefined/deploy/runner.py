@@ -175,7 +175,7 @@ class Wizard:
     def _ask(self, prompt: str) -> str:
         try:
             return input(f"{prompt}: ")
-        except (EOFError, KeyboardInterrupt):
+        except EOFError:
             print("\n（未输入，使用默认值）")
             return ""
 
@@ -486,37 +486,21 @@ def run_up(options: dict[str, Any]) -> int:
             _previous_port_bind(previous_state, previous_env)
         ) or _previous_port_bind(previous_state, previous_env)
 
-    # 子模块必须先就绪：能力开关与目标代码由同一问决定
-    if nagaagent_enabled and not dry_run:
-        try:
-            result = nagaagent.ensure_submodule(repo)
-        except RuntimeError as exc:
-            print(f"错误：{exc}")
-            return EXIT_ERROR
-        print(
-            "NagaAgent 子模块："
-            + ("已就绪" if result == "already-ready" else "拉取完成")
-        )
-
     # 端口与绑定地址必须像凭据一样跨次复用：否则重跑 up 会静默把 --port /
     # --port-bind 退回默认值（远程访问会无声中断）。
     ports = _resolve_ports(previous_state, previous_env)
     ports.update(options.get("port_overrides") or {})
 
-    # 全新部署时必须先落一份完整配置：否则只渲染被 patch 的几个键，
-    # 生成出来的 config.toml 没有 [models]/[core]，用户无从填写模型端。
-    # dry-run 不落盘，因此跳过创建，只按现有（可能为空）配置推导。
-    if not dry_run:
-        try:
-            if config_patch.ensure_config_file(
-                repo / "config.toml", repo / "config.toml.example"
-            ):
-                print("config.toml：已从 config.toml.example 生成")
-        except config_patch.ConfigError as exc:
-            print(f"错误：{exc}")
-            return EXIT_ERROR
-
-    existing_config = config_patch.load_toml(repo / "config.toml")
+    # 确认前只读现有配置或模板：取消和 dry-run 都不创建配置、不拉取子模块。
+    config_path = repo / "config.toml"
+    example_path = repo / "config.toml.example"
+    try:
+        existing_config = config_patch.load_toml(
+            config_path if config_path.is_file() else example_path
+        )
+    except config_patch.ConfigError as exc:
+        print(f"错误：{exc}")
+        return EXIT_ERROR
 
     ctx = generate.GenerateContext(
         repo=repo,
@@ -563,6 +547,25 @@ def run_up(options: dict[str, Any]) -> int:
         if not wizard.confirm("\n按以上计划继续？", True):
             print("已取消，未改动任何文件。")
             return EXIT_OK
+
+    if not dry_run:
+        # 子模块先就绪，再开启能力；所有写入都必须在最终确认之后。
+        if nagaagent_enabled:
+            try:
+                result = nagaagent.ensure_submodule(repo)
+            except RuntimeError as exc:
+                print(f"错误：{exc}")
+                return EXIT_ERROR
+            print(
+                "NagaAgent 子模块："
+                + ("已就绪" if result == "already-ready" else "拉取完成")
+            )
+        try:
+            if config_patch.ensure_config_file(config_path, example_path):
+                print("config.toml：已从 config.toml.example 生成")
+        except config_patch.ConfigError as exc:
+            print(f"错误：{exc}")
+            return EXIT_ERROR
 
     project_name = (
         previous_state.project_name if previous_state else catalog.COMPOSE_PROJECT_NAME

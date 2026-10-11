@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from functools import partial
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -16,15 +17,18 @@ class MemeWorker:
         poll_interval_seconds: float = 1.0,
         max_retries: int = 3,
         max_concurrency: int = 4,
+        stale_job_timeout_seconds: float = 300.0,
     ) -> None:
         self._job_queue = job_queue
         self._meme_service = meme_service
         self._poll_interval_seconds = max(0.1, float(poll_interval_seconds))
         self._max_retries = max(0, int(max_retries))
         self._max_concurrency = max(1, int(max_concurrency))
+        self._stale_job_timeout_seconds = max(0.0, float(stale_job_timeout_seconds))
         self._stop_event = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
         self._inflight_tasks: set[asyncio.Task[None]] = set()
+        self._active_jobs: set[str] = set()
         self._semaphore = asyncio.Semaphore(self._max_concurrency)
 
     async def start(self) -> None:
@@ -44,18 +48,17 @@ class MemeWorker:
 
     async def _poll_loop(self) -> None:
         while not self._stop_event.is_set():
-            if len(self._inflight_tasks) >= self._max_concurrency:
-                try:
-                    await asyncio.wait_for(
-                        self._stop_event.wait(), timeout=self._poll_interval_seconds
-                    )
-                except asyncio.TimeoutError:
-                    pass
-                continue
             try:
-                result = await self._job_queue.dequeue()
+                await self._job_queue.recover_stale(
+                    self._stale_job_timeout_seconds, exclude_job_ids=self._active_jobs
+                )
+                result = (
+                    await self._job_queue.dequeue()
+                    if len(self._inflight_tasks) < self._max_concurrency
+                    else None
+                )
             except Exception:
-                logger.exception("[memes] dequeue failed")
+                logger.exception("[memes] queue poll failed")
                 try:
                     await asyncio.wait_for(
                         self._stop_event.wait(), timeout=self._poll_interval_seconds
@@ -74,7 +77,18 @@ class MemeWorker:
             job_id, job = result
             task = asyncio.create_task(self._process_job_with_permit(job_id, job))
             self._inflight_tasks.add(task)
-            task.add_done_callback(self._inflight_tasks.discard)
+            self._active_jobs.add(job_id)
+            task.add_done_callback(partial(self._job_finished, job_id))
+
+    def _job_finished(self, job_id: str, task: asyncio.Task[None]) -> None:
+        self._inflight_tasks.discard(task)
+        self._active_jobs.discard(job_id)
+        if not task.cancelled() and (error := task.exception()) is not None:
+            logger.error(
+                "[memes] job 未收敛，保留 processing 等待恢复: job_id=%s error=%s",
+                job_id,
+                error,
+            )
 
     async def _process_job_with_permit(self, job_id: str, job: dict[str, Any]) -> None:
         async with self._semaphore:

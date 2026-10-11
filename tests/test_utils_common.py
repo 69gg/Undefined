@@ -165,6 +165,38 @@ class TestMessageToSegments:
         segs = message_to_segments("[CQ:face]")
         assert segs == [{"type": "face", "data": {}}]
 
+    def test_cq_parameters_decode_after_splitting(self) -> None:
+        segs = message_to_segments(
+            "before [CQ:image,file=https://example.com/image.png?crop=1&#44;2"
+            "&amp;list=&#91;one&#44;two&#93;,summary=x&#44;y&#93;&amp;&#91;] after"
+        )
+        assert segs == [
+            {"type": "text", "data": {"text": "before "}},
+            {
+                "type": "image",
+                "data": {
+                    "file": "https://example.com/image.png?crop=1,2&list=[one,two]",
+                    "summary": "x,y]&[",
+                },
+            },
+            {"type": "text", "data": {"text": " after"}},
+        ]
+
+    def test_cq_parameters_decode_literal_entities_only_once(self) -> None:
+        segs = message_to_segments(
+            "[CQ:share,title=&amp;#44;&amp;#91;&amp;#93;&amp;amp;&lt;&quot;]"
+        )
+        assert segs == [
+            {
+                "type": "share",
+                "data": {"title": "&#44;&#91;&#93;&amp;&lt;&quot;"},
+            }
+        ]
+
+    def test_plain_text_entities_are_not_decoded_as_cq_parameters(self) -> None:
+        text = "正文 &amp; &#44; &#91;CQ:at,qq=123&#93;"
+        assert message_to_segments(text) == [{"type": "text", "data": {"text": text}}]
+
 
 # ---------------------------------------------------------------------------
 # matches_xinliweiyuan

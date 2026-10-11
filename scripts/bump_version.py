@@ -247,13 +247,7 @@ def bump_project_versions(
         raise ValueError(f"'{version}' 不是合法的语义版本号 (x.y.z)")
 
     current = _read_current_version(root)
-    if version == current:
-        return BumpResult(
-            old_version=current,
-            new_version=version,
-            changed_paths=(),
-        )
-
+    # pyproject 可能已在上次失败前写完；同版本也必须逐一核对其余目标。
     changed: list[str] = []
     text_targets: tuple[tuple[Path, str, str], ...] = (
         (
@@ -274,8 +268,25 @@ def bump_project_versions(
     for app in NATIVE_APPS:
         changed.extend(_update_native_app_versions(root, app, version, dry_run))
 
-    if changed and not dry_run:
+    if not dry_run:
+        lock_paths = [root / "uv.lock"]
+        for app in NATIVE_APPS:
+            lock_paths.extend(
+                [
+                    app.app_root(root) / "package-lock.json",
+                    app.tauri_root(root) / "Cargo.lock",
+                ]
+            )
+        before_sync = {
+            path: path.read_bytes() if path.is_file() else None for path in lock_paths
+        }
+        # manifest 已一致也可能是上次同步 lock 失败后的重跑。
         sync_lock_files(root, dry_run=False)
+        for path, previous in before_sync.items():
+            content = path.read_bytes() if path.is_file() else None
+            relative = _relative(root, path)
+            if content != previous and relative not in changed:
+                changed.append(relative)
 
     return BumpResult(
         old_version=current,
@@ -290,6 +301,46 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dry-run", action="store_true", help="仅预览变更，不写入文件")
     parser.add_argument("--commit", action="store_true", help="更新后自动 git commit")
     return parser
+
+
+def _commit_version_files(project_root: Path, version: str) -> bool:
+    """提交全部受管理目标的差异，包括上次失败前已写入的文件。"""
+    paths = ["pyproject.toml", "src/Undefined/__init__.py", "uv.lock"]
+    for app in NATIVE_APPS:
+        paths.extend(
+            [
+                app.package_json,
+                app.package_lock,
+                app.cargo_toml,
+                app.tauri_conf,
+                app.cargo_lock,
+            ]
+        )
+    subprocess.run(["git", "add", "--", *paths], cwd=project_root, check=True)
+    diff = subprocess.run(
+        ["git", "diff", "--cached", "--quiet", "--", *paths],
+        cwd=project_root,
+        check=False,
+    )
+    if diff.returncode == 0:
+        return False
+    if diff.returncode != 1:
+        raise subprocess.CalledProcessError(diff.returncode, diff.args)
+    # 明确限定提交范围，保留用户已暂存的其他文件。
+    subprocess.run(
+        [
+            "git",
+            "commit",
+            "--only",
+            "-m",
+            f"chore(version): bump version to {version}",
+            "--",
+            *paths,
+        ],
+        cwd=project_root,
+        check=True,
+    )
+    return True
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -310,27 +361,24 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     if not result.changed_paths:
-        print(f"版本已经是 {result.old_version}，无需更新")
-        return 0
-
-    prefix = "(dry-run) " if dry_run else ""
-    print(f"{prefix}版本 {result.old_version} → {result.new_version}\n")
-    for path in result.changed_paths:
-        print(f"  ✓ {path}")
+        if dry_run:
+            print(f"版本文件已经是 {result.old_version}；实际执行时仍会同步 lock 文件")
+        else:
+            print(f"版本文件已经是 {result.old_version}，lock 文件同步完成")
+        if not should_commit or dry_run:
+            return 0
+    else:
+        prefix = "(dry-run) " if dry_run else ""
+        print(f"{prefix}版本 {result.old_version} → {result.new_version}\n")
+        for path in result.changed_paths:
+            print(f"  ✓ {path}")
 
     if should_commit and not dry_run:
         print("\n创建 git commit...")
-        subprocess.run(
-            ["git", "add", *result.changed_paths, "uv.lock"],
-            cwd=_PROJECT_ROOT,
-            check=True,
-        )
-        subprocess.run(
-            ["git", "commit", "-m", f"chore(version): bump version to {new_version}"],
-            cwd=_PROJECT_ROOT,
-            check=True,
-        )
-        print(f"\n完成! 已提交版本 {new_version}")
+        if _commit_version_files(_PROJECT_ROOT, new_version):
+            print(f"\n完成! 已提交版本 {new_version}")
+        else:
+            print(f"\n版本 {new_version} 的受管理文件没有待提交差异")
     elif not dry_run:
         print(f"\n完成! 版本已更新为 {new_version}")
         print("提示: 使用 --commit 可自动提交，或手动 git add + commit")

@@ -10,6 +10,8 @@ from typing import Any
 
 import chromadb
 
+from Undefined.utils import io
+
 logger = logging.getLogger(__name__)
 
 
@@ -20,6 +22,7 @@ class KnowledgeStore:
         self, name: str, chroma_dir: Path, *, create_if_missing: bool = True
     ) -> None:
         self.name = name
+        self._write_lock = asyncio.Lock()
         self._client = chromadb.PersistentClient(path=str(chroma_dir))
         if create_if_missing:
             self._collection = self._client.get_or_create_collection(
@@ -42,6 +45,8 @@ class KnowledgeStore:
         chunks: list[str],
         embeddings: list[list[float]],
         metadata_base: dict[str, Any] | None = None,
+        *,
+        replace_source: bool = False,
     ) -> int:
         if not chunks:
             return 0
@@ -52,14 +57,26 @@ class KnowledgeStore:
         ]
 
         def _upsert() -> None:
+            previous_ids = (
+                self._collection.get(where={"source": source}, include=[])["ids"]
+                if replace_source and source
+                else []
+            )
             self._collection.upsert(
                 ids=ids,
                 embeddings=embeddings,  # type: ignore[arg-type]
                 documents=chunks,
                 metadatas=metadatas,  # type: ignore[arg-type]
             )
+            current_ids = set(ids)
+            stale_ids = [
+                chunk_id for chunk_id in previous_ids if chunk_id not in current_ids
+            ]
+            if stale_ids:
+                self._collection.delete(ids=stale_ids)
 
-        await asyncio.to_thread(_upsert)
+        async with self._write_lock:
+            await io.run_cancellation_safe(asyncio.to_thread(_upsert))
         return len(chunks)
 
     async def delete_by_source(self, source: str) -> None:
@@ -69,7 +86,8 @@ class KnowledgeStore:
         def _delete() -> None:
             self._collection.delete(where={"source": source})
 
-        await asyncio.to_thread(_delete)
+        async with self._write_lock:
+            await io.run_cancellation_safe(asyncio.to_thread(_delete))
 
     async def query(
         self, query_embedding: list[float], top_k: int = 5

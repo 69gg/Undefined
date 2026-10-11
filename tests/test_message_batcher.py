@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 import time
 
 import pytest
@@ -40,6 +41,12 @@ def _make_item(
         is_at_bot=is_at_bot,
         group_id=None if is_private else 1,
     )
+
+
+def _current_token(batcher: MessageBatcher) -> BatchDispatchToken:
+    token = batcher._buckets[("group:1", 100)].dispatch_token
+    assert token is not None
+    return token
 
 
 class _Recorder:
@@ -388,7 +395,9 @@ async def test_speculative_cancelled_when_new_message_and_no_send() -> None:
     await asyncio.sleep(0.1)
     # 模拟 coordinator 上报 inflight
     inflight_task = next(iter(batcher._pending_tasks))
-    batcher.register_inflight("group:1", 100, inflight_task, fake_ctx)
+    batcher.register_inflight(
+        "group:1", 100, inflight_task, fake_ctx, token=_current_token(batcher)
+    )
     # 第二条消息到达，应取消 inflight
     await batcher.submit(_make_item(text="m2"))
     await asyncio.wait_for(cancelled.wait(), timeout=1.0)
@@ -421,12 +430,47 @@ async def test_speculative_not_cancelled_when_already_sent_default() -> None:
     await batcher.submit(_make_item(text="m1"))
     await asyncio.sleep(0.08)
     inflight_task = next(iter(batcher._pending_tasks))
-    batcher.register_inflight("group:1", 100, inflight_task, fake_ctx)
+    batcher.register_inflight(
+        "group:1", 100, inflight_task, fake_ctx, token=_current_token(batcher)
+    )
     # 新消息到达：投机已发过消息，inflight 不应被 cancel
     await batcher.submit(_make_item(text="m2"))
     # 等 inflight 自然完成
     await asyncio.wait_for(finished.wait(), timeout=1.0)
     assert not inflight_task.cancelled()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("already_sent", [False, True])
+@pytest.mark.parametrize("allow_cancel_after_send", [False, True])
+async def test_completed_speculation_does_not_reprocess_answered_items(
+    already_sent: bool, allow_cancel_after_send: bool
+) -> None:
+    cfg = MessageBatcherConfig(
+        enabled=True,
+        window_seconds=100.0,
+        pre_send_seconds=50.0,
+        allow_cancel_after_send=allow_cancel_after_send,
+    )
+    rec = _Recorder()
+    batcher = MessageBatcher(cfg, rec)
+    fake_ctx = _FakeRequestContext()
+    fake_ctx.set_resource("message_sent_this_turn", already_sent)
+    try:
+        await batcher.submit(_make_item(text="m1"))
+        await batcher._handle_t2(("group:1", 100))
+        inflight = asyncio.create_task(asyncio.sleep(0))
+        token = _current_token(batcher)
+        batcher.register_inflight("group:1", 100, inflight, fake_ctx, token=token)
+        await inflight
+        batcher.unregister_inflight("group:1", 100, inflight, token=token)
+
+        await batcher.submit(_make_item(text="m2"))
+        await batcher.flush_sender("group:1", 100)
+        expected = [["m1"], ["m2"]] if already_sent else [["m1"], ["m1", "m2"]]
+        assert [[item.text for item in items] for items in rec.batches] == expected
+    finally:
+        await batcher.flush_all()
 
 
 @pytest.mark.asyncio
@@ -462,7 +506,9 @@ async def test_speculative_cancelled_when_already_sent_with_allow_flag() -> None
     await asyncio.sleep(0.08)
     assert batcher._pending_tasks
     inflight_task = next(iter(batcher._pending_tasks))
-    batcher.register_inflight("group:1", 100, inflight_task, fake_ctx)
+    batcher.register_inflight(
+        "group:1", 100, inflight_task, fake_ctx, token=_current_token(batcher)
+    )
 
     await batcher.submit(_make_item(text="m2"))
     # 正常情况下 cancel 信号会在 50ms 内传到 callback；超时即视为未取消
@@ -532,7 +578,9 @@ async def test_t1_finalizing_does_not_clobber_new_bucket() -> None:
     await batcher.submit(_make_item(text="m1"))
     await asyncio.wait_for(inflight_started.wait(), timeout=0.5)
     inflight_task = next(iter(batcher._pending_tasks))
-    batcher.register_inflight("group:1", 100, inflight_task, fake_ctx)
+    batcher.register_inflight(
+        "group:1", 100, inflight_task, fake_ctx, token=_current_token(batcher)
+    )
     # 等到 T1 触发，桶切到 FINALIZING 等 inflight
     await asyncio.sleep(0.12)
     # 此刻新消息进入 FINALIZING 分支，开新桶
@@ -669,19 +717,51 @@ async def test_stale_unregister_does_not_clear_new_inflight() -> None:
     try:
         await batcher.submit(_make_item(text="m1"))
         await asyncio.sleep(0.08)
-        batcher.register_inflight("group:1", 100, old_task, fake_ctx)
+        old_token = _current_token(batcher)
+        batcher.register_inflight("group:1", 100, old_task, fake_ctx, token=old_token)
 
         await batcher.submit(_make_item(text="m2"))
         await asyncio.sleep(0.08)
-        batcher.register_inflight("group:1", 100, new_task, fake_ctx)
+        new_token = _current_token(batcher)
+        batcher.register_inflight("group:1", 100, new_task, fake_ctx, token=new_token)
 
-        batcher.unregister_inflight("group:1", 100, old_task)
+        batcher.unregister_inflight("group:1", 100, old_task, token=old_token)
+        batcher.unregister_inflight("group:1", 100, new_task, token=old_token)
         snap = batcher.snapshot()
         assert snap["buckets"][0]["has_inflight"] is True
     finally:
         old_task.cancel()
         new_task.cancel()
         await asyncio.gather(old_task, new_task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid_token", ["missing", "same_fields", "cancelled"])
+async def test_inflight_registration_requires_current_token_identity(
+    invalid_token: str,
+) -> None:
+    batcher = MessageBatcher(
+        MessageBatcherConfig(enabled=True, window_seconds=60.0, pre_send_seconds=10.0),
+        _Recorder(),
+    )
+    task = asyncio.create_task(asyncio.sleep(60.0))
+    try:
+        await batcher.submit(_make_item())
+        await batcher._handle_t2(("group:1", 100))
+        current_token = _current_token(batcher)
+        token: BatchDispatchToken | None = current_token
+        if invalid_token == "missing":
+            token = None
+        elif invalid_token == "same_fields":
+            token = replace(current_token)
+        else:
+            current_token.cancel()
+        assert not batcher.register_inflight("group:1", 100, task, token=token)
+        assert batcher._buckets[("group:1", 100)].inflight is None
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        await batcher.flush_all()
 
 
 @pytest.mark.asyncio

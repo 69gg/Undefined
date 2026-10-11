@@ -130,4 +130,62 @@ describe("AttachmentImageContext", () => {
 		expect(revokeSpy).toHaveBeenCalledTimes(2);
 		revokeSpy.mockRestore();
 	});
+
+	it("Provider 卸载后迟到的预览不再创建或缓存旧实例 blob", async () => {
+		let resolve!: (result: AttachmentPreviewResult) => void;
+		const createSpy = vi.spyOn(URL, "createObjectURL");
+		const { client } = makeClient(
+			() =>
+				new Promise((done) => {
+					resolve = done;
+				}),
+		);
+		const { result, unmount } = renderHook(() => useAttachmentImage(), {
+			wrapper: makeWrapper(client),
+		});
+		const pending = result.current.loadAttachmentBlob("pic_old");
+		unmount();
+		resolve(imageResult());
+		expect(await pending).toBeNull();
+		expect(createSpy).not.toHaveBeenCalled();
+		createSpy.mockRestore();
+	});
+
+	it("切换 Runtime 释放旧缓存，相同 UID 在新实例重新加载并拒绝旧回包", async () => {
+		let resolve!: (result: AttachmentPreviewResult) => void;
+		let runtimeUrl = "http://runtime-a.test";
+		const { client, previewAttachment } = makeClient();
+		previewAttachment.mockImplementationOnce(
+			() =>
+				new Promise((done) => {
+					resolve = done;
+				}),
+		);
+		function Wrapper({ children }: { children: ReactNode }) {
+			return (
+				<AttachmentImageProvider client={client} runtimeUrl={runtimeUrl}>
+					{children}
+				</AttachmentImageProvider>
+			);
+		}
+		const { result, rerender } = renderHook(() => useAttachmentImage(), {
+			wrapper: Wrapper,
+		});
+		const pending = result.current.loadAttachmentBlob("pic_pending");
+		const cached = await result.current.loadAttachmentBlob("pic_shared");
+		const revokeSpy = vi.spyOn(URL, "revokeObjectURL");
+		runtimeUrl = "http://runtime-b.test";
+		rerender();
+		expect(revokeSpy).toHaveBeenCalledWith(cached?.url);
+		const current = await result.current.loadAttachmentBlob("pic_shared");
+		expect(current?.url).not.toBe(cached?.url);
+		const createSpy = vi.spyOn(URL, "createObjectURL");
+		resolve(imageResult());
+		expect(await pending).toBeNull();
+		expect(createSpy).not.toHaveBeenCalled();
+		expect(await result.current.loadAttachmentBlob("pic_shared")).toBe(current);
+		expect(previewAttachment).toHaveBeenCalledTimes(3);
+		revokeSpy.mockRestore();
+		createSpy.mockRestore();
+	});
 });

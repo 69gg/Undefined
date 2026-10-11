@@ -10,6 +10,7 @@ use tauri_plugin_http::reqwest::Response;
 use tokio::io::AsyncWriteExt;
 
 const MAX_PREVIEW_BYTES: usize = 10 * 1024 * 1024;
+pub(crate) const MAX_DOWNLOAD_NAME_CANDIDATES: usize = 1000;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -153,12 +154,11 @@ pub async fn save_attachment(
     tokio::fs::create_dir_all(&download_dir)
         .await
         .map_err(|err| format!("download directory create failed: {err}"))?;
-    let mut path = download_dir.join(safe_file_name(
+    let path = download_dir.join(safe_file_name(
         input.file_name.as_deref(),
         &input.attachment_id,
     ));
-    path = unique_path(path).await;
-    let mut file = tokio::fs::File::create(&path)
+    let (path, mut file) = create_unique_file(path)
         .await
         .map_err(|err| format!("attachment output create failed: {err}"))?;
     let mut bytes_written = 0u64;
@@ -224,11 +224,9 @@ pub async fn preview_attachment_bytes(
     })
 }
 
-async fn unique_path(path: PathBuf) -> PathBuf {
-    if tokio::fs::metadata(&path).await.is_err() {
-        return path;
-    }
-
+pub(crate) async fn create_unique_file(
+    path: PathBuf,
+) -> std::io::Result<(PathBuf, tokio::fs::File)> {
     let parent = path
         .parent()
         .map(PathBuf::from)
@@ -238,18 +236,27 @@ async fn unique_path(path: PathBuf) -> PathBuf {
         .and_then(|value| value.to_str())
         .unwrap_or("attachment");
     let extension = path.extension().and_then(|value| value.to_str());
-    for index in 1..1000 {
-        let file_name = if let Some(extension) = extension {
-            format!("{stem} ({index}).{extension}")
+    for index in 0..MAX_DOWNLOAD_NAME_CANDIDATES {
+        let candidate = if index == 0 {
+            path.clone()
         } else {
-            format!("{stem} ({index})")
+            let file_name = if let Some(extension) = extension {
+                format!("{stem} ({index}).{extension}")
+            } else {
+                format!("{stem} ({index})")
+            };
+            parent.join(file_name)
         };
-        let candidate = parent.join(file_name);
-        if tokio::fs::metadata(&candidate).await.is_err() {
-            return candidate;
+        match tokio::fs::File::create_new(&candidate).await {
+            Ok(file) => return Ok((candidate, file)),
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(err) => return Err(err),
         }
     }
-    path
+    Err(std::io::Error::new(
+        std::io::ErrorKind::AlreadyExists,
+        "no unused attachment download file name is available",
+    ))
 }
 
 #[cfg(test)]

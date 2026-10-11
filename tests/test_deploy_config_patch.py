@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import tomllib
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
 
 from Undefined.deploy import config_patch
+from Undefined.config.toml_io import load_toml_data
 from Undefined.webui.utils.comment import parse_comment_map
 
 #: 故意写成「已有注释 + 已有用户自定义值 + 嵌套表」的形态，
@@ -61,6 +63,26 @@ def _plan(config_path: Path, desired: dict[str, object]) -> config_patch.PatchPl
         desired=desired,
         about={"onebot.ws_url": "协议端地址"},
     )
+
+
+def test_apply_accepts_bom_config_and_preserves_original_backup(
+    config_dir: tuple[Path, Path, Path],
+) -> None:
+    config, example, backup_dir = config_dir
+    config.write_text(EXAMPLE, encoding="utf-8-sig")
+    original = config.read_bytes()
+    assert config_patch.load_toml(config) == load_toml_data(config, strict=True)
+
+    outcome = config_patch.apply_plan(
+        _plan(config, {"onebot.ws_url": "ws://napcat:3001"}),
+        example_path=example,
+        backup_dir=backup_dir,
+    )
+
+    assert outcome.written is True
+    assert outcome.backup_path is not None
+    assert outcome.backup_path.read_bytes() == original
+    assert config_patch.load_toml(config)["onebot"]["ws_url"] == "ws://napcat:3001"
 
 
 def test_plan_items_report_current_and_about(
@@ -210,6 +232,82 @@ def test_apply_is_noop_when_nothing_changes(
     assert outcome.backup_path is None
     assert config.read_text(encoding="utf-8") == original
     assert not backup_dir.exists()
+
+
+def test_same_second_updates_keep_each_previous_config(
+    config_dir: tuple[Path, Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config, example, backup_dir = config_dir
+    monkeypatch.chdir(config.parent)
+    assert backup_dir.resolve().is_relative_to(config.parent)
+    monkeypatch.setattr(config_patch, "utc_stamp_compact", lambda: "20261006T123456Z")
+    original = config.read_text(encoding="utf-8")
+    first = config_patch.apply_plan(
+        _plan(config, {"webui.port": 8788}), example_path=example, backup_dir=backup_dir
+    )
+    intermediate = config.read_text(encoding="utf-8")
+    second = config_patch.apply_plan(
+        _plan(config, {"webui.port": 8789}), example_path=example, backup_dir=backup_dir
+    )
+
+    assert first.backup_path is not None and second.backup_path is not None
+    assert first.backup_path != second.backup_path
+    assert first.backup_path.read_text(encoding="utf-8") == original
+    assert second.backup_path.read_text(encoding="utf-8") == intermediate
+    assert len(list(backup_dir.glob("config_*.toml"))) == 2
+    assert config_patch.load_toml(config)["webui"]["port"] == 8789
+
+
+def test_concurrent_backups_reserve_distinct_names(
+    config_dir: tuple[Path, Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config, example, backup_dir = config_dir
+    monkeypatch.chdir(config.parent)
+    assert backup_dir.resolve().is_relative_to(config.parent)
+    other = config.with_name("other.toml")
+    other.write_text(EXAMPLE.replace("8787", "8790"), encoding="utf-8")
+    originals = {path.read_text(encoding="utf-8") for path in (config, other)}
+    monkeypatch.setattr(config_patch, "utc_stamp_compact", lambda: "20261006T123456Z")
+
+    def apply(path: Path) -> config_patch.PatchOutcome:
+        return config_patch.apply_plan(
+            _plan(path, {"webui.port": 8788}),
+            example_path=example,
+            backup_dir=backup_dir,
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(apply, path) for path in (config, other)]
+        outcomes = [future.result() for future in futures]
+
+    paths = {outcome.backup_path for outcome in outcomes}
+    assert None not in paths
+    assert len(paths) == 2
+    assert {
+        path.read_text(encoding="utf-8") for path in paths if path is not None
+    } == originals
+
+
+def test_failed_backup_keeps_config_and_removes_empty_reserved_file(
+    config_dir: tuple[Path, Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config, example, backup_dir = config_dir
+    monkeypatch.chdir(config.parent)
+    assert backup_dir.resolve().is_relative_to(config.parent)
+    original = config.read_bytes()
+
+    def fail_write(path: Path, content: str) -> None:
+        raise OSError("backup write failed")
+
+    monkeypatch.setattr(config_patch, "write_text", fail_write)
+    with pytest.raises(OSError, match="backup write failed"):
+        config_patch.apply_plan(
+            _plan(config, {"webui.port": 8788}),
+            example_path=example,
+            backup_dir=backup_dir,
+        )
+    assert config.read_bytes() == original
+    assert list(backup_dir.glob("config_*.toml")) == []
 
 
 def test_apply_is_idempotent(config_dir: tuple[Path, Path, Path]) -> None:

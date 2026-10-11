@@ -1,6 +1,8 @@
 """Common runtime paths."""
 
 from pathlib import Path
+from urllib.parse import urlsplit
+from urllib.request import url2pathname
 
 PACKAGE_ROOT: Path = Path(__file__).resolve().parent.parent
 
@@ -20,6 +22,16 @@ ATTACHMENT_REGISTRY_FILE: Path = DATA_DIR / "attachment_registry.json"
 WEBCHAT_DIR: Path = DATA_DIR / "webchat"
 WEBCHAT_CONVERSATIONS_DIR: Path = WEBCHAT_DIR / "conversations"
 WEBCHAT_MIGRATION_MARKER_FILE: Path = WEBCHAT_DIR / "legacy_private_42_migrated.json"
+
+
+def file_uri_path_text(source: str) -> str:
+    """解码本地 file URI 的路径一次，保留 localhost 与 UNC authority 语义。"""
+    parsed = urlsplit(source)
+    netloc = parsed.netloc.strip()
+    uri_path = parsed.path
+    if netloc and netloc.lower() != "localhost":
+        uri_path = f"//{netloc}{uri_path}"
+    return url2pathname(uri_path)
 
 
 def ensure_dir(path: Path) -> Path:

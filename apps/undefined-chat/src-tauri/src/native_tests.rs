@@ -9,7 +9,7 @@ use crate::preview::{
 };
 use crate::runtime_client::{
     build_runtime_url, job_events_url, parse_sse_chunks, runtime_health_from_body_result,
-    RuntimeRequestInput, StartJobEventStreamInput, Utf8ChunkDecoder,
+    ConversationHistoryInput, RuntimeRequestInput, StartJobEventStreamInput, Utf8ChunkDecoder,
 };
 use crate::secret::{
     api_key_status_from_storage, classify_secret_storage, derive_stronghold_key,
@@ -20,12 +20,34 @@ use crate::state::{
     AppRuntimeConfig, RuntimeConfigInput, RuntimeRequestPath, APP_CONFIG_FILE_NAME,
 };
 use crate::{
-    download::test_safe_file_name,
+    download::{create_unique_file, test_safe_file_name, MAX_DOWNLOAD_NAME_CANDIDATES},
     upload::{
         attachment_file_name, attachments_url, parse_file_path, requires_regular_file_check,
         upload_uses_streaming_body, UploadAttachmentInput,
     },
 };
+
+#[test]
+fn history_input_accepts_runtime_numeric_cursors() {
+    for before in [0, 70] {
+        let input: ConversationHistoryInput = serde_json::from_value(serde_json::json!({
+            "conversationId": "default",
+            "limit": 50,
+            "before": before,
+        }))
+        .unwrap();
+        assert_eq!(input.conversation_id, "default");
+        assert_eq!(input.limit, Some(50));
+        assert_eq!(input.before, Some(before));
+    }
+    for input in [
+        serde_json::json!({"conversationId": "default"}),
+        serde_json::json!({"conversationId": "default", "before": null}),
+    ] {
+        let input: ConversationHistoryInput = serde_json::from_value(input).unwrap();
+        assert_eq!(input.before, None);
+    }
+}
 
 #[test]
 fn normalize_runtime_url_removes_trailing_slashes() {
@@ -274,6 +296,59 @@ fn attachment_save_file_name_sanitizes_path_like_input() {
         test_safe_file_name(Some(".."), "attachment123"),
         "attachment"
     );
+}
+
+#[test]
+fn concurrent_attachment_saves_preserve_existing_and_each_other() {
+    let root = std::env::temp_dir().join(format!("undefined-download-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let path = root.join("report.txt");
+    std::fs::write(&path, b"existing").unwrap();
+    tauri::async_runtime::block_on(async {
+        use tokio::io::AsyncWriteExt;
+        let (first, second) = futures_util::future::join(
+            create_unique_file(path.clone()),
+            create_unique_file(path.clone()),
+        )
+        .await;
+        let (first_path, mut first_file) = first.unwrap();
+        let (second_path, mut second_file) = second.unwrap();
+        assert_ne!(first_path, second_path);
+        assert_ne!(first_path, path);
+        assert_ne!(second_path, path);
+        first_file.write_all(b"first attachment").await.unwrap();
+        second_file.write_all(b"second attachment").await.unwrap();
+        first_file.flush().await.unwrap();
+        second_file.flush().await.unwrap();
+        assert_eq!(tokio::fs::read(&path).await.unwrap(), b"existing");
+        assert_eq!(
+            tokio::fs::read(first_path).await.unwrap(),
+            b"first attachment"
+        );
+        assert_eq!(
+            tokio::fs::read(second_path).await.unwrap(),
+            b"second attachment"
+        );
+    });
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn attachment_save_fails_when_all_file_names_are_occupied() {
+    let root = std::env::temp_dir().join(format!("undefined-download-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let path = root.join("report.txt");
+    std::fs::write(&path, b"existing").unwrap();
+    for index in 1..MAX_DOWNLOAD_NAME_CANDIDATES {
+        std::fs::write(root.join(format!("report ({index}).txt")), b"existing").unwrap();
+    }
+    let error = tauri::async_runtime::block_on(create_unique_file(path.clone())).unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
+    assert!(error
+        .to_string()
+        .contains("no unused attachment download file name"));
+    assert_eq!(std::fs::read(path).unwrap(), b"existing");
+    std::fs::remove_dir_all(root).unwrap();
 }
 
 #[test]

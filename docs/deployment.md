@@ -156,7 +156,9 @@ uv run Undefined-webui
 
 #### 优雅停机
 
-`SIGINT`（Ctrl+C）与 `SIGTERM` 都会触发同一套优雅停机流程：停止 OneBot 连接、关闭 Runtime API 与微信服务、停止史官 / memes worker、断开连接、关闭 AI 客户端与检索运行时、停止配置热重载并释放渲染资源。容器、systemd、supervisor 等默认以 `SIGTERM` 停止进程，无需额外配置；请避免使用 `SIGKILL`（`docker kill -s KILL`），否则会跳过全部落盘清理。
+`SIGINT`（Ctrl+C）与 `SIGTERM` 都会触发同一套优雅停机流程：先停止 QQ、微信与普通 Runtime API 的新接入，等待已接受的入站处理和 API 请求收尾，停止史官 / memes worker，再由消息处理器排空 AI 队列并落盘历史。排空期间保留 OneBot 响应接收、微信发送和 Runtime 文件下载能力，回复完成后才关闭传输、AI 客户端、检索运行时与渲染资源。等待 worker 收尾期间模型队列保持可用，史官在向量写入后继续提交侧写模型请求也能完成；消息处理器收尾时新落盘的认知任务留待下次启动处理。容器、systemd、supervisor 等默认以 `SIGTERM` 停止进程；其强制终止等待时间应覆盖实际模型和下载收尾耗时。请避免使用 `SIGKILL`（`docker kill -s KILL`），否则会跳过全部落盘清理。
+
+WebUI 停止 Bot 默认等待优雅收尾自然完成；停止按钮、WebUI 关停和更新前停止都使用 `[webui].stop_timeout_seconds`，不会另以固定的 5 或 8 秒截断。正整数表示强制终止期限，`0` 表示不设置期限。停止请求被取消时也会先收敛子进程清理。它不改变 Docker 或 systemd 自己的停止期限，请同时给外层进程管理器留足时间。
 
 #### 自动启动选项
 
@@ -200,6 +202,10 @@ uv run deploy up
 ```
 
 部署结束后，按终端显示的地址和密码进入 WebUI，填写模型 API 与 QQ 身份配置，到 NapCat 扫码登录后，再返回 WebUI 点击“启动机器人”。`container` 与 `host` 模式都会将 `[webui].autostart_bot` 设为 `false`、`[onebot].file_send_mode` 设为 `"stream"`。**环境准备、首次配置、远程访问和常见问题请直接看 [Docker 一键部署指南](docker-deploy.md)**。
+
+向导在最终确认前只读取配置，选择“否”或按 Ctrl+C 取消都不会生成文件或初始化子模块；Ctrl+C 会立即结束命令，不会采用默认的“继续”。已有 `config.toml` 支持 UTF-8 BOM 编码。`container` 模式还会为 Python 解释器自动映射已共享的 `deploy/data/cache/python_interpreter/`，让宿主 Docker 从正确的宿主路径读取执行文件。手工挂载 Docker socket 的容器需按 [Python 解释器工具说明](../src/Undefined/skills/tools/python_interpreter/README.md#容器内使用宿主-docker)配置共享路径。
+
+向导的模式、服务、NagaAgent、绑定地址和最终确认输入均可用 Ctrl+C 取消，CLI 会统一输出“已取消。”并以退出码 `1` 结束，不打印异常堆栈。最终确认选择“否”则正常返回退出码 `0`。
 
 ---
 

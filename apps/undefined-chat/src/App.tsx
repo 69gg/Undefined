@@ -29,7 +29,7 @@ import {
 } from "./platform/PlatformContext";
 import { AttachmentImageProvider } from "./rendering/AttachmentImageContext";
 import { createTauriRuntimeClient } from "./runtime-client/tauri";
-import type { Attachment } from "./runtime-client/types";
+import type { Attachment, RuntimeConfig } from "./runtime-client/types";
 import { useTheme } from "./theme/use-theme";
 import { isImageAttachment } from "./utils/attachment";
 
@@ -89,6 +89,11 @@ export function App() {
 		: null;
 
 	const [setupError, setSetupError] = useState<string | null>(null);
+	const [isConnecting, setIsConnecting] = useState(false);
+	const [connectionRecoveryGeneration, setConnectionRecoveryGeneration] =
+		useState(0);
+	const connectionRecoveryRequired = connectionRecoveryGeneration > 0;
+	const connectionUpdateInFlightRef = useRef(false);
 
 	const needsSetup =
 		!state.runtimeConfig?.runtimeUrl || !state.runtimeConfig.hasApiKey;
@@ -127,9 +132,18 @@ export function App() {
 		apiKey: string,
 		allowInsecure: boolean,
 	): Promise<void> {
+		if (connectionUpdateInFlightRef.current) return;
+		connectionUpdateInFlightRef.current = true;
+		setIsConnecting(true);
 		setSetupError(null);
+		let previousConfig: RuntimeConfig | null = null;
+		let savedConfig: RuntimeConfig | null = null;
+		let writeStarted = false;
 		try {
-			await client.saveRuntimeConfig(url);
+			previousConfig = await client.getRuntimeConfig();
+			store.suspendRuntime();
+			writeStarted = true;
+			savedConfig = await client.saveRuntimeConfig(url);
 			if (allowInsecure) {
 				await client.confirmInsecureStorageFallback();
 			}
@@ -137,10 +151,50 @@ export function App() {
 			if (apiKey) {
 				await client.saveApiKey(apiKey);
 			}
+			await store.bootstrap({
+				runtimeUrl: savedConfig.runtimeUrl,
+				resumeSuspended: true,
+			});
+			if (store.getSnapshot().error) {
+				setSetupError(store.getSnapshot().error);
+				store.suspendRuntime(savedConfig);
+				setConnectionRecoveryGeneration((generation) => generation + 1);
+				return;
+			}
+			setConnectionRecoveryGeneration(0);
 			setIsSettingsOpen(false);
-			await store.bootstrap();
 		} catch (err) {
-			setSetupError(err instanceof Error ? err.message : String(err));
+			let detail = err instanceof Error ? err.message : String(err);
+			if (writeStarted) {
+				try {
+					if (previousConfig) {
+						await client.saveRuntimeConfig(previousConfig.runtimeUrl);
+					} else {
+						await client.clearRuntimeConfig();
+					}
+				} catch (rollbackError) {
+					detail = t("setup.error.rollbackFailed", {
+						error: detail,
+						rollbackError:
+							rollbackError instanceof Error
+								? rollbackError.message
+								: String(rollbackError),
+					});
+				}
+				let actualConfig = savedConfig ?? previousConfig;
+				try {
+					actualConfig = await client.getRuntimeConfig();
+				} catch {
+					// 无法读取时保留最后一次成功保存的目标，仍禁止 Runtime 请求。
+				}
+				store.suspendRuntime(actualConfig);
+				setConnectionRecoveryGeneration((generation) => generation + 1);
+				detail = t("setup.error.reconfigure", { error: detail });
+			}
+			setSetupError(detail);
+		} finally {
+			connectionUpdateInFlightRef.current = false;
+			setIsConnecting(false);
 		}
 	}
 
@@ -165,10 +219,12 @@ export function App() {
 	}
 
 	async function previewAttachment(attachment: Attachment): Promise<void> {
+		const runtimeConfig = store.getSnapshot().runtimeConfig;
 		try {
 			const result = await client.previewAttachment({
 				attachmentId: attachment.id,
 			});
+			if (store.getSnapshot().runtimeConfig !== runtimeConfig) return;
 			if (!result.ok || result.bytes.length === 0) {
 				window.alert(result.body ?? t("attachment.previewFailed"));
 				return;
@@ -188,11 +244,13 @@ export function App() {
 			window.open(url, "_blank", "noopener,noreferrer");
 			window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
 		} catch (err) {
+			if (store.getSnapshot().runtimeConfig !== runtimeConfig) return;
 			window.alert(err instanceof Error ? err.message : String(err));
 		}
 	}
 
 	async function addAttachment(conversationId: string): Promise<void> {
+		const runtimeConfig = store.getSnapshot().runtimeConfig;
 		try {
 			const selected = await open({
 				multiple: false,
@@ -201,10 +259,12 @@ export function App() {
 				pickerMode: "document",
 				fileAccessMode: "copy",
 			});
+			if (store.getSnapshot().runtimeConfig !== runtimeConfig) return;
 			if (typeof selected === "string") {
 				await store.addAttachmentPath(conversationId, selected);
 			}
 		} catch (err) {
+			if (store.getSnapshot().runtimeConfig !== runtimeConfig) return;
 			window.alert(err instanceof Error ? err.message : String(err));
 		}
 	}
@@ -215,7 +275,9 @@ export function App() {
 			return;
 		}
 		// 尚无会话：先自动创建再把示例填入草稿
+		const runtimeConfig = store.getSnapshot().runtimeConfig;
 		void store.createConversation().then(() => {
+			if (store.getSnapshot().runtimeConfig !== runtimeConfig) return;
 			const conversationId = store.getSnapshot().selectedConversationId;
 			if (conversationId) {
 				store.updateDraft(conversationId, prompt);
@@ -223,7 +285,7 @@ export function App() {
 		});
 	}
 
-	const showModal = needsSetup || isSettingsOpen;
+	const showModal = needsSetup || isSettingsOpen || connectionRecoveryRequired;
 
 	const closeMobileSidebar = useCallback((): void => {
 		setIsMobileSidebarActive(false);
@@ -293,7 +355,7 @@ export function App() {
 				previewImageUrlRef.current = null;
 			}
 		};
-	}, []);
+	}, [state.runtimeConfig?.runtimeUrl]);
 
 	useEffect(() => {
 		if (!isMobile || !isMobileSidebarActive) {
@@ -460,7 +522,10 @@ export function App() {
 	]);
 
 	return (
-		<AttachmentImageProvider client={client}>
+		<AttachmentImageProvider
+			client={client}
+			runtimeUrl={state.runtimeConfig?.runtimeUrl}
+		>
 			<main className="chat-app">
 				{/* 移动端侧边栏背景遮罩 */}
 				<div
@@ -596,13 +661,20 @@ export function App() {
 						{/* 模态框 / 配置面板：统一 ConnectionSetup（首次连接 / 运行期修改两种模式） */}
 						{showModal ? (
 							<ConnectionSetup
-								mode={needsSetup ? "setup" : "settings"}
+								key={connectionRecoveryGeneration}
+								mode={
+									needsSetup || connectionRecoveryRequired
+										? "setup"
+										: "settings"
+								}
 								currentUrl={state.runtimeConfig?.runtimeUrl}
 								onConnect={(url, apiKey, allowInsecure) => {
 									void handleConnect(url, apiKey, allowInsecure);
 								}}
 								onClose={
-									needsSetup ? undefined : () => setIsSettingsOpen(false)
+									needsSetup || isConnecting || connectionRecoveryRequired
+										? undefined
+										: () => setIsSettingsOpen(false)
 								}
 								error={setupError}
 							>
@@ -688,7 +760,13 @@ export function App() {
 									: []
 							}
 							commandSuggestions={state.commands}
-							disabled={isJobRunning(activeJob)}
+							disabled={
+								isJobRunning(activeJob) ||
+								isConnecting ||
+								connectionRecoveryRequired ||
+								state.bootstrapping ||
+								state.connectionState === "disconnected"
+							}
 							draft={
 								selectedConversationId
 									? (state.draftsByConversation[selectedConversationId] ?? "")

@@ -6,6 +6,8 @@
         loadingMore: false,
         selectedUid: "",
         detail: null,
+        detailRequestSeq: 0,
+        saving: false,
         listItems: [],
         total: 0,
         page: 0,
@@ -49,6 +51,16 @@
 
     function detailInputValue(id, fallback = "") {
         return String(get(id)?.value || fallback || "").trim();
+    }
+
+    function detailDraftSnapshot() {
+        return JSON.stringify([
+            get("memesDetailManualDescription")?.value || "",
+            get("memesDetailTags")?.value || "",
+            get("memesDetailAliases")?.value || "",
+            !!get("memesDetailEnabled")?.checked,
+            !!get("memesDetailPinned")?.checked,
+        ]);
     }
 
     function showError(error) {
@@ -360,6 +372,7 @@
             state.loading = true;
             if (state.queryKey !== queryKey) {
                 state.selectedUid = "";
+                state.detailRequestSeq += 1;
                 state.detail = null;
                 renderDetail(null);
             }
@@ -418,14 +431,8 @@
             state.listItems = append
                 ? state.listItems.concat(nextItems)
                 : nextItems;
-            if (
-                state.selectedUid &&
-                !state.listItems.some((item) => item.uid === state.selectedUid)
-            ) {
-                state.selectedUid = "";
-                state.detail = null;
-                renderDetail(null);
-            }
+            // 同一查询刷新或分页只更新列表；详情可能因编辑后不再匹配筛选，
+            // 或不在新首页中，仍保留选中内容和未提交草稿。
             renderList();
             return payload;
         } finally {
@@ -446,10 +453,12 @@
 
     async function refreshAll() {
         if (state.loading) return;
+        const selectedUid = state.selectedUid;
+        const expectedDraft = detailDraftSnapshot();
         try {
             await Promise.all([fetchStats(), fetchList()]);
-            if (state.selectedUid) {
-                await loadDetail(state.selectedUid, { silent: true });
+            if (selectedUid && state.selectedUid === selectedUid) {
+                await loadDetail(selectedUid, { silent: true, expectedDraft });
             }
             state.loaded = true;
         } catch (error) {
@@ -460,19 +469,36 @@
     async function loadDetail(uid, options = {}) {
         const targetUid = String(uid || "").trim();
         if (!targetUid) return;
-        const response = await api(
-            `/api/v1/management/memes/${encodeURIComponent(targetUid)}`,
-        );
-        if (!response.ok) throw new Error(await response.text());
-        const payload = await response.json();
-        state.selectedUid = targetUid;
-        renderDetail(payload);
-        if (!options.silent) {
+        if (options.silent && state.selectedUid !== targetUid) return;
+        if (state.selectedUid !== targetUid) {
+            state.selectedUid = targetUid;
+            renderDetail(null);
             renderList();
+        }
+        const requestSeq = ++state.detailRequestSeq;
+        const expectedDraft = options.expectedDraft ?? detailDraftSnapshot();
+        const isCurrent = () =>
+            requestSeq === state.detailRequestSeq &&
+            state.selectedUid === targetUid;
+        try {
+            const response = await api(
+                `/api/v1/management/memes/${encodeURIComponent(targetUid)}`,
+            );
+            if (!isCurrent()) return;
+            if (!response.ok) throw new Error(await response.text());
+            const payload = await response.json();
+            if (!isCurrent()) return;
+            // 后台刷新与保存后的刷新不能替换请求期间继续编辑的草稿。
+            if (state.detail && expectedDraft !== detailDraftSnapshot()) return;
+            renderDetail(payload);
+            if (!options.silent) renderList();
+        } catch (error) {
+            if (isCurrent()) throw error;
         }
     }
 
     async function saveDetail() {
+        if (state.saving) return;
         const record = selectedRecord();
         if (!record) {
             showToast(t("memes.select_prompt"), "warning");
@@ -487,20 +513,26 @@
             enabled: !!get("memesDetailEnabled").checked,
             pinned: !!get("memesDetailPinned").checked,
         };
-        const response = await api(
-            `/api/v1/management/memes/${encodeURIComponent(record.uid)}`,
-            {
-                method: "PATCH",
-                body: JSON.stringify(payload),
-            },
-        );
-        if (!response.ok) throw new Error(await response.text());
-        showToast(t("memes.saved"), "success");
-        await Promise.all([
-            loadDetail(record.uid, { silent: true }),
-            fetchStats(),
-            fetchList(),
-        ]);
+        const expectedDraft = detailDraftSnapshot();
+        state.saving = true;
+        const button = get("btnMemesSave");
+        if (button) button.disabled = true;
+        try {
+            const response = await api(
+                `/api/v1/management/memes/${encodeURIComponent(record.uid)}`,
+                { method: "PATCH", body: JSON.stringify(payload) },
+            );
+            if (!response.ok) throw new Error(await response.text());
+            showToast(t("memes.saved"), "success");
+            await Promise.all([
+                loadDetail(record.uid, { silent: true, expectedDraft }),
+                fetchStats(),
+                fetchList(),
+            ]);
+        } finally {
+            state.saving = false;
+            if (button) button.disabled = false;
+        }
     }
 
     async function queueAction(kind) {
@@ -538,9 +570,11 @@
             { method: "DELETE" },
         );
         if (!response.ok) throw new Error(await response.text());
-        state.selectedUid = "";
-        state.detail = null;
-        renderDetail(null);
+        if (state.selectedUid === record.uid) {
+            state.selectedUid = "";
+            state.detailRequestSeq += 1;
+            renderDetail(null);
+        }
         showToast(t("memes.deleted"), "success");
         await Promise.all([fetchStats(), fetchList()]);
     }

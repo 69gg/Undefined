@@ -44,7 +44,8 @@ export type ToolBlockStatus = "running" | "done" | "error" | "cancelled";
 export type TimelineEntry =
 	| { type: "input"; timestamp: number; content: string }
 	| { type: "output"; timestamp: number; content: string }
-	| { type: "error"; timestamp: number; message: string };
+	| { type: "error"; timestamp: number; message: string }
+	| { type: "call"; timestamp: number; callId: string };
 
 export type ToolBlock = {
 	webchatCallId: string;
@@ -197,7 +198,11 @@ export type ChatAction =
 	  }
 	// 会话管理
 	| { type: "conversation/select"; conversationId: string }
-	| { type: "conversation/upsert"; conversation: Conversation }
+	| {
+			type: "conversation/upsert";
+			conversation: Conversation;
+			select?: boolean;
+	  }
 	| {
 			type: "conversation/remove";
 			conversationId: string;
@@ -209,6 +214,7 @@ export type ChatAction =
 	| { type: "send/error"; error: string | null }
 	// 任务与事件
 	| { type: "job/upsert"; job: ChatJob }
+	| { type: "job/snapshot"; job: ChatJob }
 	| { type: "job/remove"; conversationId: string; jobId: string }
 	| { type: "events/apply"; jobId: string; events: ChatEvent[] }
 	// 工具块

@@ -75,6 +75,8 @@ Management API 兼容两套鉴权：
 
 ### 查询会话
 
+WebUI 的并发请求共用同一次 refresh token 轮换；旧会话的迟到刷新响应不会覆盖新登录的令牌，也不会清除新会话。浏览器的 Cookie Session 认证继续兼容。
+
 - `GET /api/v1/management/auth/session`
 
 返回当前是否已认证、是否仍在使用默认密码、配置文件是否存在，以及控制面的 capabilities。
@@ -139,6 +141,10 @@ Management API 兼容两套鉴权：
 - `patch`：按路径增量修改
 - `validate`：先做 TOML 语法校验，再做严格配置校验
 - `sync-template`：把 `config.toml.example` 中新增字段/注释同步到当前配置
+
+整体保存、PATCH、历史恢复、模板同步及密码更新使用同一文件读改写锁，原子落盘后在主事件循环更新运行时配置。请求取消会先等待写入与更新收敛；密码更新同时刷新管理设置并撤销旧会话令牌。历史列表和恢复读取与备份裁剪串行，已被裁剪的备份恢复返回 `404`。
+
+WebUI 历史恢复同时检查 HTTP 状态及响应中的 `success`，失败时显示服务端错误并保留当前表单与历史面板，不会误报恢复成功或重载覆盖当前编辑。
 
 ## 5. 日志、系统与 Bot 控制
 
@@ -242,7 +248,8 @@ GET /api/v1/management/runtime/commands?scope=webui&q=help
   - `PATCH` 传 `{"title":"..."}`。
   - `DELETE` 使用路径参数 `conversation_id`。
 - 校验：
-  - 删除会话时 Runtime 会检查是否存在运行中或收尾落盘中的 WebChat job。
+  - 删除会话与接受新任务共用串行边界；存在运行中或收尾落盘的 WebChat job 时返回 `409`，已删除会话创建新任务返回 `404`。
+  - 新建、改名、清空、旧历史迁移与标题更新在原子落盘成功后才发布缓存；删除在文件移除后才撤销缓存和标题任务。磁盘错误保留上次成功状态；旧历史迁移失败不写完成标记，可恢复存储后重试。写入已开始后收到取消，会等待持久操作和缓存更新收敛再释放会话锁。
 - 响应：
   - `200` / `201`：会话列表或会话对象。
   - `404`：会话不存在。
@@ -278,7 +285,8 @@ GET /api/v1/management/runtime/commands?scope=webui&q=help
   - `404`：会话不存在。
   - `409`：job 正在运行或历史尚未完成落盘。
 - 元数据语义：
-  - `webchat.duration_ms`、`webchat.events`、`webchat.timeline`、`current_tool_calls`、`stage` / `agent_stage` 是 **display-only**，用于刷新后恢复工具 / Agent 展示块、阶段和耗时。
+  - `webchat.duration_ms`、`webchat.events`、`webchat.timeline`、`current_timeline`、`current_tool_calls`、`stage` / `agent_stage` 是 **display-only**，用于刷新后恢复工具 / Agent 展示块、阶段和耗时。
+  - Job 快照的 `current_timeline` 包含截至 `last_seq` 的完整正文与嵌套调用；客户端接受后从 `last_seq` 续流。增量重放缓冲保留最近 1000 条事件，完整展示快照和历史不按这个上限截断。
   - 这些 WebChat 展示元数据不是 **AI-context**，不会作为后续 AI 对话上下文注入。
   - 工具 / Agent 输入输出预览由 Runtime 统一脱敏和截断。
 
@@ -339,13 +347,15 @@ Content-Type: multipart/form-data
 }
 ```
 
-`runtime/chat/files` 仍保留为旧 WebUI 浏览器文件缓存兼容路径；新客户端和新 WebChat 功能应使用 `runtime/chat/attachments`。
+`runtime/chat/files` 仍保留为旧 WebUI 浏览器文件缓存兼容路径；新客户端和新 WebChat 功能应使用 `runtime/chat/attachments`。其 `runtime/chat/file?id=...` 下载响应支持 gzip 协商，可压缩的文本 / HTML 文件会保留 MIME、UTF-8 charset 和附件下载头。
 
-WebUI 内嵌聊天渲染 `<attachment uid="..."/>` / `<pic uid="..."/>` 图片时会把 Runtime 返回的 `/api/v1/chat/attachments/{uid}/preview` 规整为 Management 代理路径 `/api/runtime/chat/attachments/{uid}/preview`，浏览器不直接请求 Runtime API。普通 Markdown 图片（如 `![Image #1](https://...)`）仍由前端安全 renderer 输出可点击预览的 `<img>`，不走附件代理。
+WebUI 内嵌聊天渲染 `<attachment uid="..."/>` / `<pic uid="..."/>` 图片时会把 Runtime 返回的 `/api/v1/chat/attachments/{uid}/preview` 规整为 Management 代理路径 `/api/runtime/chat/attachments/{uid}/preview`，浏览器不直接请求 Runtime API。普通 Markdown 图片（如 `![Image #1](https://...)`）仍由前端安全 renderer 输出可点击预览的 `<img>`，浏览器直接加载 HTTP/HTTPS 图片，不走附件代理。WebUI CSP 的 `img-src` 允许 HTTP/HTTPS 来源；脚本与 API 请求继续受原有 `script-src` / `connect-src` 限制。
 
 ### `runtime/chat/jobs/{job_id}/events`
 
 按 `conversation_id + job_id + seq` 续接 WebChat job 事件，支持 JSON 增量查询和兼容 SSE。
+
+WebUI 每次轮询还会校验请求身份；切换会话后重新续接同一任务时，旧响应不会重复追加正文或改写当前重试状态。发送新消息后，发送前发起的迟到历史响应也不能清空当前用户消息和实时回复。
 
 - 参数：
   - `conversation_id`：可选；传入时必须与 job 所属会话一致。
@@ -355,7 +365,7 @@ WebUI 内嵌聊天渲染 `<attachment uid="..."/>` / `<pic uid="..."/>` 图片�
 - 校验：
   - `conversation_id` 不一致时返回 `404`，避免跨会话误续接。
 - 响应：
-  - 默认 JSON：持久事件、当前顶层 `stage` 快照、当前 `agent_stage` 快照、`current_tool_calls` 和耗时字段。
+  - 默认 JSON：持久事件、当前顶层 `stage` 快照、当前 `agent_stage` 快照、`current_tool_calls`、耗时字段和 `job.history_finalized`。`done` / `error` / `cancelled` 终态可能先于历史收尾发布；WebUI 保留发送锁并继续轮询，直到 `history_finalized=true` 后刷新权威历史，刷新成功才释放任务；刷新失败时保留发送锁并通过现有轮询重试。
   - SSE：事件帧和 keep-alive 由 Runtime 透传。
 
 ```json
@@ -412,6 +422,7 @@ data: {"stage":"waiting_tools"}
   1. 判定是否表情包
   2. 生成纯文本描述与标签
 - 管理页的“重建索引”只重建向量索引，不重新跑判定。
+- 重分析期间可编辑或删除条目；旧结果会在核对编辑修订和记录身份后丢弃，包含旧任务的删除判定。不会覆盖人工修改、恢复已删除条目或影响同 UID 重新入库的记录。分析保留最新使用次数；已开始的记录与索引写入在取消时仍会先完成收尾。
 
 ## 7. 适用场景
 

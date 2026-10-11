@@ -8,6 +8,8 @@ import time
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict
 
+from Undefined.skills.shared import run_cancellation_safe
+
 logger = logging.getLogger(__name__)
 
 # Docker 执行配置
@@ -18,6 +20,8 @@ CPU_LIMIT = "0.5"
 TIMEOUT = 480  # 8 分钟
 TIMEOUT_WITH_LIBS = 600  # 10 分钟（pip 安装需要更多时间）
 OUTPUT_FILE_RETENTION_SECONDS = 30.0
+SHARED_LOCAL_DIR_ENV = "UNDEFINED_PYTHON_INTERPRETER_LOCAL_DIR"
+SHARED_HOST_DIR_ENV = "UNDEFINED_PYTHON_INTERPRETER_HOST_DIR"
 
 # 图片扩展名（内联发送而非文件附件）
 _IMAGE_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"})
@@ -25,6 +29,26 @@ _IMAGE_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}
 # 安全：库名仅允许 PyPI 合法字符，必须以字母/数字开头（防止 -r/-e/--index-url 注入）
 _SAFE_LIB_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-\[\],<>=!~]*$")
 _PENDING_CLEANUP_TASKS: set[asyncio.Task[None]] = set()
+
+
+def _create_execution_dirs() -> tuple[str, str]:
+    """返回 Bot 本地工作目录与 Docker daemon 可见的 bind mount 来源。"""
+    local_dir = os.getenv(SHARED_LOCAL_DIR_ENV, "").strip()
+    host_dir = os.getenv(SHARED_HOST_DIR_ENV, "").strip()
+    if not local_dir and not host_dir:
+        tmpdir = tempfile.mkdtemp(prefix="pyinterp_")
+        return tmpdir, tmpdir
+    if not local_dir or not host_dir:
+        raise ValueError(
+            f"必须同时配置 {SHARED_LOCAL_DIR_ENV} 和 {SHARED_HOST_DIR_ENV}"
+        )
+    local_root = Path(local_dir)
+    host_root = Path(host_dir)
+    if not local_root.is_absolute() or not host_root.is_absolute():
+        raise ValueError("Python 解释器共享目录必须是绝对路径")
+    local_root.mkdir(parents=True, exist_ok=True)
+    tmpdir = tempfile.mkdtemp(prefix="pyinterp_", dir=local_root)
+    return tmpdir, str(host_root / Path(tmpdir).name)
 
 
 def _get_output_relative_path(container_path: str) -> PurePosixPath | None:
@@ -172,25 +196,35 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
     memory = MEMORY_LIMIT_WITH_LIBS if has_libs else MEMORY_LIMIT
     timeout = TIMEOUT_WITH_LIBS if has_libs else TIMEOUT
 
-    host_tmpdir = tempfile.mkdtemp(prefix="pyinterp_")
+    execution_dir: str | None = None
     defer_cleanup = False
 
+    async def prepare_execution_dirs() -> tuple[str, str]:
+        nonlocal execution_dir
+        local_tmpdir, docker_tmpdir = await asyncio.to_thread(_create_execution_dirs)
+        # 在线程完成后、取消传播前记录所有权，finally 才能清掉创建中的目录。
+        execution_dir = local_tmpdir
+        return local_tmpdir, docker_tmpdir
+
     try:
+        local_tmpdir, docker_tmpdir = await run_cancellation_safe(
+            prepare_execution_dirs()
+        )
         for fpath in send_files:
-            if _resolve_output_host_path(fpath, host_tmpdir) is None:
+            if _resolve_output_host_path(fpath, local_tmpdir) is None:
                 return f"错误: 输出文件路径必须位于容器 /tmp 目录内: '{fpath}'"
 
-        script_path = os.path.join(host_tmpdir, "_script.py")
+        script_path = os.path.join(local_tmpdir, "_script.py")
         deadline = time.monotonic() + timeout
 
         if has_libs:
             # 单独安装依赖，再以无网络/只读根文件系统执行用户代码。
-            req_path = os.path.join(host_tmpdir, "_requirements.txt")
+            req_path = os.path.join(local_tmpdir, "_requirements.txt")
             with open(req_path, "w", encoding="utf-8") as f:
                 for lib in libraries:
                     f.write(lib + "\n")
             install_timeout = max(deadline - time.monotonic(), 1.0)
-            install_cmd = _build_install_cmd(host_tmpdir, memory)
+            install_cmd = _build_install_cmd(docker_tmpdir, memory)
             install_code, install_stdout, install_stderr = await _run_docker_command(
                 install_cmd,
                 timeout=install_timeout,
@@ -207,7 +241,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
 
             exec_timeout = max(deadline - time.monotonic(), 1.0)
             cmd = _build_exec_cmd(
-                host_tmpdir,
+                docker_tmpdir,
                 memory,
                 pythonpath="/tmp/_site_packages",
             )
@@ -215,7 +249,7 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
             # 将代码写入脚本文件（避免 shell 引号转义问题）
             with open(script_path, "w", encoding="utf-8") as f:
                 f.write(code)
-            cmd = _build_exec_cmd(host_tmpdir, memory)
+            cmd = _build_exec_cmd(docker_tmpdir, memory)
             exec_timeout = timeout
 
         logger.info(
@@ -243,7 +277,9 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
                 )
 
             if send_files and exit_code == 0:
-                file_result = await _send_output_files(send_files, host_tmpdir, context)
+                file_result = await _send_output_files(
+                    send_files, local_tmpdir, context
+                )
                 if file_result:
                     parts.append(file_result)
                 defer_cleanup = True
@@ -257,10 +293,13 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         logger.exception("[Python解释器] 执行出错: %s", e)
         return "执行出错，请检查代码或重试"
     finally:
-        if defer_cleanup:
-            _schedule_output_dir_cleanup(host_tmpdir)
-        else:
-            shutil.rmtree(host_tmpdir, ignore_errors=True)
+        if execution_dir is not None:
+            if defer_cleanup:
+                _schedule_output_dir_cleanup(execution_dir)
+            else:
+                await run_cancellation_safe(
+                    asyncio.to_thread(shutil.rmtree, execution_dir, True)
+                )
 
 
 async def _send_output_files(

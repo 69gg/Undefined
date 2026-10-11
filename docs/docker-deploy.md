@@ -56,7 +56,7 @@ uv run deploy up
 | 发布端口的绑定地址 | 保持 `127.0.0.1`；在服务器上部署时，访问方法见下文[远程访问](#在自己的电脑上访问服务器) |
 | 是否拉取 NagaAgent 子模块 | 不需要 NagaAgent 代码问答时选“否” |
 
-向导随后会展示配置变更，确认后开始拉取镜像和启动容器。首次运行需要下载依赖与镜像，请等待命令完成。
+向导随后会展示配置变更，最终确认前只读取配置和模板；选择“否”或按 Ctrl+C 取消不会创建 `config.toml` 或拉取 NagaAgent 子模块。Ctrl+C 会立即结束命令，不会采用默认的“继续”。确认后才生成配置、按需初始化子模块、拉取镜像并启动容器。首次运行需要下载依赖与镜像，请等待命令完成。
 
 如需跳过向导，可用 `uv run deploy up --yes` 代替；首次执行采用默认配置，之后执行会沿用上次的部署选择。只想提前查看变更时，可用 `uv run deploy up --dry-run`，它不会写文件或启动容器。
 
@@ -85,7 +85,7 @@ uv run deploy status
 3. 配置 `models.chat`、`models.vision`、`models.agent` 的 API 地址、API Key 和模型名称；其他已启用功能所需的模型也应按配置提示填写。完整要求见 [配置必填项](configuration.md#3-严格模式stricttrue必填项)。
 4. 保存配置并检查校验结果；字段缺失或无效时，按提示补齐。
 
-也可以直接编辑仓库根目录的 `config.toml`。部署工具已填写 OneBot 连接和所选服务的地址，首次部署通常无需再改这些项。**模型 API 和 QQ 身份信息需要你自己填写，容器启动不代表这些配置已完成。**
+也可以直接编辑仓库根目录的 `config.toml`，部署工具与 Bot 一样支持 UTF-8 和 UTF-8 BOM 编码。部署工具已填写 OneBot 连接和所选服务的地址，首次部署通常无需再改这些项。**模型 API 和 QQ 身份信息需要你自己填写，容器启动不代表这些配置已完成。**
 
 ### 扫码登录并测试回复
 
@@ -227,6 +227,10 @@ uv run deploy up --port bot_webui=18787 --port napcat_webui=16099
 
 重新运行向导可以调整模式和可选服务。重复部署会重新生成 Compose 与服务配置，并复用已有有效凭据；对生成文件的手工修改可能被覆盖。修改过 WebUI 密码时，以 `config.toml` 中的当前值为准。
 
+音乐服务生成配置的内容摘要会写入该服务的 Compose label。配置或密钥变化后，`up` 会仅重建需要更新的音乐容器，使单文件挂载读到原子替换后的新配置；内容相同时摘要保持稳定，不会因此重建其他服务。
+
+`container` 模式的 Python 解释器使用 `deploy/data/cache/python_interpreter/` 中独立的临时工作目录。部署工具通过容器环境变量传入这份共享目录在 Bot 内和宿主机上的不同路径，使宿主 Docker 能读取脚本、依赖清单和生成的文件；不会共享整个宿主 `/tmp`。`host` 模式继续使用系统临时目录。手工部署容器时的设置方法见 [Python 解释器工具说明](../src/Undefined/skills/tools/python_interpreter/README.md#容器内使用宿主-docker)。
+
 ### 更新版本
 
 先备份配置与数据，并将仓库更新到要部署的已发布版本，再执行：
@@ -248,6 +252,8 @@ uv run deploy up --pull always
 | `deploy/data/`、`deploy/logs/` | 容器模式下 Bot 的数据与日志；`host` 模式使用仓库根目录的 `data/`、`logs/` |
 | `deploy/backup/` | 部署工具修改 `config.toml` 前的备份 |
 | `deploy/searxng/`、`deploy/firecrawl/`、`deploy/lxmusic2api/` | 已选服务的配置，以及音乐服务的音源、数据和下载文件 |
+
+每次实际修改已有 `config.toml` 前，部署工具会保存独立备份，文件名为 `config_<UTC时间戳>_<唯一后缀>.toml`。同一秒内的多次更新也会保留各次修改前的内容；命令输出会显示本次备份的完整路径。配置无变更或 `--dry-run` 时不创建备份。
 
 备份时保存 `config.toml`、`deploy/` 和你使用的自定义目录。Firecrawl 等服务还使用 Docker 命名卷，备份这些服务时需另行备份对应卷；仅复制 `deploy/` 不能保存全部数据库数据。
 
@@ -274,12 +280,14 @@ uv run Undefined-webui
 | `--with searxng,firecrawl,lxmusic2api` | 设置完整的可选服务列表，按需删减；也可使用 `--with-searxng` 等独立参数 |
 | `--with-nagaagent` / `--no-nagaagent` | 开启或关闭 NagaAgent 代码问答，首次默认关闭 |
 | `--port KEY=PORT` | 修改宿主机发布端口，可重复使用；端口键见 `uv run deploy up --help` |
-| `--port-bind ADDR` | 设置所有发布端口的绑定地址，首次默认 `127.0.0.1` |
+| `--port-bind ADDR` | 设置所有发布端口的绑定地址，首次默认 `127.0.0.1`；支持 IPv4、裸 IPv6（如 `::1`）和带方括号的 IPv6（如 `[::1]`） |
 | `--pull missing\|always\|never` | 镜像拉取策略，默认 `missing`；分别表示本地缺少时拉取、总是检查更新、不拉取 |
 | `--dry-run` | 预览配置差异与 Compose，隐藏凭据，不写文件、不启动容器 |
 | `--yes` / `-y` | 跳过向导，未指定项沿用上次选择或首次默认值 |
 
 ### 配置修改与运行权限
+
+`host` 模式生成的服务连接 URL 会为 IPv6 地址补上方括号；`0.0.0.0`、`::` 与 `[::]` 仅用于监听，生成连接目标时改用回环地址。
 
 部署工具会更新 OneBot 连接、WebUI / Runtime 监听地址与凭据、Bot 启动方式、文件发送模式和所选服务地址；模型、访问控制、提示词和历史配置的取值会保留。已有配置在写入前会备份，但写回时可能调整排序、空行或部分注释，可先用 `--dry-run` 查看计划。
 

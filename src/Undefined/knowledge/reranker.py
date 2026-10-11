@@ -56,6 +56,8 @@ class Reranker:
     async def _process_loop(self) -> None:
         while True:
             job = await self._queue.get()
+            if job.future.cancelled():
+                continue
             try:
                 result = await self._requester.rerank(
                     model_config=self._config,

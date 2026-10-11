@@ -18,6 +18,9 @@ from Undefined.cognitive.chroma_scheduler import (
 )
 from Undefined.cognitive.service.helpers import (
     _build_profile_vector_payload,
+    _current_profile_name,
+    _normalize_profile_tags,
+    _parse_profile_markdown,
     _profile_section_error,
     _serialize_profile_markdown,
 )
@@ -563,6 +566,36 @@ class HistorianWorker:
             perspective,
         )
 
+    async def _sync_profile_vector(
+        self, entity_type: str, entity_id: str, profile: str | None
+    ) -> None:
+        """skip 仍需补齐当前文件索引，不能提前确认失败写入的目标。"""
+        if profile is None:
+            return
+        parsed = _parse_profile_markdown(profile)
+        if parsed is None:
+            # 兼容没有 frontmatter 的旧侧写，仅将原文作为正文索引。
+            frontmatter: dict[str, Any] = {}
+            evaluation, summary, roast = "", profile, ""
+        else:
+            frontmatter, evaluation, summary, roast = parsed
+        document, metadata = _build_profile_vector_payload(
+            entity_type=entity_type,
+            entity_id=entity_id,
+            effective_name=_current_profile_name(entity_type, frontmatter) or entity_id,
+            tags=_normalize_profile_tags(frontmatter.get("tags")),
+            summary=summary,
+            evaluation=evaluation,
+            roast=roast,
+        )
+        await call_vector_store_method(
+            self._vector_store.upsert_profile,
+            f"{entity_type}:{entity_id}",
+            document,
+            metadata,
+            priority=CHROMA_PRIORITY_BACKGROUND,
+        )
+
     @staticmethod
     def _historical_event_dedupe_key(
         event: dict[str, Any],
@@ -896,7 +929,15 @@ class HistorianWorker:
                             skip_reason or "unspecified",
                         )
                         await run_cancellation_safe(
-                            self._commit_profile_target(job, event_id, target, progress)
+                            self._commit_profile_target(
+                                job,
+                                event_id,
+                                target,
+                                progress,
+                                self._sync_profile_vector(
+                                    entity_type, entity_id, existing_profile
+                                ),
+                            )
                         )
                         tool_results.append(
                             {

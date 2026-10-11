@@ -19,6 +19,8 @@
 - 示例模板：`config.toml.example`
 - 启动 WebUI 时，如 `config.toml` 不存在，会自动用示例模板生成。
 - 已有 `config.toml` 想补齐新增配置项/注释时，可用 WebUI 的“同步模板”按钮，或运行 `python scripts/sync_config_template.py`（也支持 `uv run python scripts/sync_config_template.py`）。
+- Management 的整体保存、增量修改、恢复、模板同步和密码更新共用配置文件读改写锁，并原子替换文件；请求取消会等写入、主循环热更新及必要的凭据撤销完成后再传播。备份列表与恢复读取也同备份裁剪串行。
+- WebUI 恢复、同步或重新加载时会停止旧保存队列，等在途保存结束后再替换配置；期间表单暂停编辑，完成后以服务器配置重建。
 
 ### 1.2 运行时本地文件
 - `config.local.json`：运行时维护的本地管理员列表（如 `/admin add`）。
@@ -68,6 +70,8 @@ Python 显式 mapping / builder.override  >  config.toml  >  环境变量  >  �
 | `get_config()` | 视情况 | 未 `set_config()` 时等价于 `Config.load()` |
 
 `from_mapping` / `builder` 仍会读取进程环境变量中**已注册**的兜底项（TOML / mapping 未提供的字段）。注册表见 [`env_registry.py`](../src/Undefined/config/env_registry.py) 与本文 [§8 环境变量兜底](#8-环境变量兜底迁移建议)。
+
+内存构建的所有字段（包括 `[webui]`）都来自传入的 mapping 与上述环境变量；不会读取 `config.toml`、`config.local.json` 或 `.env`。动态管理员文件只在 `Config.load()` 的文件加载入口合并，内存构建仍会把显式超级管理员纳入管理员列表。
 
 ### 2.3 `Config.from_mapping`
 
@@ -195,6 +199,7 @@ model_name = "gpt-4o-mini"
 | `process_poke_message` | `true` | 是否响应拍一拍 | 关闭后忽略 poke |
 | `context_recent_messages_limit` | `20` | 注入到提示词的最近历史条数；当前输入批次发车入队前冻结为请求级快照 | `<0` 视为 `0`（关闭注入）；无固定上限，受 `max_records` 与存储约束；已入队请求不受后续消息或配置热更新影响 |
 | `ai_request_max_retries` | `2` | 单次 LLM 请求失败重试次数；无工具调用且实际 `assistant.content` 为空白时也走此路径，原样重试同一轮请求。安全模型注入检测、Naga 审核与注入回复在遇到可重试 HTTP 错误（429 / 5xx）时同样使用该次数 | `<0` 自动回退到 `0`；支持热更新 |
+| `group_llm_queue_max_pending` | `128` | 每模型普通群聊 LLM 等待队列的新请求准入上限；支持环境变量 `GROUP_LLM_QUEUE_MAX_PENDING` | 必须为正整数，非法值报错；支持热更新，调低不会丢弃已接收请求 |
 | `missing_tool_call_retries` | `3` | 模型返回非空纯文本且无法恢复为本轮可用工具调用时的纠正重试次数（保留 assistant 纯文本 + 通用纠正提示，不写死具体 tool）；空白响应不计入此项；每次进入下一轮纠正重试前，warning 日志会以 `raw_content=repr(...)` 完整记录该轮原始响应；格式与失败回退规则见 [模型 API 与兼容层](model-compatibility.md#文本-tool-call-后备解析) | `<0` 自动回退到 `0`；支持热更新 |
 
 ---
@@ -271,6 +276,10 @@ Stream 本地文件投递在同一 Bot 内串行，纯文本不等待上传锁�
 | `responses_force_stateless_replay` | `responses` 下的续轮强制降级开关：启用后多轮工具调用始终跳过 `previous_response_id`，改为完整消息重放；默认 `false` |
 | `prompt_cache_enabled` | OpenAI 模式下是否自动生成稳定的 `prompt_cache_key`；Anthropic 模式不发送该字段；默认 `true` |
 | `request_params` | 额外请求体参数（透传给模型 API，保留字段会忽略） |
+
+普通群聊队列过长时，仅裁剪尚未发车的外围请求；已经启动的 AI 调用所等待的 LLM 子请求及重试保留原相对顺序，避免调用方因裁剪而继续等待超时。
+
+普通群聊的新 LLM 子请求入队前，会按模型检查当前等待中的 LLM 数量；达到 `[core].group_llm_queue_max_pending` 时返回可读的 `QueueFull` 错误并记录日志，调用方会清理该请求的等待状态，不裁剪已接收请求。普通自动回复可能在有限次重试后结束而不发送回复。此限制不作用于其他优先级通道或其他模型；已接收任务的重试仍可回插，调低上限也不清空旧任务。它是新请求的排队准入限制，不是总并发或内存上限：在途调用不计入，重试可能使等待数量暂时超过配置值。
 
 请求模式说明：
 - `api_mode="openai.chat_completions"`：走 `AsyncOpenAI.chat.completions.create(...)`
@@ -367,6 +376,8 @@ Prompt caching 补充：
 - `responses_tool_choice_compat=false`
 - `responses_force_stateless_replay=false`
 - `use_proxy=false`
+
+媒体分析的进程内缓存按完整媒体来源、媒体类型与补充指令区分；相同输入复用结果，长路径或 data URL 的共同前缀不会串用分析结果。
 
 ### 4.4.4 `[models.security]` 安全模型
 
@@ -703,6 +714,10 @@ document_instruction = "passage: "
 
 外部接收的远程图片或文件默认会先下载到附件缓存再生成 UID，避免后续 URL 失效；大文件超过阈值时，UID 仍会生成，但绑定的是 URL 引用而不是缓存文件，AI 可在上下文中看到原始 `source_ref`。如果本地缓存因总容量或时间清理被删除，但记录仍保留 URL，后续需要文件内容时会优先按 URL 回源下载。
 
+仅保留 URL 引用的远程图片按登记的原始 URL 发送，查询参数中的逗号、方括号和 `&` 不会被截断。内部 CQ 参数会转义，并在转换为 OneBot 消息段时仅解码一次；URL 中原本的 `&#44;`、`&amp;` 等字面实体保持原样。这不改变远程下载上限或目标校验策略。
+
+本地 `file://` URI 在附件登记、显示名称和发送层共用路径解析规则，只解码一次，支持中文、空格、`localhost` 与 UNC 路径；普通文件路径中的 `%` 保持字面含义。附件记录仍保存原始来源引用。
+
 远程附件下载默认只允许公网 HTTP(S) 目标，拒绝 URL 内的凭据、回环、私网、链路本地、组播等非公网目标。域名的全部解析结果都必须符合策略；实际请求固定到已校验的 IP，并保留原始 Host、TLS SNI 和证书校验，避免校验后再次解析造成 DNS 重绑定绕过。每次重定向和后续回源都重新校验目标；DNS、连接、跳转与下载共用 120 秒总时限，最多跟随 20 次跳转。策略拒绝或网络错误不会降级登记成新的 URL 引用。
 
 需要从 NapCat 等内网媒体服务下载时，只将确认可信的精确 origin 加入 `remote_download_allow_private_origins`；该配置允许从对应服务的任意路径下载，不会放行其他端口、协议或跳转目标。修改配置只影响后续下载，不删除现有缓存。仅登记 URL 引用时不会发起 DNS 或 HTTP 请求；真正回源时仍须通过当时的目标策略。`use_proxy` 保持生效，代理会收到已校验的目标 IP，代理地址本身由部署者信任；代理模式也需要 Bot 本机能够解析目标域名。
@@ -984,7 +999,9 @@ summary = ""
 |---|---:|---|---|
 | `use_proxy` | `false` | URL 文件下载等消息工具联网请求是否使用 `[proxy]` 中的代理地址 | |
 | `send_text_file_max_size_kb` | `512` | 文本文件发送上限（KB） | `<=0` 回退 `512` |
-| `send_url_file_max_size_mb` | `100` | URL 文件发送上限（MB） | `<=0` 回退 `100` |
+| `send_url_file_max_size_mb` | `100` | URL 文件发送上限（MB），按 HTTP 解压后的落盘字节计算 | `<=0` 回退 `100` |
+
+下载预检与完整性校验中的 `Content-Length` 按 HTTP 传输字节比较；gzip 等压缩响应仍按实际解码后的文件大小执行容量限制。
 
 ---
 
@@ -1090,7 +1107,9 @@ api_key = "replace-with-your-key"
 - 命中 `arxiv.org/abs/...`、`arxiv.org/pdf/...` 或 `arXiv:<id>` 时直接触发。
 - 裸新式编号仅在消息中同时出现 `arxiv` 关键词时触发，避免误判普通数字串。
 - PDF 下载或上传失败时不会额外发送失败提示，只保留论文信息消息。
+- 同一论文按物理投递地址去重：同一地址的并发请求复用在途发送，发送完成后一小时内跳过重复请求。`qq:<QQ号>`、`wechat:<QQ号>` 和 `group:<群号>` 独立计数；同一逻辑 QQ 在 QQ 和微信请求论文时，两端都能收到。
 - 自动提取仍默认发送论文信息与 PDF；若用户要求分析 arXiv 论文内容，`file_analysis_agent` 会通过 `arxiv_paper(output_mode=uid)` 获取 PDF 附件 UID 后再分析；只需标题、作者、摘要和链接等元信息时可使用 `arxiv_paper(output_mode=info)`。
+- PDF 预检、流式下载或落盘阶段取消时，会清理本次独立任务目录；网络等待可直接取消，已开始的文件操作先等实际线程完成再清理并传播取消。发送和附件 UID 模式共用此规则。此保证针对 `asyncio` 任务取消，不代表所有 `BaseException` 下都能完成清理；清理期间再次发生进程级中断、事件循环被强制停止或进程被强杀时，目录仍可能残留。
 
 ---
 
@@ -1131,16 +1150,18 @@ api_key = "replace-with-your-key"
 | `download_concurrency` | `8` | 图片下载并发数 | `<1` 回退 `8`，`>32` 截断到 `32` |
 | `request_timeout` | `20.0` | 接口请求超时（秒） | `<=0` 回退 `20`，`>120` 截断到 `120` |
 | `image_timeout` | `60.0` | 图片下载超时（秒） | `<=0` 回退 `60`，`>600` 截断到 `600` |
-| `session_dir` | `""` | jmcpy 配置目录（登录态会话文件所在目录） | 空时用 jmcpy 的平台默认目录 |
+| `session_dir` | `""` | jmcpy 配置目录（登录态会话文件所在目录） | 非空值优先；空时使用 `JMCPY_HOME`，两者均为空时使用平台默认目录 |
 
 触发规则：
 - 匹配 `JM` 前缀加 5–8 位车号：`JM1114751`、`jm 1114751`、`jm:1114751`、`jm-1114751`；前缀前必须是边界（`xxjm1234567` 不触发），数字后不跟数字（9 位以上不会被截成 8 位）。
 - 匹配主机名含 `18comic` 或 `jmcomic` 的链接，车号取自 `/album/<id>`、`/photo/<id>` 或 `?id=<id>`。
 - 裸数字不触发，避免群号、时间戳等误报；QQ 分享卡片（`json` 消息段）里的链接同样会解析。
+- 畸形 URL 只跳过该链接，仍会继续解析同一条消息或后续分享卡片中的合法车号。
 
 自动提取行为：
 - 命中后发送一次外层合并转发，固定两个节点：**本子信息**（车号、标题、作者、章节数、标签、观看/点赞、页数、zip 大小、被跳过的章节数、简介预览，末尾是可直接复制的 `JM<车号>`）、**PDF 解密密码**（每次随机生成 8 位，字母表去掉 `0/O/1/l/I` 等形近字符，适用于 zip 内所有 PDF）。打包好的 zip **不进转发**，而是紧随转发之后单独作为一条文件消息发送。
 - 多章节本子会把全部章节按顺序下载（`max_chapters` 可限制章数），**每章各出一份 AES-256 加密 PDF**（都用同一个密码），再打包成一个**无密码** zip：`JM<车号> <标题>.zip`，内部条目是 `JM<车号> <序号>[ <章节标题>].pdf`，序号补零所以解压后按文件名就是阅读顺序。zip 不需要密码，密码在每个章节 PDF 内部由阅读器询问。
+- 服务端章节序号重复或缺失导致冲突时，下载目录与章节 PDF 的产物序号会顺延，保持唯一且符合阅读顺序；`uid` 模式也使用独立章节目录，避免复用同标题的上一章图片。下载结果中的章节元数据仍保留服务端原始序号。
 - 每页按 `pdf_dpi` 统一换算物理尺寸（`页宽 = 像素宽 ÷ DPI × 72`），下载与合成都不缩放像素：PDF 里的页就是站点源图的原始分辨率，画质上限由站点自己提供的图决定。
 - 每页只做一次有损编码：取服务端原始字节（无损落盘）→ 解扰 → JPEG（`image_quality`，4:4:4）→ 直接作为 PDF 的图像数据，中间不再多一代重编码。需要更高画质时可把 `image_quality` 提到 `98`/`100`（约 `+30%`/`+50%` 体积），源图本身的分辨率无法通过配置提升。
 - 单章 PDF 按 `chapter_max_file_size` 判定：组装时累计**编码后字节**（JPEG 重编码 4:4:4 / q95 可能比源 WebP 大），超过上限就中止这一章、不落盘，其余章节照常打包，信息节点会写明「N 章未打包」。这是**单章**上限，zip 总体积随章节数增长、不受配置约束；旧键 `[jm].max_file_size` 已失效（回退默认 100），请改用 `chapter_max_file_size`。
@@ -1154,8 +1175,8 @@ api_key = "replace-with-your-key"
 - 车号不存在、接口不可用时发送一行 `JM 提取失败：<原因>`，日志记录异常类型与堆栈；车号与链接混排时按原文顺序取第一个，分享卡片结构异常只跳过该段。
 - 除了自动提取，`jm_book` 工具让 AI 也能按需处理车号：`output_mode=send`（默认，等价自动提取）、`uid`（只下载并**把所有章节合成一份未加密 PDF** 注册为附件 UID，交给 `file_analysis_agent` 用 `extract_pdf` / `describe_pdf_page` 解析，不发送消息、不打包 zip）、`info`（只返回本子信息，不下载）。
 - `info_agent` 的 `jm_search` 工具查询本子列表，`mode` 三种：`search`（关键词检索，可用 `target` 限定站内/作品/作者/标签/角色，也可直接输入纯数字车号）、`browse`（按分类浏览，不需要关键词）与 `ranking`（日/周/月排行，用 `time_range` 选日榜/周榜/月榜，固定按观看数排序）。三种模式共用 `genre` 大分类、`page` 翻页与 `n`（默认 5、上限 20）；`search` / `browse` 另支持 `sort`（最新/观看/图片/点赞/评分/评论）与 `time_range` 时间范围；`sub_genre` 副分类必须与 `genre` 同时给出，且只有网页端接口支持，网页端被反爬拦截时会直接返回失败原因。只返回车号、标题、作者、分类与更新时间，不下载也不发送。查询复用同一份 `[jm]` 配置（代理、`request_timeout`、`session_dir`），且**不受** `auto_extract_enabled` 影响——该开关只约束自动提取管线。
-- jmcpy 的 HTTP 请求是异步的，但图片解码与 PDF 合成是同步 CPU 工作；这些步骤在线程中执行，不阻塞事件循环。副作用是单次自动提取不可取消，由 `request_timeout` / `image_timeout` 与 jmcpy 的多端点重试兜底。
-- 默认不登录即可使用；需要在 jmcpy 中登录（例如访问账号可见内容）时，用 jmcpy 自己的方式保存会话，再把 `session_dir` 指向同一配置目录（或设置 `JMCPY_HOME`）。
+- 图片下载、解码与 PDF 合成在专用线程池执行，不阻塞事件循环。取消提取会结束等待，但不会强停仍在写盘的同步线程；线程结束后清理本次任务目录，即使 Bot 的事件循环已经关闭也会清理，避免残留原图或未加密 PDF。下载本身由 `request_timeout` / `image_timeout` 与 jmcpy 的多端点重试收敛。
+- 默认不登录即可使用；需要在 jmcpy 中登录（例如访问账号可见内容）时，用 jmcpy 自己的方式保存会话，再把 `session_dir` 指向同一配置目录，或在 `session_dir` 留空时设置 `JMCPY_HOME`。目录值会去除首尾空白，显式 `session_dir` 优先于环境变量。
 - 请遵守所在地法律法规与目标站点服务条款，只处理你有权获取的内容。
 
 ---
@@ -1201,12 +1222,17 @@ api_key = "replace-with-your-key"
 | `password` | `changeme` | WebUI 登录密码 |
 | `autostart_bot` | `false` | WebUI 启动时是否自动启动机器人进程 |
 | `check_updates` | `true` | 打开 WebUI 时是否在后台检查 GitHub 正式 Release |
+| `stop_timeout_seconds` | `0` | 停止 Bot 的收尾期限（秒）；`0` 等待自然结束，正整数超时后强制终止 |
 
 关键行为：
-- 默认密码 `changeme` 禁止登录，必须先修改。
+
+- 默认密码 `changeme` 禁止登录，必须先修改；显式写入 `password = "changeme"` 也保持默认密码模式。
 - 未配置或为空时，会回退默认密码并标记为”默认密码模式”。
-- `webui.url/port/password/autostart_bot` 修改需重启 WebUI 进程（机器人主进程中也属于重启生效类）。
+- `webui.url` / `webui.port` 修改需重启 WebUI 进程，以重新绑定监听地址和端口。
+- `webui.password` 在配置成功加载后立即刷新 Management 的登录密码，无需重启 WebUI。
+- `webui.autostart_bot` 控制下一次 WebUI 启动时是否自动启动机器人；修改不会立即启动或停止当前机器人进程。
 - `check_updates` 支持热更新；关闭后只停止页面打开时的自动检查，概览页仍可手动检查。
+- `stop_timeout_seconds` 支持热更新，下一次停止操作读取新值，进行中的停止保持开始时的期限。停止按钮、WebUI 关停与更新前停止共用此期限；请求取消也会先等待子进程清理收敛。默认等待模型、下载、回复和历史收尾；设置正整数时需覆盖实际收尾耗时，超时强制终止可能跳过未完成的落盘。环境变量为 `WEBUI_STOP_TIMEOUT_SECONDS`，TOML 显式配置优先。
 - `autostart_bot=true` 时，运行 `uv run Undefined-webui` 会自动拉起 bot 进程，无需手动点击启动按钮；与 WebUI 更新重启后的自动恢复机制（`pending_bot_autostart` marker）互不冲突。
 - `uv run deploy up` 在 `container` 与 `host` 模式下都会写入 `autostart_bot = false`；部署后先完成配置与 QQ 登录，再在 WebUI 点击“启动机器人”。
 - 自动检查在 WebUI 鉴权成功后异步执行，失败不会阻塞或打扰页面。GitHub Release 查询在 WebUI 进程内缓存 15 分钟；同一时刻的并发检查会共享一个在途任务，查询失败时也不会逐个重试外部请求。
@@ -1334,6 +1360,8 @@ api_key = "replace-with-your-key"
 
 ### 4.27 `[memes]` 表情包库
 
+后台队列在启动与轮询时恢复超过 300 秒的遗留 `processing` 任务，并排除当前在途任务；异常退出后快速重启也会在任务过期后恢复。正常停止会等待在途任务结束，详见[表情包库](memes.md)。
+
 | 字段 | 默认值 | 说明 | 约束/回退 |
 |---|---:|---|---|
 | `enabled` | `true` | 是否启用全局表情包库 | 关闭后不会自动入库，也无法使用 `memes.*` 工具 |
@@ -1435,6 +1463,7 @@ api_key = "replace-with-your-key"
 
 ### 5.2 明确“需重启”的字段
 以下变更会被记录为“需重启生效”：
+
 - `logging.level`
 - `logging.file_path`
 - `logging.max_size_mb`
@@ -1444,8 +1473,6 @@ api_key = "replace-with-your-key"
 - `onebot.token`
 - `webui.url`
 - `webui.port`
-- `webui.password`
-- `webui.autostart_bot`
 - `api.*`（`enabled/host/port/auth_key/openapi_enabled`）
 - `memes.blob_dir`
 - `memes.preview_dir`
@@ -1455,7 +1482,12 @@ api_key = "replace-with-your-key"
 - `naga.*`（`enabled/api_url/api_key/use_proxy/moderation_enabled/mode/allowed_group_ids/blocked_group_ids/allowed_private_ids/blocked_private_ids`）
 - `models.embedding` / `models.embedding.features.*` / `models.rerank`（嵌入与重排运行时在启动时构造，热更新只提示需重启）
 
+Management 的 WebUI 配置按 [§4.23](#423-webui) 的时机生效：密码和检查更新开关支持热更新，自动启动开关控制下次启动。机器人运行时日志可能仍把 `webui.password` / `webui.autostart_bot` 归为重启提示，这不表示 Management 必须重启才能使用新密码。
+
 ### 5.3 明确“会执行热应用”的字段
+
+- `webui.password` / `webui.check_updates` / `webui.stop_timeout_seconds`（Management 的登录密码、检查更新开关与下次停止的收尾期限刷新）
+- `core.group_llm_queue_max_pending`（下一次普通群聊 LLM 入队使用新上限，保留已接收请求与重试）
 - `onebot.file_send_mode` / `onebot.file_send_host`（新投递读取快照；进行中投递及旧 URL 生命周期不变）
 - 模型发车间隔 / 模型名 / 模型池变更（队列间隔刷新）
 - `models.grok.model_name` / `models.grok.queue_interval_seconds`（队列间隔刷新）
@@ -1482,16 +1514,22 @@ api_key = "replace-with-your-key"
 - `skills.hot_reload*`（技能热重载任务重启）
 - `skills.hot_reload_interval/debounce`（配置热更新监听器自身重启）
 
+配置监听器启动和重启时会先重新读取并应用最新文件，再继续轮询；监听器切换期间保存的变更也会追赶应用。旧监听器收到停止信号后不再发起下一次重载，连续修改监听间隔也只保留使用最新参数的监听任务。读取失败仍保留上次有效配置，监听任务继续运行，文件修正后再次保存即可重新加载。
+
 ### 5.4 其他字段
 - `Config` 对象本身会更新。
 
 ### 5.5 热更新失败的可见性
 
+TOML 语法错误、编码错误或读取失败会中止本次加载，热重载保留上次有效的完整配置，包括白名单、Runtime API 密钥和 WebUI 密码；已加载配置的文件被删除时也不会切换为默认值。修正文件并再次保存后会正常重载。`strict=False` 只放宽必填项校验，不允许把损坏的文件作为空配置使用。
+
+运行中的 WebUI 直接从本次已验证的 `Config` 快照刷新设置，不再次读取文件；即使文件随后被其他进程写坏或删除，也不会把密码重置为默认值。首次启动的独立 WebUI 设置加载仍允许用默认设置显示初始化页面，但默认密码始终禁止登录。
+
 热更新在共享的 `Config` 实例上逐字段就地生效，整个过程没有 `await`，同一事件循环内的读方不会在一次读取里看到“改了一半”的对象；跨 `await` 的多次读取仍可能分别落在变更前后，需要严格一致的快照时请在单次读取中取全所需字段。
 
 应用阶段按步骤隔离：单步抛错不会中断后续步骤，失败步骤会以 `error` 级日志逐条打印（`热更新步骤失败`），并在末尾汇总一条“热更新未完全生效（运行时状态与 config.toml 不一致）”。异步步骤（技能热重载、自动化并发、配置监听器重启）使用被强引用跟踪的后台任务，任务异常同样以 `error` 级日志输出（`热更新后台任务失败`）。配置订阅者回调抛错时记录失败回调名单，其余回调继续执行。
 
-因此若看到上述日志，说明 `config.toml` 已改但对应运行时未生效，需要修复报错原因后重新保存配置；必要时重启进程。
+失败的同步回调、应用步骤和后台任务会保留相应变更。修复报错原因后重新保存相同配置也会重试，不必先把字段改成另一个值；已被后续配置覆盖的旧后台失败不会重放旧值。因此若看到上述应用失败日志，需要修复报错原因后重新保存配置；必要时重启进程。
 - 具体功能是否“立刻体现”，取决于模块是“每次读取配置”还是“启动时缓存”。
 - 对于行为不确定项，建议改完观察日志；必要时重启进程确认。
 
@@ -1905,6 +1943,12 @@ api_key = "replace-with-your-key"
 | TOML 路径 | 环境变量 |
 |-----------|----------|
 | `weather.api_key` | `WEATHER_API_KEY` |
+
+#### `webui`
+
+| TOML 路径 | 环境变量 |
+|-----------|----------|
+| `webui.stop_timeout_seconds` | `WEBUI_STOP_TIMEOUT_SECONDS` |
 
 #### `xxapi`
 

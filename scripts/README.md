@@ -65,7 +65,11 @@ python scripts/sync_config_template.py --stdout
 
 **原理**：ChromaDB 存储了完整的原文本（`documents`），脚本读取所有记录，用新模型重新计算向量后 upsert 覆写，metadata 保持不变。
 
-**维度变化**：collection 在首次写入时定维，异维 upsert 会直接报 `InvalidArgumentError`。脚本会先比较新旧向量维度，检测到变化时先读全量记录、再删除并重建 collection，最后按新维度写回；`--dry-run` 只提示会重建，不做任何写入。
+脚本不重新读取侧写 Markdown，也不用于历史侧写恢复。恢复版本或从当前 Markdown 更新检索正文与向量，请使用下方的 `restore_profile.py restore` / `sync`。
+
+**维度变化**：collection 在首次写入时定维，异维 upsert 会直接报 `InvalidArgumentError`。脚本把新向量写入临时 collection，全部写完并校验记录数后才删除旧库、把临时库换名为正式库。实际运行会清理未完成的临时库，或在正式库缺失时恢复临时库。
+
+`--dry-run` 先复制向量库到系统临时目录，仅在副本上打开 Chroma 客户端，源向量库的数据和文件均不修改。它不会创建缺失的 collection、删除残留临时库或把临时库换名；若只有临时库，会读取其中的记录预览恢复后的重嵌入。预览仍会调用嵌入 API 计算向量，并可能记录 token 用量；需要足够临时磁盘空间保存完整副本。运行前停止机器人及其他写入该库的进程，保证复制和正式迁移读取一致的数据。
 
 **前置条件**：先在 `config.toml` 中将 `[models.embedding]` 更新为新模型配置。
 
@@ -82,7 +86,7 @@ uv run python scripts/reembed_cognitive.py --profiles-only
 # 自定义批大小（默认 32，降低可减小 API 压力）
 uv run python scripts/reembed_cognitive.py --batch-size 16
 
-# 模拟运行（不实际写入，用于验证配置和统计数量）
+# 模拟运行（不修改源 ChromaDB，用于验证配置和统计数量）
 uv run python scripts/reembed_cognitive.py --dry-run
 
 # 详细日志
@@ -105,14 +109,20 @@ uv run python scripts/restore_profile.py list --entity-type user --entity-id 123
 # 查看某个历史版本内容
 uv run python scripts/restore_profile.py show --entity-type user --entity-id 123456 --revision 20260101000000000000.md
 
-# 恢复某个历史版本（恢复前会把当前内容另存为新快照，可再次回退）
+# 停止机器人及其他写入进程后恢复，并同步该实体的检索正文与向量
 uv run python scripts/restore_profile.py restore --entity-type user --entity-id 123456 --revision 20260101000000000000.md
 
 # 仅预览，不写盘
 uv run python scripts/restore_profile.py restore --entity-type user --entity-id 123456 --revision 20260101000000000000.md --dry-run
+
+# 补同步当前 Markdown（例如恢复成功但向量写入失败后重试）
+uv run python scripts/restore_profile.py sync --entity-type user --entity-id 123456 --dry-run
+uv run python scripts/restore_profile.py sync --entity-type user --entity-id 123456
 ```
 
-**注意**：恢复只改侧写 Markdown 与历史快照，不会更新 ChromaDB 中的侧写向量；需要同步检索结果时按 `docs/cognitive-memory.md` 的说明重嵌入。
+`restore` 默认恢复 Markdown、把当前内容另存为历史快照，并使用当前 cognitive 嵌入配置更新 `cognitive_profiles` 中该实体的检索正文与向量。`sync` 只从当前 Markdown 补同步检索，不创建快照。模型请求失败时文件保持原状；向量写入失败时命令报错，已恢复文件保留，可修复错误后重跑 `sync`，无需依赖可能已被清理的旧快照。文件与向量库没有跨存储事务，实际恢复/同步前需停止机器人和其他写入进程，成功后再启动。
+
+`--dry-run` 展示文件内容、检索正文与路径，不打开 Chroma、不调用模型、不写盘。目录默认来自 TOML 配置的 `cognitive.profile.path` 与 `cognitive.vector_store.path`；操作独立副本时同时传入 `--profiles-path` 和 `--db-path`。实际恢复/同步会调用嵌入 API，可能记录 token 用量。若新模型维度不同于现有库，先完成全库重嵌入再恢复/同步单个侧写。
 
 ### release_notes.py — 发布版本校验与 Release notes 生成
 
@@ -169,6 +179,7 @@ uv run python scripts/bump_version.py 3.6.0 --commit
 - `apps/undefined-chat/src-tauri/Cargo.lock`
 
 非 dry-run 时脚本还会执行 `uv sync`，并分别在 Console / Chat 下执行 `npm install --package-lock-only` 与 `cargo update --workspace`，保证 lock 文件和 manifest 不漂移。
+每次运行都会逐一核对所有版本文件，即使 `pyproject.toml` 已是目标版本也会补齐其余目标；非 dry-run 时仍完整执行锁文件同步。若写文件或同步依赖中途失败，修复原因后重跑同一个版本即可继续，不会因主版本已更新而跳过。锁同步实际修改的 `uv.lock`、`package-lock.json` 和 `Cargo.lock` 也会列入本次变更清单。`--commit` 会核对并暂存上述完整的版本管理目标与 `uv.lock`，包括上次失败前已写入的目标，即使本次没有文件写入差异也会检查；只有这些目标存在待提交差异时才创建提交，已暂存的无关文件保持暂存状态，不纳入版本提交。`--dry-run` 只预览版本文件差异，不写盘、执行依赖同步或运行 Git。
 脚本更新 JSON manifest 时只替换顶层 `version` 字段，保留现有格式，避免 Tauri 配置与 Biome 格式化规则漂移。
 
 ### prepare_tauri_android.py — 生成后 Android 修补

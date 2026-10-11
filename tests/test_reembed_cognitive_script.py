@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import Any, cast
 
 import chromadb
@@ -29,10 +29,14 @@ class _FixedDimEmbedder:
     def __init__(self, dimension: int) -> None:
         self._dimension = dimension
         self.calls: list[list[str]] = []
+        self.stopped = False
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         self.calls.append(list(texts))
         return [[0.1] * self._dimension for _ in texts]
+
+    async def stop(self) -> None:
+        self.stopped = True
 
 
 class _DriftingDimEmbedder:
@@ -135,6 +139,118 @@ async def test_reembed_dry_run_reports_dimension_change_without_writing(
     assert unchanged.count() == 3
     unchanged_sample = cast(Any, unchanged.get(limit=1, include=["embeddings"]))
     assert len(unchanged_sample["embeddings"][0]) == 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name", ["cognitive_events", "cognitive_profiles"])
+@pytest.mark.parametrize("scenario", ["formal_and_staging", "only_staging", "missing"])
+async def test_main_dry_run_preserves_collections_and_source_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str, scenario: str
+) -> None:
+    module = _load_script_module()
+    db_path = tmp_path / "db"
+    persistent_client = chromadb.PersistentClient
+    source_client = persistent_client(path=str(db_path))
+    staging_name = f"{name}__rebuild_tmp"
+    if scenario == "formal_and_staging":
+        _seed_collection(source_client, name, dimension=3, count=2)
+    if scenario != "missing":
+        _seed_collection(source_client, staging_name, dimension=3, count=2)
+    names_before = {collection.name for collection in source_client.list_collections()}
+    files_before = {
+        path.relative_to(db_path): path.read_bytes()
+        for path in db_path.rglob("*")
+        if path.is_file()
+    }
+    opened_paths: list[Path] = []
+
+    class _ReadOnlyClient:
+        def __init__(self, client: Any) -> None:
+            self._client = client
+
+        def list_collections(self) -> list[Any]:
+            return cast(list[Any], self._client.list_collections())
+
+        def get_collection(self, collection_name: str) -> Any:
+            return self._client.get_collection(collection_name)
+
+        def get_or_create_collection(self, *args: Any, **kwargs: Any) -> Any:
+            raise AssertionError("dry-run 不能创建 collection")
+
+        def delete_collection(self, *args: Any, **kwargs: Any) -> None:
+            raise AssertionError("dry-run 不能删除 collection")
+
+    def _open_preview(*, path: str) -> _ReadOnlyClient:
+        preview_path = Path(path)
+        assert preview_path != db_path
+        opened_paths.append(preview_path)
+        return _ReadOnlyClient(persistent_client(path=path))
+
+    def _unexpected_recovery(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError("dry-run 不能清理或换名 staging")
+
+    config = SimpleNamespace(
+        cognitive=SimpleNamespace(vector_store_path=str(db_path)),
+        resolve_embedding_model=lambda _feature: SimpleNamespace(
+            model_name="fake-embedding", dimensions=5
+        ),
+    )
+    embedder = _FixedDimEmbedder(5)
+    monkeypatch.setattr(module, "Config", SimpleNamespace(load=lambda **kwargs: config))
+    monkeypatch.setattr(module, "_build_embedder", lambda _config: embedder)
+    monkeypatch.setattr(module, "_recover_stale_staging", _unexpected_recovery)
+    monkeypatch.setattr(module.chromadb, "PersistentClient", _open_preview)
+    args = SimpleNamespace(
+        db_path=None,
+        events_only=name == "cognitive_events",
+        profiles_only=name == "cognitive_profiles",
+        batch_size=2,
+        dry_run=True,
+    )
+    await module._main(args)
+
+    assert {
+        path.relative_to(db_path): path.read_bytes()
+        for path in db_path.rglob("*")
+        if path.is_file()
+    } == files_before
+    assert {
+        collection.name for collection in source_client.list_collections()
+    } == names_before
+    assert embedder.stopped
+    assert len(embedder.calls) == (0 if scenario == "missing" else 1)
+    assert len(opened_paths) == 1
+    assert not opened_paths[0].exists()
+
+
+@pytest.mark.asyncio
+async def test_main_dry_run_does_not_initialize_an_empty_source_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = _load_script_module()
+    db_path = tmp_path / "empty-db"
+    db_path.mkdir()
+    config = SimpleNamespace(
+        cognitive=SimpleNamespace(vector_store_path=str(db_path)),
+        resolve_embedding_model=lambda _feature: SimpleNamespace(
+            model_name="fake-embedding", dimensions=5
+        ),
+    )
+    embedder = _FixedDimEmbedder(5)
+    monkeypatch.setattr(module, "Config", SimpleNamespace(load=lambda **kwargs: config))
+    monkeypatch.setattr(module, "_build_embedder", lambda _config: embedder)
+    await module._main(
+        SimpleNamespace(
+            db_path=None,
+            events_only=False,
+            profiles_only=False,
+            batch_size=2,
+            dry_run=True,
+        )
+    )
+    assert list(db_path.iterdir()) == []
+    assert embedder.calls == []
+    assert embedder.stopped
 
 
 @pytest.mark.asyncio

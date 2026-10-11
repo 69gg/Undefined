@@ -16,6 +16,8 @@
 from __future__ import annotations
 
 import tomllib
+import os
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -107,7 +109,7 @@ def load_toml(path: Path) -> dict[str, Any]:
     if not path.is_file():
         return {}
     try:
-        return tomllib.loads(path.read_text(encoding="utf-8"))
+        return tomllib.loads(path.read_text(encoding="utf-8-sig"))
     except tomllib.TOMLDecodeError as exc:
         raise ConfigError(f"{path} 解析失败：{exc}") from exc
     except OSError as exc:
@@ -207,9 +209,21 @@ def apply_plan(
 
     backup_path: Path | None = None
     if plan.config_path.is_file():
+        original = plan.config_path.read_text(encoding="utf-8")
         backup_dir.mkdir(parents=True, exist_ok=True)
-        backup_path = backup_dir / f"{BACKUP_FILE_PREFIX}{utc_stamp_compact()}.toml"
-        write_text(backup_path, plan.config_path.read_text(encoding="utf-8"))
+        # 独占创建预留名称；秒级时间戳相同或并发备份也不会覆盖旧文件。
+        descriptor, name = tempfile.mkstemp(
+            prefix=f"{BACKUP_FILE_PREFIX}{utc_stamp_compact()}_",
+            suffix=".toml",
+            dir=backup_dir,
+        )
+        os.close(descriptor)
+        backup_path = Path(name)
+        try:
+            write_text(backup_path, original)
+        except BaseException:
+            backup_path.unlink(missing_ok=True)
+            raise
 
     write_text(plan.config_path, rendered)
     return PatchOutcome(

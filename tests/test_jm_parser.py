@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import pytest
+
 from Undefined.jm.parser import (
     extract_from_json_message,
     extract_jm_ids,
@@ -25,6 +27,25 @@ def test_normalize_jm_id_rejects_out_of_range_and_garbage() -> None:
     assert normalize_jm_id("") is None
     assert normalize_jm_id("JM") is None
     assert normalize_jm_id("https://example.com/album/1114751") is None
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "https://[18comic.vip/album/1114751",
+        "https://[invalid]/album/1114751",
+    ],
+)
+def test_normalize_jm_id_rejects_malformed_url(value: str) -> None:
+    assert normalize_jm_id(value) is None
+
+
+def test_extract_jm_ids_skips_malformed_urls_and_keeps_text_order() -> None:
+    assert extract_jm_ids(
+        "JM1111111 https://[example.com/anything "
+        "https://[18comic.vip/album/3333333 "
+        "https://18comic.vip/album/2222222 JM4444444"
+    ) == ["1111111", "2222222", "4444444"]
 
 
 def test_extract_jm_ids_accepts_token_forms() -> None:
@@ -141,3 +162,25 @@ def test_extract_from_json_message_skips_broken_json_body() -> None:
     segments = [{"type": "json", "data": {"data": "{not json"}}]
 
     assert extract_from_json_message(segments) == []
+
+
+def test_extract_from_json_message_keeps_ids_after_malformed_url() -> None:
+    segments: list[dict[str, Any]] = [
+        {
+            "type": "json",
+            "data": {
+                "data": json.dumps(
+                    {
+                        "bad_url": "https://[18comic.vip/album/1114751",
+                        "text": "JM2222222",
+                    }
+                )
+            },
+        },
+        {
+            "type": "json",
+            "data": {"data": json.dumps({"url": "https://18comic.vip/album/3333333"})},
+        },
+    ]
+
+    assert extract_from_json_message(segments) == ["2222222", "3333333"]

@@ -8,7 +8,7 @@
             "properties": {
                 "task_uuid": {
                     "type": "string",
-                    "description": "任务 UUID（缓存目录名），留空则清理所有下载缓存目录"
+                    "description": "下载缓存的直接子目录名，不接受路径或符号链接；留空则清理所有非符号链接下载缓存子目录"
                 }
             }
         }

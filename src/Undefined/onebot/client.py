@@ -126,6 +126,8 @@ class OneBotClient:
             Callable[[dict[str, Any]], Coroutine[Any, Any, None]] | None
         ) = None
         self._running = False
+        self._accepting_messages = True
+        self._tasks: set[asyncio.Task[None]] = set()
         self.file_transport = (
             file_transport
             if file_transport is not None
@@ -190,12 +192,32 @@ class OneBotClient:
 
     async def disconnect(self) -> None:
         """断开连接"""
-        self._running = False
-        if self.ws:
-            logger.info("[WebSocket] 正在主动断开连接...")
-            await self.ws.close()
-            self.ws = None
-            logger.info("[WebSocket] 连接已断开")
+        self.stop_accepting_messages()
+        self.stop()
+        try:
+            if self.ws:
+                logger.info("[WebSocket] 正在主动断开连接...")
+                await self.ws.close()
+                self.ws = None
+                logger.info("[WebSocket] 连接已断开")
+        finally:
+            await self._cancel_message_tasks()
+
+    async def _cancel_message_tasks(self) -> None:
+        tasks = tuple(self._tasks)
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    def stop_accepting_messages(self) -> None:
+        """停止接收新事件，保留 API 响应接收与发送能力供已接受任务收尾。"""
+        self._accepting_messages = False
+
+    async def drain_message_tasks(self) -> None:
+        """等待已经接受的入站处理完成；调用前须关闭新消息接入。"""
+        if self._tasks:
+            await asyncio.gather(*tuple(self._tasks), return_exceptions=True)
 
     async def _call_api(
         self,
@@ -914,7 +936,7 @@ class OneBotClient:
             raise RuntimeError("WebSocket 未连接")
 
         self._running = True
-        self._tasks: set[asyncio.Task[None]] = set()
+        cancelled = False
         logger.info("[WebSocket] 消息接收循环已启动")
 
         try:
@@ -941,6 +963,9 @@ class OneBotClient:
                     break
                 except Exception as e:
                     logger.exception(f"[WebSocket] 接收消息时发生异常: {e}")
+        except asyncio.CancelledError:
+            cancelled = True
+            raise
         finally:
             self._running = False
             for future in self._pending_responses.values():
@@ -948,12 +973,9 @@ class OneBotClient:
                     future.set_exception(
                         ConnectionError("OneBot WebSocket 接收循环已停止")
                     )
-            # 等待所有后台任务完成
-            if self._tasks:
-                logger.debug(
-                    f"[WebSocket] 正在等待 {len(self._tasks)} 个异步任务完成..."
-                )
-                await asyncio.gather(*self._tasks, return_exceptions=True)
+            # 消息处理跨连接跟踪；网络断线不等待长任务，主动停止才取消收尾。
+            if cancelled or getattr(self, "_should_stop", False):
+                await self._cancel_message_tasks()
             logger.info("[WebSocket] 接收循环已停止")
 
     async def _dispatch_message(self, data: dict[str, Any]) -> None:
@@ -975,6 +997,9 @@ class OneBotClient:
                     f"收到未知 echo 响应: {echo_str}, 待处理: {list(self._pending_responses.keys())}"
                 )
                 return
+
+        if not self._accepting_messages:
+            return
 
         # 事件类型的消息异步处理，不阻塞接收循环
         post_type = data.get("post_type")
@@ -1056,24 +1081,29 @@ class OneBotClient:
         self._should_stop = False
         reconnect_count = 0
 
-        while not self._should_stop:
-            try:
-                if reconnect_count > 0:
-                    logger.info(f"[WebSocket] 正在尝试第 {reconnect_count} 次重连...")
-                await self.connect()
-                reconnect_count = 0  # 连接成功重置计数
-                await self.run()
-            except websockets.ConnectionClosed as e:
-                logger.warning(f"[WebSocket] 连接已断开: {e}")
-            except Exception as e:
-                logger.error(f"[WebSocket] 发生错误: {e}")
+        try:
+            while not self._should_stop:
+                try:
+                    if reconnect_count > 0:
+                        logger.info(
+                            f"[WebSocket] 正在尝试第 {reconnect_count} 次重连..."
+                        )
+                    await self.connect()
+                    reconnect_count = 0  # 连接成功重置计数
+                    await self.run()
+                except websockets.ConnectionClosed as e:
+                    logger.warning(f"[WebSocket] 连接已断开: {e}")
+                except Exception as e:
+                    logger.error(f"[WebSocket] 发生错误: {e}")
 
-            if self._should_stop:
-                break
+                if self._should_stop:
+                    break
 
-            reconnect_count += 1
-            logger.info(f"{reconnect_interval} 秒后尝试重连...")
-            await asyncio.sleep(reconnect_interval)
+                reconnect_count += 1
+                logger.info(f"{reconnect_interval} 秒后尝试重连...")
+                await asyncio.sleep(reconnect_interval)
+        finally:
+            await self._cancel_message_tasks()
 
     def stop(self) -> None:
         """停止运行"""

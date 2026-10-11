@@ -17,7 +17,8 @@ from typing import Any, Sequence
 import pytest
 import yaml
 
-from Undefined.deploy import catalog, docker_cli, generate, nagaagent, runner
+from Undefined.deploy import catalog, cli, docker_cli, generate, nagaagent, runner
+from Undefined.deploy.catalog import EXIT_ERROR
 from Undefined.deploy.docker_cli import CommandResult, DockerAvailability
 from Undefined.deploy.state import DeployLayout, read_state
 
@@ -628,6 +629,114 @@ def test_up_creates_full_config_from_example_on_fresh_clone(
     assert parsed["webui"]["autostart_bot"] is False
 
 
+@pytest.mark.parametrize("existing_config", (False, True))
+def test_cancel_up_writes_nothing_and_does_not_initialize_submodule(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    existing_config: bool,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "config.toml.example").write_text(CONFIG_TOML, encoding="utf-8")
+    if existing_config:
+        (repo / "config.toml").write_text(CONFIG_TOML, encoding="utf-8")
+    before = {path.name: path.read_bytes() for path in repo.iterdir()}
+    answers = iter(("", "", "n"))
+    monkeypatch.setattr(runner, "repo_root", lambda: repo)
+    monkeypatch.setattr(runner, "wizard_enabled", lambda options: True)
+    monkeypatch.setattr(runner.Wizard, "_ask", lambda self, prompt: next(answers))
+
+    def unexpected_side_effect(*args: object, **kwargs: object) -> None:
+        raise AssertionError("取消前不能写入子模块或调用 Docker")
+
+    monkeypatch.setattr(nagaagent, "ensure_submodule", unexpected_side_effect)
+    monkeypatch.setattr(docker_cli, "check_availability", unexpected_side_effect)
+
+    assert runner.run_up(_yes_options(yes=False, dry_run=False, nagaagent=True)) == 0
+    assert {path.name: path.read_bytes() for path in repo.iterdir()} == before
+    assert "已取消，未改动任何文件。" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("existing_config", (False, True))
+@pytest.mark.parametrize(
+    "interrupt_prompt",
+    [
+        pytest.param("请输入编号 [", id="mode"),
+        pytest.param("请输入编号，逗号或空格分隔", id="services"),
+        pytest.param("拉取 NagaAgent 子模块吗？", id="nagaagent"),
+        pytest.param("绑定地址 [", id="port-bind"),
+        pytest.param("按以上计划继续？", id="confirmation"),
+    ],
+)
+def test_ctrl_c_in_wizard_aborts_without_side_effects(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    existing_config: bool,
+    interrupt_prompt: str,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "config.toml.example").write_text(CONFIG_TOML, encoding="utf-8")
+    if existing_config:
+        (repo / "config.toml").write_text(CONFIG_TOML, encoding="utf-8")
+    before = {path.name: path.read_bytes() for path in repo.iterdir()}
+    monkeypatch.setattr(runner, "repo_root", lambda: repo)
+    monkeypatch.setattr(runner, "wizard_enabled", lambda options: True)
+
+    def _interrupt_prompt(prompt: str) -> str:
+        if interrupt_prompt in prompt:
+            raise KeyboardInterrupt
+        if "拉取 NagaAgent 子模块吗？" in prompt:
+            return "y"
+        return ""
+
+    def _unexpected_side_effect(*args: object, **kwargs: object) -> None:
+        raise AssertionError("Ctrl+C 取消前不能写入子模块或调用 Docker")
+
+    monkeypatch.setattr("builtins.input", _interrupt_prompt)
+    monkeypatch.setattr(nagaagent, "ensure_submodule", _unexpected_side_effect)
+    monkeypatch.setattr(docker_cli, "check_availability", _unexpected_side_effect)
+
+    assert cli.main(["up"]) == EXIT_ERROR
+    assert {path.name: path.read_bytes() for path in repo.iterdir()} == before
+    captured = capsys.readouterr()
+    assert "已取消。" in captured.out
+    assert "Traceback" not in captured.out + captured.err
+
+
+def test_up_accepts_bom_config(
+    fake_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path = fake_repo / "config.toml"
+    config_path.write_text(CONFIG_TOML, encoding="utf-8-sig")
+    _stub_docker(monkeypatch)
+
+    assert runner.run_up(_yes_options(dry_run=False)) == 0
+    assert (
+        tomllib.loads(config_path.read_text())["onebot"]["file_send_mode"] == "stream"
+    )
+
+
+def test_up_reports_invalid_config_before_any_write(
+    fake_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config_path = fake_repo / "config.toml"
+    config_path.write_text("[broken", encoding="utf-8")
+
+    def unexpected_submodule(*args: object, **kwargs: object) -> None:
+        raise AssertionError("无效配置不能触发子模块写入")
+
+    monkeypatch.setattr(nagaagent, "ensure_submodule", unexpected_submodule)
+    assert runner.run_up(_yes_options(dry_run=False, nagaagent=True)) != 0
+    assert config_path.read_text() == "[broken"
+    assert not (fake_repo / "deploy").exists()
+    assert "解析失败" in capsys.readouterr().out
+
+
 @pytest.mark.parametrize("mode", catalog.DEPLOY_MODES)
 @pytest.mark.parametrize("previous_file_mode", ("local", "url"))
 def test_up_replaces_legacy_startup_and_file_transport_settings(
@@ -843,6 +952,46 @@ def test_empty_with_clears_previous_service_selection(
     state = read_state(layout)
     assert state is not None
     assert state.services == (), "空元组应清空上次选择，而不是沿用"
+
+
+def test_repeat_up_with_missing_lxmusic_key_updates_service_digest(
+    fake_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_docker(monkeypatch)
+    options = _yes_options(services=("lxmusic2api",), dry_run=False)
+    assert runner.run_up(options) == 0
+    layout = DeployLayout.under(fake_repo)
+    initial_services = yaml.safe_load(layout.compose_file.read_text(encoding="utf-8"))[
+        "services"
+    ]
+    repeat_options = _yes_options(services=None, dry_run=False)
+    assert runner.run_up(repeat_options) == 0
+    assert (
+        yaml.safe_load(layout.compose_file.read_text(encoding="utf-8"))["services"]
+        == initial_services
+    )
+    previous = runner.load_previous_env(layout)
+    old_key = previous.pop("UNDEFINED_DEPLOY_LXMUSIC2API_KEY")
+    layout.env_file.write_text(generate.render_env(previous), encoding="utf-8")
+    assert runner.run_up(repeat_options) == 0
+    services = yaml.safe_load(layout.compose_file.read_text(encoding="utf-8"))[
+        "services"
+    ]
+    lx_name = generate.LXMUSIC2API_SERVICE_NAME
+    label = generate.SERVICE_CONFIG_DIGEST_LABEL
+    assert (
+        services[lx_name]["labels"][label] != initial_services[lx_name]["labels"][label]
+    )
+    assert {key: value for key, value in services.items() if key != lx_name} == {
+        key: value for key, value in initial_services.items() if key != lx_name
+    }
+    host = tomllib.loads(
+        (layout.lxmusic2api_dir / "config.toml").read_text(encoding="utf-8")
+    )
+    bot = tomllib.loads((fake_repo / "config.toml").read_text(encoding="utf-8"))
+    assert host["auth"]["api_key"] != old_key
+    assert bot["lxmusic2api"]["api_key"] == host["auth"]["api_key"]
 
 
 def test_lxmusic2api_config_is_owner_only(tmp_path: Path) -> None:

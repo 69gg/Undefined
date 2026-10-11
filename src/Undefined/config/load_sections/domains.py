@@ -5,8 +5,7 @@ from __future__ import annotations
 # 配置分段加载：按 table 解析 TOML → ctx 字段 dict
 
 import logging
-from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from ..domain_parsers import (
     _parse_api_config,
@@ -25,16 +24,14 @@ from ..parsers import (
     _parse_image_gen_config,
     _parse_image_gen_model_config,
 )
-from ..webui_settings import load_webui_settings
+from ..webui_settings import parse_webui_settings
 
 logger = logging.getLogger(__name__)
 
 
-def load_domains(
-    data: dict[str, Any], *, config_path: Optional[Path] = None
-) -> dict[str, Any]:
+def load_domains(data: dict[str, Any]) -> dict[str, Any]:
     # 子域配置：WebUI/API/认知/表情包/合并器/Naga/生图等，与 core/models 段解耦
-    webui_settings = load_webui_settings(config_path)
+    webui_settings = parse_webui_settings(data)
     api_config = _parse_api_config(data)
 
     cognitive = _parse_cognitive_config(data)
@@ -56,6 +53,7 @@ def load_domains(
         "webui_password": webui_settings.password,
         "webui_autostart_bot": webui_settings.autostart_bot,
         "webui_check_updates": webui_settings.check_updates,
+        "webui_stop_timeout_seconds": webui_settings.stop_timeout_seconds,
         "api": api_config,
         "cognitive": cognitive,
         "memes": memes,

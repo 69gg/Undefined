@@ -1,6 +1,7 @@
 import type {
 	HistoryItem,
 	RuntimeClient,
+	RuntimeConfig,
 	RuntimeSseEvent,
 	RuntimeSseStatus,
 	SendMessageInput,
@@ -26,9 +27,12 @@ export type {
 
 export type ChatStore = {
 	bootstrap: (opts?: {
+		runtimeUrl?: string;
 		preserveSelectionId?: string;
 		resuming?: boolean;
+		resumeSuspended?: boolean;
 	}) => Promise<void>;
+	suspendRuntime: (runtimeConfig?: RuntimeConfig | null) => void;
 	refreshCommandsIfStale: () => Promise<void>;
 	createConversation: (title?: string) => Promise<void>;
 	deleteConversation: (conversationId: string) => Promise<void>;
@@ -168,8 +172,36 @@ function withoutConversationJob(
 
 export function isJobRunning(job: ChatJob | null | undefined): boolean {
 	return Boolean(
-		job && !["done", "error", "cancelled"].includes(job.status.toLowerCase()),
+		job &&
+			(!["done", "error", "cancelled"].includes(job.status.toLowerCase()) ||
+				!job.historyFinalized),
 	);
+}
+
+function acceptJobSnapshot(job: ChatJob, previous?: ChatJob): ChatJob {
+	if (job.hasTimelineSnapshot || job.currentTimeline.length > 0) return job;
+	const sameJob = previous?.jobId === job.jobId ? previous : undefined;
+	if (sameJob && job.reply === sameJob.reply) {
+		return {
+			...job,
+			currentTimeline: sameJob.currentTimeline,
+			currentToolCalls: sameJob.currentToolCalls,
+		};
+	}
+	// 旧 Runtime 没有 timeline，先保存完整正文前缀，再续接快照之后的事件。
+	return {
+		...job,
+		currentTimeline: [
+			...(job.reply
+				? [{ type: "message" as const, seq: job.lastSeq, content: job.reply }]
+				: []),
+			...job.currentToolCalls.map((call) => ({
+				type: "call" as const,
+				seq: job.lastSeq,
+				callId: call.id,
+			})),
+		],
+	};
 }
 
 export function chatReducer(state: ChatState, action: ChatAction): ChatState {
@@ -184,12 +216,19 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
 				error: null,
 			};
 		case "bootstrap/success": {
-			const activeJobs = activeJobsByConversation(action.activeJobs);
+			const snapshots = action.activeJobs.map((job) => {
+				const previous = state.activeJobsByConversation[job.conversationId];
+				// 订阅仍可能在 bootstrap 请求期间前进；更旧快照不能倒退已展示事件。
+				if (previous?.jobId === job.jobId && previous.lastSeq > job.lastSeq)
+					return previous;
+				return acceptJobSnapshot(job, previous);
+			});
+			const activeJobs = activeJobsByConversation(snapshots);
 			return {
 				...state,
 				bootstrapping: false,
 				connectionState:
-					action.activeJobs.length > 0 ? "streaming" : "connected",
+					Object.keys(activeJobs).length > 0 ? "streaming" : "connected",
 				runtimeConfig: action.runtimeConfig,
 				health: action.health,
 				conversations: action.conversations.map((item) => ({
@@ -198,7 +237,13 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
 				})),
 				selectedConversationId: action.selectedConversationId,
 				activeJobsByConversation: activeJobs,
-				jobConversationById: jobConversationById(action.activeJobs),
+				jobConversationById: jobConversationById(snapshots),
+				eventCursorByJob: {
+					...state.eventCursorByJob,
+					...Object.fromEntries(
+						snapshots.map((job) => [job.jobId, job.lastSeq]),
+					),
+				},
 				commands: action.commands,
 				error: null,
 			};
@@ -295,8 +340,14 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
 							item.id === action.conversation.id ? action.conversation : item,
 						)
 					: [action.conversation, ...state.conversations],
-				selectedConversationId: action.conversation.id,
-				settings: { ...state.settings, mobilePanel: "chat" },
+				selectedConversationId:
+					action.select === false
+						? state.selectedConversationId
+						: action.conversation.id,
+				settings:
+					action.select === false
+						? state.settings
+						: { ...state.settings, mobilePanel: "chat" },
 			};
 		}
 		case "conversation/creating":
@@ -342,6 +393,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
 			return { ...state, sendError: action.error };
 		case "commands/set":
 			return { ...state, commands: action.commands };
+		case "job/snapshot":
 		case "job/upsert": {
 			const activeJobs = { ...state.activeJobsByConversation };
 			const jobConversations = {
@@ -358,6 +410,16 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
 				...state,
 				activeJobsByConversation: activeJobs,
 				jobConversationById: jobConversations,
+				eventCursorByJob:
+					action.type === "job/snapshot"
+						? {
+								...state.eventCursorByJob,
+								[action.job.jobId]: Math.max(
+									state.eventCursorByJob[action.job.jobId] ?? 0,
+									action.job.lastSeq,
+								),
+							}
+						: state.eventCursorByJob,
 				conversations: state.conversations.map((item) =>
 					item.id === action.job.conversationId
 						? { ...item, isRunning: isJobRunning(action.job) }
@@ -620,6 +682,23 @@ function chatEventFromRuntimeEvent(event: RuntimeSseEvent): ChatEvent {
  * 对齐 WebUI upsertTimelineToolBlock 的 key 策略（webchat_call_id || tool_call_id）。
  * 有 parentCallId 时在匹配父块的 children 里递归 upsert；否则在顶层 upsert。
  */
+function updateToolCall(
+	list: ToolCallSnapshot[],
+	callId: string,
+	patch: (call: ToolCallSnapshot) => ToolCallSnapshot,
+): ToolCallSnapshot[] {
+	return list.map((call) =>
+		call.id === callId
+			? patch(call)
+			: {
+					...call,
+					children: call.children
+						? updateToolCall(call.children, callId, patch)
+						: undefined,
+				},
+	);
+}
+
 function upsertToolCall(
 	list: ToolCallSnapshot[],
 	callId: string,
@@ -667,11 +746,21 @@ export function createChatStore({
 	client: RuntimeClient;
 }): ChatStore {
 	let state = createInitialChatState();
+	let runtimeUrl: string | null = null;
+	let runtimeGeneration = 0;
+	let runtimeSuspended = false;
+	const draftRevisionsByConversation = new Map<string, number>();
+	let draftRevision = 0;
+	const historyRequestsByConversation = new Map<string, number>();
+	let historyRequestGeneration = 0;
 	const listeners = new Set<() => void>();
 	const subscriptionsByJob = new Map<string, string>();
+	const streamRequestsByJob = new Map<string, symbol>();
 	const fallbackTimersByJob = new Map<string, ReturnType<typeof setTimeout>>();
 	/** 每个 job 当前的 JSON 轮询退避间隔（ms），随连续失败指数增长、成功后重置 */
 	const fallbackBackoffByJob = new Map<string, number>();
+	const latestFallbackRequestByJob = new Map<string, number>();
+	let fallbackRequestGeneration = 0;
 	let unlistenRuntimeSse: (() => void) | null = null;
 	/** bootstrap 重入保护：已在进行中的 bootstrap promise，避免并发重入导致 SSE 监听泄漏 */
 	let inFlightBootstrap: Promise<void> | null = null;
@@ -687,6 +776,19 @@ export function createChatStore({
 	}
 
 	function dispatch(action: ChatAction): void {
+		if (
+			action.type === "history/set" ||
+			action.type === "history/error" ||
+			action.type === "message/optimisticUser" ||
+			action.type === "conversation/remove"
+		) {
+			historyRequestsByConversation.delete(action.conversationId);
+		}
+		if (action.type === "draft/set") {
+			draftRevisionsByConversation.set(action.conversationId, ++draftRevision);
+		} else if (action.type === "conversation/remove") {
+			draftRevisionsByConversation.delete(action.conversationId);
+		}
 		state = chatReducer(state, action);
 		// 自动滚动偏好在状态更新后持久化（reducer 保持纯函数，副作用集中在此）
 		if (action.type === "autoScroll/set") {
@@ -702,19 +804,78 @@ export function createChatStore({
 			void client.stopJobEventStream(subscriptionId);
 		}
 		subscriptionsByJob.clear();
+		streamRequestsByJob.clear();
 		for (const timer of fallbackTimersByJob.values()) {
 			clearTimeout(timer);
 		}
 		fallbackTimersByJob.clear();
+		latestFallbackRequestByJob.clear();
+		fallbackBackoffByJob.clear();
+	}
+
+	function resetRuntimeScope(nextUrl: string): void {
+		runtimeUrl = nextUrl;
+		runtimeGeneration += 1;
+		clearNativeSubscriptions();
+		historyRequestsByConversation.clear();
+		sendInFlight = false;
+		lastCommandsFetchedAt = 0;
+		draftRevisionsByConversation.clear();
+		state = {
+			...createInitialChatState(),
+			autoScrollEnabled: state.autoScrollEnabled,
+			platform: state.platform,
+			settings: state.settings,
+		};
+	}
+
+	function suspendRuntime(runtimeConfig = state.runtimeConfig): void {
+		if (runtimeConfig?.runtimeUrl && runtimeConfig.runtimeUrl !== runtimeUrl) {
+			resetRuntimeScope(runtimeConfig.runtimeUrl);
+		} else {
+			runtimeGeneration += 1;
+			clearNativeSubscriptions();
+			sendInFlight = false;
+		}
+		runtimeSuspended = true;
+		historyRequestsByConversation.clear();
+		inFlightBootstrap = null;
+		state = {
+			...state,
+			runtimeConfig,
+			bootstrapping: false,
+			connectionState: "disconnected",
+			attachmentsByConversation: Object.fromEntries(
+				Object.entries(state.attachmentsByConversation).map(
+					([conversationId, attachments]) => [
+						conversationId,
+						attachments.map((item) =>
+							["queued", "uploading"].includes(item.status)
+								? {
+										...item,
+										status: "error" as const,
+										error: "error.attachmentsFailed",
+									}
+								: item,
+						),
+					],
+				),
+			),
+		};
+		emit();
 	}
 
 	async function loadHistory(conversationId: string): Promise<void> {
+		if (runtimeSuspended) return;
+		const generation = runtimeGeneration;
+		const request = beginHistoryRequest(conversationId);
 		dispatch({ type: "history/loading", conversationId });
 		try {
 			const history = await client.getHistory({
 				conversationId,
 				limit: HISTORY_LIMIT,
 			});
+			if (!isCurrentHistoryRequest(conversationId, generation, request)) return;
 			dispatch({
 				type: "history/set",
 				conversationId,
@@ -724,6 +885,7 @@ export function createChatStore({
 				total: history.total,
 			});
 		} catch (err) {
+			if (!isCurrentHistoryRequest(conversationId, generation, request)) return;
 			// 单会话历史加载失败降级为会话级错误，不升级为全局致命错误
 			dispatch({
 				type: "history/error",
@@ -733,17 +895,61 @@ export function createChatStore({
 		}
 	}
 
+	function beginHistoryRequest(conversationId: string): number {
+		const request = ++historyRequestGeneration;
+		historyRequestsByConversation.set(conversationId, request);
+		return request;
+	}
+
+	function isCurrentHistoryRequest(
+		conversationId: string,
+		generation: number,
+		request: number,
+	): boolean {
+		return (
+			generation === runtimeGeneration &&
+			historyRequestsByConversation.get(conversationId) === request
+		);
+	}
+
 	async function startStreamForJob(job: ChatJob): Promise<void> {
-		if (subscriptionsByJob.has(job.jobId)) {
+		if (runtimeSuspended) return;
+		const generation = runtimeGeneration;
+		if (
+			subscriptionsByJob.has(job.jobId) ||
+			streamRequestsByJob.has(job.jobId)
+		) {
 			return;
 		}
-		const subscription = await client.startJobEventStream({
-			jobId: job.jobId,
-			afterSeq: state.eventCursorByJob[job.jobId] ?? job.lastSeq,
-			conversationId: job.conversationId,
-		});
-		if (subscription.subscriptionId) {
-			subscriptionsByJob.set(job.jobId, subscription.subscriptionId);
+		const request = Symbol();
+		streamRequestsByJob.set(job.jobId, request);
+		const isCurrentRequest = (): boolean =>
+			generation === runtimeGeneration &&
+			streamRequestsByJob.get(job.jobId) === request &&
+			state.activeJobsByConversation[job.conversationId]?.jobId === job.jobId;
+		try {
+			const subscription = await client.startJobEventStream({
+				jobId: job.jobId,
+				afterSeq: Math.max(state.eventCursorByJob[job.jobId] ?? 0, job.lastSeq),
+				conversationId: job.conversationId,
+			});
+			if (!isCurrentRequest()) {
+				if (subscription.subscriptionId) {
+					void client.stopJobEventStream(subscription.subscriptionId);
+				}
+				return;
+			}
+			if (subscription.subscriptionId) {
+				subscriptionsByJob.set(job.jobId, subscription.subscriptionId);
+			}
+		} catch {
+			if (!isCurrentRequest()) return;
+			// job 已建立；订阅失败只切换传输方式，不能回滚成功发送的输入。
+			fetchJobEventsFallback(job.jobId);
+		} finally {
+			if (streamRequestsByJob.get(job.jobId) === request) {
+				streamRequestsByJob.delete(job.jobId);
+			}
 		}
 	}
 
@@ -754,6 +960,26 @@ export function createChatStore({
 			fallbackTimersByJob.delete(jobId);
 		}
 		fallbackBackoffByJob.delete(jobId);
+		latestFallbackRequestByJob.delete(jobId);
+	}
+
+	function finishJob(jobId: string, conversationId: string): void {
+		const active = state.activeJobsByConversation[conversationId];
+		if (active && active.jobId !== jobId) {
+			return;
+		}
+		stopFallbackPolling(jobId);
+		streamRequestsByJob.delete(jobId);
+		const subscriptionId = subscriptionsByJob.get(jobId);
+		if (subscriptionId) {
+			subscriptionsByJob.delete(jobId);
+			void client.stopJobEventStream(subscriptionId);
+		}
+		dispatch({ type: "job/remove", conversationId, jobId });
+		if (Object.keys(state.activeJobsByConversation).length === 0) {
+			dispatch({ type: "connection/set", connectionState: "connected" });
+		}
+		void loadHistory(conversationId);
 	}
 
 	/** 计算并推进某个 job 的下一次轮询退避间隔（指数增长，封顶 JSON_FALLBACK_MAX_MS） */
@@ -771,57 +997,100 @@ export function createChatStore({
 		if (fallbackTimersByJob.has(jobId)) {
 			return;
 		}
+		const generation = runtimeGeneration;
 		const timer = setTimeout(() => {
+			if (generation !== runtimeGeneration) return;
 			fallbackTimersByJob.delete(jobId);
 			fetchJobEventsFallback(jobId);
 		}, delayMs ?? JSON_FALLBACK_BASE_MS);
 		fallbackTimersByJob.set(jobId, timer);
 	}
 
-	function fetchJobEventsFallback(jobId: string): void {
+	async function fetchJobEventsFallback(
+		jobId: string,
+	): Promise<ChatJob | null> {
+		const generation = runtimeGeneration;
+		const conversationId = state.jobConversationById[jobId];
+		if (
+			!conversationId ||
+			state.activeJobsByConversation[conversationId]?.jobId !== jobId
+		) {
+			return null;
+		}
+		const requestGeneration = ++fallbackRequestGeneration;
+		latestFallbackRequestByJob.set(jobId, requestGeneration);
+		const isCurrentRequest = (): boolean =>
+			generation === runtimeGeneration &&
+			latestFallbackRequestByJob.get(jobId) === requestGeneration &&
+			state.activeJobsByConversation[conversationId]?.jobId === jobId;
 		const timer = fallbackTimersByJob.get(jobId);
 		if (timer) {
 			clearTimeout(timer);
 			fallbackTimersByJob.delete(jobId);
 		}
 		dispatch({ type: "connection/set", connectionState: "json_fallback" });
-		void client
+		return client
 			.fetchJobEventsJson({
 				jobId,
 				afterSeq: state.eventCursorByJob[jobId] ?? 0,
-				conversationId: state.jobConversationById[jobId],
+				conversationId,
 			})
 			.then((response) => {
+				if (!isCurrentRequest()) return null;
+				const active = state.activeJobsByConversation[conversationId];
+				const consumedSeq = Math.max(
+					state.eventCursorByJob[jobId] ?? 0,
+					active?.lastSeq ?? 0,
+				);
+				if (response.job.lastSeq < consumedSeq) {
+					// SSE 可能在请求途中推进；旧快照不能回退正文或阶段，继续拉取即可。
+					scheduleFallbackPolling(jobId);
+					return active ?? null;
+				}
 				// 拉取成功：重置退避间隔
 				fallbackBackoffByJob.delete(jobId);
-				dispatch({ type: "job/upsert", job: response.job });
-				applyRuntimeEvents(jobId, response.events);
-				const hasTerminalEvent = response.events.some((item) =>
-					TERMINAL_EVENTS.has(item.event),
-				);
+				if (!response.job.hasTimelineSnapshot) {
+					// 旧服务仅提供 reply；先回放增量以保留已有调用树。
+					applyRuntimeEvents(jobId, response.events);
+				}
+				const replayedJob =
+					state.activeJobsByConversation[response.job.conversationId];
+				const replayComplete =
+					!response.job.messages.length ||
+					JSON.stringify(response.job.messages) ===
+						JSON.stringify(replayedJob?.messages);
+				const snapshot = response.job.hasTimelineSnapshot
+					? response.job
+					: acceptJobSnapshot({
+							...response.job,
+							currentTimeline: replayComplete
+								? (replayedJob?.currentTimeline ?? [])
+								: [],
+							currentToolCalls:
+								replayedJob?.currentToolCalls ?? response.job.currentToolCalls,
+						});
+				dispatch({ type: "job/snapshot", job: snapshot });
+
 				if (isJobRunning(response.job)) {
 					scheduleFallbackPolling(jobId, JSON_FALLBACK_BASE_MS);
-				} else if (!hasTerminalEvent && response.job.conversationId) {
-					void loadHistory(response.job.conversationId);
-					dispatch({ type: "connection/set", connectionState: "connected" });
+				} else if (response.job.conversationId) {
+					finishJob(jobId, response.job.conversationId);
 				}
+				return snapshot;
 			})
 			.catch(() => {
+				if (!isCurrentRequest()) return null;
 				// 单次失败不直接放弃：仅当该 job 仍是活跃任务时按指数退避继续重试，
 				// 否则停止轮询。连接状态保持 json_fallback（仍在尝试），而非直接 disconnected。
-				const conversationId = state.jobConversationById[jobId];
 				const stillActive =
-					conversationId != null &&
 					state.activeJobsByConversation[conversationId]?.jobId === jobId;
 				if (stillActive) {
 					scheduleFallbackPolling(jobId, nextFallbackDelay(jobId));
 				} else {
 					stopFallbackPolling(jobId);
-					dispatch({
-						type: "connection/set",
-						connectionState: "disconnected",
-					});
+					dispatch({ type: "connection/set", connectionState: "disconnected" });
 				}
+				return null;
 			});
 	}
 
@@ -829,13 +1098,24 @@ export function createChatStore({
 		preserveSelectionId?: string,
 		resuming = false,
 	): Promise<void> {
+		let generation = runtimeGeneration;
+		let runtimeConfig: RuntimeConfig | null = null;
 		dispatch({ type: "bootstrap/start" });
 		// Android 切后台返回等续接场景：标记为 resuming，连接成功后由后续状态覆盖
 		if (resuming) {
 			dispatch({ type: "connection/set", connectionState: "resuming" });
 		}
 		try {
-			const runtimeConfig = await client.getRuntimeConfig();
+			runtimeConfig = await client.getRuntimeConfig();
+			if (generation !== runtimeGeneration) return;
+			if (
+				runtimeConfig?.runtimeUrl &&
+				runtimeConfig.runtimeUrl !== runtimeUrl
+			) {
+				resetRuntimeScope(runtimeConfig.runtimeUrl);
+				generation = runtimeGeneration;
+				dispatch({ type: "bootstrap/start" });
+			}
 			if (!runtimeConfig?.runtimeUrl || !runtimeConfig.hasApiKey) {
 				dispatch({
 					type: "bootstrap/error",
@@ -845,6 +1125,9 @@ export function createChatStore({
 				return;
 			}
 
+			const jobsBeforeRefresh = new Set(
+				Object.values(state.activeJobsByConversation).map((job) => job.jobId),
+			);
 			const [health, conversationsResponse, activeJobs, commands] =
 				await Promise.all([
 					client.probeRuntime(),
@@ -852,7 +1135,9 @@ export function createChatStore({
 					client.getActiveJobs(),
 					client.listCommands(),
 				]);
+			if (generation !== runtimeGeneration) return;
 			lastCommandsFetchedAt = Date.now();
+			runtimeSuspended = false;
 			// 仅选取真实存在于会话列表中的会话：defaultConversationId 是后端常量
 			// （legacy-system-42），未必对应已存在的会话，盲目用它会触发 getHistory 404
 			const conversationIds = new Set(
@@ -871,38 +1156,117 @@ export function createChatStore({
 				conversationsResponse.conversations[0]?.id ||
 				activeJobs.jobs[0]?.conversationId ||
 				"";
+			const recoveredJobs: ChatJob[] = [];
+			for (const snapshot of activeJobs.jobs) {
+				const previous =
+					state.activeJobsByConversation[snapshot.conversationId];
+				if (
+					!snapshot.hasTimelineSnapshot &&
+					previous?.jobId === snapshot.jobId &&
+					snapshot.lastSeq > previous.lastSeq
+				) {
+					// 旧 API 不含完整调用树；推进游标前用同一 JSON 回放补齐后台工具/阶段事件。
+					const recovered = await fetchJobEventsFallback(snapshot.jobId);
+					if (generation !== runtimeGeneration) return;
+					recoveredJobs.push(
+						recovered ??
+							state.activeJobsByConversation[snapshot.conversationId] ??
+							previous,
+					);
+				} else {
+					recoveredJobs.push(snapshot);
+				}
+			}
+			// 快照请求期间，先前发出的发送请求可能刚获 ACK；旧列表不能删除新任务。
+			// 请求开始前已存在的任务仍以服务端列表为准，允许回收离线时已完成的任务。
+			for (const current of Object.values(state.activeJobsByConversation)) {
+				if (jobsBeforeRefresh.has(current.jobId)) continue;
+				const index = recoveredJobs.findIndex(
+					(snapshot) => snapshot.conversationId === current.conversationId,
+				);
+				if (index < 0) recoveredJobs.push(current);
+				else if (recoveredJobs[index].jobId !== current.jobId)
+					recoveredJobs[index] = current;
+			}
+			const historyConversationIds = new Set(selected ? [selected] : []);
+			const recoveredJobIds = new Set(recoveredJobs.map((item) => item.jobId));
+			// 已落盘终态会从 active 列表消失；补刷仍存在的非当前会话缓存。
+			for (const previous of Object.values(state.activeJobsByConversation)) {
+				if (
+					conversationIds.has(previous.conversationId) &&
+					!recoveredJobIds.has(previous.jobId)
+				) {
+					historyConversationIds.add(previous.conversationId);
+				}
+			}
+			// 配置暂停可能发生在 finishJob 已移除任务、历史刷新尚未返回时。
+			for (const [conversationId, history] of Object.entries(
+				state.historyByConversation,
+			)) {
+				if (
+					history.loading &&
+					!historyRequestsByConversation.has(conversationId) &&
+					conversationIds.has(conversationId)
+				) {
+					historyConversationIds.add(conversationId);
+				}
+			}
 			dispatch({
 				type: "bootstrap/success",
 				runtimeConfig,
 				health,
 				conversations: conversationsResponse.conversations,
 				selectedConversationId: selected,
-				activeJobs: activeJobs.jobs,
+				activeJobs: recoveredJobs,
 				commands: commands.commands,
 			});
 			clearNativeSubscriptions();
-			unlistenRuntimeSse = await client.listenRuntimeSse(
-				handleRuntimeEvent,
-				handleRuntimeStatus,
+			const unlisten = await client.listenRuntimeSse(
+				(event) => {
+					if (generation === runtimeGeneration) handleRuntimeEvent(event);
+				},
+				(status) => {
+					if (generation === runtimeGeneration) handleRuntimeStatus(status);
+				},
 			);
-			for (const activeJob of activeJobs.jobs) {
+			if (generation !== runtimeGeneration) {
+				unlisten();
+				return;
+			}
+			unlistenRuntimeSse = unlisten;
+			for (const activeJob of Object.values(state.activeJobsByConversation)) {
+				if (generation !== runtimeGeneration) return;
 				await startStreamForJob(activeJob);
 			}
-			if (selected) {
-				await loadHistory(selected);
-			}
-			if (activeJobs.jobs.length > 0) {
+			await Promise.all([...historyConversationIds].map(loadHistory));
+			if (generation !== runtimeGeneration) return;
+			if (
+				Object.keys(state.activeJobsByConversation).length > 0 &&
+				state.connectionState !== "json_fallback"
+			) {
 				dispatch({ type: "connection/set", connectionState: "streaming" });
 			}
 		} catch (err) {
-			dispatch({ type: "bootstrap/error", error: errorMessage(err) });
+			if (generation !== runtimeGeneration) return;
+			dispatch({
+				type: "bootstrap/error",
+				runtimeConfig,
+				error: errorMessage(err),
+			});
 		}
 	}
 
 	async function bootstrap(opts?: {
+		runtimeUrl?: string;
 		preserveSelectionId?: string;
 		resuming?: boolean;
+		resumeSuspended?: boolean;
 	}): Promise<void> {
+		if (runtimeSuspended && !opts?.resumeSuspended) return;
+		if (opts?.runtimeUrl && opts.runtimeUrl !== runtimeUrl) {
+			resetRuntimeScope(opts.runtimeUrl);
+			inFlightBootstrap = null;
+		}
 		// 重入保护：App 挂载与 Android resume 可能并发触发 bootstrap，
 		// 复用进行中的 promise，避免重复 clearNativeSubscriptions / listenRuntimeSse 造成监听泄漏
 		if (inFlightBootstrap) {
@@ -910,7 +1274,7 @@ export function createChatStore({
 		}
 		const run = runBootstrap(opts?.preserveSelectionId, opts?.resuming).finally(
 			() => {
-				inFlightBootstrap = null;
+				if (inFlightBootstrap === run) inFlightBootstrap = null;
 			},
 		);
 		inFlightBootstrap = run;
@@ -922,6 +1286,8 @@ export function createChatStore({
 	 * 使 Skills 热重载新增的命令可见。未连接或未配置时跳过。
 	 */
 	async function refreshCommandsIfStale(): Promise<void> {
+		if (runtimeSuspended) return;
+		const generation = runtimeGeneration;
 		if (!state.runtimeConfig?.hasApiKey || state.bootstrapping) {
 			return;
 		}
@@ -930,6 +1296,7 @@ export function createChatStore({
 		}
 		try {
 			const commands = await client.listCommands();
+			if (generation !== runtimeGeneration) return;
 			lastCommandsFetchedAt = Date.now();
 			dispatch({ type: "commands/set", commands: commands.commands });
 		} catch {
@@ -938,19 +1305,27 @@ export function createChatStore({
 	}
 
 	async function createConversation(title?: string): Promise<void> {
+		if (runtimeSuspended) return;
+		const generation = runtimeGeneration;
 		dispatch({ type: "conversation/creating", creating: true });
 		try {
 			const conversation = await client.createConversation(title);
+			if (generation !== runtimeGeneration) return;
 			dispatch({ type: "conversation/upsert", conversation });
 			await loadHistory(conversation.id);
 		} catch (err) {
+			if (generation !== runtimeGeneration) return;
 			dispatch({ type: "send/error", error: errorMessage(err) });
 		} finally {
-			dispatch({ type: "conversation/creating", creating: false });
+			if (generation === runtimeGeneration) {
+				dispatch({ type: "conversation/creating", creating: false });
+			}
 		}
 	}
 
 	async function deleteConversation(conversationId: string): Promise<void> {
+		if (runtimeSuspended) return;
+		const generation = runtimeGeneration;
 		const wasSelected = state.selectedConversationId === conversationId;
 		const nextSelectedId = wasSelected
 			? (state.conversations.find((item) => item.id !== conversationId)?.id ??
@@ -958,6 +1333,7 @@ export function createChatStore({
 			: state.selectedConversationId;
 		try {
 			await client.deleteConversation(conversationId);
+			if (generation !== runtimeGeneration) return;
 			dispatch({ type: "conversation/remove", conversationId, nextSelectedId });
 			if (
 				wasSelected &&
@@ -967,6 +1343,7 @@ export function createChatStore({
 				await loadHistory(nextSelectedId);
 			}
 		} catch (err) {
+			if (generation !== runtimeGeneration) return;
 			dispatch({ type: "send/error", error: errorMessage(err) });
 		}
 	}
@@ -975,8 +1352,11 @@ export function createChatStore({
 		conversationId: string,
 		newTitle: string,
 	): Promise<void> {
+		if (runtimeSuspended) return;
+		const generation = runtimeGeneration;
 		try {
 			await client.renameConversation(conversationId, newTitle);
+			if (generation !== runtimeGeneration) return;
 			// 更新本地 state 中的会话标题
 			const conversation = state.conversations.find(
 				(item) => item.id === conversationId,
@@ -985,19 +1365,23 @@ export function createChatStore({
 				dispatch({
 					type: "conversation/upsert",
 					conversation: { ...conversation, title: newTitle },
+					select: false,
 				});
 			}
 		} catch (err) {
+			if (generation !== runtimeGeneration) return;
 			dispatch({ type: "send/error", error: errorMessage(err) });
 		}
 	}
 
 	async function selectConversation(conversationId: string): Promise<void> {
+		if (runtimeSuspended) return;
 		if (state.selectedConversationId === conversationId) {
 			return;
 		}
 		dispatch({ type: "conversation/select", conversationId });
-		if (!state.historyByConversation[conversationId]) {
+		const history = state.historyByConversation[conversationId];
+		if (!history || history.error) {
 			await loadHistory(conversationId);
 		}
 	}
@@ -1006,17 +1390,9 @@ export function createChatStore({
 		dispatch({ type: "draft/set", conversationId, draft });
 	}
 
-	function latestEventSeq(jobId: string): number {
-		const cursor = state.eventCursorByJob[jobId] ?? 0;
-		const events = state.eventsByJob[jobId] ?? [];
-		const lastEventSeq = events.reduce(
-			(maxSeq, item) => Math.max(maxSeq, item.seq),
-			0,
-		);
-		return Math.max(cursor, lastEventSeq);
-	}
-
 	async function sendSelectedMessage(): Promise<void> {
+		if (runtimeSuspended) return;
+		const generation = runtimeGeneration;
 		// in-flight 锁：从点击到 job 建立期间阻止重复发送，
 		// 避免快速双击重复插入乐观消息 / 重复请求后端
 		if (sendInFlight) {
@@ -1031,7 +1407,8 @@ export function createChatStore({
 			dispatch({ type: "send/error", error: "error.conversationRunning" });
 			return;
 		}
-		const text = (state.draftsByConversation[conversationId] ?? "").trim();
+		const draft = state.draftsByConversation[conversationId] ?? "";
+		const text = draft.trim();
 		const attachments = state.attachmentsByConversation[conversationId] ?? [];
 		if (
 			attachments.some((item) => ["queued", "uploading"].includes(item.status))
@@ -1074,6 +1451,10 @@ export function createChatStore({
 		dispatch({ type: "draft/set", conversationId, draft: "" });
 		dispatch({ type: "attachments/set", conversationId, attachments: [] });
 		dispatch({ type: "references/set", conversationId, references: [] });
+		const clearedDraftRevision =
+			draftRevisionsByConversation.get(conversationId);
+		const clearedAttachments = state.attachmentsByConversation[conversationId];
+		const clearedReferences = state.referencesByConversation[conversationId];
 
 		const input: SendMessageInput = {
 			conversationId,
@@ -1086,11 +1467,13 @@ export function createChatStore({
 		try {
 			dispatch({ type: "send/error", error: null });
 			const job = await client.sendMessage(input);
-			dispatch({ type: "job/upsert", job });
+			if (generation !== runtimeGeneration) return;
+			dispatch({ type: "job/snapshot", job: acceptJobSnapshot(job) });
 			dispatch({ type: "connection/set", connectionState: "streaming" });
 			await startStreamForJob(job);
 		} catch (err) {
-			// 发送失败：移除乐观用户消息并恢复草稿/附件/引用
+			if (generation !== runtimeGeneration) return;
+			// 发送失败：移除乐观消息，仅恢复发送后未再次编辑的字段。
 			const currentHistory = state.historyByConversation[conversationId];
 			if (currentHistory) {
 				dispatch({
@@ -1104,31 +1487,61 @@ export function createChatStore({
 					total: Math.max(0, currentHistory.total - 1),
 				});
 			}
-			dispatch({ type: "draft/set", conversationId, draft: text });
-			dispatch({ type: "attachments/set", conversationId, attachments });
-			dispatch({ type: "references/set", conversationId, references });
+			if (
+				draftRevisionsByConversation.get(conversationId) ===
+				clearedDraftRevision
+			) {
+				dispatch({ type: "draft/set", conversationId, draft });
+			}
+			if (
+				state.attachmentsByConversation[conversationId] === clearedAttachments
+			) {
+				dispatch({ type: "attachments/set", conversationId, attachments });
+			}
+			if (
+				state.referencesByConversation[conversationId] === clearedReferences
+			) {
+				dispatch({ type: "references/set", conversationId, references });
+			}
 			dispatch({ type: "send/error", error: errorMessage(err) });
 		} finally {
-			sendInFlight = false;
+			if (generation === runtimeGeneration) sendInFlight = false;
 		}
 	}
 
 	async function cancelJob(jobId: string): Promise<void> {
+		if (runtimeSuspended) return;
+		const generation = runtimeGeneration;
 		const conversationId = state.jobConversationById[jobId];
+		if (!conversationId) {
+			return;
+		}
 		try {
 			const cancelled = await client.cancelJob(jobId);
-			dispatch({ type: "job/upsert", job: cancelled });
-			applyRuntimeEvents(jobId, [
-				{
-					seq: Math.max(latestEventSeq(jobId), cancelled.lastSeq) + 1,
-					event: "cancelled",
-					payload: {
-						job_id: jobId,
-						conversation_id: cancelled.conversationId || conversationId,
-					},
+			if (generation !== runtimeGeneration) return;
+			const current = state.activeJobsByConversation[conversationId];
+			if (current?.jobId !== jobId) {
+				return;
+			}
+			dispatch({
+				type: "job/upsert",
+				job: {
+					...cancelled,
+					currentTimeline: current.currentTimeline,
+					currentToolCalls: current.currentToolCalls,
 				},
-			]);
+			});
+			// 取消响应不是增量事件，不伪造序号；真正终态由 Runtime 游标续接。
+			if (isJobRunning(cancelled)) {
+				scheduleFallbackPolling(jobId);
+			} else {
+				finishJob(jobId, conversationId);
+			}
 		} catch (err) {
+			if (generation !== runtimeGeneration) return;
+			if (state.activeJobsByConversation[conversationId]?.jobId !== jobId) {
+				return;
+			}
 			dispatch({ type: "send/error", error: errorMessage(err) });
 		}
 	}
@@ -1137,6 +1550,8 @@ export function createChatStore({
 		conversationId: string,
 		filePath: string,
 	): Promise<void> {
+		if (runtimeSuspended) return;
+		const generation = runtimeGeneration;
 		const trimmed = filePath.trim();
 		if (!trimmed) {
 			return;
@@ -1155,6 +1570,7 @@ export function createChatStore({
 		dispatch({ type: "attachments/set", conversationId, attachments: queued });
 		try {
 			const attachment = await client.uploadAttachment({ filePath: trimmed });
+			if (generation !== runtimeGeneration) return;
 			const current = state.attachmentsByConversation[conversationId] ?? [];
 			dispatch({
 				type: "attachments/set",
@@ -1172,6 +1588,7 @@ export function createChatStore({
 				),
 			});
 		} catch (err) {
+			if (generation !== runtimeGeneration) return;
 			const current = state.attachmentsByConversation[conversationId] ?? [];
 			dispatch({
 				type: "attachments/set",
@@ -1274,7 +1691,9 @@ export function createChatStore({
 			conversationId && state.activeJobsByConversation[conversationId];
 		if (activeJob && activeJob.jobId === jobId) {
 			let updatedJob = activeJob;
-			const newEvents = events.filter((item) => item.seq > prevCursor);
+			const newEvents = (state.eventsByJob[jobId] ?? []).filter(
+				(item) => item.seq > prevCursor,
+			);
 			for (const event of newEvents) {
 				if (event.event === "stage" && event.payload) {
 					// stage 事件：更新 currentStage/Detail/StartedAt（对齐 WebUI setChatStage）
@@ -1303,14 +1722,38 @@ export function createChatStore({
 						event.payload.content ?? event.payload.message ?? "",
 					);
 					if (content) {
+						const parentCallId = String(
+							event.payload.parent_webchat_call_id || "",
+						);
 						updatedJob = {
 							...updatedJob,
 							reply: updatedJob.reply + content,
-							currentTimeline: [
-								...updatedJob.currentTimeline,
-								{ type: "message", seq: event.seq, content },
-							],
+							messages: [...updatedJob.messages, content],
 						};
+						if (parentCallId) {
+							updatedJob = {
+								...updatedJob,
+								currentToolCalls: updateToolCall(
+									updatedJob.currentToolCalls,
+									parentCallId,
+									(parent) => ({
+										...parent,
+										timeline: [
+											...(parent.timeline ?? []),
+											{ type: "message", seq: event.seq, content },
+										],
+									}),
+								),
+							};
+						} else {
+							updatedJob = {
+								...updatedJob,
+								currentTimeline: [
+									...updatedJob.currentTimeline,
+									{ type: "message", seq: event.seq, content },
+								],
+							};
+						}
 					}
 				} else if (
 					event.event === "tool_start" ||
@@ -1369,6 +1812,22 @@ export function createChatStore({
 								}),
 							),
 						};
+						if (isStart && parentCallId) {
+							updatedJob = {
+								...updatedJob,
+								currentToolCalls: updateToolCall(
+									updatedJob.currentToolCalls,
+									parentCallId,
+									(parent) => ({
+										...parent,
+										timeline: [
+											...(parent.timeline ?? []),
+											{ type: "call", seq: event.seq, callId },
+										],
+									}),
+								),
+							};
+						}
 						// 顶层 tool_start/agent_start 首次进入主时间线（对齐 WebUI append 顺序；
 						// 嵌套子工具在父块 children 内，由 ToolBlock 递归渲染，不进主时间线）
 						if (
@@ -1427,27 +1886,42 @@ export function createChatStore({
 					}
 				}
 			}
-			if (updatedJob !== activeJob) {
-				dispatch({ type: "job/upsert", job: updatedJob });
+			if (newEvents.length > 0) {
+				dispatch({
+					type: "job/upsert",
+					job: {
+						...updatedJob,
+						lastSeq: Math.max(
+							updatedJob.lastSeq,
+							state.eventCursorByJob[jobId] ?? 0,
+						),
+					},
+				});
 			}
 		}
 
-		// 终态事件：清理 job 并重载历史
-		const doneEvent = events.find((item) =>
-			["done", "error", "cancelled"].includes(item.event),
+		// 终态事件先保留会话和展示状态，确认 Runtime 历史落盘后再释放发送锁。
+		const doneEvent = events.find(
+			(item) => item.seq > prevCursor && TERMINAL_EVENTS.has(item.event),
 		);
 		if (doneEvent && conversationId) {
-			stopFallbackPolling(jobId);
-			const subscriptionId = subscriptionsByJob.get(jobId);
-			if (subscriptionId) {
-				subscriptionsByJob.delete(jobId);
-				void client.stopJobEventStream(subscriptionId);
+			const currentJob = state.activeJobsByConversation[conversationId];
+			if (currentJob && currentJob.jobId !== jobId) {
+				return;
 			}
-			dispatch({ type: "job/remove", conversationId, jobId });
-			if (Object.keys(state.activeJobsByConversation).length === 0) {
-				dispatch({ type: "connection/set", connectionState: "connected" });
+			if (currentJob && !currentJob.historyFinalized) {
+				const status =
+					doneEvent.payload.error === "cancelled"
+						? "cancelled"
+						: doneEvent.event;
+				dispatch({
+					type: "job/upsert",
+					job: { ...currentJob, status },
+				});
+				scheduleFallbackPolling(jobId);
+			} else {
+				finishJob(jobId, conversationId);
 			}
-			void loadHistory(conversationId);
 		}
 	}
 
@@ -1456,6 +1930,13 @@ export function createChatStore({
 	}
 
 	function handleRuntimeStatus(status: RuntimeSseStatus): void {
+		const conversationId = state.jobConversationById[status.jobId];
+		if (
+			!conversationId ||
+			state.activeJobsByConversation[conversationId]?.jobId !== status.jobId
+		) {
+			return;
+		}
 		if (status.status === "connected") {
 			dispatch({ type: "connection/set", connectionState: "streaming" });
 			return;
@@ -1465,21 +1946,19 @@ export function createChatStore({
 			return;
 		}
 		if (status.status === "closed") {
-			const conversationId = state.jobConversationById[status.jobId];
-			if (conversationId && state.activeJobsByConversation[conversationId]) {
-				fetchJobEventsFallback(status.jobId);
-				return;
-			}
-			dispatch({ type: "connection/set", connectionState: "connected" });
+			fetchJobEventsFallback(status.jobId);
 		}
 	}
 
 	async function loadMoreHistory(conversationId: string): Promise<void> {
+		if (runtimeSuspended) return;
+		const generation = runtimeGeneration;
 		const historyState = state.historyByConversation[conversationId];
 		if (!historyState?.hasMore || historyState.loading) {
 			return;
 		}
 
+		const request = beginHistoryRequest(conversationId);
 		dispatch({ type: "history/loading", conversationId });
 
 		try {
@@ -1488,6 +1967,7 @@ export function createChatStore({
 				historyState.nextBefore ?? undefined,
 				HISTORY_LIMIT,
 			);
+			if (!isCurrentHistoryRequest(conversationId, generation, request)) return;
 
 			const newItems = [...response.items, ...historyState.items];
 
@@ -1500,6 +1980,7 @@ export function createChatStore({
 				total: response.total,
 			});
 		} catch (error) {
+			if (!isCurrentHistoryRequest(conversationId, generation, request)) return;
 			dispatch({
 				type: "history/error",
 				conversationId,
@@ -1510,6 +1991,7 @@ export function createChatStore({
 
 	return {
 		bootstrap,
+		suspendRuntime,
 		refreshCommandsIfStale,
 		createConversation,
 		deleteConversation,

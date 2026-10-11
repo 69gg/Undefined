@@ -9,17 +9,21 @@ import type { ChatStore } from "../chat-store/store";
  */
 export function setupAndroidLifecycle(store: ChatStore): () => void {
 	const unlisteners: Array<() => void> = [];
+	let disposed = false;
 	const appWindow = getCurrentWindow();
+	const registerUnlistener = (unlisten: () => void): void => {
+		if (disposed) unlisten();
+		else unlisteners.push(unlisten);
+	};
 
 	// 监听应用暂停事件
 	appWindow
 		.listen<string>(TauriEvent.WINDOW_SUSPENDED, () => {
+			if (disposed) return;
 			console.log("[Lifecycle] App paused");
 			// 可以在这里保存状态或清理资源
 		})
-		.then((unlisten: () => void) => {
-			unlisteners.push(unlisten);
-		})
+		.then(registerUnlistener)
 		.catch((err: unknown) => {
 			console.error("[Lifecycle] Failed to listen android-pause:", err);
 		});
@@ -27,6 +31,7 @@ export function setupAndroidLifecycle(store: ChatStore): () => void {
 	// 监听应用恢复事件
 	appWindow
 		.listen<string>(TauriEvent.WINDOW_RESUMED, async () => {
+			if (disposed) return;
 			console.log("[Lifecycle] App resumed, re-bootstrapping...");
 
 			try {
@@ -58,16 +63,15 @@ export function setupAndroidLifecycle(store: ChatStore): () => void {
 				console.error("[Lifecycle] Failed to reconnect:", err);
 			}
 		})
-		.then((unlisten: () => void) => {
-			unlisteners.push(unlisten);
-		})
+		.then(registerUnlistener)
 		.catch((err: unknown) => {
 			console.error("[Lifecycle] Failed to listen android-resume:", err);
 		});
 
 	// 返回清理函数
 	return () => {
-		for (const unlisten of unlisteners) {
+		disposed = true;
+		for (const unlisten of unlisteners.splice(0)) {
 			unlisten();
 		}
 	};

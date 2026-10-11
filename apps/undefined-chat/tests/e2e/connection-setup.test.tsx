@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { App } from "../../src/App";
 import { createTauriRuntimeClient } from "../../src/runtime-client/tauri";
+import type { RuntimeConfig } from "../../src/runtime-client/types";
 import { runtimeClientStub } from "../../src/test-fixtures";
 import { renderWithProviders } from "../../src/test-utils";
 
@@ -50,12 +51,12 @@ describe("E2E: Connection Setup Flow", () => {
 	test("保存配置并在连接后引导应用", async () => {
 		const client = runtimeClientStub({
 			getRuntimeConfig: vi
-				.fn()
-				.mockResolvedValueOnce(null)
-				.mockResolvedValueOnce({
+				.fn(async (): Promise<RuntimeConfig | null> => ({
 					runtimeUrl: "http://localhost:8788",
 					hasApiKey: true,
-				}),
+				}))
+				.mockResolvedValueOnce(null)
+				.mockResolvedValueOnce(null),
 		});
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
@@ -118,12 +119,12 @@ describe("E2E: Connection Setup Flow", () => {
 	test("支持不安全存储降级选项", async () => {
 		const client = runtimeClientStub({
 			getRuntimeConfig: vi
-				.fn()
-				.mockResolvedValueOnce(null)
-				.mockResolvedValueOnce({
+				.fn(async (): Promise<RuntimeConfig | null> => ({
 					runtimeUrl: "http://localhost:8788",
 					hasApiKey: true,
-				}),
+				}))
+				.mockResolvedValueOnce(null)
+				.mockResolvedValueOnce(null),
 		});
 		vi.mocked(createTauriRuntimeClient).mockReturnValue(client);
 
@@ -168,7 +169,9 @@ describe("E2E: Connection Setup Flow", () => {
 		await userEvent.type(keyInput, "sk-test");
 		await userEvent.click(connectBtn);
 
-		expect(await screen.findByText("网络连接失败")).toBeInTheDocument();
+		expect(await screen.findByText(/网络连接失败/)).toBeInTheDocument();
+		expect(client.clearRuntimeConfig).toHaveBeenCalledOnce();
+		expect(screen.getByLabelText("消息输入")).toBeDisabled();
 	});
 
 	test("已有配置时可以通过设置按钮重新打开配置面板", async () => {

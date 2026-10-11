@@ -6,6 +6,7 @@ cognitive_events 和 cognitive_profiles 两个 collection 进行全量重嵌入�
 
 原理：ChromaDB 存储了完整的原文本（documents），本脚本读取所有记录，
 用新模型重新计算向量，然后通过 upsert 覆写回去。metadata 保持不变。
+它不会重新读取侧写 Markdown；历史恢复与当前文件同步使用 restore_profile.py。
 
 维度变化：ChromaDB 的 collection 在首次写入时定维，异维向量 upsert 会直接失败
 （InvalidArgumentError）。脚本会先比较新旧向量维度，检测到变化时把新向量全部
@@ -26,7 +27,7 @@ cognitive_events 和 cognitive_profiles 两个 collection 进行全量重嵌入�
     # 自定义批大小（默认 32）
     uv run python scripts/reembed_cognitive.py --batch-size 16
 
-    # 模拟运行（不实际写入）
+    # 模拟运行（在临时副本读取，不修改源 ChromaDB）
     uv run python scripts/reembed_cognitive.py --dry-run
 """
 
@@ -37,7 +38,10 @@ import asyncio
 import logging
 import sys
 import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 
 import chromadb
@@ -53,6 +57,11 @@ from Undefined.config.loader import Config  # noqa: E402
 from Undefined.config.models import EmbeddingModelConfig  # noqa: E402
 from Undefined.knowledge.embedder import Embedder  # noqa: E402
 from Undefined.token_usage_storage import TokenUsageStorage  # noqa: E402
+from Undefined.utils.io import (  # noqa: E402
+    copy_file_atomic,
+    ensure_dir,
+    iter_rglob_files,
+)
 
 logger = logging.getLogger("reembed_cognitive")
 
@@ -61,6 +70,7 @@ _CHROMA_GET_LIMIT = 5000
 
 # 维度迁移时临时 collection 的后缀
 _STAGING_SUFFIX = "__rebuild_tmp"
+_COPY_CHUNK_SIZE = 1024 * 1024
 
 
 def _staging_name(collection_name: str) -> str:
@@ -90,13 +100,13 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="模拟运行：计算向量但不写入 ChromaDB",
+        help="模拟运行：从临时副本读取并计算向量，不修改源 ChromaDB",
     )
     parser.add_argument(
         "--db-path",
         type=str,
         default=None,
-        help="ChromaDB 路径（默认读取 config.toml 中的 cognitive.vector_store_path）",
+        help="ChromaDB 路径（默认读取 config.toml 中的 cognitive.vector_store.path）",
     )
     parser.add_argument(
         "-v",
@@ -380,6 +390,43 @@ def _build_embedder(config: Config) -> Embedder:
     return embedder
 
 
+@asynccontextmanager
+async def _open_chroma(db_path: Path, *, dry_run: bool) -> AsyncIterator[Any]:
+    """预览只打开临时副本，隔离客户端初始化、迁移或索引维护的写入。"""
+    if not dry_run:
+        yield chromadb.PersistentClient(path=str(db_path))
+        return
+    with TemporaryDirectory(prefix="undefined-reembed-preview-") as directory:
+        preview_path = Path(directory) / "chroma"
+        await ensure_dir(preview_path)
+        async for source in iter_rglob_files(db_path):
+            await copy_file_atomic(
+                source,
+                preview_path / source.relative_to(db_path),
+                chunk_size=_COPY_CHUNK_SIZE,
+            )
+        logger.info("dry-run：在临时副本读取，源 ChromaDB 不会被修改")
+        yield chromadb.PersistentClient(path=str(preview_path))
+
+
+def _load_collection(client: Any, name: str, *, dry_run: bool) -> Any | None:
+    if not dry_run:
+        _recover_stale_staging(client, name)
+        return client.get_or_create_collection(name, metadata={"hnsw:space": "cosine"})
+
+    names = {collection.name for collection in client.list_collections()}
+    staging_name = _staging_name(name)
+    if name in names:
+        if staging_name in names:
+            logger.info("dry-run：保留遗留临时 collection %s，不执行清理", staging_name)
+        return client.get_collection(name)
+    if staging_name in names:
+        logger.info("dry-run：读取 %s 预览恢复后的记录，不执行换名", staging_name)
+        return client.get_collection(staging_name)
+    logger.info("dry-run：collection %s 不存在，跳过且不创建", name)
+    return None
+
+
 async def _main(args: argparse.Namespace) -> None:
     config = Config.load(strict=False)
 
@@ -396,41 +443,29 @@ async def _main(args: argparse.Namespace) -> None:
         logger.error("ChromaDB 目录不存在: %s", db_path)
         sys.exit(1)
 
-    client = chromadb.PersistentClient(path=str(db_path))
-    embedder = _build_embedder(config)
-
     total_processed = 0
-
-    try:
-        if not args.profiles_only:
-            _recover_stale_staging(client, "cognitive_events")
-            events_col = client.get_or_create_collection(
-                "cognitive_events", metadata={"hnsw:space": "cosine"}
-            )
-            total_processed += await _reembed_collection(
-                events_col,
-                "cognitive_events",
-                embedder,
-                args.batch_size,
-                args.dry_run,
-                client,
-            )
-
-        if not args.events_only:
-            _recover_stale_staging(client, "cognitive_profiles")
-            profiles_col = client.get_or_create_collection(
-                "cognitive_profiles", metadata={"hnsw:space": "cosine"}
-            )
-            total_processed += await _reembed_collection(
-                profiles_col,
-                "cognitive_profiles",
-                embedder,
-                args.batch_size,
-                args.dry_run,
-                client,
-            )
-    finally:
-        await embedder.stop()
+    async with _open_chroma(Path(db_path), dry_run=args.dry_run) as client:
+        embedder = _build_embedder(config)
+        try:
+            collection_names = []
+            if not args.profiles_only:
+                collection_names.append("cognitive_events")
+            if not args.events_only:
+                collection_names.append("cognitive_profiles")
+            for name in collection_names:
+                collection = _load_collection(client, name, dry_run=args.dry_run)
+                if collection is None:
+                    continue
+                total_processed += await _reembed_collection(
+                    collection,
+                    name,
+                    embedder,
+                    args.batch_size,
+                    args.dry_run,
+                    client,
+                )
+        finally:
+            await embedder.stop()
 
     logger.info("全部完成，共处理 %d 条记录。", total_processed)
 

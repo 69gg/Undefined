@@ -282,20 +282,34 @@ class KnowledgeManager:
 
         for text_file in text_files:
             relative_source = text_file.relative_to(kb_dir).as_posix()
-            fhash = await self._file_hash(text_file)
-            if manifest.get(relative_source) == fhash:
+            try:
+                fhash = await self._file_hash(text_file)
+                if manifest.get(relative_source) == fhash:
+                    continue
+                content = await asyncio.to_thread(text_file.read_text, "utf-8")
+            except FileNotFoundError:
+                # 文件列表是快照；hash 或正文读取期间也可能删除源文件。
+                if store is None:
+                    store = self._get_store(kb_name)
+                await store.delete_by_source(relative_source)
+                manifest.pop(relative_source, None)
+                manifest_changed = True
+                logger.info(
+                    "[知识库] kb=%s removed source=%s", kb_name, relative_source
+                )
+                continue
+            except (OSError, UnicodeDecodeError):
+                logger.warning(
+                    "[知识库] 读取失败，保留旧索引: kb=%s source=%s",
+                    kb_name,
+                    relative_source,
+                )
                 continue
             if store is None:
                 store = self._get_store(kb_name)
-            await store.delete_by_source(relative_source)
-            try:
-                content = await asyncio.to_thread(text_file.read_text, "utf-8")
-            except (OSError, UnicodeDecodeError):
-                if manifest.pop(relative_source, None) is not None:
-                    manifest_changed = True
-                continue
             lines = chunk_lines(content, self._chunk_size, self._chunk_overlap)
             if not lines:
+                await store.delete_by_source(relative_source)
                 manifest[relative_source] = fhash
                 manifest_changed = True
                 continue
@@ -306,6 +320,7 @@ class KnowledgeManager:
                 lines,
                 embeddings,
                 metadata_base={"source": relative_source, "kb": kb_name},
+                replace_source=True,
             )
             manifest[relative_source] = fhash
             manifest_changed = True

@@ -173,6 +173,7 @@ class MessageHandler(PokeMixin, RepeatMixin, AutoExtractMixin):
         self.rate_limiter = RateLimiter(config)
         self.queue_manager = QueueManager(
             max_retries=config.ai_request_max_retries,
+            group_llm_queue_max_pending=config.group_llm_queue_max_pending,
         )
         self.queue_manager.update_model_intervals(build_model_queue_intervals(config))
 

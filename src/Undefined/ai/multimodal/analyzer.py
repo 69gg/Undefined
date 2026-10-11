@@ -329,7 +329,7 @@ class MultimodalAnalyzer:
     ) -> dict[str, str]:
         """分析媒体文件。
 
-        始终调用视觉模型进行真实分析，不会因历史缓存而跳过。
+        相同媒体类型、完整来源与补充指令复用本次进程内的分析结果。
 
         Args:
             media_url: 媒体文件 URL 或本地路径
@@ -350,7 +350,11 @@ class MultimodalAnalyzer:
             len(prompt_extra),
         )
 
-        cache_key = f"{detected_type}:{media_url[:100]}:{prompt_extra}"
+        cache_key = hashlib.sha256(
+            json.dumps(
+                [detected_type, media_url, prompt_extra], ensure_ascii=False
+            ).encode("utf-8")
+        ).hexdigest()
         if cache_key in self._cache:
             logger.debug("[媒体分析] 命中缓存: key=%s", cache_key[:120])
             return self._cache[cache_key]

@@ -195,9 +195,12 @@ function renderPreviewSection({
 }
 
 function renderTimelineEntry(
-	entry: ToolBlockType["timeline"][number],
+	entry: Exclude<ToolBlockType["timeline"][number], { type: "call" }>,
 	index: number,
 	t: TranslateFn,
+	attachments: Attachment[],
+	onPreviewHtml: (input: HtmlPreviewRequest) => void,
+	onImageClick?: (src: string, alt: string) => void,
 ): React.ReactElement {
 	const content = entry.type === "error" ? entry.message : entry.content;
 	const label =
@@ -215,7 +218,14 @@ function renderTimelineEntry(
 	return (
 		<div className={className} key={index}>
 			<span className="timeline-label">{label}</span>
-			<div className="timeline-content">{content}</div>
+			<div className="timeline-content">
+				<MarkdownContent
+					content={content}
+					attachments={attachments}
+					onPreviewHtml={onPreviewHtml}
+					onImageClick={onImageClick}
+				/>
+			</div>
 		</div>
 	);
 }
@@ -359,16 +369,45 @@ export function ToolBlock({
 
 			{childrenArray.length > 0 || timeline.length > 0 ? (
 				<div className="runtime-tool-children">
-					{timeline.map((entry, index) => renderTimelineEntry(entry, index, t))}
-					{childrenArray.map((child) => (
-						<ToolBlock
-							key={child.webchatCallId}
-							{...child}
-							attachments={attachments}
-							onPreviewHtml={onPreviewHtml}
-							onImageClick={onImageClick}
-						/>
-					))}
+					{timeline.map((entry, index) => {
+						if (entry.type !== "call")
+							return renderTimelineEntry(
+								entry,
+								index,
+								t,
+								attachments,
+								onPreviewHtml,
+								onImageClick,
+							);
+						const child = children.get(entry.callId);
+						return child ? (
+							<ToolBlock
+								key={child.webchatCallId}
+								{...child}
+								attachments={attachments}
+								onPreviewHtml={onPreviewHtml}
+								onImageClick={onImageClick}
+							/>
+						) : null;
+					})}
+					{childrenArray
+						.filter(
+							(child) =>
+								!timeline.some(
+									(entry) =>
+										entry.type === "call" &&
+										entry.callId === child.webchatCallId,
+								),
+						)
+						.map((child) => (
+							<ToolBlock
+								key={child.webchatCallId}
+								{...child}
+								attachments={attachments}
+								onPreviewHtml={onPreviewHtml}
+								onImageClick={onImageClick}
+							/>
+						))}
 				</div>
 			) : null}
 

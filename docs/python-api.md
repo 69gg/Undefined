@@ -107,9 +107,13 @@ OneBot 内部时间解析提供两种约定：`parse_message_time(message)` 在�
 Python 显式 mapping / override  >  config.toml  >  环境变量  >  代码默认值
 ```
 
-- `Config.from_mapping()` / `Config.builder()`：**不读取** `config.toml`，适合测试与无文件部署。
+- `Config.from_mapping()` / `Config.builder()`：**不读取** `config.toml`、`config.local.json` 或 `.env`，适合测试与无文件部署；`[webui]` 与其余字段一样使用传入 mapping，显式超级管理员仍自动加入管理员列表。
 - `Config.load()`：从指定或 CWD 下的 `config.toml` 加载（CLI 路径）。
 - 环境变量仅在 TOML / mapping **未提供**对应项时兜底；详见 [配置详解 — 环境变量兜底](configuration.md#8-环境变量兜底迁移建议)。
+
+`Config.load(strict=False)` 只放宽必填项校验，文件的 TOML 语法、编码或读取错误仍会抛出 `ValueError`。`ConfigManager.reload()` 加载失败时保留原配置；订阅者应用失败会记录日志并保留变更，下次重载相同内容也会再次通知。运行时热更新应用函数会在完成其余同步步骤后汇报失败，后台失败同样会进入重试。
+
+`WebUISettings.from_config(config, config_exists=...)` 从已验证的 Config 构建设置，不读文件；运行中的 WebUI 使用该入口刷新同一次重载的快照。`config_exists` 表示这份快照是否来自现存配置；显式或隐式的 `changeme` 都会标记为默认密码模式，禁止登录。独立 `load_webui_settings()` 保留首次启动的宽松解析和初始化默认值，不应拿它替代已验证的运行时快照。
 
 ### `Config.from_mapping`
 
@@ -159,6 +163,12 @@ client = OneBotClient(cfg.onebot_ws_url, cfg.onebot_token, config_getter=lambda:
 ```
 
 `OneBotFileTransport` 的 `chunk_size`、`timeout` 和 `store` 可用于测试注入，不是额外业务配置。URL 模式需要将同一客户端传入 `RuntimeAPIContext.onebot`，并显式启动 `RuntimeAPIServer`；服务会绑定客户端的临时文件存储与实际监听端口，OneBot 发送方法不会自动启动 Runtime。准备错误为 `FileTransferError`，含 `mode`、`stage`、`user_message` 与 `file_transfer_error` 标记；投递发出后结果未确认仍为 `OneBotDeliveryUncertainError`。详细模式与部署要求见 [配置说明](configuration.md#43-onebot-协议端连接)。
+
+### `OneBotClient` 关闭与重连
+
+`stop_accepting_messages()` 关闭新消息与通知事件入口，但保留已有 API 响应的处理，供已接收任务收尾；随后可用 `drain_message_tasks()` 等待这些任务完成。`disconnect()` 会先关闭新事件入口，再关闭 WebSocket 并取消、回收剩余消息任务，直接调用它也不会在断开期间新建消息任务。
+
+`disconnect()` 用于终止当前客户端，后续启动应创建新的 `OneBotClient`。网络断线时，`run_with_reconnect()` 的自动重连路径不会调用 `disconnect()`，也不会关闭新事件入口。
 
 ### `Config.builder`
 
@@ -292,6 +302,8 @@ server = RuntimeAPIServer(RuntimeAPIContext(...))
 | `Undefined.attachments` | stable | `AttachmentRegistry` |
 | `Undefined.api` | stable | `RuntimeAPIServer`, `RuntimeAPIContext` |
 | `Undefined.mcp` | subpackage | `MCPToolRegistry`, `MCPToolSetRegistry` |
+
+`ProfileStorage` 的所有读写、历史版本和合并锁操作只接受 `user` / `group` 实体类型，以及非空的单层实体 ID（不接受路径分隔符、`.` / `..` 或 Windows 盘符）。侧写文件与历史版本解析符号链接后必须仍位于 `base_path` 内，否则抛出 `ValueError`；路径解析与文件访问一起在线程中执行，避免阻塞事件循环。Runtime 的侧写查询接口将这类错误转换为 HTTP 400。
 
 ---
 

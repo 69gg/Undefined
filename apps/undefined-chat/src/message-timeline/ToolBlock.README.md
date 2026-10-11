@@ -6,7 +6,7 @@
 
 - ✅ **可折叠展开** - 使用 `<details>` 元素实现原生折叠/展开（running 自动展开，done/error 后 2s 自动折叠，用户交互后不再自动折叠）
 - ✅ **状态指示** - 支持 running / done / error / cancelled 状态，带视觉反馈
-- ✅ **时间线展示** - 显示工具执行的输入、输出、错误历史
+- ✅ **时间线展示** - 显示工具执行的输入、输出、错误历史；Agent 内正文支持 Markdown，并与子调用按时间线顺序交错展示
 - ✅ **嵌套渲染** - 支持递归渲染子工具调用
 - ✅ **实时计时** - 运行中通过统一时钟 `useChatClock` 每 500ms 刷新用时，结束后定格；自动格式化（ms/s/m）
 - ✅ **Agent 阶段明细** - Agent 运行中在状态位展示阶段标签（`currentStage`），并可附加阶段明细 `stageDetail`（如模型名/子步骤）
@@ -37,7 +37,8 @@ export type ToolBlock = {
 export type TimelineEntry =
   | { type: "input"; timestamp: number; content: string }
   | { type: "output"; timestamp: number; content: string }
-  | { type: "error"; timestamp: number; message: string };
+  | { type: "error"; timestamp: number; message: string }
+  | { type: "call"; timestamp: number; callId: string };
 ```
 
 ## 使用示例
@@ -69,7 +70,12 @@ const toolBlock = {
 const childTool = { /* ... */ };
 const parentTool = {
   // ...
-  children: new Map([["child-id", childTool]])
+  children: new Map([["child-id", childTool]]),
+  timeline: [
+    { type: "output", timestamp: 1, content: "调用之前的说明" },
+    { type: "call", timestamp: 2, callId: "child-id" },
+    { type: "output", timestamp: 3, content: "调用之后的说明" }
+  ]
 };
 
 <ToolBlock {...parentTool} />
@@ -92,7 +98,7 @@ const toolBlocks = useStore(state => state.toolBlocksByJob[jobId]);
 实时运行的工具块由 store 维护；历史消息则由 `MessageTimelineContent` 消费一条已交错好的
 `timeline`，其中 `type === "call"` 的条目经 `convertHistoryToolCallToToolBlock` 转换为本组件所需的
 `ToolBlock`（映射 `arguments_preview`/`result_preview`/`is_agent`/`current_stage`/`current_stage_detail`
-等字段，并按 `duration_ms` 反推 `startTime`）。
+等字段，并按 `duration_ms` 反推 `startTime`）。调用身份兼容 Runtime 的 `webchat_call_id`、`tool_call_id` 与已有 `id`，同一子调用在 `children` 和 `timeline` 中只渲染一次。嵌套 `message` 转为输出条目，`call` 引用对应子块；已被时间线引用的子块不会再次追加到末尾。
 
 `timeline` 由 `MessageTimeline` 的 `buildHistoryTimeline` 按可用性多级回退构建：
 
@@ -158,7 +164,7 @@ const toolBlocks = useStore(state => state.toolBlocksByJob[jobId]);
 - 状态样式（running / done / error）
 - 时长格式化（ms / s / m）
 - 折叠展开交互
-- 时间线渲染（input / output / error）
+- 时间线渲染（input / output / error / call），流式与历史 Agent 正文归属和子调用先后顺序
 - 嵌套子工具递归渲染（单个 / 多个）
 - 空状态处理（无时间线、无子工具）
 - 结果预览：JSON/Python 风格结构化、非结构化 Markdown、附件图片标签 fallback

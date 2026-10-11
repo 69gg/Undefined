@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping
+from contextlib import asynccontextmanager
 from dataclasses import replace
 import hashlib
 import logging
@@ -34,6 +35,7 @@ from Undefined.memes.models import (
 from Undefined.memes.search import MemeSearchMixin
 from Undefined.memes.store import MemeStore
 from Undefined.memes.vector_store import MemeVectorStore
+from Undefined.utils.io import run_cancellation_safe
 from Undefined.utils.paths import ensure_dir
 
 logger = logging.getLogger(__name__)
@@ -66,11 +68,13 @@ class MemeService(MemeSearchMixin):
         self._ai_client = ai_client
         self._attachment_registry = attachment_registry
         self._retrieval_runtime = retrieval_runtime
-        # Serialize same-content ingest jobs within the process to avoid duplicates.
+        # Serialize same-content ingest and final metadata/index mutations.
         self._ingest_digest_locks: dict[str, IngestDigestLockEntry] = {}
         self._ingest_digest_locks_guard = asyncio.Lock()
+        self._prune_lock = asyncio.Lock()
         self._global_image_cache: dict[str, AttachmentRecord] = {}
         self._global_image_cache_lock = threading.Lock()
+        self._global_image_cache_generation = 0
 
     @property
     def enabled(self) -> bool:
@@ -124,6 +128,18 @@ class MemeService(MemeSearchMixin):
             if current is entry and entry.users == 0 and not entry.lock.locked():
                 self._ingest_digest_locks.pop(digest, None)
 
+    @asynccontextmanager
+    async def _meme_mutation_lock(self, digest: str) -> AsyncIterator[None]:
+        entry = await self._acquire_ingest_digest_lock(digest)
+        try:
+            yield
+        finally:
+            await run_cancellation_safe(
+                self._release_ingest_digest_lock_reference(
+                    digest, entry, release_lock=True
+                )
+            )
+
     def _preview_dir(self) -> Path:
         return ensure_dir(Path(self._cfg().preview_dir))
 
@@ -136,42 +152,7 @@ class MemeService(MemeSearchMixin):
             return
         with self._global_image_cache_lock:
             self._global_image_cache.pop(normalized_uid, None)
-
-    def resolve_global_image_sync(self, uid: str) -> AttachmentRecord | None:
-        normalized_uid = str(uid or "").strip()
-        if not normalized_uid:
-            return None
-
-        with self._global_image_cache_lock:
-            cached = self._global_image_cache.get(normalized_uid)
-        if cached is not None:
-            return cached
-
-        record = self._store.get_sync(normalized_uid)
-        if record is None or not record.enabled or record.status != "ready":
-            return None
-        attachment = AttachmentRecord(
-            uid=record.uid,
-            scope_key="",
-            kind="image",
-            media_type="image",
-            display_name=Path(record.blob_path).name,
-            source_kind="meme_library",
-            source_ref=Path(record.blob_path).resolve().as_uri(),
-            local_path=record.blob_path,
-            mime_type=record.mime_type,
-            sha256=record.content_sha256,
-            created_at=record.created_at,
-            segment_data={"subType": "1"},
-            semantic_kind="meme",
-            description=record.description,
-        )
-        with self._global_image_cache_lock:
-            self._global_image_cache[normalized_uid] = attachment
-        return attachment
-
-    async def resolve_global_image(self, uid: str) -> AttachmentRecord | None:
-        return await asyncio.to_thread(self.resolve_global_image_sync, uid)
+            self._global_image_cache_generation += 1
 
     async def get_meme(self, uid: str) -> dict[str, Any] | None:
         record = await self._store.get(uid)
@@ -288,71 +269,108 @@ class MemeService(MemeSearchMixin):
         if record is None:
             return None
 
-        next_tags = list(record.tags) if tags is None else _normalize_tags(tags)
-        next_aliases = (
-            list(record.aliases) if aliases is None else _normalize_tags(aliases)
-        )
-        next_manual = (
-            record.manual_description
-            if manual_description is None
-            else str(manual_description or "").strip()
-        )
-        next_enabled = record.enabled if enabled is None else bool(enabled)
-        next_pinned = record.pinned if pinned is None else bool(pinned)
-        next_search_text = build_search_text(
-            manual_description=next_manual,
-            auto_description=record.auto_description,
-            ocr_text="",
-            tags=next_tags,
-            aliases=next_aliases,
-        )
+        async def commit() -> dict[str, Any] | None:
+            current = await self._store.get(uid)
+            if current is None or current.generation != record.generation:
+                return None
+            next_tags = list(current.tags) if tags is None else _normalize_tags(tags)
+            next_aliases = (
+                list(current.aliases) if aliases is None else _normalize_tags(aliases)
+            )
+            next_manual = (
+                current.manual_description
+                if manual_description is None
+                else str(manual_description or "").strip()
+            )
+            next_search_text = build_search_text(
+                manual_description=next_manual,
+                auto_description=current.auto_description,
+                ocr_text="",
+                tags=next_tags,
+                aliases=next_aliases,
+            )
 
-        updated = await self._store.update_fields(
-            uid,
-            {
-                "manual_description": next_manual,
-                "tags_json": next_tags,
-                "aliases_json": next_aliases,
-                "enabled": next_enabled,
-                "pinned": next_pinned,
-                "search_text": next_search_text,
-                "updated_at": _now_iso(),
-            },
-        )
-        if updated is None:
-            return None
-        self._invalidate_global_image_cache(uid)
-        await self._vector_store.upsert(updated)
-        return self.serialize_record(updated)
+            updated = await self._store.update_fields(
+                uid,
+                {
+                    "manual_description": next_manual,
+                    "tags_json": next_tags,
+                    "aliases_json": next_aliases,
+                    "enabled": current.enabled if enabled is None else bool(enabled),
+                    "pinned": current.pinned if pinned is None else bool(pinned),
+                    "search_text": next_search_text,
+                    "updated_at": _now_iso(),
+                },
+                expected_record=current,
+            )
+            if updated is None:
+                return None
+            self._invalidate_global_image_cache(uid)
+            await self._vector_store.upsert(updated)
+            return self.serialize_record(updated)
 
-    async def delete_meme(self, uid: str) -> bool:
-        record = await self._store.delete(uid)
+        async with self._meme_mutation_lock(record.content_sha256):
+            return await run_cancellation_safe(commit())
+
+    async def delete_meme(
+        self, uid: str, *, expected_record: MemeRecord | None = None
+    ) -> bool:
+        record = expected_record or await self._store.get(uid)
         if record is None:
             return False
-        self._invalidate_global_image_cache(uid)
-        await self._vector_store.delete(uid)
-        await asyncio.to_thread(self._delete_file_if_exists, Path(record.blob_path))
-        if record.preview_path and record.preview_path != record.blob_path:
-            await asyncio.to_thread(
-                self._delete_file_if_exists,
-                Path(record.preview_path),
-            )
-        await asyncio.to_thread(self._cleanup_gif_frame_files, uid)
-        return True
 
-    def _delete_file_if_exists(self, path: Path) -> None:
+        async def commit() -> bool:
+            current = await self._store.get(uid)
+            if (
+                current is None
+                or current.generation != record.generation
+                or current.content_sha256 != record.content_sha256
+                or (
+                    expected_record is not None
+                    and current.revision != expected_record.revision
+                )
+            ):
+                return False
+            # 保留可重试的 SQL 记录和容量统计，直到所有外部收尾成功。
+            await self._vector_store.delete(uid)
+            await asyncio.to_thread(
+                self._delete_file_if_exists, Path(current.blob_path), strict=True
+            )
+            if current.preview_path and current.preview_path != current.blob_path:
+                await asyncio.to_thread(
+                    self._delete_file_if_exists,
+                    Path(current.preview_path),
+                    strict=True,
+                )
+            await asyncio.to_thread(self._cleanup_gif_frame_files, uid, strict=True)
+            deleted = await self._store.delete(
+                uid, expected_record=expected_record or current
+            )
+            if deleted is None:
+                return False
+            self._invalidate_global_image_cache(uid)
+            return True
+
+        async with self._meme_mutation_lock(record.content_sha256):
+            return await run_cancellation_safe(commit())
+
+    def _delete_file_if_exists(self, path: Path, *, strict: bool = False) -> None:
         try:
             path.unlink(missing_ok=True)
         except OSError:
+            if strict:
+                raise
             logger.debug("[memes] 删除文件失败: path=%s", path, exc_info=True)
 
-    def _cleanup_gif_frame_files(self, uid: str) -> None:
+    def _cleanup_gif_frame_files(self, uid: str, *, strict: bool = False) -> None:
         """清理 GIF 多帧分析产生的临时帧文件 ({uid}_f{i}.png)。"""
         preview_dir = self._preview_dir()
         for frame_file in preview_dir.glob(f"{uid}_f*.png"):
             try:
                 frame_file.unlink(missing_ok=True)
             except OSError:
+                if strict:
+                    raise
                 logger.debug(
                     "[memes] 删除帧文件失败: path=%s", frame_file, exc_info=True
                 )
@@ -482,7 +500,11 @@ class MemeService(MemeSearchMixin):
             existing = merged.get(uid)
             if existing is None:
                 stored_record = missing_records.get(uid)
-                if stored_record is None:
+                if (
+                    stored_record is None
+                    or stored_record.status != "ready"
+                    or (not include_disabled and not stored_record.enabled)
+                ):
                     continue
                 existing = {
                     "record": stored_record,
@@ -704,7 +726,14 @@ class MemeService(MemeSearchMixin):
         record = await self._store.get(uid)
         if record is None:
             return
-        await self._vector_store.upsert(record)
+
+        async def commit() -> None:
+            current = await self._store.get(uid)
+            if current is not None and current.generation == record.generation:
+                await self._vector_store.upsert(current)
+
+        async with self._meme_mutation_lock(record.content_sha256):
+            await run_cancellation_safe(commit())
 
     async def _process_reanalyze_job(self, job: Mapping[str, Any]) -> None:
         uid = str(job.get("uid") or "").strip()
@@ -722,45 +751,51 @@ class MemeService(MemeSearchMixin):
         if record.is_animated:
             cfg = self._cfg()
             if str(getattr(cfg, "gif_analysis_mode", "grid")).lower() == "multi":
-                analyze_path = await self._prepare_gif_multi_frames(
-                    Path(record.blob_path), uid
-                )
+                frame_owner = f"{uid}_{uuid4().hex}"
+                try:
+                    analyze_path = await run_cancellation_safe(
+                        self._prepare_gif_multi_frames(
+                            Path(record.blob_path), frame_owner
+                        )
+                    )
+                    await self._reanalyze_record(record, analyze_path)
+                finally:
+                    await run_cancellation_safe(
+                        asyncio.to_thread(self._cleanup_gif_frame_files, frame_owner)
+                    )
+                return
+        await self._reanalyze_record(record, analyze_path)
+
+    async def _reanalyze_record(
+        self, record: MemeRecord, analyze_path: str | list[str]
+    ) -> None:
+        uid = record.uid
+        ai_client = self._ai_client
+        if ai_client is None:
+            raise RuntimeError("reanalyze requires ai_client")
         try:
-            judgement = await self._ai_client.judge_meme_image(analyze_path)
+            judgement = await ai_client.judge_meme_image(analyze_path)
         except Exception as exc:
             if _is_retryable_llm_error(exc):
-                if isinstance(analyze_path, list):
-                    await asyncio.to_thread(self._cleanup_gif_frame_files, uid)
                 raise
             logger.exception(
                 "[memes] judge stage failed during reanalyze: uid=%s err=%s", uid, exc
             )
-            if isinstance(analyze_path, list):
-                await asyncio.to_thread(self._cleanup_gif_frame_files, uid)
             return
         if not bool(judgement.get("is_meme", False)):
-            if isinstance(analyze_path, list):
-                await asyncio.to_thread(self._cleanup_gif_frame_files, uid)
-            await self.delete_meme(uid)
+            await self.delete_meme(uid, expected_record=record)
             return
         try:
-            described = await self._ai_client.describe_meme_image(analyze_path)
+            described = await ai_client.describe_meme_image(analyze_path)
         except Exception as exc:
             if _is_retryable_llm_error(exc):
-                if isinstance(analyze_path, list):
-                    await asyncio.to_thread(self._cleanup_gif_frame_files, uid)
                 raise
             logger.exception(
                 "[memes] describe stage failed during reanalyze: uid=%s err=%s",
                 uid,
                 exc,
             )
-            if isinstance(analyze_path, list):
-                await asyncio.to_thread(self._cleanup_gif_frame_files, uid)
             return
-        # GIF 多帧文件用完即清理
-        if isinstance(analyze_path, list):
-            await asyncio.to_thread(self._cleanup_gif_frame_files, uid)
         auto_description = str(described.get("description") or "").strip()
         next_tags = _normalize_tags(described.get("tags"))
         if not auto_description and not next_tags:
@@ -768,23 +803,34 @@ class MemeService(MemeSearchMixin):
                 "[memes] reanalyze describe failed, skip update: uid=%s", uid
             )
             return
-        next_record = replace(
-            record,
-            auto_description=auto_description,
-            ocr_text="",
-            tags=next_tags,
-            search_text=build_search_text(
-                manual_description=record.manual_description,
-                auto_description=auto_description,
-                ocr_text="",
-                tags=next_tags,
-                aliases=record.aliases,
-            ),
-            updated_at=_now_iso(),
-        )
-        saved = await self._store.upsert_record(next_record)
-        self._invalidate_global_image_cache(saved.uid)
-        await self._vector_store.upsert(saved)
+
+        async def commit() -> None:
+            current = await self._store.get(uid)
+            if current is None:
+                return
+            saved = await self._store.update_fields(
+                uid,
+                {
+                    "auto_description": auto_description,
+                    "ocr_text": "",
+                    "tags_json": next_tags,
+                    "search_text": build_search_text(
+                        manual_description=current.manual_description,
+                        auto_description=auto_description,
+                        ocr_text="",
+                        tags=next_tags,
+                        aliases=current.aliases,
+                    ),
+                    "updated_at": _now_iso(),
+                },
+                expected_record=record,
+            )
+            if saved is not None:
+                self._invalidate_global_image_cache(saved.uid)
+                await self._vector_store.upsert(saved)
+
+        async with self._meme_mutation_lock(record.content_sha256):
+            await run_cancellation_safe(commit())
 
     async def _process_ingest_job(self, job: Mapping[str, Any]) -> None:
         if self._attachment_registry is None:
@@ -1072,37 +1118,25 @@ class MemeService(MemeSearchMixin):
             return candidate
 
     async def _prune_if_needed(self) -> None:
-        stats = await self._store.stats()
-        cfg = self._cfg()
-        total_count = int(stats.get("total_count", 0))
-        total_bytes = int(stats.get("total_bytes", 0))
-        if total_count <= int(cfg.max_items) and total_bytes <= int(
-            cfg.max_total_bytes
-        ):
-            return
-        candidates = await self._store.list_prune_candidates()
-        for candidate in candidates:
-            if candidate.pinned:
-                continue
+        async with self._prune_lock:
+            cfg = self._cfg()
+            stats = await self._store.stats()
+            total_count = int(stats.get("total_count", 0))
+            total_bytes = int(stats.get("total_bytes", 0))
             if total_count <= int(cfg.max_items) and total_bytes <= int(
                 cfg.max_total_bytes
             ):
-                break
-            deleted = await self._store.delete(candidate.uid)
-            if deleted is None:
-                continue
-            self._invalidate_global_image_cache(candidate.uid)
-            await self._vector_store.delete(candidate.uid)
-            await asyncio.to_thread(
-                self._delete_file_if_exists, Path(deleted.blob_path)
-            )
-            if deleted.preview_path and deleted.preview_path != deleted.blob_path:
-                await asyncio.to_thread(
-                    self._delete_file_if_exists,
-                    Path(deleted.preview_path),
-                )
-            total_count -= 1
-            total_bytes -= int(deleted.file_size)
+                return
+            candidates = await self._store.list_prune_candidates()
+            for candidate in candidates:
+                if candidate.pinned:
+                    continue
+                stats = await self._store.stats()
+                if int(stats.get("total_count", 0)) <= int(cfg.max_items) and int(
+                    stats.get("total_bytes", 0)
+                ) <= int(cfg.max_total_bytes):
+                    break
+                await self.delete_meme(candidate.uid, expected_record=candidate)
 
     async def blob_path_for_uid(
         self, uid: str, *, preview: bool = False

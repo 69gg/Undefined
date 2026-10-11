@@ -419,6 +419,16 @@ def process_at_mentions(message: str) -> str:
     return message
 
 
+def _unescape_cq_parameter(value: str) -> str:
+    """仅解码 CQ 参数实体一次；最后还原 &，避免再次解码字面实体。"""
+    return (
+        value.replace("&#91;", "[")
+        .replace("&#93;", "]")
+        .replace("&#44;", ",")
+        .replace("&amp;", "&")
+    )
+
+
 def message_to_segments(message: str) -> List[Dict[str, Any]]:
     """将包含 CQ 码的字符串转换为 OneBot 消息段数组
 
@@ -446,7 +456,9 @@ def message_to_segments(message: str) -> List[Dict[str, Any]]:
             for arg_pair in cq_args_str.split(","):
                 if "=" in arg_pair:
                     k, v = arg_pair.split("=", 1)
-                    data[k.strip()] = v.strip()
+                    data[_unescape_cq_parameter(k.strip())] = _unescape_cq_parameter(
+                        v.strip()
+                    )
 
         segments.append({"type": cq_type, "data": data})
         last_pos = match.end()

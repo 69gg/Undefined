@@ -39,6 +39,9 @@ export function CodeBlock({
 				// htm 别名映射到 html
 				const normalizedLanguage =
 					language.toLowerCase() === "htm" ? "html" : language;
+				if (!hljs.getLanguage(normalizedLanguage)) {
+					return { highlightedCode: null, detectedLanguage: "plaintext" };
+				}
 				// 指定了语言，尝试使用指定语言高亮
 				const result = hljs.highlight(trimmedCode, {
 					language: normalizedLanguage,
@@ -58,7 +61,7 @@ export function CodeBlock({
 		} catch (err) {
 			console.error("Highlight error:", err);
 			return {
-				highlightedCode: trimmedCode,
+				highlightedCode: null,
 				detectedLanguage: "plaintext",
 			};
 		}
@@ -141,9 +144,13 @@ export function CodeBlock({
 				<pre>
 					<code
 						className={`hljs ${showLineNumbers ? "line-numbers" : ""}`}
-						// highlight.js output is sanitized.
-						dangerouslySetInnerHTML={{ __html: highlightedCode }}
-					/>
+						// Only highlighter output is HTML; fallback code is rendered as text.
+						dangerouslySetInnerHTML={
+							highlightedCode === null ? undefined : { __html: highlightedCode }
+						}
+					>
+						{highlightedCode === null ? code.trim() : undefined}
+					</code>
 				</pre>
 			</div>
 		</div>

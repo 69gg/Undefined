@@ -187,7 +187,7 @@ HEAD /api/v1/onebot/files/{file_id}?token=...
 说明：这里的 HTTP 探针是“可达性/连通性探测”。只要拿到 HTTP 响应就会记为 `status=ok`，真实业务状态应结合 `http_status` 一起解读。
 当 Naga 集成未启用时，`naga_model` 会以 `status=skipped`、`reason=naga_integration_disabled` 出现在结果中。
 
-### 记忆（只读）
+### 长期记忆
 
 - `GET /api/v1/memory`
 - 查询参数：
@@ -195,7 +195,13 @@ HEAD /api/v1/onebot/files/{file_id}?token=...
   - `top_k`：返回条数上限（可选，正整数）
   - `time_from` / `time_to`：ISO 时间范围过滤（可选）
 
-说明：仅提供查看/查询，不提供写入接口，不改变现有记忆存储格式。
+- `POST /api/v1/memory`：用 `{"fact":"..."}` 创建记忆，成功返回 `201`；重复内容返回已提交记录的 UUID。
+- `PATCH /api/v1/memory/{uuid}`：用 `{"fact":"..."}` 更新记忆，成功返回 `200`。
+- `DELETE /api/v1/memory/{uuid}`：删除记忆，成功返回 `200`；不存在的 UUID 返回 `404`。
+
+增删改先串行原子落盘，再发布内存状态；持久化失败返回 `500` 并保留原记录，故障修复后可重试。等待提交锁时取消不会产生修改，实际写入开始后取消会先等待文件与内存提交完成。存储格式保持兼容。
+
+时间筛选接受带 `Z`、明确 UTC 偏移或无时区的 ISO 时间。无时区查询与旧记录中的无时区 `created_at` 均按 Bot 所在系统的本地时区解释（采用该日期的时区偏移），转换到 UTC 后比较；带偏移的时间按其实际时刻比较。上下界均包含在结果中；开始晚于结束时自动交换上下界。无效查询时间返回 `400`，无法解析创建时间的记录在启用时间筛选时跳过。响应中的 `created_at` 保留原始存储字符串。
 
 ### 表情包库
 
@@ -224,6 +230,8 @@ HEAD /api/v1/onebot/files/{file_id}?token=...
 - 表情包库条目使用统一图片 `uid`，与普通图片 `<attachment uid="..."/>` 语义一致。
 - 入库文本和向量索引只使用纯文本 `description + tags + aliases`，不依赖 OCR。
 - 后台重跑分析使用两阶段 LLM 管线：先判定，再描述。
+- 重分析期间可继续编辑或删除条目；提交结果时会核对编辑修订和记录身份，丢弃过期结果，包括旧任务的“不属于表情包”删除判定。旧分析不会覆盖人工修改、恢复已删除条目或影响同 UID 重新入库的记录。
+- 发送产生的使用次数不使分析失效；分析只更新生成字段并保留最新计数。最终记录与向量写入按内容串行收尾，取消会等待已开始的写入完成。GIF 多帧重分析的临时文件按任务独立清理。
 
 ### 自动化
 
@@ -373,6 +381,7 @@ Undefined Chat 使用同一组 Runtime Chat 端点作为权威合同。客户端
 - WebChat 不发布模型 token 级文本增量，也不发布工具参数增量；正文以 `message` 事件展示，工具只按生命周期事件展示。
 - `stage`、`agent_stage`、`webchat.calls`、`webchat.timeline`、`current_tool_calls` 和 `duration_ms` 是 display-only 展示元数据，不作为 AI-context 注入后续对话。
 - 工具结束事件 payload 会尽量带 `duration_ms`。运行中的 job 快照会在 `current_tool_calls` 返回仍在执行的工具 / Agent 及其后端计算的 `duration_ms`。
+- Job 快照的 `current_timeline` 包含截至 `last_seq` 的完整展示时间线（正文、已结束和运行中的调用及 Agent 内嵌时间线），客户端接受快照后从该序号续接事件。只有 SSE/JSON 增量事件重放缓冲保留最近 1000 条，完整展示快照与历史不会因此截掉早期正文。
 - WebUI 每 0.5 秒查询一次；查询间隙只用本地时间临时递增显示，下一次查询后以 Runtime 返回值校准。
 - 并发工具按实际完成时间发布结束事件，LLM tool message 回填仍保持模型要求的原始顺序。
 - 工具 / Agent 事件 payload 由后端补齐调用链字段：`webchat_call_id`、`parent_webchat_call_id`、`depth`、`agent_path`。
@@ -386,14 +395,15 @@ Undefined Chat 使用同一组 Runtime Chat 端点作为权威合同。客户端
 - 权限视角：`superadmin`。
 - 如果输入以 `/` 开头，按私聊命令分发执行（遵循命令 `allow_in_private` 开放策略）。
 - WebChat 会话持久化在 `data/webchat/conversations/<conversation_id>.json`，一个会话一个 JSON 文件。删除会话会删除对应 JSON；不会写入单个全局 conversations JSON。
-- 首次加载会自动把旧版 `data/history/private_42.json` 或运行中的旧历史管理器记录迁移到 `legacy-system-42`，并写入 `data/webchat/legacy_private_42_migrated.json` 迁移标记。只要标记存在就不会重复迁移；即使删除迁移出的会话，也不会再次从旧文件恢复。
+- 会话创建、改名、清空、旧历史迁移、标题状态及生成标题均在持久写入成功后更新可见缓存；写盘失败保留上次成功状态。删除失败也保留会话与标题任务，便于重试。持久操作开始后取消请求，会等文件和缓存提交收敛后再释放会话锁。
+- 首次加载会自动把旧版 `data/history/private_42.json` 或运行中的旧历史管理器记录迁移到 `legacy-system-42`，并写入 `data/webchat/legacy_private_42_migrated.json` 迁移标记。迁移写盘失败不写完成标记，可在存储恢复后重试。只要标记存在就不会重复迁移；即使删除迁移出的会话，也不会再次从旧文件恢复。
 
 ### WebUI AI Chat Conversations
 
 - `GET /api/v1/chat/conversations`：列出 WebChat 会话，响应包含 `conversations`、`active_job`、`default_conversation_id` 和 `virtual_user_id`。
 - `POST /api/v1/chat/conversations`：新建会话，Body 可选 `{"title":"..."}`。不传标题时先使用临时标题。
 - `PATCH /api/v1/chat/conversations/{conversation_id}`：重命名会话，Body 为 `{"title":"..."}`。手动标题会标记为 `manual`，后续不会被自动标题覆盖。
-- `DELETE /api/v1/chat/conversations/{conversation_id}`：删除会话 JSON。若目标会话存在运行中或收尾落盘的 WebChat job，返回 `409`。
+- `DELETE /api/v1/chat/conversations/{conversation_id}`：删除会话 JSON。与新任务接受共用串行边界；若目标会话存在运行中或收尾落盘的 WebChat job，返回 `409`，删除后的会话创建新任务返回 `404`。
 
 会话标题由后端维护。第一条用户消息写入后会先用首问前若干字符作为临时标题；当该会话同时具备首问和首答时，后端会调标题生成模型用“首问 + 首答”生成正式标题。标题生成带状态和内容哈希校验，避免并发回复、手动重命名或历史变化时把旧标题写回新内容。
 
@@ -523,6 +533,7 @@ Undefined Chat 使用同一组 Runtime Chat 端点作为权威合同。客户端
 
 - `POST /api/v1/chat/jobs`：创建后台 job。兼容旧 Body `{"message":"...","conversation_id":"..."}`，也支持结构化 Body `{"message":{"text":"...","attachment_ids":["..."],"references":[{"message_id":"...","quote":"..."}]},"conversation_id":"..."}`；`conversation_id` 可选。取消后重试最后一条纯文本用户消息时，可传 `reuse_previous_user_message: true`，Runtime 会要求最后一条可见用户历史与本次文本完全一致，并跳过重复写入用户历史。
 - WebChat job 在同一会话内 single-flight；如果目标会话已有 job 正在运行或收尾落盘，创建新 job 返回 `409`。不同会话可以并发运行。兼容的非流式 `POST /api/v1/chat` 也走同一套会话级 job 锁，只是等待完成后返回同步结果。
+- Runtime 开始停止后，新的 job 和同步／SSE 聊天请求返回 `503`；此前已进入创建阶段的历史写入会先收敛，再取消并收尾其任务。结构化消息的历史预写失败时会撤销未启动的 job，缓存与磁盘均不追加失败消息，存储恢复后可以正常重试。若取消发生在历史原子写入已提交之后，该条用户历史会保留，但不会遗留未启动的 active job。
 - 附件先通过 `POST /api/v1/chat/attachments` 以 multipart 上传并由 Runtime 返回附件 metadata；发送消息时只传 Runtime 生成的 `attachment_ids`。客户端不应把本地文件内容、下载 URL 或临时缓存路径拼入 `message.text`。
 - 引用内容通过结构化 `references` 提交。Runtime 负责把引用写入历史 metadata，并按需要生成 AI 可见上下文；客户端不把引用块拼接进最终历史作为真源。
 - `GET /api/v1/chat/jobs/active?conversation_id=<id>`：返回兼容字段 `job` 和 active `jobs[]`。不传时 `jobs[]` 包含所有运行中 WebChat job，`job` 为最新 active job；传入 `conversation_id` 时只返回目标会话的 active job。
@@ -583,6 +594,8 @@ Undefined Chat 使用同一组 Runtime Chat 端点作为权威合同。客户端
 ```
 
 `events` 只包含 `after` 之后的持久事件以及当前运行阶段快照。快照使用当前 `last_seq`，便于刷新或断线后以 `job_id + seq` 轮询续接，但不会推进序号或重复写入历史。
+
+`done`、`error` 或 `cancelled` 终态事件可能早于历史落盘与任务收尾完成。客户端应继续查询 job，直到快照的 `history_finalized = true`，再重载历史、释放会话发送锁；该字段只有在历史已完成且任务已解除会话占用时才为 `true`，与 Runtime 接受下一任务的门槛一致。详情接口与 JSON 事件接口使用相同的完成信号。
 
 Runtime 在同一个 job 条件锁内维护事件、顶层阶段、Agent 阶段和耗时快照，因此 JSON 查询和兼容 SSE 都应看到一致的 job 状态。
 - `GET /api/v1/chat/jobs/{job_id}/events?after=<seq>` 加请求头 `Accept: text/event-stream`：兼容 SSE 订阅；SSE 帧包含 `id: <seq>`，长时间无事件时会发送 keep-alive 注释帧。
@@ -979,6 +992,9 @@ Naga 集成端点仅在以下条件同时满足时注册：
 - 绑定流程使用 `bind_uuid` 驱动，而不是早期的 scoped token。
 - 发送流程使用 `bind_uuid + naga_id + delivery_signature` 三元组验签。
 - 发送流程支持调用方提供 `uuid` 作为幂等键；相同键的重复请求会直接复用首个结果。
+- 投递成功后，使用次数等统计的持久化失败只记录日志，仍返回实际投递结果并保留 `uuid` 幂等结果；同键重试不会再次发送。统计信息在该次持久化失败后可能暂时未落盘。
+- 已确认的投递结果会先提交幂等状态，再保存使用统计；收尾期间取消请求会等待这段提交和投递租约释放后再传播取消，同键重试仍复用已确认结果。该保护区不包含审核或实际发送，不会把未确认的投递转换为成功。
+- 请求异常退出后的 `uuid` 失败清理由首个请求负责，清理期间取消也会等待进行中状态释放；重复请求的失败或取消只结束自身等待，不取消共享结果、不清理其他请求拥有的状态。
 - `target.qq_id` / `target.group_id` 必须显式提供，并且必须等于已绑定目标。
 - `target.mode` 支持 `private` / `group` / `both`。
 - `message.format` 支持 `text` / `markdown` / `html`。

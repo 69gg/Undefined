@@ -1214,7 +1214,10 @@ async def test_security_headers_csp_allows_blob_image_previews() -> None:
     request = make_mocked_request("GET", "/")
     response = await webui_app.security_headers_middleware(request, _handler)
 
-    assert "img-src 'self' data: blob:;" in response.headers["Content-Security-Policy"]
+    assert (
+        "img-src 'self' data: blob: http: https:;"
+        in response.headers["Content-Security-Policy"]
+    )
 
 
 async def test_non_static_responses_have_no_explicit_cache_control() -> None:

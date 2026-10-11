@@ -5,12 +5,15 @@ import "./style.css";
 type Lang = "zh" | "en";
 type Theme = "light" | "dark";
 type ProbeKind = "management" | "runtime" | "profile" | "configuration";
+type ConnectionScheme = "http" | "https";
 
 type ConnectionProfile = {
 	id: string;
 	name: string;
 	host: string;
+	managementScheme: ConnectionScheme;
 	managementPort: string;
+	runtimeScheme: ConnectionScheme;
 	runtimePort: string;
 	password: string;
 	notes: string;
@@ -53,7 +56,9 @@ const messages = {
 		host: "IP / 域名",
 		host_placeholder: "例如：192.168.2.1 或 example.com",
 		management_port: "Management 端口",
+		management_scheme: "Management 协议",
 		runtime_port: "Runtime 端口",
+		runtime_scheme: "Runtime 协议",
 		password: "管理密码",
 		password_placeholder: "填写后打开 WebUI 时会自动尝试登录",
 		notes: "备注",
@@ -109,7 +114,9 @@ const messages = {
 		host: "Host / IP",
 		host_placeholder: "For example: 192.168.2.1 or example.com",
 		management_port: "Management port",
+		management_scheme: "Management protocol",
 		runtime_port: "Runtime port",
+		runtime_scheme: "Runtime protocol",
 		password: "Management password",
 		password_placeholder: "If filled, WebUI will try to sign in automatically",
 		notes: "Notes",
@@ -185,17 +192,37 @@ function loadPreference<T extends Lang | Theme>(
 	}
 }
 
-function parseLegacyUrl(url: string): { host: string; port: string } {
+function normalizeHost(host: string): string {
+	const text = host.trim();
+	return text.startsWith("[") && text.endsWith("]") ? text.slice(1, -1) : text;
+}
+
+function connectionScheme(
+	value: unknown,
+	fallback: ConnectionScheme = "http",
+): ConnectionScheme {
+	return value === "http" || value === "https" ? value : fallback;
+}
+
+function parseLegacyUrl(url: string): {
+	host: string;
+	port: string;
+	scheme: ConnectionScheme;
+} {
 	const text = String(url || "").trim();
-	if (!text) return { host: "", port: "" };
+	const empty = { host: "", port: "", scheme: "http" as const };
+	if (!text) return empty;
 	try {
 		const parsed = new URL(text);
+		if (parsed.protocol !== "http:" && parsed.protocol !== "https:")
+			return empty;
 		return {
-			host: parsed.hostname || "",
+			host: normalizeHost(parsed.hostname),
 			port: parsed.port || (parsed.protocol === "https:" ? "443" : "80"),
+			scheme: parsed.protocol === "https:" ? "https" : "http",
 		};
 	} catch {
-		return { host: "", port: "" };
+		return empty;
 	}
 }
 
@@ -207,7 +234,9 @@ function loadProfiles(): ConnectionProfile[] {
 				id: crypto.randomUUID(),
 				name: messages.zh.profile_default_name,
 				host: "127.0.0.1",
+				managementScheme: "http",
 				managementPort: "8787",
+				runtimeScheme: "http",
 				runtimePort: "8788",
 				password: "",
 				notes: messages.zh.profile_default_notes,
@@ -220,15 +249,22 @@ function loadProfiles(): ConnectionProfile[] {
 		return parsed.map((item) => {
 			const management = parseLegacyUrl(String(item.managementUrl || ""));
 			const runtime = parseLegacyUrl(String(item.runtimeUrl || ""));
-			const host = String(item.host || management.host || runtime.host || "");
+			const host = normalizeHost(
+				String(item.host || management.host || runtime.host || ""),
+			);
 			return {
 				id: String(item.id || crypto.randomUUID()),
 				name: String(item.name || messages.zh.profile_new_name),
 				host,
+				managementScheme: connectionScheme(
+					item.managementScheme,
+					management.scheme,
+				),
 				managementPort: String(
 					item.managementPort || management.port || "8787",
 				),
 				runtimePort: String(item.runtimePort || runtime.port || "8788"),
+				runtimeScheme: connectionScheme(item.runtimeScheme, runtime.scheme),
 				password: String(item.password || ""),
 				notes: String(item.notes || ""),
 			};
@@ -262,22 +298,31 @@ function selectedProfile(): ConnectionProfile | undefined {
 }
 
 function formatHost(host: string): string {
-	if (host.includes(":")) return `[${host}]`;
-	return host;
+	const normalized = normalizeHost(host);
+	return normalized.includes(":") ? `[${normalized}]` : normalized;
 }
 
 function buildManagementUrl(profile: ConnectionProfile): string {
 	const host = profile.host.trim();
 	const port = profile.managementPort.trim();
 	if (!host || !port) return "";
-	return `http://${formatHost(host)}:${port}`;
+	return `${profile.managementScheme}://${formatHost(host)}:${port}`;
 }
 
 function buildRuntimeUrl(profile: ConnectionProfile): string {
 	const host = profile.host.trim();
 	const port = profile.runtimePort.trim();
 	if (!host || !port) return "";
-	return `http://${formatHost(host)}:${port}`;
+	return `${profile.runtimeScheme}://${formatHost(host)}:${port}`;
+}
+
+function schemeOptions(selected: ConnectionScheme): string {
+	return (["http", "https"] as const)
+		.map(
+			(scheme) =>
+				`<option value="${scheme}"${scheme === selected ? " selected" : ""}>${scheme.toUpperCase()}</option>`,
+		)
+		.join("");
 }
 
 function badge(status: ProbeState["status"]): string {
@@ -646,8 +691,16 @@ function render(): void {
                                     <input id="host" name="host" value="${escapeAttribute(profile?.host ?? "")}" placeholder="${escapeAttribute(t("host_placeholder"))}" />
                                 </div>
                                 <div class="field">
+                                    <label for="management-scheme">${t("management_scheme")}</label>
+                                    <select id="management-scheme" name="managementScheme">${schemeOptions(profile?.managementScheme ?? "http")}</select>
+                                </div>
+                                <div class="field">
                                     <label for="management-port">${t("management_port")}</label>
                                     <input id="management-port" name="managementPort" value="${escapeAttribute(profile?.managementPort ?? "")}" inputmode="numeric" />
+                                </div>
+                                <div class="field">
+                                    <label for="runtime-scheme">${t("runtime_scheme")}</label>
+                                    <select id="runtime-scheme" name="runtimeScheme">${schemeOptions(profile?.runtimeScheme ?? "http")}</select>
                                 </div>
                                 <div class="field">
                                     <label for="runtime-port">${t("runtime_port")}</label>
@@ -692,8 +745,16 @@ function bindEvents(): void {
 			const nextProfile: ConnectionProfile = {
 				id: state.selectedId || crypto.randomUUID(),
 				name: String(form.get("name") || t("profile_new_name")).trim(),
-				host: String(form.get("host") || "").trim(),
+				host: normalizeHost(String(form.get("host") || "")),
+				managementScheme: connectionScheme(
+					form.get("managementScheme"),
+					selectedProfile()?.managementScheme,
+				),
 				managementPort: String(form.get("managementPort") || "").trim(),
+				runtimeScheme: connectionScheme(
+					form.get("runtimeScheme"),
+					selectedProfile()?.runtimeScheme,
+				),
 				runtimePort: String(form.get("runtimePort") || "").trim(),
 				password: String(form.get("password") || "").trim(),
 				notes: String(form.get("notes") || "").trim(),
@@ -749,7 +810,9 @@ function bindEvents(): void {
 				id: crypto.randomUUID(),
 				name: t("profile_new_name"),
 				host: "",
+				managementScheme: "http",
 				managementPort: "",
+				runtimeScheme: "http",
 				runtimePort: "",
 				password: "",
 				notes: "",
@@ -768,7 +831,9 @@ function bindEvents(): void {
 				id: crypto.randomUUID(),
 				name: t("profile_seed_name"),
 				host: "127.0.0.1",
+				managementScheme: "http",
 				managementPort: "8787",
+				runtimeScheme: "http",
 				runtimePort: "8788",
 				password: "",
 				notes: t("profile_seed_notes"),

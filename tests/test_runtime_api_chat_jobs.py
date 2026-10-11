@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -104,6 +105,273 @@ async def _last_webchat_record(server: RuntimeAPIServer) -> dict[str, Any]:
     assert isinstance(messages, list)
     assert messages
     return cast(dict[str, Any], messages[-1])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("first_operation", ["create", "delete"])
+@pytest.mark.parametrize("pre_record_user_history", [False, True])
+async def test_conversation_delete_and_job_acceptance_are_serialized(
+    monkeypatch: pytest.MonkeyPatch,
+    first_operation: str,
+    pre_record_user_history: bool,
+) -> None:
+    release_chat = asyncio.Event()
+    chat_started = asyncio.Event()
+
+    async def run_chat(_ctx: RuntimeAPIContext, **_kwargs: Any) -> str:
+        chat_started.set()
+        await release_chat.wait()
+        return "chat"
+
+    monkeypatch.setattr(runtime_api_chat, "run_webui_chat", run_chat)
+    server = RuntimeAPIServer(_context(), host="127.0.0.1", port=8788)
+    manager = server._chat_job_manager
+    store = manager.conversation_store
+    await store.ensure_ready(manager._ctx.history_manager)
+    conversation = await store.create_conversation()
+    conversation_id = str(conversation["id"])
+    request = cast(
+        web.Request,
+        cast(Any, _DummyRequest(match_info={"conversation_id": conversation_id})),
+    )
+    # 模拟重命名/文件写入持有真实会话锁，让两种请求在同一边界排队。
+    conversation_lock = store._get_lock(conversation_id)
+    await conversation_lock.acquire()
+
+    async def create() -> runtime_api_chat.ChatJob | None:
+        try:
+            return await manager.create_job(
+                "hello",
+                conversation_id,
+                pre_record_user_history=pre_record_user_history,
+            )
+        except KeyError:
+            return None
+
+    async def delete() -> web.Response:
+        return await server._chat_conversation_delete_handler(request)
+
+    try:
+        if first_operation == "create":
+            creation = asyncio.create_task(create())
+            await asyncio.sleep(0)
+            deletion = asyncio.create_task(delete())
+        else:
+            deletion = asyncio.create_task(delete())
+            await asyncio.sleep(0)
+            creation = asyncio.create_task(create())
+        await asyncio.sleep(0)
+        conversation_lock.release()
+        job, response = await asyncio.wait_for(
+            asyncio.gather(creation, deletion), timeout=2
+        )
+        if first_operation == "create":
+            assert job is not None
+            assert response.status == 409
+            assert await store.get_conversation(conversation_id) is not None
+            await asyncio.wait_for(chat_started.wait(), timeout=2)
+            await store.append_message(
+                conversation_id,
+                role="bot",
+                text_content="reply",
+                display_name="Bot",
+                user_name="Bot",
+            )
+        else:
+            assert response.status == 200
+            assert job is None
+            assert not manager._jobs
+            assert not chat_started.is_set()
+            assert await store.get_conversation(conversation_id) is None
+    finally:
+        if conversation_lock.locked():
+            conversation_lock.release()
+        release_chat.set()
+        await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_running_job_snapshot_contains_complete_nested_display_timeline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ready = asyncio.Event()
+    release = asyncio.Event()
+
+    async def run_chat(
+        _ctx: RuntimeAPIContext,
+        *,
+        send_output: Any,
+        webchat_event_callback: Any,
+        **_kwargs: Any,
+    ) -> str:
+        await send_output(42, "root prefix")
+        await webchat_event_callback(
+            "tool_start",
+            {
+                "tool_call_id": "agent-tool",
+                "webchat_call_id": "agent",
+                "name": "web_agent",
+                "is_agent": True,
+                "arguments": {"password": "must-not-leak"},
+            },
+        )
+        await send_output(42, "agent message")
+        nested = {
+            "tool_call_id": "search-tool",
+            "webchat_call_id": "agent/search",
+            "parent_webchat_call_id": "agent",
+            "name": "search",
+        }
+        await webchat_event_callback("tool_start", nested)
+        await webchat_event_callback(
+            "tool_end", {**nested, "ok": True, "result": "completed search"}
+        )
+        ready.set()
+        await release.wait()
+        return "chat"
+
+    monkeypatch.setattr(runtime_api_chat, "run_webui_chat", run_chat)
+    server = RuntimeAPIServer(_context(), host="127.0.0.1", port=8788)
+    manager = server._chat_job_manager
+    job = await manager.create_job("hello")
+    try:
+        await asyncio.wait_for(ready.wait(), timeout=2)
+        detail = await server._chat_job_detail_handler(
+            cast(
+                web.Request, cast(Any, _DummyRequest(match_info={"job_id": job.job_id}))
+            )
+        )
+        snapshot = json.loads(detail.text or "{}")
+        assert snapshot["last_seq"] == job.next_seq - 1
+        assert snapshot["messages"] == ["root prefix", "agent message"]
+        timeline = snapshot["current_timeline"]
+        assert [item["type"] for item in timeline] == ["message", "call"]
+        assert timeline[0]["content"] == "root prefix"
+        agent = timeline[1]["call"]
+        assert agent["webchat_call_id"] == "agent"
+        assert agent["status"] == "running"
+        assert [item["type"] for item in agent["timeline"]] == ["message", "call"]
+        assert agent["timeline"][0]["content"] == "agent message"
+        child = agent["timeline"][1]["call"]
+        assert child["status"] == "done"
+        assert child["result_preview"] == "completed search"
+        assert agent["children"] == [child]
+        assert "must-not-leak" not in json.dumps(timeline)
+        assert len(snapshot["current_tool_calls"]) == 1
+        assert snapshot["current_tool_calls"][0]["webchat_call_id"] == "agent"
+        events, refreshed, _live = await manager.events_after_with_snapshot(
+            job, snapshot["last_seq"]
+        )
+        assert events == []
+        assert refreshed["current_timeline"] == timeline
+    finally:
+        release.set()
+        await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_job_snapshot_preserves_display_content_beyond_sse_replay_limit() -> None:
+    manager = runtime_api_chat.ChatJobManager(_context())
+    job = runtime_api_chat.ChatJob("snapshot-job", "hello", 1, 1, status="running")
+    for index in range(runtime_api_chat._CHAT_JOB_EVENT_BUFFER_LIMIT + 5):
+        await manager._append_event(job, "message", {"content": f"message-{index}"})
+    snapshot = await manager.snapshot(job)
+    timeline = snapshot["current_timeline"]
+    assert len(job.events) == runtime_api_chat._CHAT_JOB_EVENT_BUFFER_LIMIT
+    assert len(timeline) == runtime_api_chat._CHAT_JOB_EVENT_BUFFER_LIMIT + 5
+    assert timeline[0]["content"] == "message-0"
+    assert timeline[-1]["content"] == (
+        f"message-{runtime_api_chat._CHAT_JOB_EVENT_BUFFER_LIMIT + 4}"
+    )
+    assert timeline[-1]["seq"] == snapshot["last_seq"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["error", "cancelled"])
+async def test_terminal_snapshot_finalizes_unclosed_display_calls(status: str) -> None:
+    manager = runtime_api_chat.ChatJobManager(_context())
+    job = runtime_api_chat.ChatJob("terminal-job", "hello", 1, 1, status=status)
+    await manager.append_lifecycle_event(
+        job,
+        "tool_start",
+        {"tool_call_id": "tool", "webchat_call_id": "tool", "name": "search"},
+    )
+    timeline = (await manager.snapshot(job))["current_timeline"]
+    assert timeline[0]["call"]["status"] == status
+    assert timeline == runtime_api_chat._build_webchat_history_payload(job)["timeline"]
+
+
+@pytest.mark.asyncio
+async def test_history_finalized_is_published_only_after_job_releases_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def run_chat(ctx: RuntimeAPIContext, *, text: str, send_output: Any) -> str:
+        await send_output(42, "final")
+        return "chat"
+
+    title_entered = asyncio.Event()
+    release_title = asyncio.Event()
+
+    async def schedule_title(conversation_id: str) -> None:
+        title_entered.set()
+        await release_title.wait()
+
+    server = RuntimeAPIServer(_context(), host="127.0.0.1", port=8788)
+    manager = server._chat_job_manager
+    monkeypatch.setattr(runtime_api_chat, "run_webui_chat", run_chat)
+    monkeypatch.setattr(manager, "maybe_schedule_title_generation", schedule_title)
+    job = await manager.create_job("first")
+    detail_request = cast(
+        web.Request,
+        cast(Any, _DummyRequest(match_info={"job_id": job.job_id}, query={})),
+    )
+    events_request = cast(
+        web.Request,
+        cast(
+            Any,
+            _DummyRequest(
+                match_info={"job_id": job.job_id},
+                query={"format": "json"},
+                headers={"Accept": "application/json"},
+            ),
+        ),
+    )
+    try:
+        await asyncio.wait_for(title_entered.wait(), timeout=2.0)
+        # 真实 job 已经落盘，但最终收尾仍占用会话。
+        assert job.status == "done"
+        assert job.history_finalized is True
+        assert not job.done.is_set()
+        assert await manager.has_running_job(job.conversation_id)
+        assert (await manager.snapshot(job))["history_finalized"] is False
+        response = await server._chat_job_detail_handler(detail_request)
+        assert json.loads(response.text or "{}")["history_finalized"] is False
+        events_response = await server._chat_job_events_handler(events_request)
+        assert isinstance(events_response, web.Response)
+        payload = json.loads(events_response.text or "{}")
+        assert payload["job"]["history_finalized"] is False
+        assert any(event["event"] == "done" for event in payload["events"])
+        with pytest.raises(RuntimeError, match="still running"):
+            await manager.create_job("too early", job.conversation_id)
+
+        release_title.set()
+        assert job.task is not None
+        await asyncio.wait_for(job.task, timeout=2.0)
+        assert job.done.is_set()
+        assert not await manager.has_running_job(job.conversation_id)
+        response = await server._chat_job_detail_handler(detail_request)
+        assert json.loads(response.text or "{}")["history_finalized"] is True
+        events_response = await server._chat_job_events_handler(events_request)
+        assert isinstance(events_response, web.Response)
+        assert (
+            json.loads(events_response.text or "{}")["job"]["history_finalized"] is True
+        )
+        next_job = await manager.create_job("next", job.conversation_id)
+        assert next_job.task is not None
+        await asyncio.wait_for(next_job.task, timeout=2.0)
+    finally:
+        release_title.set()
+        await manager.stop()
 
 
 async def _store_runtime_attachment(
@@ -902,6 +1170,201 @@ async def test_chat_job_cancelled_error_event_is_appended_once() -> None:
         if event.event == "error" and event.payload.get("error") == "cancelled"
     ]
     assert len(cancelled_events) == 1
+
+
+@pytest.mark.asyncio
+async def test_chat_job_history_write_failure_rolls_back_creation_and_cache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    server = RuntimeAPIServer(_context(), host="127.0.0.1", port=8788)
+    manager = server._chat_job_manager
+    await manager.conversation_store.ensure_ready()
+    conversation = await manager.conversation_store.ensure_default_conversation()
+    conversation_id = str(conversation["id"])
+    history_path = manager.conversation_store._path_for(conversation_id)
+    original_disk = history_path.read_bytes()
+    original_write = async_io.write_json_sync
+    fail_once = True
+
+    def write_json(file_path: Path | str, data: Any, use_lock: bool = True) -> None:
+        nonlocal fail_once
+        if Path(file_path) == history_path and data.get("messages") and fail_once:
+            fail_once = False
+            raise OSError("history disk unavailable")
+        original_write(file_path, data, use_lock)
+
+    run_chat = AsyncMock(return_value="chat")
+    monkeypatch.setattr(async_io, "write_json_sync", write_json)
+    monkeypatch.setattr(runtime_api_chat, "run_webui_chat", run_chat)
+
+    def request() -> web.Request:
+        return cast(
+            web.Request,
+            cast(
+                Any,
+                _DummyRequest(
+                    _json={
+                        "conversation_id": conversation_id,
+                        "message": {"text": "hello"},
+                    }
+                ),
+            ),
+        )
+
+    with pytest.raises(OSError, match="history disk unavailable"):
+        await server._chat_job_create_handler(request())
+
+    assert not manager._jobs
+    assert await manager.get_active_job(conversation_id) is None
+    page = await manager.conversation_store.get_history_page(
+        conversation_id, limit=50, before=None
+    )
+    assert page.total == 0
+    assert history_path.read_bytes() == original_disk
+    run_chat.assert_not_awaited()
+
+    retry = await server._chat_job_create_handler(request())
+    assert retry.status == 202
+    job = await manager.get_job(str(json.loads(retry.text or "{}")["job_id"]))
+    assert job is not None and job.task is not None
+    await asyncio.wait_for(job.task, timeout=2)
+    page = await manager.conversation_store.get_history_page(
+        conversation_id, limit=50, before=None
+    )
+    assert [record["message"] for record in page.records] == ["hello"]
+    assert len(json.loads(history_path.read_text(encoding="utf-8"))["messages"]) == 1
+    assert await manager.clear_history_when_idle(conversation_id) == 1
+    await server.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("endpoint", ["job", "sync", "sse"])
+async def test_chat_stop_rejects_new_jobs_while_existing_job_finishes(
+    endpoint: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    started = asyncio.Event()
+    cancelling = asyncio.Event()
+    release = asyncio.Event()
+    calls: list[str] = []
+
+    async def run_chat(_ctx: Any, *, text: str, **_kwargs: Any) -> str:
+        calls.append(text)
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelling.set()
+            await release.wait()
+        return "chat"
+
+    monkeypatch.setattr(runtime_api_chat, "run_webui_chat", run_chat)
+    server = RuntimeAPIServer(_context(), host="127.0.0.1", port=8788)
+    manager = server._chat_job_manager
+    job = await manager.create_job("old")
+    other = await manager.conversation_store.create_conversation()
+    await asyncio.wait_for(started.wait(), timeout=2)
+    stopping = asyncio.create_task(server.stop())
+    try:
+        await asyncio.wait_for(cancelling.wait(), timeout=2)
+        body: dict[str, Any] = {
+            "conversation_id": str(other["id"]),
+            "message": {"text": "new"} if endpoint == "job" else "new",
+            "stream": endpoint == "sse",
+        }
+        request = cast(web.Request, cast(Any, _DummyRequest(_json=body)))
+        response: web.StreamResponse
+        if endpoint == "job":
+            response = await server._chat_job_create_handler(request)
+        else:
+            response = await server._chat_handler(request)
+        assert response.status == 503
+        assert len(manager._jobs) == 1
+        assert calls == ["old"]
+        release.set()
+        await asyncio.wait_for(stopping, timeout=2)
+        assert job.status == "cancelled"
+        assert job.done.is_set()
+        assert not await manager.has_running_job()
+        with pytest.raises(runtime_api_chat.ChatJobManagerClosingError):
+            await manager.create_job("after stop")
+    finally:
+        release.set()
+        await stopping
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancel_creation", [False, True])
+async def test_chat_stop_waits_for_in_progress_history_write(
+    cancel_creation: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    started = threading.Event()
+    release = threading.Event()
+    server = RuntimeAPIServer(_context(), host="127.0.0.1", port=8788)
+    manager = server._chat_job_manager
+    await manager.conversation_store.ensure_ready()
+    conversation = await manager.conversation_store.ensure_default_conversation()
+    conversation_id = str(conversation["id"])
+    history_path = manager.conversation_store._path_for(conversation_id)
+    original_write = async_io.write_json_sync
+
+    def controlled_write(
+        file_path: Path | str, data: Any, use_lock: bool = True
+    ) -> None:
+        if Path(file_path) == history_path and data.get("messages"):
+            started.set()
+            if not release.wait(timeout=3):
+                raise TimeoutError("history write not released")
+        original_write(file_path, data, use_lock)
+
+    async def run_chat(_ctx: Any, **_kwargs: Any) -> str:
+        await asyncio.Event().wait()
+        return "chat"
+
+    monkeypatch.setattr(async_io, "write_json_sync", controlled_write)
+    run_mock = AsyncMock(side_effect=run_chat)
+    monkeypatch.setattr(runtime_api_chat, "run_webui_chat", run_mock)
+    creation = asyncio.create_task(
+        manager.create_job("hello", conversation_id, pre_record_user_history=True)
+    )
+    stopping: asyncio.Task[None] | None = None
+    try:
+        assert await asyncio.wait_for(asyncio.to_thread(started.wait, 1), timeout=2)
+        stopping = asyncio.create_task(server.stop())
+        await asyncio.sleep(0)
+        assert manager._closing
+        with pytest.raises(runtime_api_chat.ChatJobManagerClosingError):
+            await manager.create_job("new")
+        if cancel_creation:
+            creation.cancel()
+            await asyncio.sleep(0)
+            assert not creation.done()
+        assert not stopping.done()
+        release.set()
+        if cancel_creation:
+            with pytest.raises(asyncio.CancelledError):
+                await creation
+            run_mock.assert_not_awaited()
+            assert not manager._jobs
+        else:
+            job = await creation
+            await asyncio.wait_for(stopping, timeout=2)
+            assert job.status == "cancelled"
+            assert job.done.is_set()
+            assert job.task is not None and job.task.done()
+        await asyncio.wait_for(stopping, timeout=2)
+        assert not await manager.has_running_job()
+        page = await manager.conversation_store.get_history_page(
+            conversation_id, limit=50, before=None
+        )
+        assert [record["message"] for record in page.records] == ["hello"]
+        assert (
+            len(json.loads(history_path.read_text(encoding="utf-8"))["messages"]) == 1
+        )
+    finally:
+        release.set()
+        await asyncio.gather(creation, return_exceptions=True)
+        if stopping is not None:
+            await stopping
 
 
 @pytest.mark.asyncio

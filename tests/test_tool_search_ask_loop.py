@@ -16,6 +16,9 @@ from Undefined.skills.toolsets.music._track_refs import (
     MUSIC_TRACK_STORE_CONTEXT_KEY,
     MusicTrackReferenceStore,
 )
+from Undefined.skills.tools.task_progress.handler import (
+    execute as execute_task_progress,
+)
 from Undefined.utils.easter_egg_calls import (
     format_batched_easter_egg_message,
     main_call_key,
@@ -156,6 +159,81 @@ def _build_client(
     client._build_messages_mock = build_messages
     client._virtual_tool_announcements = virtual_tool_announcements
     return client
+
+
+@pytest.mark.asyncio
+async def test_task_progress_state_survives_rounds_and_replanning() -> None:
+    stores: list[list[dict[str, Any]]] = []
+    results: list[str] = []
+
+    async def execute_tool(
+        name: str, args: dict[str, Any], context: dict[str, Any]
+    ) -> str:
+        if name == "end":
+            context["conversation_ended"] = True
+            return "ended"
+        assert name == "task_progress"
+        stores.append(context["_task_progress"])
+        result = await execute_task_progress(args, context)
+        results.append(result)
+        return result
+
+    client = _build_client(
+        execute_tool=execute_tool,
+        tool_search_enabled=False,
+        schemas=[_tool("task_progress"), _tool("end")],
+        llm_responses=[
+            _llm_tool_calls(
+                _tool_call(
+                    "plan_first",
+                    "task_progress",
+                    '{"action":"plan","tasks":[{"id":1,"description":"first"}]}',
+                )
+            ),
+            _llm_tool_calls(
+                _tool_call(
+                    "update_first",
+                    "task_progress",
+                    '{"action":"update","tasks":[{"id":1,"status":"done"}]}',
+                )
+            ),
+            _llm_tool_calls(
+                _tool_call(
+                    "plan_again",
+                    "task_progress",
+                    '{"action":"plan","tasks":[{"id":2,"description":"second"}]}',
+                )
+            ),
+            _llm_tool_calls(
+                _tool_call(
+                    "update_second",
+                    "task_progress",
+                    '{"action":"update","tasks":[{"id":2,"status":"done"}]}',
+                )
+            ),
+            _llm_tool_calls(_tool_call("end_first", "end")),
+            _llm_tool_calls(
+                _tool_call(
+                    "update_new_request",
+                    "task_progress",
+                    '{"action":"update","tasks":[{"id":2,"status":"done"}]}',
+                )
+            ),
+            _llm_tool_calls(_tool_call("end_second", "end")),
+        ],
+    )
+
+    assert await AIClient.ask(client, "plan and complete tasks") == ""
+    assert await AIClient.ask(client, "new request") == ""
+
+    assert results[0].startswith("计划已创建")
+    assert "进度: 1/1" in results[1]
+    assert results[2].startswith("计划已创建")
+    assert "进度: 1/1" in results[3]
+    assert all(store is stores[0] for store in stores[:4])
+    assert stores[0] == [{"id": 2, "description": "second", "status": "done"}]
+    assert stores[4] is not stores[0]
+    assert results[4] == "还没有任务计划，请先用 plan 动作创建"
 
 
 @pytest.mark.asyncio

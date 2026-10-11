@@ -17,6 +17,7 @@ from ..coercers import (
 )
 
 from ..onebot import parse_file_send_host, parse_file_send_mode
+from ..models import DEFAULT_GROUP_LLM_QUEUE_MAX_PENDING
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +137,20 @@ def load_core(
     if ai_request_max_retries < 0:
         ai_request_max_retries = 0
 
+    group_llm_queue_limit_raw = _get_value(
+        data, ("core", "group_llm_queue_max_pending"), "GROUP_LLM_QUEUE_MAX_PENDING"
+    )
+    if group_llm_queue_limit_raw is None:
+        group_llm_queue_max_pending = DEFAULT_GROUP_LLM_QUEUE_MAX_PENDING
+    else:
+        group_llm_queue_max_pending = _coerce_int(group_llm_queue_limit_raw, 0)
+        if (
+            isinstance(group_llm_queue_limit_raw, bool)
+            or not isinstance(group_llm_queue_limit_raw, (int, str))
+            or group_llm_queue_max_pending < 1
+        ):
+            raise ValueError("core.group_llm_queue_max_pending 必须为正整数")
+
     missing_tool_call_retries = _coerce_int(
         _get_value(
             data,
@@ -178,6 +193,7 @@ def load_core(
         "repeat_cooldown_minutes": repeat_cooldown_minutes,
         "context_recent_messages_limit": context_recent_messages_limit,
         "ai_request_max_retries": ai_request_max_retries,
+        "group_llm_queue_max_pending": group_llm_queue_max_pending,
         "missing_tool_call_retries": missing_tool_call_retries,
         "nagaagent_mode_enabled": nagaagent_mode_enabled,
         "onebot_ws_url": onebot_ws_url,

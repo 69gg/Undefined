@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+from copy import deepcopy
 import logging
 from pathlib import Path
 from typing import Any
@@ -25,6 +27,7 @@ class AutomationStorage:
     ) -> None:
         self.path = path or AUTOMATIONS_FILE_PATH
         self.legacy_path = legacy_path or LEGACY_TASKS_FILE_PATH
+        self._save_lock = asyncio.Lock()
 
     def load_tasks(self) -> dict[str, Any]:
         loaded_from_legacy = False
@@ -59,14 +62,20 @@ class AutomationStorage:
     async def save_all(self, tasks: dict[str, Any]) -> None:
         from Undefined.utils import io
 
-        data_to_save: dict[str, Any] = {}
-        for task_id, task_info in tasks.items():
-            if isinstance(task_info, dict):
-                data_to_save[str(task_id)] = task_info
-            else:
-                logger.warning("[自动化] 跳过未知任务格式: %s", task_id)
-        await io.write_json(self.path, data_to_save, use_lock=True)
-        logger.info("[自动化] 已保存 %s 条到 %s", len(data_to_save), self.path)
+        async def save_snapshot() -> None:
+            async with self._save_lock:
+                data_to_save: dict[str, Any] = {}
+                for task_id, task_info in tasks.items():
+                    if isinstance(task_info, dict):
+                        data_to_save[str(task_id)] = deepcopy(task_info)
+                    else:
+                        logger.warning("[自动化] 跳过未知任务格式: %s", task_id)
+                await io.write_json(self.path, data_to_save, use_lock=True)
+                logger.info("[自动化] 已保存 %s 条到 %s", len(data_to_save), self.path)
+
+        # 调用方在保存前已修改共享 tasks；等锁时取消也不能丢掉这次持久化，
+        # 否则旧写入完成后，重启可能恢复内存中已经删除的任务。
+        await io.run_cancellation_safe(save_snapshot())
 
     def _write_json_sync(self, path: Path, data: dict[str, Any]) -> None:
         from Undefined.utils.io import write_json_sync

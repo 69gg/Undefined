@@ -60,6 +60,8 @@ class Embedder:
         """站台/发车：按固定间隔从队列取任务并执行。"""
         while True:
             job = await self._queue.get()
+            if job.future.cancelled():
+                continue
             try:
                 result = await self._requester.embed(self._config, job.texts)
                 if not job.future.done():

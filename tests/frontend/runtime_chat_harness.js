@@ -226,6 +226,9 @@ function createEnv(root, options = {}) {
             get() {
                 return this.textContent;
             },
+            set(value) {
+                this.textContent = value;
+            },
             configurable: true,
         });
     }
@@ -318,6 +321,7 @@ function createEnv(root, options = {}) {
             path.join(staticDir, name),
         ),
         path.join(staticDir, "runtime.js"),
+        ...(options.scripts || []).map((name) => path.join(staticDir, name)),
     ];
     // harness 专用垫片：产品脚本里 `const state = {...}` 属于这次 eval 的词法作用域，
     // 后续 window.eval 看不到它。只有拼在同一次 eval 里才能改 `state.authenticated`
@@ -343,6 +347,7 @@ function createEnv(root, options = {}) {
         requests,
         requestDetails,
         setRoutes,
+        response,
         scrollActivity,
         scrollTopWrites,
         eventSourceConstructions,
@@ -2756,6 +2761,1364 @@ SCENARIOS.workflow_tool_args_json_round_trip = async (env) => {
     };
 };
 
+async function jobWaitsForHistoryFinalization(env, status, controlledHistory = false) {
+    const { window, setRoutes } = env;
+    let jobPosts = 0;
+    let historyFinalized = false;
+    let historyReads = 0;
+    let firstEventBatch = true;
+    let historyAttempts = 0;
+    let resolveHistory = null;
+    let rejectHistory = null;
+    const snapshot = () => ({
+        job_id: "job-finalizing",
+        conversation_id: "conv-1",
+        status,
+        last_seq: 2,
+        history_finalized: historyFinalized,
+        reply: "answer",
+        error: status === "done" ? "" : status,
+    });
+    setRoutes([
+        {
+            match: "/chat/conversations",
+            reply: () => ({ body: {
+                conversations: [{ id: "conv-1", title: "t" }],
+                active_job: jobPosts === 1 && !historyFinalized ? snapshot() : null,
+            } }),
+        },
+        {
+            match: "/chat/history",
+            reply: () => {
+                historyReads += 1;
+                return { body: {
+                    items: historyFinalized ? [{ role: "bot", content: "persisted answer" }] : [],
+                    has_more: false,
+                    next_before: null,
+                } };
+            },
+        },
+        { match: "/chat/jobs/active", reply: { body: { job: null } } },
+        {
+            match: "/jobs/job-finalizing/events",
+            reply: () => {
+                const events = firstEventBatch ? [
+                    { seq: 1, event: "message", payload: { job_id: "job-finalizing", conversation_id: "conv-1", content: "answer" } },
+                    { seq: 2, event: status === "done" ? "done" : "error", payload: { job_id: "job-finalizing", conversation_id: "conv-1", reply: "answer", error: status } },
+                ] : [];
+                firstEventBatch = false;
+                return { body: { events, job: snapshot() } };
+            },
+        },
+        {
+            match: "/jobs/job-next/events",
+            reply: { body: { events: [], job: { job_id: "job-next", conversation_id: "conv-1", status: "running" } } },
+        },
+        {
+            match: "/chat/jobs",
+            reply: () => {
+                jobPosts += 1;
+                return { body: { job_id: jobPosts === 1 ? "job-finalizing" : "job-next", conversation_id: "conv-1" } };
+            },
+        },
+    ]);
+    if (controlledHistory) {
+        const fetch = window.fetch;
+        window.fetch = (url, options) => {
+            if (historyFinalized && String(url).includes("/chat/history")) {
+                historyAttempts += 1;
+                return new Promise((resolve, reject) => {
+                    resolveHistory = () => fetch(url, options).then(resolve, reject);
+                    rejectHistory = reject;
+                });
+            }
+            return fetch(url, options);
+        };
+    }
+    window.RuntimeController.init();
+    await window.RuntimeController.loadChatHistory(true);
+    const input = window.document.getElementById("runtimeChatInput");
+    const button = window.document.getElementById("btnRuntimeChatSend");
+    input.value = "first";
+    button.click();
+    await tick();
+    input.value = "second";
+    button.click();
+    await tick();
+    const beforeFinalization = { disabled: button.disabled, jobPosts, historyReads };
+    historyFinalized = true;
+    await settle(650);
+    let slowHistory = null;
+    if (controlledHistory) {
+        button.click();
+        await tick();
+        const whilePending = { disabled: button.disabled, jobPosts, historyAttempts };
+        rejectHistory(new Error("temporary history refresh failure"));
+        await tick();
+        await settle(650);
+        button.click();
+        await tick();
+        const afterFailure = { disabled: button.disabled, jobPosts, historyAttempts };
+        resolveHistory();
+        await tick();
+        slowHistory = { whilePending, afterFailure };
+    }
+    const afterFinalization = { disabled: button.disabled, historyReads, botTexts: botNodes(window).map((node) => node.contentText) };
+    button.click();
+    await tick();
+    return {
+        beforeFinalization,
+        afterFinalization,
+        jobPosts,
+        eventRequests: env.requests.filter((url) => url.includes("/jobs/job-finalizing/events")).length,
+        slowHistory,
+    };
+}
+SCENARIOS.history_finalization_slow_history = (env) => jobWaitsForHistoryFinalization(env, "done", true);
+
+for (const status of ["done", "error", "cancelled"]) {
+    SCENARIOS[`history_finalization_${status}`] = (env) => jobWaitsForHistoryFinalization(env, status);
+}
+
+async function staleChatJobPoll(env, outcome) {
+    const { window, setRoutes, response } = env;
+    let jobPosts = 0;
+    let oldFinished = false;
+    let newPolls = 0;
+    const oldJob = {
+        job_id: "old",
+        conversation_id: "A",
+        status: "running",
+        last_seq: 2,
+        history_finalized: false,
+    };
+    const newJob = { ...oldJob, job_id: "new" };
+    setRoutes([
+        {
+            match: "/chat/conversations",
+            reply: { body: {
+                conversations: [{ id: "A", title: "A" }, { id: "B", title: "B" }],
+                active_job: null,
+            } },
+        },
+        {
+            match: "/chat/history",
+            reply: (url) => ({ body: {
+                items: oldFinished && url.includes("conversation_id=A")
+                    ? [{ role: "bot", content: "old-persisted" }] : [],
+                has_more: false,
+                next_before: null,
+            } }),
+        },
+        {
+            match: "/chat/jobs/active",
+            reply: (url) => ({ body: {
+                job: url.includes("conversation_id=A") && jobPosts > 0 && !oldFinished
+                    ? oldJob : null,
+            } }),
+        },
+        {
+            match: "/jobs/old/events",
+            reply: { body: { job: oldJob, events: [
+                { seq: 1, event: "meta", payload: { job_id: "old", conversation_id: "A" } },
+                { seq: 2, event: "message", payload: { job_id: "old", conversation_id: "A", content: "old-live" } },
+            ] } },
+        },
+        {
+            match: "/jobs/new/events",
+            reply: (url) => {
+                newPolls += 1;
+                const after = Number(new URL(url, window.location.href).searchParams.get("after"));
+                const events = [
+                    { seq: 1, event: "meta", payload: { job_id: "new", conversation_id: "A" } },
+                    { seq: 2, event: "message", payload: { job_id: "new", conversation_id: "A", content: "new-live" } },
+                    ...(newPolls > 1 ? [{ seq: 3, event: "message", payload: { job_id: "new", conversation_id: "A", content: "new-followup" } }] : []),
+                ].filter((event) => event.seq > after);
+                return { body: { job: newJob, events } };
+            },
+        },
+        {
+            match: "/chat/jobs",
+            reply: () => ({ body: {
+                job_id: ++jobPosts === 1 ? "old" : "new", conversation_id: "A",
+            } }),
+        },
+    ]);
+    const fetch = window.fetch;
+    const pending = [];
+    let deferOld = false;
+    window.fetch = (url, options) => {
+        if (deferOld && String(url).includes("/jobs/old/events")) {
+            return new Promise((resolve, reject) => pending.push({ url: String(url), resolve, reject }));
+        }
+        return fetch(url, options);
+    };
+    window.RuntimeController.init();
+    await window.RuntimeController.loadChatHistory(true);
+    const input = window.document.getElementById("runtimeChatInput");
+    const button = window.document.getElementById("btnRuntimeChatSend");
+    input.value = "first";
+    button.click();
+    await tick();
+    deferOld = true;
+    window.document.querySelector('[data-conversation-select="B"]').click();
+    await tick();
+    window.document.querySelector('[data-conversation-select="A"]').click();
+    await tick();
+    if (pending.length !== 2) {
+        throw new Error(`expected two overlapping old job polls, got ${pending.length}`);
+    }
+    if (outcome.startsWith("same-")) {
+        pending[1].resolve(response(200, {
+            job: { ...oldJob, last_seq: 3, current_stage: "thinking", current_stage_detail: "current-model" },
+            events: [
+                { seq: 1, event: "meta", payload: oldJob },
+                { seq: 2, event: "message", payload: { ...oldJob, content: "old-live" } },
+                { seq: 3, event: "stage", payload: { ...oldJob, stage: "thinking", detail: "current-model" } },
+            ],
+        }));
+        await tick();
+        const snapshot = () => ({
+            nodes: botNodes(window).map((node) => ({ content: node.contentTexts })),
+            stageDetails: Array.from(window.document.querySelectorAll(".runtime-chat-stage"))
+                .map((node) => node.dataset.stageDetail),
+            disabled: button.disabled,
+            toast: textOf(window, "toast-container"),
+        });
+        const beforeLate = snapshot();
+        if (outcome === "same-failure") {
+            pending[0].reject(new Error("obsolete same job poll failure"));
+        } else {
+            pending[0].resolve(response(200, {
+                job: { ...oldJob, current_stage: "thinking", current_stage_detail: "obsolete-model" },
+                events: [
+                    { seq: 1, event: "meta", payload: oldJob },
+                    { seq: 2, event: "message", payload: { ...oldJob, content: "old-live" } },
+                ],
+            }));
+        }
+        await tick();
+        const afterLate = snapshot();
+        await settle(650);
+        return { beforeLate, afterLate, pollUrls: pending.map((item) => item.url) };
+    }
+    oldFinished = true;
+    pending[1].resolve(response(200, {
+        job: { ...oldJob, status: "done", last_seq: 3, history_finalized: true },
+        events: [{ seq: 3, event: "done", payload: { job_id: "old", conversation_id: "A", reply: "old-live" } }],
+    }));
+    await tick();
+    const oldUnlocked = !button.disabled;
+    input.value = "second";
+    button.click();
+    await tick();
+    const snapshot = () => ({
+        disabled: button.disabled,
+        nodes: chatNodes(window).map((node) => ({ text: node.contentText, job: node.jobId })),
+        cancelIds: Array.from(window.document.querySelectorAll("[data-cancel-job]"))
+            .filter((element) => !element.hidden).map((element) => element.dataset.cancelJob),
+    });
+    const beforeLate = snapshot();
+    if (outcome === "failure") {
+        pending[0].reject(new Error("obsolete poll failure"));
+    } else {
+        const terminal = outcome === "done";
+        pending[0].resolve(response(200, {
+            job: terminal ? { ...oldJob, status: "done", history_finalized: true } : oldJob,
+            events: terminal ? [
+                { seq: 99, event: "done", payload: { job_id: "old", conversation_id: "A", reply: "INTRUDER" } },
+            ] : [
+                { seq: 98, event: "meta", payload: { job_id: "old", conversation_id: "A" } },
+                { seq: 99, event: "message", payload: { job_id: "old", conversation_id: "A", content: "INTRUDER" } },
+            ],
+        }));
+    }
+    await tick();
+    const afterLate = snapshot();
+    await settle(650);
+    return {
+        oldUnlocked,
+        jobPosts,
+        beforeLate,
+        afterLate,
+        newPolls,
+        allNodes: chatNodes(window),
+        nextPollUrls: env.requests.filter((url) => url.includes("/jobs/new/events")),
+        toastText: textOf(window, "toast-container"),
+    };
+}
+
+for (const outcome of ["events", "done", "failure", "same-events", "same-failure"]) {
+    SCENARIOS[`stale_job_poll_${outcome}`] = (env) => staleChatJobPoll(env, outcome);
+}
+
+async function staleChatSend(env, boundary, target, outcome, newerJob) {
+    const { window, response } = env;
+    let releaseOld;
+    const posts = [];
+    const polls = [];
+    window.fetch = (url, options = {}) => {
+        const parsed = new window.URL(url, window.location.href);
+        const pathname = parsed.pathname;
+        if (pathname.endsWith("/chat/conversations")) {
+            return Promise.resolve(response(200, {
+                conversations: [{ id: "A", title: "A" }, { id: "B", title: "B" }],
+            }));
+        }
+        if (pathname.endsWith("/chat/history")) {
+            return Promise.resolve(response(200, {
+                items: [{ role: "bot", content: `history-${parsed.searchParams.get("conversation_id")}` }],
+                has_more: false,
+            }));
+        }
+        if (pathname.endsWith("/chat/jobs/active")) {
+            return Promise.resolve(response(200, { job: null }));
+        }
+        if (pathname.endsWith("/chat/files")) {
+            return new Promise((resolve) => {
+                releaseOld = () => resolve(response(outcome === "failure" ? 500 : 200,
+                    outcome === "failure" ? { error: "obsolete upload failure" }
+                        : { id: "file-original", name: "original.txt", size: 4 }));
+            });
+        }
+        if (pathname.endsWith("/chat/jobs")) {
+            const body = JSON.parse(options.body);
+            posts.push(body);
+            if (body.message.startsWith("original")) {
+                if (boundary === "post") {
+                    return new Promise((resolve) => {
+                        releaseOld = () => resolve(response(outcome === "failure" ? 409 : 202,
+                            outcome === "failure" ? { error: "obsolete send failure" }
+                                : { job_id: "old", conversation_id: "A" }));
+                    });
+                }
+                return Promise.resolve(response(202, { job_id: "old", conversation_id: "A" }));
+            }
+            return Promise.resolve(response(202, { job_id: "new", conversation_id: body.conversation_id }));
+        }
+        if (pathname.endsWith("/events")) {
+            polls.push(String(url));
+            return Promise.resolve(response(200, { events: [], job: {
+                job_id: pathname.includes("/new/") ? "new" : "old",
+                conversation_id: parsed.searchParams.get("conversation_id"),
+                status: "running", last_seq: 0,
+            } }));
+        }
+        throw new Error(`unexpected route ${pathname}`);
+    };
+    window.RuntimeController.init();
+    await window.RuntimeController.loadChatHistory(true);
+    const input = window.document.getElementById("runtimeChatInput");
+    const button = window.document.getElementById("btnRuntimeChatSend");
+    const pick = (name) => {
+        const picker = window.document.getElementById("runtimeChatFileInput");
+        Object.defineProperty(picker, "files", {
+            configurable: true,
+            value: [new window.File(["file"], name, { type: "text/plain" })],
+        });
+        picker.dispatchEvent(new window.Event("change", { bubbles: true }));
+    };
+    input.value = "original";
+    if (boundary === "upload") pick("original.txt");
+    button.click();
+    await tick();
+    if (target !== "normal" && target !== "edited") {
+        window.document.querySelector('[data-conversation-select="B"]').click();
+        await tick();
+        if (target === "same") {
+            window.document.querySelector('[data-conversation-select="A"]').click();
+            await tick();
+        }
+    }
+    if (newerJob) {
+        input.value = "new-request";
+        button.click();
+        await tick();
+    }
+    if (target !== "normal") {
+        input.value = "later-draft";
+        pick("later.txt");
+    }
+    const snapshot = () => ({
+        title: textOf(window, "runtimeChatCurrentTitle"),
+        draft: input.value,
+        attachments: textOf(window, "runtimeChatAttachments"),
+        disabled: button.disabled,
+        busy: button.getAttribute("aria-busy"),
+        nodes: chatNodes(window).map(({ role, contentText, jobId }) => ({ role, contentText, jobId })),
+        cancelIds: Array.from(window.document.querySelectorAll("[data-cancel-job]"))
+            .filter((node) => !node.hidden).map((node) => node.dataset.cancelJob),
+        toast: textOf(window, "toast-container"),
+    });
+    const beforeLate = snapshot();
+    if (!releaseOld) throw new Error("send did not reach deferred boundary");
+    releaseOld();
+    await tick();
+    const afterLate = snapshot();
+    return { beforeLate, afterLate, posts, polls };
+}
+
+async function historyResponseAfterNewJob(env, sendFails) {
+    const { window, response } = env;
+    let releaseHistory;
+    let deferHistory = false;
+    let running = false;
+    let failedSend = false;
+    const job = { job_id: "new-A", conversation_id: "A", status: "running", last_seq: 2 };
+    window.fetch = (url, options = {}) => {
+        const parsed = new window.URL(url, window.location.href);
+        const pathname = parsed.pathname;
+        if (pathname.endsWith("/chat/conversations")) return Promise.resolve(response(200, {
+            conversations: [{ id: "A", title: "A" }, { id: "B", title: "B" }],
+        }));
+        if (pathname.endsWith("/chat/history")) {
+            if (deferHistory && parsed.searchParams.get("conversation_id") === "A") {
+                return new Promise((resolve) => { releaseHistory = resolve; });
+            }
+            return Promise.resolve(response(200, {
+                items: failedSend ? [{ role: "bot", content: "persisted-after-failed-send" }] : [],
+                has_more: false,
+            }));
+        }
+        if (pathname.endsWith("/chat/jobs/active")) return Promise.resolve(response(200, { job: running ? job : null }));
+        if (pathname.endsWith("/chat/jobs") && options.method === "POST") {
+            if (sendFails) {
+                failedSend = true;
+                return Promise.resolve(response(409, { error: "definite-send-failure" }));
+            }
+            running = true;
+            return Promise.resolve(response(202, job));
+        }
+        if (pathname.endsWith("/events")) {
+            const after = Number(parsed.searchParams.get("after"));
+            return Promise.resolve(response(200, { job, events: [
+                { seq: 1, event: "meta", payload: job },
+                { seq: 2, event: "message", payload: { ...job, content: "new-live-reply" } },
+            ].filter((event) => event.seq > after) }));
+        }
+        throw new Error(`unexpected route ${pathname}`);
+    };
+    window.RuntimeController.init();
+    await window.RuntimeController.loadChatHistory(true);
+    window.document.querySelector('[data-conversation-select="B"]').click();
+    await tick();
+    deferHistory = true;
+    window.document.querySelector('[data-conversation-select="A"]').click();
+    await tick();
+    window.document.getElementById("runtimeChatInput").value = "new-question";
+    window.document.getElementById("btnRuntimeChatSend").click();
+    await tick();
+    const snapshot = () => ({
+        nodes: chatNodes(window).map((node) => ({ role: node.role, content: node.contentTexts })),
+        disabled: window.document.getElementById("btnRuntimeChatSend").disabled,
+    });
+    const beforeLate = snapshot();
+    if (!releaseHistory) throw new Error("A latest history was not pending");
+    releaseHistory(response(200, { items: [{ role: "bot", content: "older-history" }], has_more: false }));
+    await tick();
+    const afterLate = snapshot();
+    deferHistory = false;
+    window.__harness.setAuthenticated(true);
+    window.RuntimeController.onTabActivated("chat");
+    await tick();
+    return { beforeLate, afterLate, afterReopen: snapshot() };
+}
+
+for (const outcome of ["success", "failure"]) {
+    SCENARIOS[`history_response_after_new_job_${outcome}`] = (env) =>
+        historyResponseAfterNewJob(env, outcome === "failure");
+}
+
+for (const boundary of ["upload", "post"]) {
+    for (const target of ["other", "same"]) {
+        for (const outcome of ["success", "failure"]) {
+            for (const newerJob of [false, true]) {
+                SCENARIOS[`stale_send_${boundary}_${target}_${outcome}_${newerJob}`] =
+                    (env) => staleChatSend(env, boundary, target, outcome, newerJob);
+            }
+        }
+    }
+    SCENARIOS[`stale_send_${boundary}_normal`] =
+        (env) => staleChatSend(env, boundary, "normal", "success", false);
+}
+SCENARIOS.stale_send_upload_edited =
+    (env) => staleChatSend(env, "upload", "edited", "success", false);
+
+async function staleChatHistoryPage(env, returnToSameConversation, outcome) {
+    const { window, setRoutes, response } = env;
+    const historyReads = { A: 0, B: 0 };
+    setRoutes([
+        {
+            match: "/chat/conversations",
+            reply: { body: {
+                conversations: [{ id: "A", title: "A" }, { id: "B", title: "B" }],
+                active_job: null,
+            } },
+        },
+        { match: "/chat/jobs/active", reply: { body: { job: null } } },
+        {
+            match: "/chat/history",
+            reply: (url) => {
+                const conversationId = new URL(url, window.location.href).searchParams.get("conversation_id");
+                historyReads[conversationId] += 1;
+                return { body: {
+                    conversation_id: conversationId,
+                    items: [{ role: "bot", content: `${conversationId}-current-${historyReads[conversationId]}` }],
+                    has_more: true,
+                    next_before: conversationId === "A" ? 10 : 20,
+                } };
+            },
+        },
+    ]);
+    const fetch = window.fetch;
+    const pending = [];
+    window.fetch = (url, options) => {
+        if (new URL(String(url), window.location.href).searchParams.has("before")) {
+            return new Promise((resolve, reject) => pending.push({ url: String(url), resolve, reject }));
+        }
+        return fetch(url, options);
+    };
+    window.RuntimeController.init();
+    await window.RuntimeController.loadChatHistory(true);
+    await settle(1800);
+    const log = chatLog(window);
+    const loadOlder = () => {
+        log.scrollTop = 0;
+        log.dispatchEvent(new window.Event("scroll"));
+    };
+    const snapshot = () => ({
+        texts: botNodes(window).map((node) => node.contentText),
+        title: textOf(window, "runtimeChatCurrentTitle"),
+        loader: textOf(window, "runtimeChatLoadMore"),
+        scrollTop: log.scrollTop,
+    });
+    loadOlder();
+    await tick();
+    if (pending.length !== 1) throw new Error("first conversation did not request older history");
+    window.document.querySelector('[data-conversation-select="B"]').click();
+    await tick();
+    if (returnToSameConversation) {
+        window.document.querySelector('[data-conversation-select="A"]').click();
+        await tick();
+    }
+    await settle(1800);
+    loadOlder();
+    await tick();
+    if (pending.length !== 2) throw new Error("current view did not request older history");
+    const beforeLate = snapshot();
+    if (outcome === "failure") {
+        pending[0].reject(new Error("obsolete history page failure"));
+    } else {
+        pending[0].resolve(response(200, {
+            conversation_id: "A",
+            items: [{ role: "bot", content: "A-obsolete-page" }],
+            has_more: true,
+            next_before: 7,
+        }));
+    }
+    await tick();
+    const afterLate = snapshot();
+    loadOlder();
+    await tick();
+    const requestsWhileCurrentPagePending = pending.length;
+    const target = returnToSameConversation ? "A" : "B";
+    pending[1].resolve(response(200, {
+        conversation_id: target,
+        items: [{ role: "bot", content: `${target}-legitimate-older` }],
+        has_more: true,
+        next_before: 3,
+    }));
+    await tick();
+    const afterCurrentPage = snapshot();
+    loadOlder();
+    await tick();
+    return {
+        target,
+        beforeLate,
+        afterLate,
+        requestsWhileCurrentPagePending,
+        afterCurrentPage,
+        pageUrls: pending.map((request) => request.url),
+        toastText: textOf(window, "toast-container"),
+    };
+}
+
+for (const target of ["other", "same"]) {
+    for (const outcome of ["success", "failure"]) {
+        SCENARIOS[`stale_history_page_${target}_${outcome}`] = (env) =>
+            staleChatHistoryPage(env, target === "same", outcome);
+    }
+}
+
+async function staleLatestChatHistory(env, initialLoad, failure) {
+    const { window, setRoutes, response } = env;
+    setRoutes([
+        { match: "/chat/conversations", reply: { body: {
+            conversations: [{ id: "A", title: "A" }, { id: "B", title: "B" }],
+            active_job: null,
+        } } },
+        { match: "/chat/jobs/active", reply: { body: { job: null } } },
+        { match: "/chat/history", reply: { body: {
+            items: [{ role: "bot", content: "initial history" }],
+            has_more: false, next_before: null,
+        } } },
+    ]);
+    const fetch = window.fetch;
+    const pending = [];
+    let deferA = initialLoad;
+    window.fetch = (url, options) => {
+        if (deferA && String(url).includes("/chat/history") && String(url).includes("conversation_id=A")) {
+            if (failure === "parse") {
+                return Promise.resolve({ ...response(200, {}),
+                    json: () => new Promise((resolve, reject) => pending.push({ resolve, reject })),
+                });
+            }
+            return new Promise((resolve, reject) => pending.push({ resolve, reject }));
+        }
+        return fetch(url, options);
+    };
+    window.RuntimeController.init();
+    if (initialLoad) {
+        window.__harness.setAuthenticated(true);
+        window.RuntimeController.onTabActivated("chat");
+        await tick();
+    } else {
+        await window.RuntimeController.loadChatHistory(true);
+        window.document.querySelector('[data-conversation-select="B"]').click();
+        await tick();
+        deferA = true;
+        window.document.querySelector('[data-conversation-select="A"]').click();
+        await tick();
+    }
+    window.document.querySelector('[data-conversation-select="B"]').click();
+    await tick();
+    window.document.querySelector('[data-conversation-select="A"]').click();
+    await tick();
+    if (pending.length !== 2) throw new Error(`expected two pending A latest reads, got ${pending.length}`);
+    const snapshot = () => ({
+        texts: botNodes(window).map((node) => node.contentText),
+        title: textOf(window, "runtimeChatCurrentTitle"),
+        toasts: window.document.querySelectorAll(".toast").length,
+        activeRequests: env.requests.filter((url) => url.includes("/chat/jobs/active")).length,
+    });
+    const beforeLate = snapshot();
+    pending[0].reject(new Error("obsolete latest history failure"));
+    await tick();
+    const afterLate = snapshot();
+    const body = { items: [{ role: "bot", content: "A-current-latest" }], has_more: false, next_before: null };
+    pending[1].resolve(failure === "parse" ? body : response(200, body));
+    await tick();
+    return { beforeLate, afterLate, afterCurrent: snapshot() };
+}
+
+for (const loading of ["initial", "forced"]) {
+    for (const failure of ["network", "parse"]) {
+        SCENARIOS[`stale_latest_history_${loading}_${failure}`] = (env) =>
+            staleLatestChatHistory(env, loading === "initial", failure);
+    }
+}
+
+async function staleActiveJobResume(env, returnToSameConversation, outcome) {
+    const { window, setRoutes, response } = env;
+    const currentJob = {
+        job_id: "current-A", conversation_id: "A", status: "running",
+    };
+    setRoutes([
+        {
+            match: "/chat/conversations",
+            reply: { body: {
+                conversations: [{ id: "A", title: "A" }, { id: "B", title: "B" }],
+                active_job: null,
+            } },
+        },
+        {
+            match: "/chat/history",
+            reply: (url) => ({ body: {
+                items: [{ role: "bot", content: url.includes("conversation_id=B") ? "B-history" : "A-history" }],
+                has_more: false, next_before: null,
+            } }),
+        },
+        {
+            match: "/chat/jobs/active",
+            reply: (url) => ({ body: {
+                job: returnToSameConversation && url.includes("conversation_id=A") ? currentJob : null,
+            } }),
+        },
+        {
+            match: "/jobs/current-A/events",
+            reply: (url) => {
+                const after = Number(new URL(url, window.location.href).searchParams.get("after"));
+                return { body: { job: currentJob, events: [
+                    { seq: 1, event: "meta", payload: currentJob },
+                    { seq: 2, event: "message", payload: { ...currentJob, content: "current-live" } },
+                ].filter((event) => event.seq > after) } };
+            },
+        },
+        {
+            match: "/jobs/obsolete-A/events",
+            reply: { body: { job: { job_id: "obsolete-A", conversation_id: "A", status: "running" }, events: [] } },
+        },
+    ]);
+    const fetch = window.fetch;
+    let pending;
+    const resumeUrls = [];
+    window.fetch = (url, options) => {
+        if (String(url).includes("/chat/jobs/active")) {
+            resumeUrls.push(String(url));
+            if (!pending && String(url).includes("conversation_id=A")) {
+                return new Promise((resolve, reject) => { pending = { resolve, reject }; });
+            }
+        }
+        return fetch(url, options);
+    };
+    window.RuntimeController.init();
+    const initialLoad = window.RuntimeController.loadChatHistory(true);
+    await tick();
+    if (!pending) throw new Error("initial A resume request was not dispatched");
+    window.document.querySelector('[data-conversation-select="B"]').click();
+    await tick();
+    if (returnToSameConversation) {
+        window.document.querySelector('[data-conversation-select="A"]').click();
+        await tick();
+    }
+    const snapshot = () => ({
+        title: textOf(window, "runtimeChatCurrentTitle"),
+        nodes: chatNodes(window).map((node) => ({ text: node.contentText, job: node.jobId })),
+        disabled: window.document.getElementById("btnRuntimeChatSend").disabled,
+        cancelIds: Array.from(window.document.querySelectorAll("[data-cancel-job]"))
+            .filter((element) => !element.hidden).map((element) => element.dataset.cancelJob),
+    });
+    const beforeLate = snapshot();
+    const resumeCountBeforeLate = resumeUrls.length;
+    if (outcome === "failure") {
+        pending.reject(new Error("obsolete resume failure"));
+    } else {
+        pending.resolve(response(200, {
+            job: outcome === "empty" ? null : { job_id: "obsolete-A", conversation_id: "A", status: "running" },
+        }));
+    }
+    await initialLoad;
+    await tick();
+    const afterLate = snapshot();
+    if (outcome === "failure") await settle(1100);
+    return {
+        beforeLate, afterLate, afterRetryWindow: snapshot(),
+        resumeCountBeforeLate, resumeCountAfterLate: resumeUrls.length,
+        obsoletePolls: env.requests.filter((url) => url.includes("/jobs/obsolete-A/events")),
+    };
+}
+
+for (const target of ["other", "same"]) {
+    for (const outcome of ["running", "empty", "failure"]) {
+        SCENARIOS[`stale_active_job_resume_${target}_${outcome}`] = (env) =>
+            staleActiveJobResume(env, target === "same", outcome);
+    }
+}
+
+async function configAutoSave(env, outcome) {
+    const { window, response } = env;
+    env.setRoutes([
+        { match: "/api/config/summary", reply: { body: {
+            data: { onebot: { file_send_mode: "local", file_send_host: "initial" } }, comments: {},
+        } } },
+    ]);
+    const fetch = window.fetch;
+    const pending = [];
+    let inFlight = 0;
+    let maxInFlight = 0;
+    let saved = null;
+    window.fetch = (url, options) => {
+        if (String(url) === "/api/patch") {
+            inFlight += 1;
+            maxInFlight = Math.max(maxInFlight, inFlight);
+            return new Promise((resolve, reject) => {
+                pending.push({ patch: JSON.parse(options.body).patch, resolve, reject });
+            });
+        }
+        return fetch(url, options);
+    };
+    await window.loadConfig();
+    const mode = window.document.querySelector('[data-path="onebot.file_send_mode"].config-input');
+    const host = window.document.querySelector('[data-path="onebot.file_send_host"].config-input');
+    if (!mode || !host) throw new Error("config form was not built");
+    const changeMode = (value) => {
+        mode.value = value;
+        mode.dispatchEvent(new window.Event("change", { bubbles: true }));
+    };
+    const snapshot = () => ({
+        requestCount: pending.length,
+        status: textOf(window, "saveStatusText"),
+        active: window.document.getElementById("saveStatus").classList.contains("active"),
+        opacity: window.document.getElementById("saveStatus").style.opacity,
+        toasts: window.document.querySelector(".toast-container")?.textContent || "",
+    });
+    const finish = (index, result = { success: true }) => {
+        inFlight -= 1;
+        if (result.success) saved = pending[index].patch;
+        pending[index].resolve(response(200, result));
+    };
+    changeMode("stream");
+    await tick();
+    if (outcome === "saved_timer") {
+        finish(0);
+        await tick();
+        changeMode("url");
+        await tick();
+        await settle(2100);
+        const whilePending = snapshot();
+        finish(1);
+        await tick();
+        return { whilePending, final: snapshot(), saved, maxInFlight };
+    }
+    if (outcome === "typing") {
+        host.value = "updated-host";
+        host.dispatchEvent(new window.Event("input", { bubbles: true }));
+    } else {
+        changeMode("url");
+        changeMode("local");
+    }
+    await tick();
+    const beforeOldResponse = snapshot();
+    if (outcome === "network_error") {
+        inFlight -= 1;
+        pending[0].reject(new Error("obsolete save failure"));
+    } else {
+        finish(0, outcome === "api_error"
+            ? { success: false, error: "obsolete save failure" }
+            : { success: true, warning: "obsolete save warning" });
+    }
+    await tick();
+    const afterOldResponse = snapshot();
+    if (outcome === "typing") await settle(1100);
+    if (pending.length !== 2) throw new Error(`expected latest save after old response, got ${pending.length}`);
+    if (outcome.startsWith("latest_")) {
+        if (outcome === "latest_network_error") {
+            inFlight -= 1;
+            pending[1].reject(new Error("latest save failure"));
+        } else {
+            finish(1, { success: false, error: "latest save failure" });
+        }
+        await tick();
+        const afterFailure = snapshot();
+        changeMode("url");
+        await tick();
+        finish(2);
+        await tick();
+        return { afterFailure, final: snapshot(), saved, maxInFlight };
+    }
+    finish(1);
+    await tick();
+    return {
+        beforeOldResponse, afterOldResponse, final: snapshot(), maxInFlight, saved,
+        patches: pending.map((entry) => entry.patch),
+    };
+}
+
+for (const outcome of ["success", "network_error", "api_error", "typing", "saved_timer", "latest_network_error", "latest_api_error"]) {
+    SCENARIOS[`config_autosave_${outcome}`] = (env) => configAutoSave(env, outcome);
+}
+
+async function configReplacement(env, operation) {
+    const { window, response, root } = env;
+    const calls = [];
+    let serverMode = "local";
+    let finishPatch;
+    let patchCount = 0;
+    let restoreAttempts = 0;
+    window.confirm = () => true;
+    window.fetch = async (url, options = {}) => {
+        const route = String(url);
+        calls.push(route);
+        if (route === "/api/config/summary") return response(200, {
+            data: { onebot: { file_send_mode: serverMode, file_send_host: "localhost" } },
+            comments: {},
+        });
+        if (route === "/api/patch") {
+            patchCount += 1;
+            serverMode = JSON.parse(options.body).patch["onebot.file_send_mode"];
+            if (patchCount === 1) return new Promise((resolve) => { finishPatch = resolve; });
+            return response(200, { success: true });
+        }
+        if (route === "/api/config/history") return response(200, {
+            backups: [{ name: "config_previous.toml", mtime: 1, size: 1 }],
+        });
+        if (route === "/api/config/history/restore") {
+            restoreAttempts += 1;
+            if (restoreAttempts === 1 && operation.startsWith("restore_failure_")) {
+                if (operation === "restore_failure_network") {
+                    throw new Error("isolated restore failure");
+                }
+                return response(operation === "restore_failure_http" ? 500 : 200, {
+                    success: false, error: "isolated restore failure",
+                });
+            }
+            serverMode = "local";
+            return response(200, { success: true });
+        }
+        if (route.startsWith("/api/config/sync-template")) return response(200, {
+            success: true, removed_paths: [], added_count: 1,
+        });
+        throw new Error(`unexpected config route: ${route}`);
+    };
+    // 使用真实历史按钮的处理器，避免仅测试串行 helper 而漏掉其调用入口。
+    const main = fs.readFileSync(path.join(root, "src/Undefined/webui/static/js/main.js"), "utf8");
+    const start = main.indexOf('    get("btnConfigHistory")?.addEventListener');
+    const end = main.indexOf("    const logout = async", start);
+    window.eval(main.slice(start, end));
+    await window.loadConfig();
+    const mode = () => window.document.querySelector('[data-path="onebot.file_send_mode"].config-input');
+    const changeMode = (value) => {
+        mode().value = value;
+        mode().dispatchEvent(new window.Event("change", { bubbles: true }));
+    };
+    changeMode("stream");
+    await tick();
+    changeMode("url");
+    // 同时覆盖已排队快照与尚未触发的 debounce。
+    const host = window.document.querySelector('[data-path="onebot.file_send_host"].config-input');
+    host.value = "obsolete-host";
+    host.dispatchEvent(new window.Event("input", { bubbles: true }));
+    let completion;
+    if (operation.startsWith("restore")) {
+        window.get("btnConfigHistory").click();
+        await tick();
+        window.document.querySelector("[data-restore-name]").click();
+        if (operation === "restore_sync") {
+            completion = window.syncConfigTemplate(window.get("btnSyncConfigTemplate"));
+        }
+    } else if (operation === "sync") {
+        completion = window.syncConfigTemplate(window.get("btnSyncConfigTemplate"));
+    } else {
+        completion = window.resetConfig();
+    }
+    await tick();
+    const beforeResponse = {
+        patchCount,
+        mutationCount: calls.filter((url) => url.includes("/restore") || url.includes("sync-template")).length,
+        formInert: window.get("formSections").inert,
+    };
+    finishPatch(response(200, { success: true, warning: "obsolete save warning" }));
+    if (completion) await completion;
+    await tick();
+    await settle(1100);
+    let afterFailure = null;
+    if (operation.startsWith("restore_failure_")) {
+        afterFailure = {
+            formMode: mode().value,
+            formHost: window.document.querySelector('[data-path="onebot.file_send_host"].config-input').value,
+            formInert: window.get("formSections").inert,
+            panelVisible: window.get("configHistoryPanel").style.display !== "none",
+            summaryCount: calls.filter((url) => url === "/api/config/summary").length,
+            toasts: window.document.querySelector(".toast-container")?.textContent || "",
+        };
+        window.document.querySelector("[data-restore-name]").click();
+        await tick();
+    }
+    return {
+        beforeResponse,
+        afterFailure,
+        patchCount,
+        calls,
+        serverMode,
+        formMode: mode().value,
+        formInert: window.get("formSections").inert,
+        toasts: window.document.querySelector(".toast-container")?.textContent || "",
+    };
+}
+
+for (const operation of ["restore", "sync", "reload", "restore_sync", "restore_failure_http", "restore_failure_api", "restore_failure_network"]) {
+    SCENARIOS[`config_replacement_${operation}`] = (env) => configReplacement(env, operation);
+}
+
+function workflowEditorFixture(env) {
+    const { window, response } = env;
+    const tasks = ["A", "B"].map((id) => ({
+        task_id: id, task_name: `${id}-original`, enabled: true,
+        nodes: [{ id: "start", type: "start", kind: "message", channels: ["group"] }],
+        edges: [], ui: { positions: {}, zoom: 1, pan: { x: 40, y: 40 } },
+    }));
+    const pendingSaves = [];
+    const validations = [];
+    let deferredValidation = null;
+    let deferredList = null;
+    let deferNextList = false;
+    let deferNextValidation = false;
+    let currentIssues = [];
+    const pages = [];
+    window.document.getElementById("scheduleListView").getBoundingClientRect = () => ({ top: 0 });
+    window.document.getElementById("scheduleEditorView").getBoundingClientRect = () => ({ top: 1000 });
+    const scroller = window.document.getElementById("schedulePages");
+    scroller.getBoundingClientRect = () => ({ top: 0 });
+    scroller.scrollTo = ({ top }) => pages.push(top === 1000 ? "editor" : "list");
+    window.fetch = (url, options = {}) => {
+        const endpoint = String(url);
+        const method = options.method || "GET";
+        if (endpoint.endsWith("/automations/catalog")) {
+            return Promise.resolve(response(200, { node_type_meta: [], presets: [] }));
+        }
+        if (endpoint.endsWith("/automations/validate")) {
+            validations.push(JSON.parse(options.body));
+            if (deferNextValidation) {
+                deferNextValidation = false;
+                return new Promise((resolve, reject) => { deferredValidation = { resolve, reject }; });
+            }
+            return Promise.resolve(response(200, { issues: currentIssues }));
+        }
+        if (["POST", "PATCH"].includes(method)) {
+            return new Promise((resolve, reject) => {
+                pendingSaves.push({ url: endpoint, method, payload: JSON.parse(options.body), resolve, reject });
+            });
+        }
+        if (endpoint.endsWith("/automations")) {
+            if (deferNextList) {
+                deferNextList = false;
+                return new Promise((resolve) => { deferredList = resolve; });
+            }
+            return Promise.resolve(response(200, { items: tasks }));
+        }
+        throw new Error(`unexpected workflow request: ${method} ${endpoint}`);
+    };
+    window.confirm = () => true;
+    window.SchedulesController.init();
+    const input = window.document.getElementById("wfTaskName");
+    return {
+        pendingSaves, validations, pages, input,
+        open(id) { window.document.querySelector(`[data-task-id="${id}"]`).click(); },
+        edit(value, commit = true) {
+            input.value = value;
+            input.dispatchEvent(new window.Event("input", { bubbles: true }));
+            if (commit) input.dispatchEvent(new window.Event("change", { bubbles: true }));
+        },
+        save() { window.document.getElementById("btnWfSave").click(); },
+        finishSave(index) {
+            const request = pendingSaves[index];
+            const id = request.method === "POST" ? "created" : request.url.split("/").at(-1);
+            const task = { ...tasks.find((item) => item.task_id === id), ...request.payload, task_id: id };
+            const existing = tasks.findIndex((item) => item.task_id === id);
+            if (existing >= 0) tasks[existing] = task;
+            else tasks.push(task);
+            request.resolve(response(200, { task }));
+        },
+        failSave(index) { pendingSaves[index].reject(new Error("obsolete save failure")); },
+        deferList() { deferNextList = true; },
+        finishList() {
+            if (!deferredList) throw new Error("list refresh was not dispatched");
+            deferredList(response(200, { items: tasks }));
+        },
+        deferValidation() { deferNextValidation = true; },
+        setIssues(issues) { currentIssues = issues; },
+        finishValidation(outcome) {
+            if (!deferredValidation) throw new Error("validation was not dispatched");
+            if (outcome === "failure") deferredValidation.reject(new Error("obsolete validation failure"));
+            else deferredValidation.resolve(response(200, { issues: [
+                { path: "nodes", message: "obsolete issue one" },
+                { path: "edges", message: "obsolete issue two" },
+            ] }));
+        },
+        snapshot() {
+            const graph = JSON.parse(window.document.getElementById("wfGraphJson").value);
+            return {
+                input: input.value, graphName: graph.task_name,
+                id: window.document.getElementById("wfTaskId").value,
+                idDisabled: window.document.getElementById("wfTaskId").disabled,
+                dirty: window.document.getElementById("tab-schedules").classList.contains("is-dirty"),
+                page: pages.at(-1), status: textOf(window, "wfEditorStatus"),
+                issueBadge: textOf(window, "wfIssueBadge"),
+            };
+        },
+    };
+}
+
+async function workflowEditorSave(env, target) {
+    const fixture = workflowEditorFixture(env);
+    const { window } = env;
+    await window.SchedulesController.refresh();
+    if (target === "new") {
+        window.document.getElementById("btnSchedulesNew").click();
+        window.document.querySelector('[data-preset-id=""]').click();
+    } else fixture.open("A");
+    await tick();
+    fixture.edit("first-edit");
+    fixture.save();
+    await tick();
+    if (!fixture.pendingSaves.length) throw new Error("save was not dispatched");
+    if (target.startsWith("switch") || target.startsWith("same")) {
+        fixture.open("B");
+        await tick();
+        if (target.startsWith("same")) {
+            fixture.open("A");
+            await tick();
+        }
+    } else if (target === "typing") {
+        fixture.input.focus();
+        fixture.edit("later-edit", false);
+    } else if (target !== "normal" && target !== "refresh") fixture.edit("later-edit");
+    if (target === "refresh") fixture.deferList();
+    const beforeResponse = fixture.snapshot();
+    if (target.endsWith("_failure")) fixture.failSave(0);
+    else fixture.finishSave(0);
+    await tick();
+    if (target === "refresh") {
+        fixture.edit("later-edit");
+        fixture.finishList();
+        await tick();
+    }
+    const afterResponse = fixture.snapshot();
+    if (target === "typing") {
+        fixture.input.blur();
+        fixture.input.dispatchEvent(new window.Event("change", { bubbles: true }));
+    }
+    let secondSave = null;
+    if (["edited", "new", "typing", "refresh"].includes(target)) {
+        fixture.save();
+        await tick();
+        const request = fixture.pendingSaves[1];
+        if (!request) throw new Error("second save was not dispatched");
+        secondSave = { url: request.url, method: request.method, name: request.payload.task_name };
+        fixture.finishSave(1);
+        await tick();
+    }
+    return { beforeResponse, afterResponse, final: fixture.snapshot(), secondSave,
+        firstSave: { method: fixture.pendingSaves[0].method, name: fixture.pendingSaves[0].payload.task_name } };
+}
+
+for (const target of ["normal", "edited", "switch", "same", "switch_failure", "same_failure", "new", "typing", "refresh"]) {
+    SCENARIOS[`workflow_editor_save_${target}`] = (env) => workflowEditorSave(env, target);
+}
+
+for (const target of ["switch", "edit"]) {
+    for (const outcome of ["response", "failure"]) {
+        SCENARIOS[`workflow_editor_validation_${target}_${outcome}`] = async (env) => {
+            const fixture = workflowEditorFixture(env);
+            await env.window.SchedulesController.refresh();
+            fixture.deferValidation();
+            fixture.open("A");
+            await tick();
+            if (target === "switch") {
+                fixture.setIssues([{ path: "nodes", message: "current B issue" }]);
+                fixture.open("B");
+                await tick();
+            } else fixture.edit("current-edit");
+            const beforeResponse = fixture.snapshot();
+            fixture.finishValidation(outcome);
+            await tick();
+            fixture.edit(target === "switch" ? "B-current-edit" : "current-edit");
+            return { beforeResponse, afterResponse: fixture.snapshot() };
+        };
+    }
+}
+
+function weixinDialogFixture(env) {
+    const { window, response } = env;
+    const endpoint = "/api/v1/management/runtime/weixin";
+    const sessions = new Map();
+    const held = new Set();
+    const pending = [];
+    const calls = [];
+    const revoked = [];
+    const blobSessions = new WeakMap();
+    let blobId = 0;
+    window.URL.createObjectURL = (blob) => `blob:fixture-qr-${blobSessions.get(blob)}-${++blobId}`;
+    window.URL.revokeObjectURL = (url) => revoked.push(url);
+    window.HTMLImageElement.prototype.decode = async () => {};
+    const defaults = (request, payload) => {
+        if (request.kind === "login") {
+            const sessionId = payload?.session_id;
+            if (!sessionId) throw new Error("login fixture needs a session_id");
+            sessions.set(sessionId, request.body);
+        }
+        if (request.kind === "cancel") sessions.delete(request.sessionId);
+        if (request.kind === "poll" && payload?.status === "confirmed") sessions.delete(request.sessionId);
+        if (request.kind === "qr") return {
+            ...response(200, {}), blob: async () => {
+                const blob = new window.Blob([`qr-${request.sessionId}`], { type: "image/png" });
+                blobSessions.set(blob, request.sessionId);
+                return blob;
+            },
+        };
+        if (request.kind === "status") return response(200, {
+            enabled: true, running: true,
+            accounts: [{ alias: "B", qq_id: 2, enabled: true, connected: true }],
+        });
+        if (request.kind === "pending" || request.kind === "audit") return response(200, { items: [] });
+        return response(200, payload || (request.kind === "poll" ? { status: "wait" } : {}));
+    };
+    window.fetch = (url, options = {}) => {
+        const route = new window.URL(String(url), window.location.href).pathname;
+        const method = options.method || "GET";
+        const login = route.match(/\/login\/([^/]+)(?:\/(qr\.png|refresh|verify))?$/);
+        let kind;
+        if (route === endpoint) kind = "status";
+        else if (route === `${endpoint}/pending`) kind = "pending";
+        else if (route === `${endpoint}/audit`) kind = "audit";
+        else if (route === `${endpoint}/login` && method === "POST") kind = "login";
+        else if (login) kind = method === "DELETE" ? "cancel" : login[2] === "qr.png" ? "qr" : login[2] || "poll";
+        else if (route.includes("/accounts/") && method === "PATCH") kind = "rebind";
+        else throw new Error(`unexpected Weixin request: ${method} ${route}`);
+        const request = { kind, url: String(url), method, sessionId: login?.[1] || "", body: options.body ? JSON.parse(options.body) : null };
+        calls.push(request);
+        if (kind === "login" || held.delete(kind)) return new Promise((resolve, reject) => {
+            pending.push({ ...request, resolve, reject, done: false });
+        });
+        return Promise.resolve(defaults(request));
+    };
+    const element = (id) => window.document.getElementById(id);
+    window.WeixinController.init();
+    return {
+        calls, sessions, revoked,
+        hold(kind) { held.add(kind); },
+        finish(kind, payload, sessionId = "") {
+            const request = pending.find((item) => !item.done && item.kind === kind && (!sessionId || item.sessionId === sessionId));
+            if (!request) throw new Error(`no pending ${kind} ${sessionId}`);
+            request.done = true;
+            request.resolve(defaults(request, payload));
+        },
+        fail(kind, sessionId = "", confirmation = false) {
+            const request = pending.find((item) => !item.done && item.kind === kind && (!sessionId || item.sessionId === sessionId));
+            if (!request) throw new Error(`no pending ${kind} ${sessionId}`);
+            request.done = true;
+            if (confirmation) request.resolve(response(409, { requires_confirmation: true, confirmation_token: "obsolete-token", error: "obsolete confirmation" }));
+            else request.reject(new Error(`obsolete ${kind} failure`));
+        },
+        open(alias = "A", qqId = "1") {
+            element("btnWeixinBind").click();
+            element("weixinAliasInput").value = alias;
+            element("weixinQqInput").value = qqId;
+        },
+        rebind() { window.document.querySelector('[data-weixin-action="rebind"][data-alias="B"]').click(); },
+        submit() { element("btnWeixinBindingSubmit").click(); },
+        close() { element("btnWeixinDialogClose").click(); },
+        refresh() { element("btnWeixinQrRefresh").click(); },
+        verify() {
+            element("weixinVerifyInput").value = "123456";
+            element("weixinVerifyForm").querySelector('button[type="submit"]').click();
+        },
+        snapshot() {
+            return {
+                hidden: element("weixinDialogBackdrop").hidden,
+                alias: element("weixinAliasInput").value,
+                bindingHidden: element("weixinBindingForm").hidden,
+                qrHidden: element("weixinQrStep").hidden,
+                qrSrc: element("weixinQrImage").getAttribute("src"),
+                qrFrame: element("weixinQrFrame").dataset.state,
+                qrState: textOf(window, "weixinQrState"),
+                qrMessage: textOf(window, "weixinQrMessage"),
+                dialogStatus: textOf(window, "weixinDialogStatus"),
+                confirmationHidden: element("weixinConfirmationPanel").hidden,
+                submitDisabled: element("btnWeixinBindingSubmit").disabled,
+                verifyHidden: element("weixinVerifyForm").hidden,
+                overflow: window.document.body.style.overflow,
+            };
+        },
+    };
+}
+
+async function staleWeixinDialogRequest(env, kind, outcome) {
+    const { window } = env;
+    const fixture = weixinDialogFixture(env);
+    await window.WeixinController.loadAll(true);
+    if (kind === "rebind") fixture.rebind();
+    else fixture.open();
+    if (kind !== "login") fixture.hold(kind);
+    if (kind === "rebind") fixture.submit();
+    else {
+        fixture.submit();
+        await tick();
+        if (kind !== "login") {
+            fixture.finish("login", { session_id: "old-A" });
+            await tick();
+            if (kind === "poll") await settle(250);
+            if (kind === "refresh") fixture.refresh();
+            if (kind === "verify") {
+                fixture.hold("poll");
+                await settle(250);
+                fixture.finish("poll", { status: "need_verifycode" }, "old-A");
+                await tick();
+                fixture.verify();
+            }
+        }
+    }
+    await tick();
+    fixture.close();
+    await tick();
+    const closed = fixture.snapshot();
+    fixture.open("C", "3");
+    fixture.submit();
+    await tick();
+    if (kind === "qr" || kind === "poll") {
+        fixture.hold("poll");
+        fixture.finish("login", { session_id: "new-C" });
+        await tick();
+        if (kind === "poll") await settle(250);
+    }
+    const beforeLate = fixture.snapshot();
+    if (outcome === "failure" || outcome === "confirmation") fixture.fail(kind, kind === "login" || kind === "rebind" ? "" : "old-A", outcome === "confirmation");
+    else fixture.finish(kind, kind === "login" ? { session_id: "old-A" } : kind === "poll" ? { status: outcome === "confirmed" ? "confirmed" : "wait", message: "obsolete poll" } : {}, kind === "login" || kind === "rebind" ? "" : "old-A");
+    await tick();
+    const afterLate = fixture.snapshot();
+    if (kind === "poll") {
+        fixture.finish("poll", { status: "need_verifycode", message: "current C verification" }, "new-C");
+        await tick();
+    } else if (kind !== "qr") {
+        fixture.finish("login", { session_id: "new-C" });
+        await tick();
+    }
+    return { closed, beforeLate, afterLate, current: fixture.snapshot(),
+        sessions: Array.from(fixture.sessions.entries()), revoked: fixture.revoked,
+        calls: fixture.calls.map(({ kind: requestKind, sessionId, body }) => ({ kind: requestKind, sessionId, body })) };
+}
+
+for (const kind of ["login", "qr", "poll", "refresh", "verify", "rebind"]) {
+    for (const outcome of kind === "login" ? ["success", "failure", "confirmation"] : kind === "poll" ? ["success", "failure", "confirmed"] : ["success", "failure"]) {
+        SCENARIOS[`weixin_dialog_late_${kind}_${outcome}`] = (env) => staleWeixinDialogRequest(env, kind, outcome);
+    }
+}
+
+SCENARIOS.weixin_dialog_slow_cancel = async (env) => {
+    const fixture = weixinDialogFixture(env);
+    await env.window.WeixinController.loadAll(true);
+    fixture.open(); fixture.submit(); await tick();
+    fixture.finish("login", { session_id: "old-A" }); await tick();
+    fixture.hold("cancel"); fixture.close(); await tick();
+    const closed = fixture.snapshot();
+    fixture.open("C", "3"); fixture.submit(); await tick();
+    fixture.finish("login", { session_id: "new-C" }); await tick();
+    const beforeLate = fixture.snapshot();
+    fixture.finish("cancel", {}, "old-A"); await tick();
+    return { closed, beforeLate, afterLate: fixture.snapshot(), sessions: Array.from(fixture.sessions.keys()) };
+};
+
+SCENARIOS.weixin_dialog_replace_cancels_existing = async (env) => {
+    const fixture = weixinDialogFixture(env);
+    await env.window.WeixinController.loadAll(true);
+    fixture.open(); fixture.submit(); await tick();
+    fixture.finish("login", { session_id: "old-A" }); await tick();
+    fixture.rebind(); await tick();
+    return { current: fixture.snapshot(), sessions: Array.from(fixture.sessions.keys()), revoked: fixture.revoked,
+        cancelIds: fixture.calls.filter((item) => item.kind === "cancel").map((item) => item.sessionId) };
+};
+
+for (const boundary of ["load", "timer", "normal"]) {
+    SCENARIOS[`weixin_dialog_confirmed_${boundary}`] = async (env) => {
+        const fixture = weixinDialogFixture(env);
+        await env.window.WeixinController.loadAll(true);
+        env.window.document.getElementById("btnWeixinBind").focus();
+        fixture.open(); fixture.hold("poll"); fixture.submit(); await tick();
+        fixture.finish("login", { session_id: "old-A" }); await tick(); await settle(250);
+        if (boundary === "load") fixture.hold("status");
+        fixture.finish("poll", { status: "confirmed" }, "old-A"); await tick();
+        if (boundary !== "normal") {
+            fixture.close(); await tick(); fixture.open("C", "3"); fixture.submit(); await tick();
+        }
+        const beforeLate = fixture.snapshot();
+        if (boundary === "load") { fixture.finish("status"); await tick(); }
+        await settle(550);
+        const afterLate = fixture.snapshot();
+        if (boundary !== "normal") { fixture.finish("login", { session_id: "new-C" }); await tick(); }
+        return { beforeLate, afterLate, current: fixture.snapshot(), focus: env.window.document.activeElement?.id || "" };
+    };
+}
+
 async function main() {
     const args = parseArgs(process.argv.slice(2));
     if (!args.scenario) throw new Error("缺少 --scenario");
@@ -2766,7 +4129,15 @@ async function main() {
         );
     }
     const root = resolveRoot(args.root);
-    const env = createEnv(root);
+    const env = createEnv(root, {
+        scripts: args.scenario.startsWith("config_autosave_") || args.scenario.startsWith("config_replacement_")
+            ? ["config-form.js"]
+            : args.scenario.startsWith("workflow_editor_")
+              ? ["workflow-graph.js", "workflow-canvas.js", "workflow-inspector.js", "schedules.js"]
+              : args.scenario.startsWith("weixin_dialog_")
+                ? ["weixin.js"]
+            : [],
+    });
     const result = await scenario(env);
     process.stdout.write(
         `${JSON.stringify({ ok: true, scenario: args.scenario, result })}\n`,

@@ -7,7 +7,7 @@ import logging
 import os
 import tempfile
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
 from Undefined.utils.io import run_cancellation_safe
@@ -30,6 +30,7 @@ class ProfileStorage:
         )
 
     def _get_lock(self, entity_type: str, entity_id: str) -> asyncio.Lock:
+        self._validate_entity(entity_type, entity_id)
         # setdefault 原子插入：并发首次进入同一实体时双方拿到同一把锁，
         # 不会出现各自建锁、后建覆盖先建导致互斥失效
         return self._locks.setdefault(f"{entity_type}:{entity_id}", asyncio.Lock())
@@ -41,23 +42,46 @@ class ProfileStorage:
         （后写覆盖先写，先前的观察永久丢失）。与文件写入锁分开，避免与
         `write_profile` 的锁重入死锁。锁的创建经 `dict.setdefault` 原子完成。
         """
+        self._validate_entity(entity_type, entity_id)
         return self._merge_locks.setdefault(
             f"{entity_type}:{entity_id}", asyncio.Lock()
         )
 
     def _profile_path(self, entity_type: str, entity_id: str) -> Path:
-        return self._base / f"{entity_type}s" / f"{entity_id}.md"
+        self._validate_entity(entity_type, entity_id)
+        return self._contained_path(self._base / f"{entity_type}s" / f"{entity_id}.md")
 
     def _history_dir(self, entity_type: str, entity_id: str) -> Path:
-        return self._base / "history" / entity_type / entity_id
+        self._validate_entity(entity_type, entity_id)
+        return self._contained_path(self._base / "history" / entity_type / entity_id)
+
+    @staticmethod
+    def _validate_entity(entity_type: str, entity_id: str) -> None:
+        if entity_type not in {"user", "group"}:
+            raise ValueError(f"非法的侧写实体类型: {entity_type!r}")
+        if (
+            not entity_id.strip()
+            or entity_id in {".", ".."}
+            or "/" in entity_id
+            or "\\" in entity_id
+            or "\x00" in entity_id
+            or PureWindowsPath(entity_id).drive
+        ):
+            raise ValueError(f"非法的侧写实体 ID: {entity_id!r}")
+
+    def _contained_path(self, path: Path) -> Path:
+        # 同时检查已存在的目录/文件符号链接，不能只过滤输入中的 ../。
+        if not path.resolve().is_relative_to(self._base.resolve()):
+            raise ValueError("侧写路径超出存储目录")
+        return path
 
     async def read_profile(self, entity_type: str, entity_id: str) -> str | None:
-        p = self._profile_path(entity_type, entity_id)
         logger.info(
             "[认知侧写] 读取侧写: entity_type=%s entity_id=%s", entity_type, entity_id
         )
 
         def _read() -> str | None:
+            p = self._profile_path(entity_type, entity_id)
             if not p.exists():
                 return None
             return p.read_text(encoding="utf-8")
@@ -82,10 +106,10 @@ class ProfileStorage:
             len(content or ""),
         )
         async with self._get_lock(entity_type, entity_id):
-            p = self._profile_path(entity_type, entity_id)
-            hist_dir = self._history_dir(entity_type, entity_id)
 
             def _write() -> None:
+                p = self._profile_path(entity_type, entity_id)
+                hist_dir = self._history_dir(entity_type, entity_id)
                 p.parent.mkdir(parents=True, exist_ok=True)
                 hist_dir.mkdir(parents=True, exist_ok=True)
 
@@ -132,9 +156,8 @@ class ProfileStorage:
         )
 
     async def list_revisions(self, entity_type: str, entity_id: str) -> list[str]:
-        hist_dir = self._history_dir(entity_type, entity_id)
-
         def _list() -> list[str]:
+            hist_dir = self._history_dir(entity_type, entity_id)
             if not hist_dir.exists():
                 return []
             return sorted(f.name for f in hist_dir.glob("*.md"))
@@ -169,9 +192,11 @@ class ProfileStorage:
     ) -> str | None:
         """读取指定历史版本内容；版本名取 `list_revisions` 的返回值。"""
         name = self._normalize_revision_name(revision)
-        path = self._history_dir(entity_type, entity_id) / name
 
         def _read() -> str | None:
+            path = self._contained_path(
+                self._history_dir(entity_type, entity_id) / name
+            )
             if not path.exists():
                 return None
             return path.read_text(encoding="utf-8")

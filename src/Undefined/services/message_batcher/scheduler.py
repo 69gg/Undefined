@@ -305,34 +305,46 @@ class MessageBatcher:
         sender_id: int,
         task: asyncio.Task[Any],
         request_context: Any = None,
-    ) -> None:
+        *,
+        token: BatchDispatchToken | None,
+    ) -> bool:
         """coordinator 在 ``execute_reply`` 开头上报 inflight LLM 任务。
 
-        如果桶不存在或 phase 不是 SPECULATING，则忽略（说明这次 fire 不是投机的）。
+        只接受当前投机批次的 token，独立旁路请求或过期批次不能占用此桶。
         """
         key = (scope, sender_id)
         state = self._buckets.get(key)
-        if state is None:
-            return
-        if state.phase is not BatchPhase.SPECULATING:
-            return
+        if (
+            state is None
+            or state.phase is not BatchPhase.SPECULATING
+            or token is None
+            or token.cancelled
+            or state.dispatch_token is not token
+        ):
+            return False
         state.inflight = _InflightInfo(task=task, request_context=request_context)
         logger.debug(
             "[MessageBatcher] 注册 inflight 任务: scope=%s sender=%s",
             scope,
             sender_id,
         )
+        return True
 
     # 注销 inflight 任务
     def unregister_inflight(
-        self, scope: str, sender_id: int, task: asyncio.Task[Any]
+        self,
+        scope: str,
+        sender_id: int,
+        task: asyncio.Task[Any],
+        *,
+        token: BatchDispatchToken | None,
     ) -> None:
         """coordinator 在 ``execute_reply`` 结束（含异常/取消）时上报。"""
         key = (scope, sender_id)
         state = self._buckets.get(key)
-        if state is None:
+        if state is None or token is None or state.dispatch_token is not token:
             return
-        if state.inflight is not None and state.inflight.task is not task:
+        if state.inflight is None or state.inflight.task is not task:
             logger.debug(
                 "[MessageBatcher] 忽略过期 inflight 注销: scope=%s sender=%s phase=%s",
                 scope,
@@ -340,11 +352,20 @@ class MessageBatcher:
                 state.phase.value,
             )
             return
+        if (
+            state.phase is BatchPhase.SPECULATING
+            and state.inflight is not None
+            and was_message_sent(state.inflight.request_context)
+        ):
+            # 已回复且模型已结束，旧批次无需再等待 T1；完成后不能再取消，
+            # 新消息必须开新桶，不能重放旧 items（与 allow_cancel_after_send 无关）。
+            self._cancel_t1(state)
+            self._cancel_t2(state)
+            state.phase = BatchPhase.FINALIZING
+            self._buckets.pop(key, None)
         state.inflight = None
-        # 若 phase 是 SPECULATING 且 T1 已经 fire 过（FINALIZING 才 unregister），
-        # 此时 inflight 自然结束 → 桶已经在 _on_t1_timer 中弹出，无需再做事
-        # 若仍在 SPECULATING（T1 未到）：inflight 已结束但仍可能有新消息进来；
-        # 保持 SPECULATING，新消息会按 SPECULATING 分支处理（已发消息开新 batch / 未发追加）
+        # 未发回复的投机仍保留 items，后续补充消息可以重新合并；T1 已到的桶
+        # 则交给 _handle_t1 收尾，避免注销旧任务时误删后来创建的新桶。
         logger.debug(
             "[MessageBatcher] 注销 inflight 任务: scope=%s sender=%s phase=%s",
             scope,

@@ -8,9 +8,14 @@ from pathlib import Path
 from typing import Any
 
 from Undefined.config.loader import CONFIG_PATH
+from Undefined.utils.io import write_text_sync
 
 from .comment import CommentMap, parse_comment_map_text
-from .config_io import CONFIG_EXAMPLE_PATH, _resolve_config_example_path
+from .config_io import (
+    CONFIG_EXAMPLE_PATH,
+    _resolve_config_example_path,
+    config_write_lock,
+)
 from .toml_render import TomlData, merge_defaults, render_toml
 
 _PASSTHROUGH_KEYS = {"request_params"}
@@ -290,11 +295,12 @@ def sync_config_file(
     if resolved_example is None or not resolved_example.exists():
         raise FileNotFoundError(f"config example not found: {example_path}")
 
-    current_text = (
-        config_path.read_text(encoding="utf-8") if config_path.exists() else ""
-    )
-    example_text = resolved_example.read_text(encoding="utf-8")
-    result = sync_config_text(current_text, example_text, prune=prune)
-    if write:
-        config_path.write_text(result.content, encoding="utf-8")
-    return result
+    with config_write_lock(config_path):
+        current_text = (
+            config_path.read_text(encoding="utf-8") if config_path.exists() else ""
+        )
+        example_text = resolved_example.read_text(encoding="utf-8")
+        result = sync_config_text(current_text, example_text, prune=prune)
+        if write:
+            write_text_sync(config_path, result.content, use_lock=False)
+        return result

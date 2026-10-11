@@ -33,12 +33,13 @@ export function AttachmentImage({
 	style,
 	onOpenImage,
 }: AttachmentImageProps) {
-	const { loadAttachmentBlob } = useAttachmentImage();
+	const { loadAttachmentBlob, retainAttachmentBlob } = useAttachmentImage();
 	const { t } = useTranslation();
 	const [state, setState] = useState<LoadState>({ status: "loading" });
 
 	useEffect(() => {
 		let cancelled = false;
+		const release = retainAttachmentBlob(uid);
 		setState({ status: "loading" });
 		loadAttachmentBlob(uid)
 			.then((loaded) => {
@@ -52,8 +53,9 @@ export function AttachmentImage({
 			});
 		return () => {
 			cancelled = true;
+			release();
 		};
-	}, [uid, loadAttachmentBlob]);
+	}, [uid, loadAttachmentBlob, retainAttachmentBlob]);
 
 	if (state.status === "loading") {
 		return (

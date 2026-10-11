@@ -7,12 +7,46 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from collections.abc import Coroutine
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, TypeVar
 
 if TYPE_CHECKING:
     from jmcpy import Genre, SearchTarget, SortBy, SubGenre, TimeRange
 
     from Undefined.jm.searcher import JmListingMode
+
+_ResultT = TypeVar("_ResultT")
+
+
+async def run_cancellation_safe(operation: Coroutine[Any, Any, _ResultT]) -> _ResultT:
+    """复用公共 IO 的取消保护，等待临界区结束后再传播取消。"""
+    from Undefined.utils.io import run_cancellation_safe as run_io_cancellation_safe
+
+    return await run_io_cancellation_safe(operation)
+
+
+def download_cache_root(context: dict[str, Any]) -> Path:
+    """取得执行上下文的下载缓存根目录。"""
+    from Undefined.utils.paths import DOWNLOAD_CACHE_DIR
+
+    return Path(context.get("download_cache_dir") or DOWNLOAD_CACHE_DIR).resolve()
+
+
+def resolve_download_cache_path(path: Path, context: dict[str, Any]) -> Path:
+    """解析缓存内路径，拒绝缓存根本身和通过符号链接逃逸的路径。"""
+    root = download_cache_root(context)
+    resolved = path.resolve()
+    if resolved == root or not resolved.is_relative_to(root):
+        raise ValueError("路径必须位于下载缓存目录内，且不能是缓存根目录")
+    return resolved
+
+
+async def delete_download_cache_directory(path: Path) -> None:
+    """通过公共异步 IO 清理已验证的下载缓存子目录。"""
+    from Undefined.utils.io import delete_tree
+
+    await delete_tree(path)
 
 
 def private_access_error(
@@ -166,6 +200,8 @@ async def jm_send_book(
 
 
 __all__ = [
+    "delete_download_cache_directory",
+    "download_cache_root",
     "jm_book_attachment_text",
     "jm_book_info_text",
     "jm_normalize_book_id",
@@ -174,4 +210,5 @@ __all__ = [
     "jm_send_book",
     "parse_positive_int",
     "private_access_error",
+    "resolve_download_cache_path",
 ]

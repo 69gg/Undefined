@@ -75,7 +75,10 @@ async def cognitive_profile_handler(
     if not entity_type or not entity_id:
         return _json_error("entity_type/entity_id are required", status=400)
 
-    profile = await cognitive_service.get_profile(entity_type, entity_id)
+    try:
+        profile = await cognitive_service.get_profile(entity_type, entity_id)
+    except ValueError as exc:
+        return _json_error(str(exc), status=400)
     return web.json_response(
         {
             "entity_type": entity_type,

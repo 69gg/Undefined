@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -33,6 +34,45 @@ def test_from_mapping_builds_without_toml() -> None:
     cfg = Config.from_mapping(_MINIMAL_MAPPING, strict=False)
     assert cfg.onebot_ws_url == "ws://127.0.0.1:3001"
     assert cfg.chat_model.model_name == "gpt-test"
+
+
+@pytest.mark.parametrize("use_builder", [False, True])
+def test_memory_config_uses_webui_mapping_without_disk_reads(
+    monkeypatch: pytest.MonkeyPatch, use_builder: bool
+) -> None:
+    def _unexpected_read(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("内存配置不应读取 TOML 或本地管理员文件")
+
+    monkeypatch.setattr("Undefined.config.loader.load_toml_data", _unexpected_read)
+    monkeypatch.setattr(
+        "Undefined.config.config_class.load_toml_data", _unexpected_read
+    )
+    monkeypatch.setattr(
+        "Undefined.config.parsers.helpers.load_local_admins", _unexpected_read
+    )
+    monkeypatch.setenv("WEBUI_PORT", "19876")
+    mapping = {
+        **_MINIMAL_MAPPING,
+        "core": {"superadmin_qq": 11, "admin_qq": [22]},
+        "webui": {
+            "url": "::1",
+            "port": 12345,
+            "password": "mapping-password",
+            "autostart_bot": True,
+            "check_updates": False,
+        },
+    }
+    config = (
+        Config.builder().with_mapping(mapping).build(strict=False)
+        if use_builder
+        else Config.from_mapping(mapping, strict=False)
+    )
+    assert config.webui_url == "::1"
+    assert config.webui_port == 12345
+    assert config.webui_password == "mapping-password"
+    assert config.webui_autostart_bot is True
+    assert config.webui_check_updates is False
+    assert set(config.admin_qqs) == {11, 22}
 
 
 def test_tool_search_defaults() -> None:
