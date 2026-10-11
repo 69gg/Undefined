@@ -497,6 +497,69 @@ async def test_embed_removes_deleted_sources(tmp_path: Path) -> None:
     assert json.loads(manifest_path.read_text("utf-8")) == {}
 
 
+@pytest.mark.parametrize("phase", ["hash", "read"])
+@pytest.mark.parametrize("missing", [False, True])
+async def test_scan_handles_file_io_failure_without_losing_other_sources(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    phase: str,
+    missing: bool,
+) -> None:
+    manager, _ = _make_manager(tmp_path)
+    kb_dir = _make_kb(
+        tmp_path, "kb1", {"a.txt": "updated contents", "z.txt": "healthy contents"}
+    )
+    source_path = kb_dir / "texts/a.txt"
+    manifest_path = kb_dir / ".manifest.json"
+    manifest_path.write_text('{"texts/a.txt":"outdated"}', "utf-8")
+    store = manager._get_store("kb1")
+    await store.add_chunks(
+        ["old contents"], [[0.1, 0.2]], {"source": "texts/a.txt", "kb": "kb1"}
+    )
+    read_bytes = Path.read_bytes
+    read_text = Path.read_text
+
+    def fail_source(path: Path) -> None:
+        if path != source_path:
+            return
+        if missing:
+            path.unlink()
+            raise FileNotFoundError(path)
+        raise OSError("source temporarily unreadable")
+
+    def read_bytes_with_failure(path: Path) -> bytes:
+        fail_source(path)
+        return read_bytes(path)
+
+    def read_text_with_failure(path: Path, *args: Any, **kwargs: Any) -> str:
+        fail_source(path)
+        return read_text(path, *args, **kwargs)
+
+    with monkeypatch.context() as failure_patch:
+        if phase == "hash":
+            failure_patch.setattr(Path, "read_bytes", read_bytes_with_failure)
+        else:
+            failure_patch.setattr(Path, "read_text", read_text_with_failure)
+        assert await manager.embed_knowledge_base("kb1") == 1
+
+    manifest = json.loads(manifest_path.read_text("utf-8"))
+    assert store._collection.get(where={"source": "texts/z.txt"})["documents"] == [
+        "healthy contents"
+    ]
+    assert "texts/z.txt" in manifest
+    old_documents = store._collection.get(where={"source": "texts/a.txt"})["documents"]
+    if missing:
+        assert old_documents == []
+        assert "texts/a.txt" not in manifest
+    else:
+        assert old_documents == ["old contents"]
+        assert manifest["texts/a.txt"] == "outdated"
+        assert await manager.embed_knowledge_base("kb1") == 1
+        assert store._collection.get(where={"source": "texts/a.txt"})["documents"] == [
+            "updated contents"
+        ]
+
+
 async def test_embed_replaces_changed_file_chunks(tmp_path: Path) -> None:
     manager, embedder = _make_manager(tmp_path)
     embedder.embed = AsyncMock(return_value=[[0.1]])
