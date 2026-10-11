@@ -9,6 +9,7 @@ from typing import Any
 from .api_modes import API_MODE_OPENAI_CHAT_COMPLETIONS, normalize_api_mode
 
 HISTORIAN_MIN_POLL_INTERVAL_SECONDS: float = 0.1
+DEFAULT_GROUP_LLM_QUEUE_MAX_PENDING: int = 128
 PROMPT_FILE_INCLUDE_SLOTS: tuple[str, ...] = ("p0", "p1", "p2", "p3", "summary")
 
 # 支持独立 embedding 配置的功能；顺序即文档与校验顺序

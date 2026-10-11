@@ -66,6 +66,7 @@ class Config:
     inverted_question_enabled: bool
     context_recent_messages_limit: int
     ai_request_max_retries: int
+    group_llm_queue_max_pending: int
     missing_tool_call_retries: int
     nagaagent_mode_enabled: bool
     onebot_ws_url: str

@@ -199,6 +199,7 @@ model_name = "gpt-4o-mini"
 | `process_poke_message` | `true` | 是否响应拍一拍 | 关闭后忽略 poke |
 | `context_recent_messages_limit` | `20` | 注入到提示词的最近历史条数；当前输入批次发车入队前冻结为请求级快照 | `<0` 视为 `0`（关闭注入）；无固定上限，受 `max_records` 与存储约束；已入队请求不受后续消息或配置热更新影响 |
 | `ai_request_max_retries` | `2` | 单次 LLM 请求失败重试次数；无工具调用且实际 `assistant.content` 为空白时也走此路径，原样重试同一轮请求。安全模型注入检测、Naga 审核与注入回复在遇到可重试 HTTP 错误（429 / 5xx）时同样使用该次数 | `<0` 自动回退到 `0`；支持热更新 |
+| `group_llm_queue_max_pending` | `128` | 每模型普通群聊 LLM 等待队列的新请求准入上限；支持环境变量 `GROUP_LLM_QUEUE_MAX_PENDING` | 必须为正整数，非法值报错；支持热更新，调低不会丢弃已接收请求 |
 | `missing_tool_call_retries` | `3` | 模型返回非空纯文本且无法恢复为本轮可用工具调用时的纠正重试次数（保留 assistant 纯文本 + 通用纠正提示，不写死具体 tool）；空白响应不计入此项；每次进入下一轮纠正重试前，warning 日志会以 `raw_content=repr(...)` 完整记录该轮原始响应；格式与失败回退规则见 [模型 API 与兼容层](model-compatibility.md#文本-tool-call-后备解析) | `<0` 自动回退到 `0`；支持热更新 |
 
 ---
@@ -277,6 +278,8 @@ Stream 本地文件投递在同一 Bot 内串行，纯文本不等待上传锁�
 | `request_params` | 额外请求体参数（透传给模型 API，保留字段会忽略） |
 
 普通群聊队列过长时，仅裁剪尚未发车的外围请求；已经启动的 AI 调用所等待的 LLM 子请求及重试保留原相对顺序，避免调用方因裁剪而继续等待超时。
+
+普通群聊的新 LLM 子请求入队前，会按模型检查当前等待中的 LLM 数量；达到 `[core].group_llm_queue_max_pending` 时返回可读的 `QueueFull` 错误并记录日志，调用方会清理该请求的等待状态，不裁剪已接收请求。普通自动回复可能在有限次重试后结束而不发送回复。此限制不作用于其他优先级通道或其他模型；已接收任务的重试仍可回插，调低上限也不清空旧任务。它是新请求的排队准入限制，不是总并发或内存上限：在途调用不计入，重试可能使等待数量暂时超过配置值。
 
 请求模式说明：
 - `api_mode="openai.chat_completions"`：走 `AsyncOpenAI.chat.completions.create(...)`
@@ -1484,6 +1487,7 @@ Management 的 WebUI 配置按 [§4.23](#423-webui) 的时机生效：密码和�
 ### 5.3 明确“会执行热应用”的字段
 
 - `webui.password` / `webui.check_updates` / `webui.stop_timeout_seconds`（Management 的登录密码、检查更新开关与下次停止的收尾期限刷新）
+- `core.group_llm_queue_max_pending`（下一次普通群聊 LLM 入队使用新上限，保留已接收请求与重试）
 - `onebot.file_send_mode` / `onebot.file_send_host`（新投递读取快照；进行中投递及旧 URL 生命周期不变）
 - 模型发车间隔 / 模型名 / 模型池变更（队列间隔刷新）
 - `models.grok.model_name` / `models.grok.queue_interval_seconds`（队列间隔刷新）

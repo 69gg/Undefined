@@ -60,6 +60,7 @@ ENV_REGISTRY: Final[dict[tuple[str, ...], str]] = {
     ("core", "admin_qq"): "ADMIN_QQ",
     ("core", "bot_qq"): "BOT_QQ",
     ("core", "forward_proxy_qq"): "FORWARD_PROXY_QQ",
+    ("core", "group_llm_queue_max_pending"): "GROUP_LLM_QUEUE_MAX_PENDING",
     ("core", "superadmin_qq"): "SUPERADMIN_QQ",
     ("features", "pool_enabled"): "MODEL_POOL_ENABLED",
     ("attachments", "use_proxy"): "ATTACHMENTS_USE_PROXY",

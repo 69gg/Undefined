@@ -210,6 +210,11 @@ def apply_config_updates(
     def _apply_retries() -> None:
         context.queue_manager.update_max_retries(updated.ai_request_max_retries)
 
+    def _apply_group_llm_queue_limit() -> None:
+        context.queue_manager.update_group_llm_queue_max_pending(
+            updated.group_llm_queue_max_pending
+        )
+
     def _apply_queue_intervals() -> None:
         context.queue_manager.update_model_intervals(
             build_model_queue_intervals(updated)
@@ -292,6 +297,8 @@ def apply_config_updates(
         steps.append(("security", _apply_security))
     if "ai_request_max_retries" in changed_keys:
         steps.append(("ai_request_max_retries", _apply_retries))
+    if "group_llm_queue_max_pending" in changed_keys:
+        steps.append(("group_llm_queue_max_pending", _apply_group_llm_queue_limit))
     if _needs_queue_interval_update(changed_keys):
         steps.append(("queue_intervals", _apply_queue_intervals))
     if _needs_intro_update(changed_keys):

@@ -28,6 +28,9 @@ context_recent_messages_limit = 20
 # zh: 单次 LLM 请求失败时最大静默重试次数（0=不重试，默认2）。失败的请求会回到原队列的第 2 个位置。
 # en: Max silent retries for a single failed LLM request (0=no retry, default 2). Failed requests are reinserted at position 2 of their original queue lane.
 ai_request_max_retries = 2
+# zh: 每模型普通群聊 LLM 等待队列的新请求准入上限（正整数，默认128，可热更新）。满时拒绝新请求；保留已接收请求和重试，不限制在途调用。
+# en: Per-model admission limit for new ordinary-group queued LLM calls (positive integer, default 128, hot reload). Rejects new calls when full; retains accepted calls and retries, and does not cap in-flight calls.
+group_llm_queue_max_pending = 128
 # zh: 模型返回纯文本但未调用 send_message/end 等工具时的最大纠正重试次数（0=不重试，默认3）。
 # en: Max correction retries when the model returns plain text without tool calls (0=no retry, default 3).
 missing_tool_call_retries = 3

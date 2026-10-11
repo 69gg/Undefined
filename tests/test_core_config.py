@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
+
+import pytest
 
 from Undefined.config.loader import Config
+from Undefined.config.env_registry import ENV_REGISTRY
 
 
 _MINIMAL = """
@@ -34,3 +38,39 @@ def test_missing_tool_call_retries_clamps_negative(tmp_path: Path) -> None:
 def test_missing_tool_call_retries_loads_explicit_value(tmp_path: Path) -> None:
     cfg = _load(tmp_path, "\n[core]\nmissing_tool_call_retries = 5\n")
     assert cfg.missing_tool_call_retries == 5
+
+
+def test_group_llm_queue_limit_defaults_and_env_precedence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("GROUP_LLM_QUEUE_MAX_PENDING", raising=False)
+    assert _load(tmp_path).group_llm_queue_max_pending == 128
+    assert ENV_REGISTRY[("core", "group_llm_queue_max_pending")] == (
+        "GROUP_LLM_QUEUE_MAX_PENDING"
+    )
+    monkeypatch.setenv("GROUP_LLM_QUEUE_MAX_PENDING", "32")
+    assert _load(tmp_path).group_llm_queue_max_pending == 32
+    assert (
+        _load(
+            tmp_path, "\n[core]\ngroup_llm_queue_max_pending = 7\n"
+        ).group_llm_queue_max_pending
+        == 7
+    )
+
+
+@pytest.mark.parametrize("value", [0, -1, True, False, 1.5, "bad", "0", "", []])
+def test_invalid_group_llm_queue_limit_is_rejected(value: Any) -> None:
+    with pytest.raises(
+        ValueError, match="core.group_llm_queue_max_pending 必须为正整数"
+    ):
+        Config.from_mapping(
+            {"core": {"group_llm_queue_max_pending": value}}, strict=False
+        )
+
+
+def test_invalid_group_llm_queue_limit_env_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GROUP_LLM_QUEUE_MAX_PENDING", "-1")
+    with pytest.raises(ValueError, match="必须为正整数"):
+        _load(tmp_path)
