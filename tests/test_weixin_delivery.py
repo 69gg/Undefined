@@ -31,7 +31,9 @@ from Undefined.weixin.transport import (
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("response", ["timeout", "server_error", "rejection"])
+@pytest.mark.parametrize(
+    "response", ["timeout", "server_error", "rejection", "history_error"]
+)
 async def test_sdk_dispatch_error_controls_jm_fallback(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -43,6 +45,8 @@ async def test_sdk_dispatch_error_controls_jm_fallback(
         message = json.loads(request.content)["msg"]
         requests.append(message)
         if len(requests) == 1:
+            if response == "history_error":
+                return httpx.Response(200, json={"ret": 0}, request=request)
             if response == "timeout":
                 raise httpx.ReadTimeout("response lost after POST", request=request)
             if response == "server_error":
@@ -62,6 +66,13 @@ async def test_sdk_dispatch_error_controls_jm_fallback(
     )
     history = MagicMock()
     history.add_private_message = AsyncMock()
+    if response == "history_error":
+        history.add_private_message.side_effect = [
+            OSError("isolated history write failure after ACK"),
+            None,
+            None,
+            None,
+        ]
     sender_config = MagicMock()
     sender_config.is_private_allowed.return_value = True
     sender_config.weixin.multi_item_messages_enabled = True
@@ -103,7 +114,10 @@ async def test_sdk_dispatch_error_controls_jm_fallback(
         )
     zip_send.assert_awaited_once()
     await service.stop()
-    if response == "rejection":
+    if response == "history_error":
+        assert [len(message["item_list"]) for message in requests] == [2]
+        assert "已发送合并转发" in status
+    elif response == "rejection":
         assert [len(message["item_list"]) for message in requests] == [2, 1, 1]
         assert "已发送合并转发" in status
     else:

@@ -1,6 +1,8 @@
 """消息发送管理"""
 
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
 import time
@@ -63,6 +65,15 @@ class _WeixinDeliveryUnit:
 
 class WeixinReplyTargetError(ValueError):
     """Raised when a quoted target is outside the current WeChat route."""
+
+
+@contextmanager
+def _weixin_history_guard(user_id: int) -> Iterator[None]:
+    """ACK 后的历史副作用失败不能被上层当作投递失败并触发重发。"""
+    try:
+        yield
+    except Exception:
+        logger.exception("[历史记录] 记录微信发送失败: user=%s", user_id)
 
 
 def _extract_message_id(result: object) -> int | None:
@@ -537,35 +548,38 @@ class MessageSender:
         sent_at_ms = time.time_ns() // 1_000_000
         if not auto_history:
             return
-        file_name = name or Path(file_path).name
-        file_size = await _get_file_size(file_path)
-        history_attachments = await self.register_sent_file_attachment(
-            "private",
-            address.target_id,
-            file_path,
-            file_name,
-            kind=(history_attachment.kind if history_attachment else kind or "file"),
-            source_attachment=history_attachment,
-        )
-        history_content = _append_attachment_refs(
-            _build_file_history_message(file_name, file_size),
-            history_attachments,
-        )
-        await self.history_manager.add_private_message(
-            user_id=address.target_id,
-            text_content=history_content,
-            display_name="Bot",
-            user_name="Bot",
-            attachments=history_attachments,
-            message_id=sent_message_id,
-            transport={
-                "channel": "wechat",
-                "address": address.canonical,
-                "direction": "outbound",
-                "message_ids": [sent_message_id],
-                "sent_at_ms": sent_at_ms,
-            },
-        )
+        with _weixin_history_guard(address.target_id):
+            file_name = name or Path(file_path).name
+            file_size = await _get_file_size(file_path)
+            history_attachments = await self.register_sent_file_attachment(
+                "private",
+                address.target_id,
+                file_path,
+                file_name,
+                kind=(
+                    history_attachment.kind if history_attachment else kind or "file"
+                ),
+                source_attachment=history_attachment,
+            )
+            history_content = _append_attachment_refs(
+                _build_file_history_message(file_name, file_size),
+                history_attachments,
+            )
+            await self.history_manager.add_private_message(
+                user_id=address.target_id,
+                text_content=history_content,
+                display_name="Bot",
+                user_name="Bot",
+                attachments=history_attachments,
+                message_id=sent_message_id,
+                transport={
+                    "channel": "wechat",
+                    "address": address.canonical,
+                    "direction": "outbound",
+                    "message_ids": [sent_message_id],
+                    "sent_at_ms": sent_at_ms,
+                },
+            )
 
     async def send_address_voice(
         self,
@@ -653,36 +667,37 @@ class MessageSender:
         mark_message_sent_this_turn()
         if not auto_history:
             return sent_message_id
-        sent_at_ms = time.time_ns() // 1_000_000
-        file_name = name or path.name
-        file_size = await _get_file_size(path)
-        history_attachments = await self.register_sent_file_attachment(
-            "private",
-            address.target_id,
-            str(path),
-            file_name,
-            kind="record",
-            source_attachment=history_attachment,
-        )
-        history_content = _append_attachment_refs(
-            f"[语音] {file_name} ({_format_size(file_size)})",
-            history_attachments,
-        )
-        await self.history_manager.add_private_message(
-            user_id=address.target_id,
-            text_content=history_content,
-            display_name="Bot",
-            user_name="Bot",
-            attachments=history_attachments,
-            message_id=sent_message_id,
-            transport={
-                "channel": "wechat",
-                "address": address.canonical,
-                "direction": "outbound",
-                "message_ids": [sent_message_id],
-                "sent_at_ms": sent_at_ms,
-            },
-        )
+        with _weixin_history_guard(address.target_id):
+            sent_at_ms = time.time_ns() // 1_000_000
+            file_name = name or path.name
+            file_size = await _get_file_size(path)
+            history_attachments = await self.register_sent_file_attachment(
+                "private",
+                address.target_id,
+                str(path),
+                file_name,
+                kind="record",
+                source_attachment=history_attachment,
+            )
+            history_content = _append_attachment_refs(
+                f"[语音] {file_name} ({_format_size(file_size)})",
+                history_attachments,
+            )
+            await self.history_manager.add_private_message(
+                user_id=address.target_id,
+                text_content=history_content,
+                display_name="Bot",
+                user_name="Bot",
+                attachments=history_attachments,
+                message_id=sent_message_id,
+                transport={
+                    "channel": "wechat",
+                    "address": address.canonical,
+                    "direction": "outbound",
+                    "message_ids": [sent_message_id],
+                    "sent_at_ms": sent_at_ms,
+                },
+            )
         return sent_message_id
 
     async def set_address_typing(self, address: DeliveryAddress, typing: bool) -> None:
@@ -852,43 +867,44 @@ class MessageSender:
             raise ValueError("微信消息中没有可投递的文本或本地媒体")
 
         if auto_history:
-            history_attachments = _merge_attachment_refs(
-                attachments,
-                await self._register_local_segment_attachments(
-                    "private",
-                    user_id,
-                    segments,
-                ),
-            )
-            history_content = history_message
-            if history_content is None:
-                history_content = text
-            history_content = _append_attachment_refs(
-                history_content,
-                history_attachments,
-            )
-            transport: dict[str, Any] = {
-                "channel": "wechat",
-                "address": f"wechat:{user_id}",
-                "direction": "outbound",
-            }
-            if first_sent_at_ms is not None:
-                transport["sent_at_ms"] = first_sent_at_ms
-            if sent_ids:
-                transport["message_ids"] = list(sent_ids)
-            if reply_to is not None:
-                transport["reply_to"] = str(reply_to)
-                transport["reply_mode"] = reply_mode
-            await self.history_manager.add_private_message(
-                user_id=user_id,
-                text_content=history_content,
-                display_name="Bot",
-                user_name="Bot",
-                message_id=(sent_ids[0] if sent_ids else None),
-                attachments=history_attachments,
-                transport=transport,
-                reply_context=reply_context,
-            )
+            with _weixin_history_guard(user_id):
+                history_attachments = _merge_attachment_refs(
+                    attachments,
+                    await self._register_local_segment_attachments(
+                        "private",
+                        user_id,
+                        segments,
+                    ),
+                )
+                history_content = history_message
+                if history_content is None:
+                    history_content = text
+                history_content = _append_attachment_refs(
+                    history_content,
+                    history_attachments,
+                )
+                transport: dict[str, Any] = {
+                    "channel": "wechat",
+                    "address": f"wechat:{user_id}",
+                    "direction": "outbound",
+                }
+                if first_sent_at_ms is not None:
+                    transport["sent_at_ms"] = first_sent_at_ms
+                if sent_ids:
+                    transport["message_ids"] = list(sent_ids)
+                if reply_to is not None:
+                    transport["reply_to"] = str(reply_to)
+                    transport["reply_mode"] = reply_mode
+                await self.history_manager.add_private_message(
+                    user_id=user_id,
+                    text_content=history_content,
+                    display_name="Bot",
+                    user_name="Bot",
+                    message_id=(sent_ids[0] if sent_ids else None),
+                    attachments=history_attachments,
+                    transport=transport,
+                    reply_context=reply_context,
+                )
         return sent_ids[0] if sent_ids else None
 
     async def _resolve_weixin_reply_context(
@@ -1835,34 +1851,35 @@ class AddressBoundSender:
         sent_message_ids = await self._send_weixin_forward(messages)
         sent_at_ms = time.time_ns() // 1_000_000
         if auto_history:
-            history_attachments = (
-                await self._sender._register_local_segment_attachments(
-                    "private",
-                    user_id,
-                    _iter_segments_deep(messages),
+            with _weixin_history_guard(user_id):
+                history_attachments = (
+                    await self._sender._register_local_segment_attachments(
+                        "private",
+                        user_id,
+                        _iter_segments_deep(messages),
+                    )
                 )
-            )
-            history_content = _append_attachment_refs(
-                history_message,
-                history_attachments,
-            )
-            transport: dict[str, Any] = {
-                "channel": "wechat",
-                "address": self._address.canonical,
-                "direction": "outbound",
-                "sent_at_ms": sent_at_ms,
-            }
-            if sent_message_ids:
-                transport["message_ids"] = sent_message_ids
-            await self._sender.history_manager.add_private_message(
-                user_id=user_id,
-                text_content=history_content,
-                display_name="Bot",
-                user_name="Bot",
-                message_id=(sent_message_ids[0] if sent_message_ids else None),
-                attachments=history_attachments,
-                transport=transport,
-            )
+                history_content = _append_attachment_refs(
+                    history_message,
+                    history_attachments,
+                )
+                transport: dict[str, Any] = {
+                    "channel": "wechat",
+                    "address": self._address.canonical,
+                    "direction": "outbound",
+                    "sent_at_ms": sent_at_ms,
+                }
+                if sent_message_ids:
+                    transport["message_ids"] = sent_message_ids
+                await self._sender.history_manager.add_private_message(
+                    user_id=user_id,
+                    text_content=history_content,
+                    display_name="Bot",
+                    user_name="Bot",
+                    message_id=(sent_message_ids[0] if sent_message_ids else None),
+                    attachments=history_attachments,
+                    transport=transport,
+                )
 
     async def _send_weixin_forward(
         self,

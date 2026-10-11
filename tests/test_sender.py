@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import nturl2path
 from collections.abc import Sequence
@@ -1304,6 +1305,73 @@ async def test_wechat_media_failure_does_not_mark_turn(
                 DeliveryAddress("wechat", 12345), str(source)
             )
         assert ctx.get_resource("message_sent_this_turn") is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["text", "file", "voice", "forward"])
+@pytest.mark.parametrize("cancelled", [False, True])
+async def test_wechat_ack_survives_history_failure_without_swallowing_cancel(
+    sender: MessageSender,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    kind: str,
+    cancelled: bool,
+) -> None:
+    source = tmp_path / "report.wav"
+    await async_io.write_bytes(source, b"isolated media")
+    service = SimpleNamespace(
+        send_text=AsyncMock(return_value="text-ack"),
+        send_file=AsyncMock(return_value="file-ack"),
+        prepare_voice=AsyncMock(
+            return_value=PreparedWeixinVoice(content=b"silk", duration_ms=200)
+        ),
+        send_prepared_voice=AsyncMock(return_value="voice-ack"),
+        send_items=AsyncMock(return_value="forward-ack"),
+    )
+    weixin_config = cast(Any, sender.config.weixin)
+    weixin_config.multi_item_messages_enabled = True
+    weixin_config.multi_item_max_items = 10
+    weixin_config.media_max_size_mb = 100
+    sender.set_weixin_service(service)
+    history = cast(AsyncMock, sender.history_manager.add_private_message)
+    history.side_effect = (
+        asyncio.CancelledError() if cancelled else OSError("history unavailable")
+    )
+    address = DeliveryAddress("wechat", 12345)
+
+    async def send() -> None:
+        if kind == "text":
+            assert await sender.send_address_message(address, "hello") == "text-ack"
+        elif kind == "forward":
+            await AddressBoundSender(sender, address).send_private_forward_message(
+                address.target_id,
+                [{"type": "node", "data": {"name": "Bot", "content": "hello"}}],
+                history_message="hello",
+            )
+        else:
+            await sender.send_address_file(address, str(source), kind=kind)
+
+    async with RequestContext("private", user_id=address.target_id) as ctx:
+        if cancelled:
+            with pytest.raises(asyncio.CancelledError):
+                await send()
+        else:
+            await send()
+            assert "记录微信发送失败" in caplog.text
+        assert ctx.get_resource("message_sent_this_turn") is True
+    history.assert_awaited_once()
+    assert (
+        sum(
+            method.await_count
+            for method in (
+                service.send_text,
+                service.send_file,
+                service.send_prepared_voice,
+                service.send_items,
+            )
+        )
+        == 1
+    )
 
 
 @pytest.mark.asyncio
