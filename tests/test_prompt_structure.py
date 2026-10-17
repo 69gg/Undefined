@@ -41,6 +41,7 @@ EACH_RULES: Final[Path] = IMPORTANT / "each.md"
 #: 顶层小节的名字与顺序。增删或重排都必须同步改这里——这正是契约的意义：
 #: 让结构变化成为一次**显式决定**，而不是悄悄发生。
 EXPECTED_SECTIONS: Final[tuple[str, ...]] = (
+    "speaking_style",
     "absolute_priority",
     "core_rules",
     "important_rules",
