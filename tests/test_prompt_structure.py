@@ -175,8 +175,15 @@ def test_prompt_variants_share_the_same_structure() -> None:
         r'<guideline id="3">.*?</guideline>',
         r'<guideline id="5">.*?</guideline>',
         r'<guideline id="6">.*?</guideline>',
+        r'<guideline id="18">.*?</guideline>',
     ),
-    ids=("speaking-style", "message-splitting", "natural-language", "reply-length"),
+    ids=(
+        "speaking-style",
+        "message-splitting",
+        "natural-language",
+        "reply-length",
+        "own-capabilities",
+    ),
 )
 def test_prompt_variants_share_speaking_guidance(section_pattern: str) -> None:
     """共用表达规范不可只更新一个变体，不锁定任一句指导语的具体措辞。"""
@@ -186,6 +193,32 @@ def test_prompt_variants_share_speaking_guidance(section_pattern: str) -> None:
     assert len(base_sections) == 1, "基础提示词的共用表达板块缺失或重复"
     assert len(naga_sections) == 1, "NagaAgent 提示词的共用表达板块缺失或重复"
     assert base_sections == naga_sections, "两个提示词变体的共用表达规范不同步"
+
+
+@pytest.mark.parametrize(
+    "case_id",
+    (
+        "casual_memory_recognition",
+        "casual_question_without_unasked_caveats",
+        "explain_own_memory_without_api_docs",
+        "requested_memory_implementation_detail",
+    ),
+)
+def test_conversation_regression_cases_stay_complete_and_synced(case_id: str) -> None:
+    """场景须同时覆盖两个变体的判断与工具流程，不锁定指导语措辞。"""
+    pattern = rf'<case id="{re.escape(case_id)}" class="style">.*?</case>'
+    base_cases = re.findall(pattern, _text(BASE_PROMPT), flags=re.DOTALL)
+    naga_cases = re.findall(pattern, _text(NAGA_PROMPT), flags=re.DOTALL)
+
+    assert len(base_cases) == len(naga_cases) == 1
+    assert base_cases == naga_cases
+    for field in ("given", "expected_decision", "must_not"):
+        values = re.findall(
+            rf"<{field}>(.*?)</{field}>", base_cases[0], flags=re.DOTALL
+        )
+        assert len(values) == 1 and values[0].strip(), f"{case_id} 缺少 {field}"
+    calls = re.findall(r'<call index="(\d+)">(.*?)</call>', base_cases[0])
+    assert calls == [("1", "send_message"), ("2", "end")]
 
 
 def test_every_section_has_a_matching_closing_tag() -> None:
