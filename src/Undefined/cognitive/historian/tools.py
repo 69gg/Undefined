@@ -57,7 +57,10 @@ _PROFILE_TOOL = {
                 },
                 "skip": {
                     "type": "boolean",
-                    "description": "是否跳过更新；仅当现有侧写已合规且本轮无新稳定特征时为 true",
+                    "description": (
+                        "是否跳过更新；本轮无可靠新稳定特征、无待纠正误记，"
+                        "且已有侧写合规或尚不存在时为 true。玩笑与复读不算事实依据。"
+                    ),
                 },
                 "skip_reason": {
                     "type": "string",

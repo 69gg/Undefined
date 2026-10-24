@@ -175,17 +175,89 @@ def test_prompt_variants_share_the_same_structure() -> None:
         r'<guideline id="3">.*?</guideline>',
         r'<guideline id="5">.*?</guideline>',
         r'<guideline id="6">.*?</guideline>',
+        r'<guideline id="18">.*?</guideline>',
+        r"<end_tool_usage>.*?</end_tool_usage>",
+        r"<tool_selection>.*?</tool_selection>",
     ),
-    ids=("speaking-style", "message-splitting", "natural-language", "reply-length"),
+    ids=(
+        "speaking-style",
+        "message-splitting",
+        "natural-language",
+        "reply-length",
+        "own-capabilities",
+        "observation-collection",
+        "memory-tool-selection",
+    ),
 )
-def test_prompt_variants_share_speaking_guidance(section_pattern: str) -> None:
-    """共用表达规范不可只更新一个变体，不锁定任一句指导语的具体措辞。"""
+def test_prompt_variants_share_guidance(section_pattern: str) -> None:
+    """共用表达与记忆规范不可只更新一个变体，不锁定指导语措辞。"""
     base_sections = re.findall(section_pattern, _text(BASE_PROMPT), flags=re.DOTALL)
     naga_sections = re.findall(section_pattern, _text(NAGA_PROMPT), flags=re.DOTALL)
 
     assert len(base_sections) == 1, "基础提示词的共用表达板块缺失或重复"
     assert len(naga_sections) == 1, "NagaAgent 提示词的共用表达板块缺失或重复"
     assert base_sections == naga_sections, "两个提示词变体的共用表达规范不同步"
+
+
+def _shared_regression_case(case_id: str, case_class: str) -> str:
+    pattern = (
+        rf'<case id="{re.escape(case_id)}" class="{re.escape(case_class)}">.*?</case>'
+    )
+    base_cases: list[str] = re.findall(pattern, _text(BASE_PROMPT), flags=re.DOTALL)
+    naga_cases: list[str] = re.findall(pattern, _text(NAGA_PROMPT), flags=re.DOTALL)
+
+    assert len(base_cases) == len(naga_cases) == 1
+    assert base_cases == naga_cases
+    for field in ("given", "expected_decision", "must_not"):
+        values = re.findall(
+            rf"<{field}>(.*?)</{field}>", base_cases[0], flags=re.DOTALL
+        )
+        assert len(values) == 1 and values[0].strip(), f"{case_id} 缺少 {field}"
+    return base_cases[0]
+
+
+@pytest.mark.parametrize(
+    "case_id",
+    (
+        "casual_memory_recognition",
+        "casual_question_without_unasked_caveats",
+        "explain_own_memory_without_api_docs",
+        "requested_memory_implementation_detail",
+        "casual_pause_with_spaces",
+        "preserve_required_punctuation",
+    ),
+)
+def test_conversation_regression_cases_stay_complete_and_synced(case_id: str) -> None:
+    """场景须同时覆盖两个变体的判断与工具流程，不锁定指导语措辞。"""
+    case = _shared_regression_case(case_id, "style")
+    calls = re.findall(r'<call index="(\d+)">(.*?)</call>', case)
+    assert calls == [("1", "send_message"), ("2", "end")]
+
+
+@pytest.mark.parametrize(
+    ("case_id", "expected_calls", "empty_observations"),
+    (
+        ("joking_identity_not_biography", ("send_message", "end"), True),
+        ("repeated_claim_not_corroboration", ("end",), True),
+        ("serious_self_report_is_eligible", ("send_message", "end"), False),
+        ("mixed_joke_and_real_preference", ("send_message", "end"), False),
+        ("correct_previous_joke_misrecording", ("send_message", "end"), False),
+    ),
+)
+def test_observation_cases_keep_decisions_and_memory_expectations(
+    case_id: str, expected_calls: tuple[str, ...], empty_observations: bool
+) -> None:
+    """保留玩笑与真实自述两侧的场景契约；不代替真实模型行为评测。"""
+    case = _shared_regression_case(case_id, "memory")
+    observations = re.findall(
+        r"<expected_observations>(.*?)</expected_observations>", case, flags=re.DOTALL
+    )
+    assert len(observations) == 1 and observations[0].strip()
+    assert (observations[0].strip() == "[]") is empty_observations
+    calls = re.findall(r'<call index="(\d+)">(.*?)</call>', case)
+    assert calls == [
+        (str(index), name) for index, name in enumerate(expected_calls, start=1)
+    ]
 
 
 def test_every_section_has_a_matching_closing_tag() -> None:
@@ -281,6 +353,36 @@ def test_historian_profile_merge_keeps_template_placeholders() -> None:
     required = {"now_local", "now_utc", "profile_updated_at"}
     missing = sorted(required - _placeholders(HISTORIAN_MERGE))
     assert not missing, f"historian_profile_merge.md 缺少模板占位符：{missing}"
+
+
+@pytest.mark.parametrize(
+    ("path", "required"),
+    (
+        (
+            HISTORIAN_REWRITE,
+            {"source_message", "recent_messages", "observations", "sender_id"},
+        ),
+        (
+            HISTORIAN_MERGE,
+            {
+                "source_message",
+                "recent_messages",
+                "observations",
+                "canonical_text",
+                "historical_events",
+                "current_profile",
+                "target_entity_id",
+            },
+        ),
+    ),
+    ids=("rewrite", "profile-merge"),
+)
+def test_historian_prompts_keep_evidence_context(
+    path: Path, required: set[str]
+) -> None:
+    """事实判断必须看到原文与来源，不能只剩已改写的结论。"""
+    missing = sorted(required - _placeholders(path))
+    assert not missing, f"{path.name} 缺少事实判断上下文槽位：{missing}"
 
 
 def test_known_tag_mismatch_count_is_registered() -> None:
