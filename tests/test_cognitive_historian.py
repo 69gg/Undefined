@@ -118,9 +118,30 @@ async def test_process_job_memo_only_no_observations_skips_vector_write() -> Non
 
 
 @pytest.mark.asyncio
-async def test_merge_profile_target_user_queries_history_with_sender_or_user_id() -> (
-    None
-):
+@pytest.mark.parametrize(
+    ("source_message", "observation"),
+    (
+        ("我还是喜欢 Python", "用户提到会继续用 Python"),
+        (
+            "大家都在刷六年级小学生，我也跟一个：我是六年级小学生（笑）",
+            "用户是六年级小学生",
+        ),
+        (
+            "认真说，我现在读六年级，这学期在学分数",
+            "用户明确说明正在读六年级",
+        ),
+        (
+            "上次六年级那句是在跟风玩梗，不是我的真实身份",
+            "用户澄清先前的六年级自称为玩笑",
+        ),
+    ),
+    ids=("preference", "misleading-observation", "serious-self-report", "correction"),
+)
+async def test_merge_profile_target_user_queries_history_with_sender_or_user_id(
+    source_message: str, observation: str
+) -> None:
+    """真实合并上下文保留原文，供模型识别误提取；不模拟模型的事实判断。"""
+
     class _FakeVectorStore:
         def __init__(self) -> None:
             self.where_calls: list[dict[str, Any]] = []
@@ -172,7 +193,7 @@ async def test_merge_profile_target_user_queries_history_with_sender_or_user_id(
         config_getter=lambda: SimpleNamespace(),
     )
     job: dict[str, Any] = {
-        "observations": ["用户提到会继续用 Python"],
+        "observations": [observation],
         "request_type": "private",
         "user_id": "123456",
         "group_id": "",
@@ -185,14 +206,14 @@ async def test_merge_profile_target_user_queries_history_with_sender_or_user_id(
         "end_seq": 1,
         "message_ids": [],
         "memo": "",
-        "source_message": "我还是喜欢 Python",
+        "source_message": source_message,
         "recent_messages": [],
     }
 
     with pytest.raises(RuntimeError, match="未产生有效更新"):
         await worker._merge_profile_target(
             job=job,
-            canonical="测试用户(123456)表示长期偏好 Python",
+            canonical=observation,
             event_id="job-1",
             target={
                 "entity_type": "user",
@@ -216,7 +237,8 @@ async def test_merge_profile_target_user_queries_history_with_sender_or_user_id(
     assert "当前时刻:" in prompt
     assert "本轮事件时间: 2026-03-01T12:00:00+08:00" in prompt
     assert "目标侧写上次更新: 2026-02-01T10:00:00+08:00" in prompt
-    assert "最新优先" in prompt
+    assert source_message in prompt
+    assert observation in prompt
     utc_match = re.search(r"UTC:\s*([0-9T:.+-]+)", prompt)
     assert utc_match is not None
     utc_dt = datetime.fromisoformat(utc_match.group(1))
