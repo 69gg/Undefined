@@ -202,6 +202,8 @@ def test_prompt_variants_share_speaking_guidance(section_pattern: str) -> None:
         "casual_question_without_unasked_caveats",
         "explain_own_memory_without_api_docs",
         "requested_memory_implementation_detail",
+        "casual_pause_with_spaces",
+        "preserve_required_punctuation",
     ),
 )
 def test_conversation_regression_cases_stay_complete_and_synced(case_id: str) -> None:
