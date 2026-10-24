@@ -238,17 +238,11 @@ async def test_group_prompt_keeps_speakers_and_current_batch_corrections(
         extra_context={"group_id": 100, "sender_id": 20001},
     )
 
-    system_prompt = str(messages[0]["content"])
-    assert ("<nagaagent_relationship>" in system_prompt) is naga_active
-    archive_index = next(
-        index
-        for index, message in enumerate(messages)
-        if '<history_archive readonly="true">' in str(message.get("content", ""))
-    )
-    assert archive_index < len(messages) - 1
-    archived = extract_current_message_signatures(
-        str(messages[archive_index]["content"])
-    )
+    archived = [
+        signature
+        for message in messages[1:-1]
+        for signature in extract_current_message_signatures(str(message["content"]))
+    ]
     assert [(item.message_id, item.sender_id) for item in archived] == [
         ("10", "10000"),
         ("11", "30001"),

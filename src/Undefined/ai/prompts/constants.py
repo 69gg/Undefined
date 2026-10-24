@@ -7,7 +7,7 @@ import re
 from Undefined.utils.xml import XML_CONTENT_BODY_PATTERN
 
 CURRENT_MESSAGE_RE = re.compile(
-    # 实际消息的 content 紧随开标签；不能跨过说明文字里的 <message> 吞掉下一条消息的属性。
+    # 开标签与 content 之间仅允许可选空白；不能跨过说明文字里的 <message> 吞掉下一条消息的属性。
     rf"<message\b(?P<attrs>[^>]*)>\s*"
     rf"<content>(?P<content>{XML_CONTENT_BODY_PATTERN})</content>.*?</message>",
     re.DOTALL | re.IGNORECASE,
