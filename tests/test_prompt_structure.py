@@ -178,6 +178,10 @@ def test_prompt_variants_share_the_same_structure() -> None:
         r'<guideline id="18">.*?</guideline>',
         r"<end_tool_usage>.*?</end_tool_usage>",
         r"<tool_selection>.*?</tool_selection>",
+        r"<response_trigger_logic>.*?</response_trigger_logic>",
+        r'<strategy id="1">.*?</strategy>',
+        r'<strategy id="4">.*?</strategy>',
+        r'<example id="11">.*?</example>',
     ),
     ids=(
         "speaking-style",
@@ -187,16 +191,51 @@ def test_prompt_variants_share_the_same_structure() -> None:
         "own-capabilities",
         "observation-collection",
         "memory-tool-selection",
+        "reply-trigger-policy",
+        "default-silence",
+        "participation-frequency",
+        "unaddressed-message-example",
     ),
 )
 def test_prompt_variants_share_guidance(section_pattern: str) -> None:
-    """共用表达与记忆规范不可只更新一个变体，不锁定指导语措辞。"""
+    """共用表达、记忆与回复边界不可只更新一个变体，不锁定指导语措辞。"""
     base_sections = re.findall(section_pattern, _text(BASE_PROMPT), flags=re.DOTALL)
     naga_sections = re.findall(section_pattern, _text(NAGA_PROMPT), flags=re.DOTALL)
 
     assert len(base_sections) == 1, "基础提示词的共用表达板块缺失或重复"
     assert len(naga_sections) == 1, "NagaAgent 提示词的共用表达板块缺失或重复"
     assert base_sections == naga_sections, "两个提示词变体的共用表达规范不同步"
+
+
+@pytest.mark.parametrize("path", (BASE_PROMPT, NAGA_PROMPT, EACH_RULES))
+def test_context_review_precedes_recipient_decision(path: Path) -> None:
+    """上下文核对必须在回复判定之前，避免只强化末尾的发送要求。"""
+    text = _text(path)
+    review = re.search(
+        r'<context_review priority="P0">.*?</context_review>', text, re.DOTALL
+    )
+    assert review is not None
+    decision = re.search(r"<(?:decision_process|identity_target_check)\b", text)
+    assert decision is not None
+    assert review.end() < decision.start()
+
+
+def test_naga_technical_route_declares_reply_prerequisite() -> None:
+    """Naga 专用路由不能重新成为独立的回复触发器。"""
+    support = re.search(
+        r"<technical_support>.*?</technical_support>",
+        _text(NAGA_PROMPT),
+        re.DOTALL,
+    )
+    assert support is not None
+    section = support.group()
+    prerequisite = re.search(
+        r'<prerequisite priority="P0">(.+?)</prerequisite>', section, re.DOTALL
+    )
+    assert prerequisite is not None
+    assert prerequisite.group(1).strip()
+    assert prerequisite.end() < section.index("<mandatory_agent_route")
+    assert prerequisite.end() < section.index("<when_to_call>")
 
 
 def _shared_regression_case(case_id: str, case_class: str) -> str:
@@ -232,6 +271,26 @@ def test_conversation_regression_cases_stay_complete_and_synced(case_id: str) ->
     case = _shared_regression_case(case_id, "style")
     calls = re.findall(r'<call index="(\d+)">(.*?)</call>', case)
     assert calls == [("1", "send_message"), ("2", "end")]
+
+
+@pytest.mark.parametrize(
+    ("case_id", "expected_calls"),
+    (
+        ("technical_share_without_request", ("end",)),
+        ("old_participation_not_current_recipient", ("end",)),
+        ("resolved_open_question_no_extra_reply", ("end",)),
+        ("unresolved_explicit_open_request", ("send_message", "end")),
+        ("direct_followup_uses_current_context", ("send_message", "end")),
+        ("mixed_batch_preserves_recipients", ("send_message", "end")),
+    ),
+)
+def test_reply_relevance_cases_keep_decisions_and_sync(
+    case_id: str, expected_calls: tuple[str, ...]
+) -> None:
+    """覆盖沉默和正常交流两侧的提示词契约，不代替真实模型行为评测。"""
+    case = _shared_regression_case(case_id, "relevance")
+    calls = re.findall(r'<call index="(\d+)">(.*?)</call>', case)
+    assert calls == [(str(index), tool) for index, tool in enumerate(expected_calls, 1)]
 
 
 @pytest.mark.parametrize(

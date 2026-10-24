@@ -255,10 +255,11 @@ async def test_private_injection_uses_validated_delivery_address() -> None:
     assert call.kwargs["address"].canonical == "wechat:20001"
 
 
-def test_build_prompt_limits_proactive_participation_to_technical_contexts() -> None:
+@pytest.mark.parametrize("batched", (False, True))
+def test_group_prompt_always_ends_with_shared_reply_policy(batched: bool) -> None:
     coordinator: Any = object.__new__(AICoordinator)
 
-    prompt = AICoordinator._build_prompt(
+    single_prompt = AICoordinator._build_prompt(
         coordinator,
         prefix="",
         name="member",
@@ -272,25 +273,30 @@ def test_build_prompt_limits_proactive_participation_to_technical_contexts() -> 
         text="哈哈",
     )
 
-    assert "群聊里的主动参与只保留给公开、开放的技术或项目讨论" in prompt
-    assert "轻松互动、玩梗、吐槽本身不构成参与许可" in prompt
-    assert "只有明确纯表情包回复才先检索表情包" in prompt
-    assert "第一轮必须优先把必要文字回复做好并调用 send_message" in prompt
-    assert "文字发送成功后优先考虑在后续响应轮次补一张独立表情包" in prompt
-    assert "严肃答疑、代码排查、长任务推进、隐私/安全拒绝、信息不足追问" in prompt
-    assert "默认先尝试 memes.search_memes" not in prompt
-    assert "普通闲聊、玩梗、吐槽、轻松互动：" not in prompt
-
-    recipient_gate = prompt.index("【P0 群聊收件人闸门")
-    proactive_policy = prompt.index(
-        "群聊里的主动参与只保留给公开、开放的技术或项目讨论"
+    items = [
+        BufferedMessage(
+            scope="group:12345",
+            sender_id=20001,
+            text=text,
+            message_content=[],
+            attachments=[],
+            sender_name="member",
+            arrival_time=1_700_000_000 + index,
+            is_private=False,
+            group_id=12345,
+            group_name="测试群",
+        )
+        for index, text in enumerate(("第一条", "第二条"))
+    ]
+    prompt = (
+        AICoordinator._build_grouped_prompt(coordinator, items)
+        if batched
+        else single_prompt
     )
-    assert recipient_gate < proactive_policy
-    assert 'bot_trigger="none"' in prompt
-    assert "「你/你们/我/咱们」等人称" in prompt
-    assert "即使原句写着「你就……」「你能不能……」也不是在叫你" in prompt
-    assert "闸门未通过时，禁止 send_message、tool_search、cognitive.*" in prompt
-    assert "不回复时禁止把闸门结论、静默原因、规则自检或拼写声明发到聊天里" in prompt
+    footer = coordinator_group_module._GROUP_STRATEGY_FOOTER
+    assert prompt.endswith(footer)
+    assert prompt.count(footer) == 1
+    assert prompt.rindex("</message>") < prompt.index(footer)
 
 
 @pytest.mark.parametrize(
