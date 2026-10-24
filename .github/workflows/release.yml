@@ -294,16 +294,10 @@ jobs:
       - name: Build Tauri bundles
         working-directory: ${{ matrix.app_dir }}
         shell: bash
-        run: |
-          TAURI_ARGS="--ci --bundles ${{ matrix.bundles }}"
-          if [ -n "${{ matrix.rust_target }}" ]; then
-            TAURI_ARGS="$TAURI_ARGS --target ${{ matrix.rust_target }}"
-          fi
-          if [ "${{ runner.os }}" = "Linux" ]; then
-            NO_STRIP=true npm run tauri:build -- $TAURI_ARGS
-          else
-            npm run tauri:build -- $TAURI_ARGS
-          fi
+        env:
+          TAURI_BUNDLES: ${{ matrix.bundles }}
+          TAURI_RUST_TARGET: ${{ matrix.rust_target }}
+        run: bash ../../scripts/build_tauri_desktop.sh "$TAURI_BUNDLES" "$TAURI_RUST_TARGET"
 
       - name: Collect release artifacts
         shell: bash

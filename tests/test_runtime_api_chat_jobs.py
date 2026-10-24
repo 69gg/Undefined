@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -288,16 +289,27 @@ async def test_job_snapshot_preserves_display_content_beyond_sse_replay_limit() 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", ["error", "cancelled"])
-async def test_terminal_snapshot_finalizes_unclosed_display_calls(status: str) -> None:
+async def test_terminal_snapshot_finalizes_unclosed_display_calls(
+    status: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = 10.0
+    monkeypatch.setattr(time, "time", lambda: now)
     manager = runtime_api_chat.ChatJobManager(_context())
-    job = runtime_api_chat.ChatJob("terminal-job", "hello", 1, 1, status=status)
+    job = runtime_api_chat.ChatJob("terminal-job", "hello", 1, 1, status="running")
     await manager.append_lifecycle_event(
         job,
         "tool_start",
         {"tool_call_id": "tool", "webchat_call_id": "tool", "name": "search"},
     )
+    now = 12.0
+    job.status = status
+    manager._mark_job_finished(job)
     timeline = (await manager.snapshot(job))["current_timeline"]
-    assert timeline[0]["call"]["status"] == status
+    call = timeline[0]["call"]
+    assert call["status"] == status
+    assert call["duration_ms"] == 2000
+    assert call["elapsed_ms"] == 11000
+    now = 20.0
     assert timeline == runtime_api_chat._build_webchat_history_payload(job)["timeline"]
 
 

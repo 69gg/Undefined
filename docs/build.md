@@ -322,6 +322,8 @@ npm install
 6. `publish-release`：汇总所有产物并上传 GitHub Release；Release notes 从 `CHANGELOG.md` 最新版本条目生成，不读取 tag 注释。
 7. `publish-pypi`：发布 Python 包到 PyPI。
 
+桌面构建与手动 Artifact 工作流共用 `scripts/build_tauri_desktop.sh`，保留 Linux 的 `NO_STRIP=true` 和矩阵指定的 Rust target。macOS 启用 Tauri 详细日志；只有 `dmg` 构建明确报告 `error running bundle_dmg.sh` 时，才等待 5 秒并通过 `tauri bundle` 重试一次打包，避免重新执行前端和 Rust 编译。重试仍失败时保留失败状态，编译、签名及其他平台的错误直接返回。编译与打包分离的命令见 [Tauri 官方分发说明](https://v2.tauri.app/distribute/#bundling)。
+
 ### Docker 镜像构建与维护
 
 本节面向镜像维护者。部署和使用步骤见 [Docker 一键部署指南](docker-deploy.md)。
@@ -353,6 +355,8 @@ docker build -f src/Undefined/deploy/templates/Dockerfile.bot -t 'ghcr.io/<owner
 2. `python-compat`（3.11 / 3.13）：`pyproject.toml` 声明 `>=3.11,<3.14`，因此两端边界各跑一次 `mypy` 与 `pytest`。
 3. `native-app-quality-check`（Console / Chat 矩阵）：`npm run check`。
 
+聊天任务的终态快照测试应按真实收尾流程记录 `finished_at`，再比较快照与历史时间线；使用可推进的模拟时钟验证结束后耗时固定，避免断言依赖两次读取恰好落在同一毫秒。
+
 依赖统一通过 `uv sync --group dev` 安装：`dev` 是唯一一份工具清单（含 `pytest-cov` 与 `types-*` 类型桩），不再维护与它重复的 `ci` 组或 `[project.optional-dependencies]`。
 
 ## 8. 手动 Artifact 工作流
@@ -383,6 +387,7 @@ docker build -f src/Undefined/deploy/templates/Dockerfile.bot -t 'ghcr.io/<owner
 
 手动 artifact 工作流的边界：
 
+- 构建的源码含 `scripts/build_tauri_desktop.sh` 时复用 Release 的桌面构建逻辑；选择不含此脚本的历史 `source_ref` 时，保留原有 Tauri 构建命令与目标架构参数。
 - 不调用 `gh release create`。
 - 不发布 Python 包到 PyPI。
 - Android 只构建 debug APK，不需要配置 release keystore secrets。
