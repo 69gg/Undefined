@@ -1,9 +1,14 @@
 from typing import Any, cast
 
+import pytest
+
 from Undefined.ai.prompts.cognitive import build_cognitive_per_message_queries
 from Undefined.ai.prompts.cognitive import drop_current_message_if_duplicated
 from Undefined.ai.prompts import PromptBuilder
-from Undefined.ai.prompts.current_input import build_current_input_query_text
+from Undefined.ai.prompts.current_input import (
+    build_current_input_query_text,
+    extract_current_message_signatures,
+)
 
 
 class _FakeEndSummaryStorage:
@@ -17,6 +22,41 @@ def _make_builder() -> PromptBuilder:
         memory_storage=None,
         end_summary_storage=cast(Any, _FakeEndSummaryStorage()),
     )
+
+
+@pytest.mark.parametrize(
+    "prefix",
+    (
+        "(用户 @ 了你)（逐条收件人以各 <message> 的 bot_trigger 为准）\n",
+        "(用户拍了拍你)（逐条收件人以各 <message> 的 bot_trigger 为准）\n",
+        "<message> 是本轮消息块的格式名称\n",
+        "<message>\n",
+        '<message sender_id="旧示例">这只是标签示例</message>\n',
+    ),
+)
+def test_current_input_ignores_message_labels_before_real_blocks(prefix: str) -> None:
+    question = (
+        f'{prefix}<message message_id="101" sender_id="10001">\n'
+        "<content>第一条请求</content>\n</message>\n"
+        '<message message_id="102" sender_id="10001">\n'
+        "<content>修正第一条的前提</content>\n</message>"
+    )
+
+    signatures = extract_current_message_signatures(question)
+
+    assert [(item.message_id, item.sender_id, item.content) for item in signatures] == [
+        ("101", "10001", "第一条请求"),
+        ("102", "10001", "修正第一条的前提"),
+    ]
+
+
+def test_current_input_still_accepts_unattributed_message_block() -> None:
+    query, extracted = build_current_input_query_text(
+        "<message>\n <content>没有属性的合法消息</content>\n</message>"
+    )
+
+    assert extracted is True
+    assert query == "没有属性的合法消息"
 
 
 def test_current_input_query_decodes_wechat_cdata_content() -> None:

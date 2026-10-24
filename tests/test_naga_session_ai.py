@@ -9,12 +9,15 @@ import pytest
 
 from Undefined.ai.client.setup import ClientSetupMixin
 from Undefined.ai.prompts.builder import PromptBuilder
+from Undefined.ai.prompts.current_input import extract_current_message_signatures
 from Undefined.ai.prompts.system_context import select_system_prompt_path
 from Undefined.ai.tooling import ToolManager
 from Undefined.config.models import NagaConfig
 from Undefined.context import RequestContext
 from Undefined.end_summary_storage import EndSummaryRecord
 from Undefined.memory import Memory
+from Undefined.services.coordinator import AICoordinator
+from Undefined.services.message_batcher import BufferedMessage
 
 
 class _FakeEndSummaryStorage:
@@ -180,6 +183,75 @@ async def test_prompt_builder_loads_naga_prompt_for_allowed_session(
     )
     assert loaded[-1] == "res/prompts/undefined.xml"
     assert content_denied.endswith("undefined.xml") or "undefined.xml" in content_denied
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("naga_active", (False, True))
+async def test_group_prompt_keeps_speakers_and_current_batch_corrections(
+    naga_active: bool,
+) -> None:
+    """验证两套实际提示词的上下文组装，不把模型决策当成单元测试结果。"""
+    cfg = _runtime(nagaagent=naga_active, mode="allowlist", allowed_group_ids={100})
+    builder = _make_builder(cfg)
+    coordinator: Any = object.__new__(AICoordinator)
+    items = [
+        BufferedMessage(
+            scope="group:100",
+            sender_id=20001,
+            text=text,
+            message_content=[],
+            attachments=[],
+            sender_name="提问者",
+            arrival_time=1_700_000_000 + index,
+            is_private=False,
+            trigger_message_id=20 + index,
+            is_at_bot=index == 0,
+            group_id=100,
+            group_name="测试群",
+        )
+        for index, text in enumerate(
+            ("看看新项目构建失败", "补充 是测试环境 不是之前的部署问题")
+        )
+    ]
+    history: list[dict[str, Any]] = [
+        {
+            "type": "group",
+            "chat_id": "100",
+            "chat_name": "测试群",
+            "message_id": message_id,
+            "user_id": sender_id,
+            "display_name": name,
+            "message": text,
+        }
+        for message_id, sender_id, name, text in (
+            ("10", "10000", "Undefined", "之前的部署问题已经修复"),
+            ("11", "30001", "群友甲", "[@30002] 你的测试结果呢"),
+            ("20", "20001", "提问者", items[0].text),
+            ("12", "30002", "群友乙", "我这边已解决"),
+            ("21", "20001", "提问者", items[1].text),
+        )
+    ]
+    question = AICoordinator._build_grouped_prompt(coordinator, items)
+    messages = await builder.build_messages(
+        question,
+        recent_messages_snapshot=history,
+        extra_context={"group_id": 100, "sender_id": 20001},
+    )
+
+    archived = [
+        signature
+        for message in messages[1:-1]
+        for signature in extract_current_message_signatures(str(message["content"]))
+    ]
+    assert [(item.message_id, item.sender_id) for item in archived] == [
+        ("10", "10000"),
+        ("11", "30001"),
+        ("12", "30002"),
+    ]
+    current = extract_current_message_signatures(str(messages[-1]["content"]))
+    assert [(item.message_id, item.sender_id, item.content) for item in current] == [
+        (str(item.trigger_message_id), str(item.sender_id), item.text) for item in items
+    ]
 
 
 @pytest.mark.asyncio

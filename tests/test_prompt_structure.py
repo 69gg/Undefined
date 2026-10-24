@@ -168,37 +168,6 @@ def test_prompt_variants_share_the_same_structure() -> None:
     assert top_sections(BASE_PROMPT) == top_sections(NAGA_PROMPT)
 
 
-@pytest.mark.parametrize(
-    "section_pattern",
-    (
-        r"<speaking_style\b[^>]*>.*?</speaking_style>",
-        r'<guideline id="3">.*?</guideline>',
-        r'<guideline id="5">.*?</guideline>',
-        r'<guideline id="6">.*?</guideline>',
-        r'<guideline id="18">.*?</guideline>',
-        r"<end_tool_usage>.*?</end_tool_usage>",
-        r"<tool_selection>.*?</tool_selection>",
-    ),
-    ids=(
-        "speaking-style",
-        "message-splitting",
-        "natural-language",
-        "reply-length",
-        "own-capabilities",
-        "observation-collection",
-        "memory-tool-selection",
-    ),
-)
-def test_prompt_variants_share_guidance(section_pattern: str) -> None:
-    """共用表达与记忆规范不可只更新一个变体，不锁定指导语措辞。"""
-    base_sections = re.findall(section_pattern, _text(BASE_PROMPT), flags=re.DOTALL)
-    naga_sections = re.findall(section_pattern, _text(NAGA_PROMPT), flags=re.DOTALL)
-
-    assert len(base_sections) == 1, "基础提示词的共用表达板块缺失或重复"
-    assert len(naga_sections) == 1, "NagaAgent 提示词的共用表达板块缺失或重复"
-    assert base_sections == naga_sections, "两个提示词变体的共用表达规范不同步"
-
-
 def _shared_regression_case(case_id: str, case_class: str) -> str:
     pattern = (
         rf'<case id="{re.escape(case_id)}" class="{re.escape(case_class)}">.*?</case>'

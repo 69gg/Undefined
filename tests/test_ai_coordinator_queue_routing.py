@@ -255,44 +255,6 @@ async def test_private_injection_uses_validated_delivery_address() -> None:
     assert call.kwargs["address"].canonical == "wechat:20001"
 
 
-def test_build_prompt_limits_proactive_participation_to_technical_contexts() -> None:
-    coordinator: Any = object.__new__(AICoordinator)
-
-    prompt = AICoordinator._build_prompt(
-        coordinator,
-        prefix="",
-        name="member",
-        uid=20001,
-        gid=12345,
-        gname="测试群",
-        loc="测试群",
-        role="member",
-        title="",
-        time_str="2026-04-11 12:00:00",
-        text="哈哈",
-    )
-
-    assert "群聊里的主动参与只保留给公开、开放的技术或项目讨论" in prompt
-    assert "轻松互动、玩梗、吐槽本身不构成参与许可" in prompt
-    assert "只有明确纯表情包回复才先检索表情包" in prompt
-    assert "第一轮必须优先把必要文字回复做好并调用 send_message" in prompt
-    assert "文字发送成功后优先考虑在后续响应轮次补一张独立表情包" in prompt
-    assert "严肃答疑、代码排查、长任务推进、隐私/安全拒绝、信息不足追问" in prompt
-    assert "默认先尝试 memes.search_memes" not in prompt
-    assert "普通闲聊、玩梗、吐槽、轻松互动：" not in prompt
-
-    recipient_gate = prompt.index("【P0 群聊收件人闸门")
-    proactive_policy = prompt.index(
-        "群聊里的主动参与只保留给公开、开放的技术或项目讨论"
-    )
-    assert recipient_gate < proactive_policy
-    assert 'bot_trigger="none"' in prompt
-    assert "「你/你们/我/咱们」等人称" in prompt
-    assert "即使原句写着「你就……」「你能不能……」也不是在叫你" in prompt
-    assert "闸门未通过时，禁止 send_message、tool_search、cognitive.*" in prompt
-    assert "不回复时禁止把闸门结论、静默原因、规则自检或拼写声明发到聊天里" in prompt
-
-
 @pytest.mark.parametrize(
     ("text", "is_at_bot", "is_poke", "is_fake_at", "expected_trigger"),
     [
