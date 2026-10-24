@@ -9,7 +9,7 @@
 
 - **结构**：顶层小节的名字与顺序（改动必须显式确认，不能静默增删）
 - **体量**：行数棘轮，只允许增长或小幅波动，防止静默缩水
-- **一致性**：两个提示词变体的结构必须同步演进
+- **一致性**：两个提示词变体的结构与共用表达规范必须同步演进
 - **格式契约**：Markdown 提示词里的模板占位符（``{now_local}`` 等）是功能性
   契约，改动会影响渲染
 - **渲染槽位**：``<!-- undefined:prompt-file-include:... -->`` 是渲染器依赖的
@@ -25,6 +25,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 from typing import Final
+
+import pytest
 
 from Undefined.config.models import PROMPT_FILE_INCLUDE_SLOTS
 
@@ -164,6 +166,26 @@ def test_prompt_sections_match_contract() -> None:
 def test_prompt_variants_share_the_same_structure() -> None:
     """两个变体必须同步演进：结构不一致说明其中一个漏了更新。"""
     assert top_sections(BASE_PROMPT) == top_sections(NAGA_PROMPT)
+
+
+@pytest.mark.parametrize(
+    "section_pattern",
+    (
+        r"<speaking_style\b[^>]*>.*?</speaking_style>",
+        r'<guideline id="3">.*?</guideline>',
+        r'<guideline id="5">.*?</guideline>',
+        r'<guideline id="6">.*?</guideline>',
+    ),
+    ids=("speaking-style", "message-splitting", "natural-language", "reply-length"),
+)
+def test_prompt_variants_share_speaking_guidance(section_pattern: str) -> None:
+    """共用表达规范不可只更新一个变体，不锁定任一句指导语的具体措辞。"""
+    base_sections = re.findall(section_pattern, _text(BASE_PROMPT), flags=re.DOTALL)
+    naga_sections = re.findall(section_pattern, _text(NAGA_PROMPT), flags=re.DOTALL)
+
+    assert len(base_sections) == 1, "基础提示词的共用表达板块缺失或重复"
+    assert len(naga_sections) == 1, "NagaAgent 提示词的共用表达板块缺失或重复"
+    assert base_sections == naga_sections, "两个提示词变体的共用表达规范不同步"
 
 
 def test_every_section_has_a_matching_closing_tag() -> None:
