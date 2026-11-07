@@ -14,10 +14,14 @@
   契约，改动会影响渲染
 - **渲染槽位**：``<!-- undefined:prompt-file-include:... -->`` 是渲染器依赖的
   锚点，删掉之后该插槽静默失效
+- **错误处理契约**：``error_reporting`` 必须同时覆盖用户要求与自行发起的失败；
+  静默结束必须带 ``end(force=true)``（``end`` 工具在 memo 非空且本轮未发消息时
+  会拒绝结束）
 - **负向协议**：真实提示词里不得出现文本形式的工具调用协议痕迹
 
-刻意**不**断言：任何一句指导语的具体文字、小节内部的段落结构、标签是否良构
-（已知提示词存在历史遗留的标签不匹配，见 ``KNOWN_TAG_MISMATCHES``）。
+刻意**不**断言：任何一句指导语的具体文字（上述功能性协议标记除外）、小节内部的
+段落结构、标签是否良构（已知提示词存在历史遗留的标签不匹配，见
+``KNOWN_TAG_MISMATCHES``）。
 """
 
 from __future__ import annotations
@@ -44,6 +48,7 @@ EACH_RULES: Final[Path] = IMPORTANT / "each.md"
 #: 让结构变化成为一次**显式决定**，而不是悄悄发生。
 EXPECTED_SECTIONS: Final[tuple[str, ...]] = (
     "speaking_style",
+    "error_reporting",
     "absolute_priority",
     "core_rules",
     "important_rules",
@@ -400,6 +405,51 @@ def test_real_prompts_keep_every_file_include_slot_exactly_once() -> None:
             f"{name} 的文件插槽与契约不符：实际 {sorted(slots)}，"
             f"契约 {sorted(PROMPT_FILE_INCLUDE_SLOTS)}（缺失或重复都会在这里暴露）"
         )
+
+
+# --------------------------------------------------------------------------- #
+# 错误处理契约（功能性，不是措辞）
+# --------------------------------------------------------------------------- #
+
+_ERROR_REPORTING_SECTION = re.compile(
+    r"<error_reporting\b[^>]*>(?P<body>.*?)</error_reporting>", re.DOTALL
+)
+
+
+def _error_reporting_rules(path: Path) -> list[str]:
+    """取出顶层 error_reporting 小节里的规则正文。"""
+    match = _ERROR_REPORTING_SECTION.search(_text(path))
+    assert match is not None, f"{path.name} 缺少顶层 error_reporting 小节"
+    return re.findall(r"<rule>(.*?)</rule>", match.group("body"), flags=re.DOTALL)
+
+
+@pytest.mark.parametrize(
+    ("name", "path"),
+    (("undefined.xml", BASE_PROMPT), ("undefined_nagaagent.xml", NAGA_PROMPT)),
+)
+def test_error_reporting_covers_requested_and_unrequested_failures(
+    name: str, path: Path
+) -> None:
+    """群聊失败处理必须区分用户要求与自行发起，并给出对应动作。
+
+    ``end(force=true)`` 是功能性契约：``end`` 工具在 memo 非空且本轮未发送消息时
+    会拒绝结束（见 ``skills/tools/end/handler.py``），静默失败必须显式传 force。
+    """
+    rules = _error_reporting_rules(path)
+
+    silent_rules = [rule for rule in rules if "不发送任何消息" in rule]
+    assert len(silent_rules) == 1, f"{name} 的静默失败规则数量异常"
+    silent_rule = silent_rules[0]
+    assert "自行发起" in silent_rule
+    assert "end(force=true)" in silent_rule
+    assert "memo" in silent_rule and "脱敏" in silent_rule
+
+    status_rules = [rule for rule in rules if "现在不可用" in rule]
+    assert len(status_rules) == 1, f"{name} 的请求失败状态规则数量异常"
+    status_rule = status_rules[0]
+    assert "用户明确要求" in status_rule
+    assert "回一句" in status_rule
+    assert "附件" in status_rule
 
 
 # --------------------------------------------------------------------------- #
