@@ -44,6 +44,7 @@ EACH_RULES: Final[Path] = IMPORTANT / "each.md"
 #: 让结构变化成为一次**显式决定**，而不是悄悄发生。
 EXPECTED_SECTIONS: Final[tuple[str, ...]] = (
     "speaking_style",
+    "error_reporting",
     "absolute_priority",
     "core_rules",
     "important_rules",
