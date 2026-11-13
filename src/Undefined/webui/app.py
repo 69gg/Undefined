@@ -297,13 +297,14 @@ def create_app(*, redirect_to_config_once: bool = False) -> web.Application:
         middlewares=[cors_middleware, gzip_middleware, security_headers_middleware]
     )
 
-    # 初始化核心组件
-    # 会话落盘：控制台重启后浏览器无需重新登录。
-    app[SESSION_STORE_APP_KEY] = SessionStore(storage_path=WEBUI_SESSIONS_FILE)
-
     # 配置 WebUI 设置热重载
     config_manager = get_config_manager()
-    app[SETTINGS_APP_KEY] = load_webui_settings()
+    settings = load_webui_settings()
+    app[SETTINGS_APP_KEY] = settings
+    # 会话落盘：控制台重启后浏览器无需重新登录；密码变更时旧会话自动失效。
+    app[SESSION_STORE_APP_KEY] = SessionStore(
+        storage_path=WEBUI_SESSIONS_FILE, password=settings.password
+    )
     app[BOT_APP_KEY] = BotProcessController(
         stop_timeout_getter=lambda: app[SETTINGS_APP_KEY].stop_timeout_seconds
     )

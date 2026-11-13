@@ -25,7 +25,7 @@ from Undefined.webui.routes._shared import (
 
 def _make_app(path: Path) -> web.Application:
     app = web.Application()
-    app[SESSION_STORE_APP_KEY] = SessionStore(storage_path=path)
+    app[SESSION_STORE_APP_KEY] = SessionStore(storage_path=path, password="secret")
     app[SETTINGS_APP_KEY] = WebUISettings(
         url="127.0.0.1",
         port=8787,
@@ -104,6 +104,27 @@ def test_corrupt_file_does_not_break_startup(tmp_path: Path) -> None:
 
     assert store.is_valid(token)
     assert SessionStore(storage_path=path).is_valid(token)
+
+
+def test_password_change_invalidates_persisted_sessions(tmp_path: Path) -> None:
+    path = tmp_path / "sessions.json"
+    store = SessionStore(storage_path=path, password="old")
+    token = store.create()
+
+    assert SessionStore(storage_path=path, password="old").is_valid(token)
+    assert not SessionStore(storage_path=path, password="new").is_valid(token)
+
+
+def test_set_password_clears_sessions_and_updates_fingerprint(tmp_path: Path) -> None:
+    path = tmp_path / "sessions.json"
+    store = SessionStore(storage_path=path, password="old")
+    token = store.create()
+
+    store.set_password("new")
+
+    assert not store.is_valid(token)
+    assert not SessionStore(storage_path=path, password="old").is_valid(token)
+    assert not SessionStore(storage_path=path, password="new").is_valid(token)
 
 
 def test_active_session_slides_expiry(tmp_path: Path) -> None:

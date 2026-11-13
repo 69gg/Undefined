@@ -1,6 +1,7 @@
 import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
+import hashlib
 import json
 import logging
 import os
@@ -23,6 +24,15 @@ SESSION_TTL_SECONDS = 30 * 24 * 60 * 60
 ACCESS_TOKEN_TTL_SECONDS = 15 * 60
 REFRESH_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60
 SESSION_FILE_VERSION = 1
+
+
+def _password_fingerprint(password: str | None) -> str | None:
+    """会话文件只保存密码指纹，用于在密码变更后作废旧登录态。"""
+    if password is None:
+        return None
+    return hashlib.sha256(password.encode("utf-8")).hexdigest()[:16]
+
+
 #: 拉起 Bot 子进程的命令。
 #:
 #: 用**当前解释器**直接跑模块，而不是 ``uv run``：WebUI 自己就跑在这个解释器里，
@@ -53,11 +63,13 @@ class SessionStore:
         access_ttl_seconds: int = ACCESS_TOKEN_TTL_SECONDS,
         refresh_ttl_seconds: int = REFRESH_TOKEN_TTL_SECONDS,
         storage_path: Path | None = None,
+        password: str | None = None,
     ) -> None:
         self._ttl_seconds = ttl_seconds
         self._access_ttl_seconds = access_ttl_seconds
         self._refresh_ttl_seconds = refresh_ttl_seconds
         self._storage_path = storage_path
+        self._password_fingerprint = _password_fingerprint(password)
         self._sessions: dict[str, SessionEntry] = {}
         self._lock = threading.RLock()
         self._load()
@@ -78,7 +90,17 @@ class SessionStore:
         except (ValueError, TypeError):
             logger.warning("[WebUI] 会话文件损坏，已忽略: %s", path)
             return
-        raw_sessions = payload.get("sessions") if isinstance(payload, dict) else None
+        if not isinstance(payload, dict):
+            return
+        stored_fingerprint = payload.get("password_fingerprint")
+        if (
+            self._password_fingerprint is not None
+            and stored_fingerprint != self._password_fingerprint
+        ):
+            # 密码已变更（例如直接编辑 config.toml 后重启），旧令牌必须失效。
+            logger.info("[WebUI] 管理密码已变更，清除旧登录会话")
+            return
+        raw_sessions = payload.get("sessions")
         if not isinstance(raw_sessions, dict):
             return
         now = time.time()
@@ -106,6 +128,7 @@ class SessionStore:
             self._sessions.pop(token, None)
         payload = {
             "version": SESSION_FILE_VERSION,
+            "password_fingerprint": self._password_fingerprint,
             "sessions": {
                 token: {"expires_at": entry.expires_at, "kind": entry.kind}
                 for token, entry in self._sessions.items()
@@ -218,6 +241,13 @@ class SessionStore:
         with self._lock:
             if self._sessions.pop(token, None) is not None:
                 self._persist()
+
+    def set_password(self, password: str | None) -> None:
+        """密码变更后作废全部旧会话，并更新会话文件中的密码指纹。"""
+        with self._lock:
+            self._password_fingerprint = _password_fingerprint(password)
+            self._sessions.clear()
+            self._persist()
 
     def clear(self) -> None:
         with self._lock:

@@ -267,7 +267,7 @@ async def password_handler(request: web.Request) -> Response:
         request.app[SETTINGS_APP_KEY] = WebUISettings.from_config(
             manager.load(strict=False), config_exists=True
         )
-        get_session_store(request).clear()
+        get_session_store(request).set_password(new_password)
 
     try:
         await async_io.run_cancellation_safe(password_and_reload())
