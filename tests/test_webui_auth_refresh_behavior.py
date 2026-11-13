@@ -47,7 +47,8 @@ const context = vm.createContext({state, Response, AbortController, Map,
     if (path === '/refresh') return new Promise(resolve => pending.push({resolve,
       body: JSON.parse(options.body)}));
     resources++;
-    return new Response('{}', {status: input.scenario === 'cookie' || state.authAccessToken ? 200 : 401});
+    const staleAccess = input.scenario === 'adopt_retry' && state.authAccessToken === 'oldA';
+    return new Response('{}', {status: !staleAccess && (input.scenario === 'cookie' || state.authAccessToken) ? 200 : 401});
   },
 });
 vm.runInContext(fs.readFileSync(input.source, 'utf8'), context);
@@ -74,12 +75,20 @@ const tick = async () => { for(let i=0; i<10; i++) await new Promise(r => setImm
       status: input.scenario === 'replacement_error' ? 401 : 200}));
     await request;
   } else {
+    if (input.scenario === 'adopt_retry') {
+      state.authAccessTokenExpiresAt = 0;
+      stored.refresh = 'otherR';
+      stored.access = 'otherA';
+      stored.expiresAt = String(Date.now() + 900000);
+    }
     const calls = vm.runInContext('Promise.allSettled([api("/status"), api("/system")])', context);
     await tick();
     const refreshCountWhilePending = pending.length;
-    pending[0].resolve(new Response(JSON.stringify(pair), {status: input.scenario === 'failure' ? 401 : 200}));
+    const status = ['failure', 'adopt_retry'].includes(input.scenario) ? 401
+      : input.scenario === 'server_error' ? 500 : 200;
+    pending[0].resolve(new Response(JSON.stringify(pair), {status}));
     const results = await calls;
-    console.log(JSON.stringify({state, refreshCountWhilePending, refreshes: pending.length,
+    console.log(JSON.stringify({state, stored, refreshCountWhilePending, refreshes: pending.length,
       inputs: pending.map(item => item.body), resources, results: results.map(item => item.status)}));
     return;
   }
@@ -136,3 +145,21 @@ def test_failed_refresh_keeps_token_rotated_by_another_tab() -> None:
     assert result["stored"]["refresh"] == "otherR"
     assert result["state"]["authRefreshToken"] == "otherR"
     assert result["state"]["authAccessToken"] == "otherA"
+
+
+def test_refresh_adopts_other_tab_tokens_and_retries() -> None:
+    result = _run_refresh_scenario("adopt_retry")
+    # 采用替换令牌后按成功处理：两个请求都用新 access token 重试。
+    assert result["state"]["authRefreshToken"] == "otherR"
+    assert result["state"]["authAccessToken"] == "otherA"
+    assert result["resources"] == 4
+    assert result["results"] == ["fulfilled", "fulfilled"]
+
+
+def test_refresh_server_error_preserves_tokens() -> None:
+    result = _run_refresh_scenario("server_error")
+    # 5xx 属于可重试失败，不能清除仍可能有效的登录态。
+    assert result["state"]["authRefreshToken"] == "oldR"
+    assert result["state"]["authAccessToken"] == "oldA"
+    assert result["stored"]["refresh"] == "oldR"
+    assert result["results"] == ["fulfilled", "fulfilled"]

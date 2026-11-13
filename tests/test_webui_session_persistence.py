@@ -177,7 +177,7 @@ def test_refresh_failure_restores_old_token(
     assert store.is_valid(refresh_token, allowed_kinds={"refresh"})
 
 
-def test_set_password_failure_restores_sessions(
+def test_set_password_failure_fails_closed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     path = tmp_path / "sessions.json"
@@ -188,7 +188,9 @@ def test_set_password_failure_restores_sessions(
     with pytest.raises(OSError):
         store.set_password("new")
 
-    assert store.is_valid(token)
+    # 写盘失败也不能让旧会话继续可用；指纹保持新值，重试可补齐磁盘状态。
+    assert not store.is_valid(token)
+    assert not store._sessions
 
 
 def test_password_change_invalidates_persisted_sessions(tmp_path: Path) -> None:

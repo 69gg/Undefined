@@ -199,7 +199,7 @@ async function refreshAccessToken() {
             );
             if (storedRefreshToken && storedRefreshToken !== refreshToken) {
                 // 其他标签页已轮换令牌：跟随共享存储，避免清掉新令牌。
-                updateAuthFromPayload({
+                const adopted = updateAuthFromPayload({
                     accessToken: readAuthStorage("undefined_auth_access_token"),
                     refreshToken: storedRefreshToken,
                     accessTokenExpiresAt:
@@ -210,7 +210,12 @@ async function refreshAccessToken() {
                             10,
                         ) || 0,
                 });
-            } else {
+                // 采用替换令牌后按成功处理，让调用方用新 access token 重试。
+                if (adopted) return payload;
+            }
+            // 只有服务端明确判定登录态失效时才清除令牌；
+            // 5xx 或异常响应属于可重试失败，保留令牌等待下次刷新。
+            if (response.status === 401 || response.status === 403) {
                 clearStoredAuthTokens();
             }
             throw new Error("Unauthorized");

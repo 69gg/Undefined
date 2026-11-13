@@ -328,12 +328,19 @@ def create_app(*, redirect_to_config_once: bool = False) -> web.Application:
             # 本次快照已成功读取；后续外部写入不能覆盖已验证的设置。
             previous = app[SETTINGS_APP_KEY]
             updated = WebUISettings.from_config(config, config_exists=True)
-            app[SETTINGS_APP_KEY] = updated
             if updated.password != previous.password:
                 try:
+                    # 先持久化作废旧会话，再启用新密码，避免旧令牌在新密码下仍可用。
                     app[SESSION_STORE_APP_KEY].set_password(updated.password)
                 except Exception:
-                    logger.warning("[WebUI] 密码变更后清理旧会话失败", exc_info=True)
+                    # 内存中的旧会话已作废（fail closed）；保留旧设置，
+                    # 下一次配置变更会重试持久化，避免把新密码当作已完全生效。
+                    logger.warning(
+                        "[WebUI] 密码变更后清理旧会话失败，暂不启用新密码",
+                        exc_info=True,
+                    )
+                    return
+            app[SETTINGS_APP_KEY] = updated
 
     config_manager.subscribe(_on_config_change)
 

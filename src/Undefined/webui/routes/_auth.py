@@ -282,10 +282,11 @@ async def password_handler(request: web.Request) -> Response:
         await asyncio.to_thread(write_password)
         manager = get_config_manager()
         manager.reload()
+        # 先完成会话失效持久化，再启用新密码；失败时由 500 分支返回。
+        get_session_store(request).set_password(new_password)
         request.app[SETTINGS_APP_KEY] = WebUISettings.from_config(
             manager.load(strict=False), config_exists=True
         )
-        get_session_store(request).set_password(new_password)
 
     try:
         await async_io.run_cancellation_safe(password_and_reload())

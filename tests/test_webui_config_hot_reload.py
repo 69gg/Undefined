@@ -9,6 +9,7 @@ from aiohttp.test_utils import make_mocked_request
 
 from Undefined.config import Config
 from Undefined.config.manager import ConfigManager
+from Undefined.utils.io import write_json_sync as real_write_json_sync
 from Undefined.webui import app as webui_app
 from Undefined.webui.routes import _auth
 from Undefined.webui.routes._shared import SESSION_STORE_APP_KEY, SETTINGS_APP_KEY
@@ -125,4 +126,31 @@ async def test_password_change_keeps_validated_settings_after_external_write(
     assert path.read_text(encoding="utf-8") == "[webui\n"
     assert app[SETTINGS_APP_KEY].password == "private-new"
     assert not app[SETTINGS_APP_KEY].using_default_password
+    assert not sessions.is_valid(token)
+
+
+def test_password_reload_keeps_old_settings_when_session_persist_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(webui_app, "WEBUI_SESSIONS_FILE", tmp_path / "sessions.json")
+    path, manager, app = _manager_and_app(tmp_path, monkeypatch)
+    sessions = app[SESSION_STORE_APP_KEY]
+    token = sessions.create()
+
+    def _fail_write(*_args: object, **_kwargs: object) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr("Undefined.webui.core.write_json_sync", _fail_write)
+    path.write_text('[webui]\npassword="private-new"\n', encoding="utf-8")
+    manager.reload(strict=False)
+
+    # 持久化失败时不启用新密码，但旧会话已在内存中作废（fail closed）。
+    assert app[SETTINGS_APP_KEY].password == "private-old"
+    assert not sessions.is_valid(token)
+
+    # 磁盘恢复后，下一次配置变更会重试失效持久化并启用新密码。
+    monkeypatch.setattr("Undefined.webui.core.write_json_sync", real_write_json_sync)
+    path.write_text('[webui]\npassword="private-new"\nport=18787\n', encoding="utf-8")
+    manager.reload(strict=False)
+    assert app[SETTINGS_APP_KEY].password == "private-new"
     assert not sessions.is_valid(token)
