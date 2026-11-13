@@ -54,12 +54,19 @@ Management API 兼容两套鉴权：
   "access_token": "...",
   "refresh_token": "...",
   "expires_in": 900,
-  "refresh_expires_in": 28800,
+  "refresh_expires_in": 2592000,
   "access_token_expires_at": 1741420800000
 }
 ```
 
 同时浏览器会收到兼容旧逻辑的 session cookie。
+
+登录态会持久化到 `data/cache/webui_sessions.json`，控制台进程重启后仍然有效：
+
+- access token 有效期 15 分钟，客户端应在到期前调用 refresh。
+- refresh token 与 cookie session 有效期 30 天；每次刷新轮换后重新计时，旧 refresh token 立即失效。
+- 活跃会话在剩余有效期不足一半时自动续期；前端令牌保存在浏览器 `localStorage`，关闭浏览器或重启控制台都不需要重新登录。
+- 修改管理密码（包括直接编辑 `config.toml` 后重启）会作废全部旧会话。
 
 ### 刷新 token
 
@@ -117,7 +124,7 @@ WebUI 的并发请求共用同一次 refresh token 轮换；旧会话的迟到�
 
 用于告诉客户端当前控制面支持哪些能力，例如：
 
-- token 鉴权
+- token 鉴权（`capabilities.auth` 返回 `access_token_ttl_seconds` 与 `refresh_token_ttl_seconds`）
 - bootstrap probe
 - runtime proxy
 - config read/write/validate

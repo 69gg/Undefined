@@ -1230,6 +1230,7 @@ api_key = "replace-with-your-key"
 - 未配置或为空时，会回退默认密码并标记为”默认密码模式”。
 - `webui.url` / `webui.port` 修改需重启 WebUI 进程，以重新绑定监听地址和端口。
 - `webui.password` 在配置成功加载后立即刷新 Management 的登录密码，无需重启 WebUI。
+- 登录态持久化在 `data/cache/webui_sessions.json`，WebUI 进程重启后仍然有效；`webui.password` 变更（包括直接编辑配置后重启）会作废全部旧会话。
 - `webui.autostart_bot` 控制下一次 WebUI 启动时是否自动启动机器人；修改不会立即启动或停止当前机器人进程。
 - `check_updates` 支持热更新；关闭后只停止页面打开时的自动检查，概览页仍可手动检查。
 - `stop_timeout_seconds` 支持热更新，下一次停止操作读取新值，进行中的停止保持开始时的期限。停止按钮、WebUI 关停与更新前停止共用此期限；请求取消也会先等待子进程清理收敛。默认等待模型、下载、回复和历史收尾；设置正整数时需覆盖实际收尾耗时，超时强制终止可能跳过未完成的落盘。环境变量为 `WEBUI_STOP_TIMEOUT_SECONDS`，TOML 显式配置优先。

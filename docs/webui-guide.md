@@ -33,6 +33,8 @@ check_updates = true    # 打开 WebUI 时后台检查正式 Release（默认 tr
 
 修改后的密码会写入 `config.toml`。桌面端 / Android 客户端也使用同一密码连接。
 
+登录成功后，登录态会同时保存在浏览器和 `data/cache/webui_sessions.json`：控制台进程重启、浏览器关闭重开都不需要重新登录。会话有效期 30 天，持续使用会自动续期；access token 每 15 分钟由前端自动刷新。修改密码会撤销全部登录态，退出登录只撤销当前令牌。
+
 ---
 
 ## 功能概览
@@ -253,7 +255,7 @@ WebUI 和桌面端 / Android 客户端共享同一 Management API：
 
 **Q: 忘记密码怎么办？**
 
-直接编辑 `config.toml` 中的 `[webui].password` 字段，重启 WebUI 即可。
+直接编辑 `config.toml` 中的 `[webui].password` 字段，重启 WebUI 即可。密码变更后旧的登录态会自动失效，需要用新密码重新登录。
 
 **Q: 配置保存后 Bot 没反应？**
 
