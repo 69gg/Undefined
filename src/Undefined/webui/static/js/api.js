@@ -194,7 +194,25 @@ async function refreshAccessToken() {
         // 登录或退出可能已替换会话；旧请求不能改写新令牌。
         if (state.authRefreshToken !== refreshToken) return payload;
         if (!response.ok || !updateAuthFromPayload(payload)) {
-            clearStoredAuthTokens();
+            const storedRefreshToken = readAuthStorage(
+                "undefined_auth_refresh_token",
+            );
+            if (storedRefreshToken && storedRefreshToken !== refreshToken) {
+                // 其他标签页已轮换令牌：跟随共享存储，避免清掉新令牌。
+                updateAuthFromPayload({
+                    accessToken: readAuthStorage("undefined_auth_access_token"),
+                    refreshToken: storedRefreshToken,
+                    accessTokenExpiresAt:
+                        Number.parseInt(
+                            readAuthStorage(
+                                "undefined_auth_access_expires_at",
+                            ) || "0",
+                            10,
+                        ) || 0,
+                });
+            } else {
+                clearStoredAuthTokens();
+            }
             throw new Error("Unauthorized");
         }
         return payload;

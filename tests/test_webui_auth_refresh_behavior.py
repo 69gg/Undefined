@@ -19,15 +19,30 @@ const vm = require('node:vm');
 const input = JSON.parse(fs.readFileSync(0, 'utf8'));
 const state = {authAccessToken: 'oldA', authRefreshToken: 'oldR',
   authAccessTokenExpiresAt: Date.now() + 10, authenticated: true};
+const stored = {access: 'oldA', refresh: 'oldR', expiresAt: ''};
 const pending = [];
 let resources = 0;
 const context = vm.createContext({state, Response, AbortController, Map,
   FormData, Blob, URLSearchParams, console, setTimeout, clearTimeout,
   window: {setTimeout: () => 1}, refreshUI: () => {},
-  storeAuthTokens: tokens => Object.assign(state, {authAccessToken: tokens.accessToken,
-    authRefreshToken: tokens.refreshToken, authAccessTokenExpiresAt: tokens.accessTokenExpiresAt}),
-  clearStoredAuthTokens: () => Object.assign(state, {authAccessToken: '',
-    authRefreshToken: '', authAccessTokenExpiresAt: 0}),
+  readAuthStorage: key => {
+    if (key === 'undefined_auth_access_token') return stored.access;
+    if (key === 'undefined_auth_refresh_token') return stored.refresh;
+    if (key === 'undefined_auth_access_expires_at') return stored.expiresAt;
+    return '';
+  },
+  storeAuthTokens: tokens => {
+    Object.assign(state, {authAccessToken: tokens.accessToken,
+      authRefreshToken: tokens.refreshToken, authAccessTokenExpiresAt: tokens.accessTokenExpiresAt});
+    stored.access = tokens.accessToken || '';
+    stored.refresh = tokens.refreshToken || '';
+    stored.expiresAt = String(tokens.accessTokenExpiresAt || '');
+  },
+  clearStoredAuthTokens: () => {
+    Object.assign(state, {authAccessToken: '',
+      authRefreshToken: '', authAccessTokenExpiresAt: 0});
+    stored.access = ''; stored.refresh = ''; stored.expiresAt = '';
+  },
   fetch: async (path, options) => {
     if (path === '/refresh') return new Promise(resolve => pending.push({resolve,
       body: JSON.parse(options.body)}));
@@ -40,6 +55,17 @@ vm.runInContext('AUTH_ENDPOINTS.refresh = ["/refresh"]', context);
 const pair = {access_token: 'newA', refresh_token: 'newR', expires_in: 900};
 const tick = async () => { for(let i=0; i<10; i++) await new Promise(r => setImmediate(r)); };
 (async () => {
+  if (input.scenario === 'stale_tab') {
+    stored.refresh = 'otherR';
+    stored.access = 'otherA';
+    stored.expiresAt = String(Date.now() + 900000);
+    const request = vm.runInContext('refreshAccessToken()', context);
+    await tick();
+    pending[0].resolve(new Response('{}', {status: 401}));
+    await request.catch(() => {});
+    console.log(JSON.stringify({state, stored, refreshes: pending.length}));
+    return;
+  }
   if (input.scenario.startsWith('replacement')) {
     const request = vm.runInContext('refreshAccessToken()', context);
     await tick();
@@ -101,3 +127,12 @@ def test_failed_shared_refresh_clears_its_own_expired_tokens() -> None:
     assert result["refreshes"] == 1
     assert result["state"]["authRefreshToken"] == ""
     assert result["results"] == ["rejected", "rejected"]
+
+
+def test_failed_refresh_keeps_token_rotated_by_another_tab() -> None:
+    result = _run_refresh_scenario("stale_tab")
+    assert result["refreshes"] == 1
+    # 其他标签页已轮换：共享存储和内存状态都跟随新令牌，不被旧请求清除。
+    assert result["stored"]["refresh"] == "otherR"
+    assert result["state"]["authRefreshToken"] == "otherR"
+    assert result["state"]["authAccessToken"] == "otherA"

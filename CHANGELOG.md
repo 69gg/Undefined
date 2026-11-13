@@ -5,7 +5,7 @@
 - 会话落盘：服务端会话表写入 `data/cache/webui_sessions.json`（权限 0600），启动时自动恢复；过期条目在加载和写盘时清理，文件损坏只告警，不影响控制台启动。
 - 有效期延长：session 与 refresh token 从 8 小时延长到 30 天，access token 保持 15 分钟并由前端自动刷新；session 剩余不足一半时滑动续期，持续使用不会掉线。
 - 前端存储：WebUI 令牌从 `sessionStorage` 改为 `localStorage`，浏览器或控制台重启后仍然保留；自动迁移旧版本遗留的令牌，登出时一并清理。
-- Cookie 同步：`undefined_webui` 与 `undefined_webui_token` 的 `max_age` 同步为 30 天，刷新轮换后重新计时。
+- Cookie 同步：`undefined_webui` 与 `undefined_webui_token` 的 `max_age` 均设为 30 天；刷新轮换只重置 `undefined_webui_token`，`undefined_webui` 保持登录时的 30 天期限。
 - 刷新安全：refresh token 轮换改为加锁原子操作，旧 token 立即失效；会话文件只保存密码指纹，修改管理密码（含直接编辑 `config.toml` 后重启）会作废旧登录态。
 - 测试覆盖：新增会话持久化、滑动续期、密码变更失效与重启恢复测试。
 

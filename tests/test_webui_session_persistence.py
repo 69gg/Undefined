@@ -12,6 +12,7 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 from Undefined.config.webui_settings import WebUISettings
+from Undefined.utils.io import write_json_sync as _real_write_json_sync
 from Undefined.webui import core
 from Undefined.webui.core import SessionStore
 from Undefined.webui.routes import routes
@@ -104,6 +105,90 @@ def test_corrupt_file_does_not_break_startup(tmp_path: Path) -> None:
 
     assert store.is_valid(token)
     assert SessionStore(storage_path=path).is_valid(token)
+
+
+def test_invalid_utf8_file_does_not_break_startup(tmp_path: Path) -> None:
+    path = tmp_path / "sessions.json"
+    path.write_bytes(b"\xff\xfe\x00\x00")
+
+    store = SessionStore(storage_path=path)
+    token = store.create()
+
+    assert store.is_valid(token)
+    assert SessionStore(storage_path=path).is_valid(token)
+
+
+def test_password_change_persists_invalidation(tmp_path: Path) -> None:
+    path = tmp_path / "sessions.json"
+    store = SessionStore(storage_path=path, password="old")
+    token = store.create()
+
+    # 用新密码启动会立即把空会话表和新指纹写回磁盘。
+    SessionStore(storage_path=path, password="new")
+
+    # 即使密码改回旧值，旧会话也不能复活。
+    assert not SessionStore(storage_path=path, password="old").is_valid(token)
+
+
+def _fail_write(*_args: object, **_kwargs: object) -> None:
+    raise OSError("disk full")
+
+
+def test_revoke_failure_restores_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "sessions.json"
+    store = SessionStore(storage_path=path)
+    token = store.create()
+    monkeypatch.setattr("Undefined.webui.core.write_json_sync", _fail_write)
+
+    with pytest.raises(OSError):
+        store.revoke(token)
+
+    assert store.is_valid(token)
+
+
+def test_clear_failure_restores_sessions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "sessions.json"
+    store = SessionStore(storage_path=path)
+    token = store.create()
+    monkeypatch.setattr("Undefined.webui.core.write_json_sync", _fail_write)
+
+    with pytest.raises(OSError):
+        store.clear()
+
+    assert store.is_valid(token)
+
+
+def test_refresh_failure_restores_old_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "sessions.json"
+    store = SessionStore(storage_path=path)
+    tokens = store.issue_auth_tokens()
+    refresh_token = str(tokens["refresh_token"])
+    monkeypatch.setattr("Undefined.webui.core.write_json_sync", _fail_write)
+
+    with pytest.raises(OSError):
+        store.refresh_auth_tokens(refresh_token)
+
+    assert store.is_valid(refresh_token, allowed_kinds={"refresh"})
+
+
+def test_set_password_failure_restores_sessions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "sessions.json"
+    store = SessionStore(storage_path=path, password="old")
+    token = store.create()
+    monkeypatch.setattr("Undefined.webui.core.write_json_sync", _fail_write)
+
+    with pytest.raises(OSError):
+        store.set_password("new")
+
+    assert store.is_valid(token)
 
 
 def test_password_change_invalidates_persisted_sessions(tmp_path: Path) -> None:
@@ -201,3 +286,51 @@ async def test_cookie_login_survives_restart(tmp_path: Path) -> None:
         assert response.status == 200
         payload = await response.json()
         assert payload["authenticated"] is True
+
+
+async def test_refresh_persistence_failure_returns_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "sessions.json"
+    app = _make_app(path)
+    real_write = _real_write_json_sync
+    async with TestClient(TestServer(app)) as client:
+        login = await client.post(
+            "/api/v1/management/auth/login", json={"password": "secret"}
+        )
+        refresh_token = (await login.json())["refresh_token"]
+        monkeypatch.setattr("Undefined.webui.core.write_json_sync", _fail_write)
+
+        response = await client.post(
+            "/api/v1/management/auth/refresh",
+            json={"refresh_token": refresh_token},
+        )
+
+        assert response.status == 500
+        assert (await response.json())["success"] is False
+        monkeypatch.setattr("Undefined.webui.core.write_json_sync", real_write)
+        assert app[SESSION_STORE_APP_KEY].is_valid(
+            refresh_token, allowed_kinds={"refresh"}
+        )
+
+
+async def test_logout_persistence_failure_keeps_cookies(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "sessions.json"
+    app = _make_app(path)
+    async with TestClient(TestServer(app)) as client:
+        login = await client.post(
+            "/api/v1/management/auth/login", json={"password": "secret"}
+        )
+        cookies = {
+            SESSION_COOKIE: login.cookies[SESSION_COOKIE].value,
+            TOKEN_COOKIE: login.cookies[TOKEN_COOKIE].value,
+        }
+        monkeypatch.setattr("Undefined.webui.core.write_json_sync", _fail_write)
+
+        response = await client.post("/api/v1/management/auth/logout", cookies=cookies)
+
+        assert response.status == 500
+        assert (await response.json())["success"] is False
+        assert response.headers.getall("Set-Cookie", []) == []

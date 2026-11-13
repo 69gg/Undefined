@@ -16,10 +16,12 @@
 
 ## 复现调用
 
-先在本地进程环境中设置 `OPENAI_API_KEY` 和 `OPENAI_BASE_URL`；后者应指向用户指定兼容接口的 `/v1` 地址。凭据和接口地址不写入本目录文件。
+先在本地进程环境中设置 `OPENAI_API_KEY` 和 `OPENAI_BASE_URL`；后者应指向用户指定兼容接口的 `/v1` 地址。凭据和接口地址不写入本目录文件。`image_gen.py` 来自本机安装的 imagegen 技能，可通过 `IMAGE_GEN` 指向任意安装位置。
 
 ```bash
-uv run --no-sync python /home/pyl/.codex/skills/.system/imagegen/scripts/image_gen.py generate \
+# IMAGE_GEN 默认为 Codex 技能目录下的脚本，可按实际安装位置覆盖。
+IMAGE_GEN="${IMAGE_GEN:-$HOME/.codex/skills/.system/imagegen/scripts/image_gen.py}"
+uv run --no-sync python "$IMAGE_GEN" generate \
   --model gpt-image-2.5-sunburst \
   --prompt-file output/imagegen/undefined-9527-concept-20261026.prompt.txt \
   --no-augment \

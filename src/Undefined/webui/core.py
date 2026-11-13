@@ -82,7 +82,7 @@ class SessionStore:
             raw = path.read_text(encoding="utf-8")
         except FileNotFoundError:
             return
-        except OSError as exc:
+        except (OSError, UnicodeError) as exc:
             logger.warning("[WebUI] 读取会话文件失败: %s", exc)
             return
         try:
@@ -99,6 +99,8 @@ class SessionStore:
         ):
             # 密码已变更（例如直接编辑 config.toml 后重启），旧令牌必须失效。
             logger.info("[WebUI] 管理密码已变更，清除旧登录会话")
+            # 立即用新指纹覆盖磁盘，避免密码回滚后旧会话重新生效。
+            self._persist()
             return
         raw_sessions = payload.get("sessions")
         if not isinstance(raw_sessions, dict):
@@ -116,28 +118,40 @@ class SessionStore:
                 continue
             self._sessions[token] = SessionEntry(expires_at=expires_at, kind=kind)
 
-    def _persist(self) -> None:
-        path = self._storage_path
-        if path is None:
-            return
+    def _payload(self) -> dict[str, object]:
         now = time.time()
-        # 顺手清掉过期条目，避免长期运行后会话文件无限增长。
-        for token in [
-            token for token, entry in self._sessions.items() if entry.expires_at <= now
-        ]:
-            self._sessions.pop(token, None)
-        payload = {
+        return {
             "version": SESSION_FILE_VERSION,
             "password_fingerprint": self._password_fingerprint,
             "sessions": {
                 token: {"expires_at": entry.expires_at, "kind": entry.kind}
                 for token, entry in self._sessions.items()
+                if entry.expires_at > now
             },
         }
+
+    def _persist_strict(self) -> None:
+        """写盘失败时向上抛出，供登出/刷新等需要强一致性的路径回滚。"""
+        path = self._storage_path
+        if path is None:
+            return
+        write_json_sync(path, self._payload(), use_lock=False)
+
+    def _prune_expired(self) -> None:
+        now = time.time()
+        for token in [
+            token for token, entry in self._sessions.items() if entry.expires_at <= now
+        ]:
+            self._sessions.pop(token, None)
+
+    def _persist(self) -> None:
+        """登录与校验路径的 best-effort 写盘；磁盘异常只告警。"""
         try:
-            write_json_sync(path, payload, use_lock=False)
+            self._persist_strict()
         except Exception as exc:  # 磁盘异常不应让登录/校验直接失败
             logger.warning("[WebUI] 写入会话文件失败: %s", exc)
+            return
+        self._prune_expired()
 
     def create(self, *, ttl_seconds: int | None = None, kind: str = "session") -> str:
         token = secrets.token_urlsafe(32)
@@ -227,32 +241,59 @@ class SessionStore:
                 return None
             if entry.expires_at < time.time():
                 self._sessions.pop(refresh_token, None)
-                self._persist()
+                try:
+                    self._persist_strict()
+                except Exception:
+                    self._sessions[refresh_token] = entry
+                    raise
                 return None
             # 旧 refresh token 立即作废并轮换，避免重放。
+            previous = dict(self._sessions)
             self._sessions.pop(refresh_token, None)
             tokens = self._issue_auth_tokens_locked()
-            self._persist()
+            try:
+                self._persist_strict()
+            except Exception:
+                self._sessions = previous
+                raise
             return tokens
 
     def revoke(self, token: str | None) -> None:
         if not token:
             return
         with self._lock:
-            if self._sessions.pop(token, None) is not None:
-                self._persist()
+            entry = self._sessions.pop(token, None)
+            if entry is None:
+                return
+            try:
+                self._persist_strict()
+            except Exception:
+                self._sessions[token] = entry
+                raise
 
     def set_password(self, password: str | None) -> None:
         """密码变更后作废全部旧会话，并更新会话文件中的密码指纹。"""
         with self._lock:
+            previous_fingerprint = self._password_fingerprint
+            previous = dict(self._sessions)
             self._password_fingerprint = _password_fingerprint(password)
             self._sessions.clear()
-            self._persist()
+            try:
+                self._persist_strict()
+            except Exception:
+                self._password_fingerprint = previous_fingerprint
+                self._sessions = previous
+                raise
 
     def clear(self) -> None:
         with self._lock:
+            previous = dict(self._sessions)
             self._sessions.clear()
-            self._persist()
+            try:
+                self._persist_strict()
+            except Exception:
+                self._sessions = previous
+                raise
 
 
 class BotProcessController:

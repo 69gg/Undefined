@@ -326,9 +326,14 @@ def create_app(*, redirect_to_config_once: bool = False) -> web.Application:
         ):
             logger.info("[WebUI] 检测到 WebUI 配置变更，正在热重载设置...")
             # 本次快照已成功读取；后续外部写入不能覆盖已验证的设置。
-            app[SETTINGS_APP_KEY] = WebUISettings.from_config(
-                config, config_exists=True
-            )
+            previous = app[SETTINGS_APP_KEY]
+            updated = WebUISettings.from_config(config, config_exists=True)
+            app[SETTINGS_APP_KEY] = updated
+            if updated.password != previous.password:
+                try:
+                    app[SESSION_STORE_APP_KEY].set_password(updated.password)
+                except Exception:
+                    logger.warning("[WebUI] 密码变更后清理旧会话失败", exc_info=True)
 
     config_manager.subscribe(_on_config_change)
 
