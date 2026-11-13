@@ -7,13 +7,13 @@ from aiohttp.web_response import Response
 from Undefined.config.loader import CONFIG_PATH, DEFAULT_WEBUI_PASSWORD
 from Undefined.config import WebUISettings, get_config_manager
 from Undefined.utils import io as async_io
+from ..core import REFRESH_TOKEN_TTL_SECONDS, SESSION_TTL_SECONDS
 from ..utils.config_io import config_write_lock
 from ._shared import (
     auth_capabilities,
     routes,
     SESSION_COOKIE,
     TOKEN_COOKIE,
-    SESSION_TTL_SECONDS,
     SETTINGS_APP_KEY,
     get_bearer_token,
     get_refresh_token,
@@ -120,7 +120,7 @@ async def login_handler(request: web.Request) -> Response:
             str(auth_tokens["refresh_token"]),
             httponly=True,
             samesite="Lax",
-            max_age=SESSION_TTL_SECONDS,
+            max_age=REFRESH_TOKEN_TTL_SECONDS,
         )
         return resp
 
@@ -172,7 +172,7 @@ async def refresh_handler(request: web.Request) -> Response:
         str(tokens["refresh_token"]),
         httponly=True,
         samesite="Lax",
-        max_age=SESSION_TTL_SECONDS,
+        max_age=REFRESH_TOKEN_TTL_SECONDS,
     )
     return resp
 

@@ -1,22 +1,28 @@
 import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
+import json
 import logging
 import os
+from pathlib import Path
 import signal
 import subprocess
 import sys
+import threading
 import time
 import secrets
 from typing import Any
 from Undefined.config.webui_settings import DEFAULT_WEBUI_STOP_TIMEOUT_SECONDS
-from Undefined.utils.io import run_cancellation_safe
+from Undefined.utils.io import run_cancellation_safe, write_json_sync
 
 logger = logging.getLogger(__name__)
 
-SESSION_TTL_SECONDS = 8 * 60 * 60
+#: 登录态有效期。控制台属于本地自托管面板，长有效期配合活跃滑动续期，
+#: 让长期使用的浏览器不必反复登录。
+SESSION_TTL_SECONDS = 30 * 24 * 60 * 60
 ACCESS_TOKEN_TTL_SECONDS = 15 * 60
-REFRESH_TOKEN_TTL_SECONDS = 8 * 60 * 60
+REFRESH_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60
+SESSION_FILE_VERSION = 1
 #: 拉起 Bot 子进程的命令。
 #:
 #: 用**当前解释器**直接跑模块，而不是 ``uv run``：WebUI 自己就跑在这个解释器里，
@@ -35,33 +41,110 @@ class SessionEntry:
 
 
 class SessionStore:
+    """WebUI 会话表。
+
+    传入 ``storage_path`` 时会话会原子写入磁盘，控制台重启后自动恢复，
+    浏览器手里的 cookie / 令牌无需重新登录即可继续使用。
+    """
+
     def __init__(
         self,
         ttl_seconds: int = SESSION_TTL_SECONDS,
         access_ttl_seconds: int = ACCESS_TOKEN_TTL_SECONDS,
         refresh_ttl_seconds: int = REFRESH_TOKEN_TTL_SECONDS,
+        storage_path: Path | None = None,
     ) -> None:
         self._ttl_seconds = ttl_seconds
         self._access_ttl_seconds = access_ttl_seconds
         self._refresh_ttl_seconds = refresh_ttl_seconds
+        self._storage_path = storage_path
         self._sessions: dict[str, SessionEntry] = {}
+        self._lock = threading.RLock()
+        self._load()
+
+    def _load(self) -> None:
+        path = self._storage_path
+        if path is None:
+            return
+        try:
+            raw = path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            logger.warning("[WebUI] 读取会话文件失败: %s", exc)
+            return
+        try:
+            payload = json.loads(raw)
+        except (ValueError, TypeError):
+            logger.warning("[WebUI] 会话文件损坏，已忽略: %s", path)
+            return
+        raw_sessions = payload.get("sessions") if isinstance(payload, dict) else None
+        if not isinstance(raw_sessions, dict):
+            return
+        now = time.time()
+        for token, value in raw_sessions.items():
+            if not isinstance(token, str) or not token or not isinstance(value, dict):
+                continue
+            try:
+                expires_at = float(value.get("expires_at") or 0)
+            except (TypeError, ValueError):
+                continue
+            kind = str(value.get("kind") or "session")
+            if kind not in {"session", "access", "refresh"} or expires_at <= now:
+                continue
+            self._sessions[token] = SessionEntry(expires_at=expires_at, kind=kind)
+
+    def _persist(self) -> None:
+        path = self._storage_path
+        if path is None:
+            return
+        now = time.time()
+        # 顺手清掉过期条目，避免长期运行后会话文件无限增长。
+        for token in [
+            token for token, entry in self._sessions.items() if entry.expires_at <= now
+        ]:
+            self._sessions.pop(token, None)
+        payload = {
+            "version": SESSION_FILE_VERSION,
+            "sessions": {
+                token: {"expires_at": entry.expires_at, "kind": entry.kind}
+                for token, entry in self._sessions.items()
+            },
+        }
+        try:
+            write_json_sync(path, payload, use_lock=False)
+        except Exception as exc:  # 磁盘异常不应让登录/校验直接失败
+            logger.warning("[WebUI] 写入会话文件失败: %s", exc)
 
     def create(self, *, ttl_seconds: int | None = None, kind: str = "session") -> str:
         token = secrets.token_urlsafe(32)
         ttl = self._ttl_seconds if ttl_seconds is None else ttl_seconds
-        self._sessions[token] = SessionEntry(expires_at=time.time() + ttl, kind=kind)
+        with self._lock:
+            self._sessions[token] = SessionEntry(
+                expires_at=time.time() + ttl, kind=kind
+            )
+            self._persist()
         return token
 
     def _resolve_entry(self, token: str | None) -> SessionEntry | None:
         if not token:
             return None
-        entry = self._sessions.get(token)
-        if entry is None:
-            return None
-        if entry.expires_at < time.time():
-            self._sessions.pop(token, None)
-            return None
-        return entry
+        with self._lock:
+            entry = self._sessions.get(token)
+            if entry is None:
+                return None
+            now = time.time()
+            if entry.expires_at < now:
+                self._sessions.pop(token, None)
+                self._persist()
+                return None
+            # 活跃会话滑动续期：剩余不足一半时重新计时，长期使用不会掉线。
+            if entry.kind == "session":
+                ttl = self._ttl_seconds
+                if ttl > 0 and entry.expires_at - now < ttl / 2:
+                    entry.expires_at = now + ttl
+                    self._persist()
+            return entry
 
     def is_valid(
         self,
@@ -86,38 +169,60 @@ class SessionStore:
         entry = self._resolve_entry(token)
         return None if entry is None else entry.kind
 
-    def issue_auth_tokens(self) -> dict[str, int | str]:
-        access_token = self.create(
-            ttl_seconds=self._access_ttl_seconds,
-            kind="access",
+    def _issue_auth_tokens_locked(self) -> dict[str, int | str]:
+        now = time.time()
+        access_token = secrets.token_urlsafe(32)
+        refresh_token = secrets.token_urlsafe(32)
+        self._sessions[access_token] = SessionEntry(
+            expires_at=now + self._access_ttl_seconds, kind="access"
         )
-        refresh_token = self.create(
-            ttl_seconds=self._refresh_ttl_seconds,
-            kind="refresh",
+        self._sessions[refresh_token] = SessionEntry(
+            expires_at=now + self._refresh_ttl_seconds, kind="refresh"
         )
         return {
             "access_token": access_token,
             "refresh_token": refresh_token,
             "expires_in": self._access_ttl_seconds,
             "refresh_expires_in": self._refresh_ttl_seconds,
-            "access_token_expires_at": self.get_expiry_ms(access_token),
+            "access_token_expires_at": int((now + self._access_ttl_seconds) * 1000),
         }
+
+    def issue_auth_tokens(self) -> dict[str, int | str]:
+        with self._lock:
+            tokens = self._issue_auth_tokens_locked()
+            self._persist()
+            return tokens
 
     def refresh_auth_tokens(
         self, refresh_token: str | None
     ) -> dict[str, int | str] | None:
-        if not self.is_valid(refresh_token, allowed_kinds={"refresh"}):
+        if not refresh_token:
             return None
-        self.revoke(refresh_token)
-        return self.issue_auth_tokens()
+        with self._lock:
+            entry = self._sessions.get(refresh_token)
+            if entry is None or entry.kind != "refresh":
+                return None
+            if entry.expires_at < time.time():
+                self._sessions.pop(refresh_token, None)
+                self._persist()
+                return None
+            # 旧 refresh token 立即作废并轮换，避免重放。
+            self._sessions.pop(refresh_token, None)
+            tokens = self._issue_auth_tokens_locked()
+            self._persist()
+            return tokens
 
     def revoke(self, token: str | None) -> None:
         if not token:
             return
-        self._sessions.pop(token, None)
+        with self._lock:
+            if self._sessions.pop(token, None) is not None:
+                self._persist()
 
     def clear(self) -> None:
-        self._sessions.clear()
+        with self._lock:
+            self._sessions.clear()
+            self._persist()
 
 
 class BotProcessController:

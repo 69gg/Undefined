@@ -17,6 +17,7 @@ from Undefined.config import (
 )
 from Undefined.utils.cors import is_allowed_cors_origin, normalize_origin
 from Undefined.utils import io as async_io
+from Undefined.utils.paths import WEBUI_SESSIONS_FILE
 from Undefined.utils.self_update import resolve_repo_root
 from .core import BotProcessController, SessionStore
 from .routes import routes
@@ -297,7 +298,8 @@ def create_app(*, redirect_to_config_once: bool = False) -> web.Application:
     )
 
     # 初始化核心组件
-    app[SESSION_STORE_APP_KEY] = SessionStore()
+    # 会话落盘：控制台重启后浏览器无需重新登录。
+    app[SESSION_STORE_APP_KEY] = SessionStore(storage_path=WEBUI_SESSIONS_FILE)
 
     # 配置 WebUI 设置热重载
     config_manager = get_config_manager()
