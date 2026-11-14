@@ -274,13 +274,18 @@ class SessionStore:
     def set_password(self, password: str | None) -> None:
         """密码变更后作废全部旧会话，并更新会话文件中的密码指纹。
 
-        写盘失败时内存中仍保持“旧会话已作废 + 新指纹”的 fail-closed 状态，
-        异常抛给调用方决定是否启用新密码；再次调用可重试持久化。
+        写盘失败时内存中的旧会话保持作废（fail closed），但密码指纹回滚，
+        异常抛给调用方；后续密码重载会重新尝试持久化新指纹。
         """
         with self._lock:
+            previous_fingerprint = self._password_fingerprint
             self._password_fingerprint = _password_fingerprint(password)
             self._sessions.clear()
-            self._persist_strict()
+            try:
+                self._persist_strict()
+            except Exception:
+                self._password_fingerprint = previous_fingerprint
+                raise
 
     def clear(self) -> None:
         with self._lock:

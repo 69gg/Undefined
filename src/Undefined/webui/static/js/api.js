@@ -167,10 +167,16 @@ function updateAuthFromPayload(payload) {
 
 let _authRefreshRequest = null;
 
+function unauthorizedError(authFailure) {
+    const error = new Error("Unauthorized");
+    error.authFailure = !!authFailure;
+    return error;
+}
+
 async function refreshAccessToken() {
     const refreshToken = state.authRefreshToken;
     if (!refreshToken) {
-        throw new Error("Unauthorized");
+        throw unauthorizedError(false);
     }
     if (_authRefreshRequest?.token === refreshToken) {
         return _authRefreshRequest.promise;
@@ -218,7 +224,9 @@ async function refreshAccessToken() {
             if (response.status === 401 || response.status === 403) {
                 clearStoredAuthTokens();
             }
-            throw new Error("Unauthorized");
+            throw unauthorizedError(
+                response.status === 401 || response.status === 403,
+            );
         }
         return payload;
     })();
@@ -238,11 +246,13 @@ async function api(path, options = {}) {
         !!state.authAccessTokenExpiresAt &&
         state.authAccessTokenExpiresAt <= Date.now() + 60_000;
 
+    let refreshFailure = null;
     if (accessExpiringSoon && method !== "OPTIONS") {
         try {
             await refreshAccessToken();
-        } catch (_error) {
-            // ignore and let request surface authorization result
+        } catch (error) {
+            // 记录失败原因，由资源请求结果决定是否降级登录态。
+            refreshFailure = error;
         }
     }
 
@@ -254,15 +264,21 @@ async function api(path, options = {}) {
     ) {
         try {
             await refreshAccessToken();
+            refreshFailure = null;
             res = await apiWithFallback(candidates, {
                 ...options,
                 _skipRefreshRetry: true,
             });
-        } catch (_error) {
+        } catch (error) {
             // refreshAccessToken 只清除仍属于失败请求的令牌。
+            refreshFailure = error;
         }
     }
     if (res.status === 401) {
+        if (refreshFailure && !refreshFailure.authFailure) {
+            // 刷新因网络或服务端故障失败：保留登录态，交回原始 401 响应。
+            return res;
+        }
         state.authenticated = false;
         refreshUI();
         throw new Error("Unauthorized");

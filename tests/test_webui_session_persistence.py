@@ -183,14 +183,16 @@ def test_set_password_failure_fails_closed(
     path = tmp_path / "sessions.json"
     store = SessionStore(storage_path=path, password="old")
     token = store.create()
+    fingerprint = store._payload()["password_fingerprint"]
     monkeypatch.setattr("Undefined.webui.core.write_json_sync", _fail_write)
 
     with pytest.raises(OSError):
         store.set_password("new")
 
-    # 写盘失败也不能让旧会话继续可用；指纹保持新值，重试可补齐磁盘状态。
+    # 写盘失败也不能让旧会话继续可用；指纹回滚以便后续重载重试。
     assert not store.is_valid(token)
     assert not store._sessions
+    assert store._payload()["password_fingerprint"] == fingerprint
 
 
 def test_password_change_invalidates_persisted_sessions(tmp_path: Path) -> None:

@@ -81,12 +81,19 @@ const tick = async () => { for(let i=0; i<10; i++) await new Promise(r => setImm
       stored.access = 'otherA';
       stored.expiresAt = String(Date.now() + 900000);
     }
+    if (input.scenario === 'server_error_401') {
+      state.authAccessToken = '';
+    }
     const calls = vm.runInContext('Promise.allSettled([api("/status"), api("/system")])', context);
     await tick();
     const refreshCountWhilePending = pending.length;
     const status = ['failure', 'adopt_retry'].includes(input.scenario) ? 401
-      : input.scenario === 'server_error' ? 500 : 200;
+      : ['server_error', 'server_error_401'].includes(input.scenario) ? 500 : 200;
     pending[0].resolve(new Response(JSON.stringify(pair), {status}));
+    await tick();
+    for (let i = 1; i < pending.length; i++) {
+      pending[i].resolve(new Response('{}', {status}));
+    }
     const results = await calls;
     console.log(JSON.stringify({state, stored, refreshCountWhilePending, refreshes: pending.length,
       inputs: pending.map(item => item.body), resources, results: results.map(item => item.status)}));
@@ -135,6 +142,7 @@ def test_failed_shared_refresh_clears_its_own_expired_tokens() -> None:
     result = _run_refresh_scenario("failure")
     assert result["refreshes"] == 1
     assert result["state"]["authRefreshToken"] == ""
+    assert result["state"]["authenticated"] is False
     assert result["results"] == ["rejected", "rejected"]
 
 
@@ -162,4 +170,12 @@ def test_refresh_server_error_preserves_tokens() -> None:
     assert result["state"]["authRefreshToken"] == "oldR"
     assert result["state"]["authAccessToken"] == "oldA"
     assert result["stored"]["refresh"] == "oldR"
+    assert result["results"] == ["fulfilled", "fulfilled"]
+
+
+def test_refresh_server_error_keeps_authenticated_state_on_401() -> None:
+    result = _run_refresh_scenario("server_error_401")
+    # 资源请求的 401 不能单独判定登录态失效：刷新端点是 5xx，保留登录态并交回响应。
+    assert result["state"]["authRefreshToken"] == "oldR"
+    assert result["state"]["authenticated"] is True
     assert result["results"] == ["fulfilled", "fulfilled"]
