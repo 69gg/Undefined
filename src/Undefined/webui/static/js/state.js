@@ -77,41 +77,46 @@ function readStorage(key) {
     }
 }
 
-function removeStorage(key) {
-    try {
-        window.localStorage.removeItem(key);
-    } catch (_error) {
-        // ignore storage failures in hardened browsers/private mode
-    }
-}
-
-function writeSessionStorage(key, value) {
+function writeStorage(key, value) {
     try {
         if (value === null || value === undefined || value === "") {
-            window.sessionStorage.removeItem(key);
+            window.localStorage.removeItem(key);
             return true;
         }
-        window.sessionStorage.setItem(key, String(value));
+        window.localStorage.setItem(key, String(value));
         return true;
     } catch (_error) {
         return false;
     }
 }
 
+function removeSessionStorage(key) {
+    try {
+        window.sessionStorage.removeItem(key);
+    } catch (_error) {
+        // ignore storage failures in hardened browsers/private mode
+    }
+}
+
+// 登录态落在 localStorage：浏览器或控制台重启后仍然保留，
+// 配合服务端 30 天会话与滑动续期，长期使用无需反复登录。
 function readAuthStorage(key) {
-    const sessionValue = readSessionStorage(key);
-    if (sessionValue) return sessionValue;
-    const legacyValue = readStorage(key);
+    const stored = readStorage(key);
+    if (stored) return stored;
+    // 兼容旧版本写在 sessionStorage 的令牌，读取后迁移到 localStorage。
+    const legacyValue = readSessionStorage(key);
     if (!legacyValue) return "";
-    if (writeSessionStorage(key, legacyValue)) {
-        removeStorage(key);
+    if (writeStorage(key, legacyValue)) {
+        removeSessionStorage(key);
     }
     return legacyValue;
 }
 
 function writeAuthStorage(key, value) {
-    if (writeSessionStorage(key, value)) {
-        removeStorage(key);
+    if (!writeStorage(key, value)) return;
+    // 清空时同时移除旧版本遗留的 sessionStorage 副本，避免登出后又被读回来。
+    if (value === null || value === undefined || value === "") {
+        removeSessionStorage(key);
     }
 }
 

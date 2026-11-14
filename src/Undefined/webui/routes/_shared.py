@@ -27,7 +27,6 @@ _PENDING_BOT_AUTOSTART_MARKER = Path("data/cache/pending_bot_autostart")
 
 SESSION_COOKIE = "undefined_webui"
 TOKEN_COOKIE = "undefined_webui_token"
-SESSION_TTL_SECONDS = 8 * 60 * 60
 LOGIN_ATTEMPT_LIMIT = 5
 LOGIN_ATTEMPT_WINDOW = 5 * 60
 LOGIN_BLOCK_SECONDS = 15 * 60

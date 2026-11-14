@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import tomllib
 
 from aiohttp import web
@@ -7,13 +8,13 @@ from aiohttp.web_response import Response
 from Undefined.config.loader import CONFIG_PATH, DEFAULT_WEBUI_PASSWORD
 from Undefined.config import WebUISettings, get_config_manager
 from Undefined.utils import io as async_io
+from ..core import REFRESH_TOKEN_TTL_SECONDS, SESSION_TTL_SECONDS
 from ..utils.config_io import config_write_lock
 from ._shared import (
     auth_capabilities,
     routes,
     SESSION_COOKIE,
     TOKEN_COOKIE,
-    SESSION_TTL_SECONDS,
     SETTINGS_APP_KEY,
     get_bearer_token,
     get_refresh_token,
@@ -28,6 +29,8 @@ from ._shared import (
     _clear_login_failures,
 )
 from ..utils import read_config_source, apply_patch, load_comment_map, render_toml
+
+logger = logging.getLogger(__name__)
 
 
 def _build_session_payload(
@@ -120,7 +123,7 @@ async def login_handler(request: web.Request) -> Response:
             str(auth_tokens["refresh_token"]),
             httponly=True,
             samesite="Lax",
-            max_age=SESSION_TTL_SECONDS,
+            max_age=REFRESH_TOKEN_TTL_SECONDS,
         )
         return resp
 
@@ -154,7 +157,13 @@ async def refresh_handler(request: web.Request) -> Response:
     except Exception:
         data = {}
     refresh_token = get_refresh_token(request, data)
-    tokens = get_session_store(request).refresh_auth_tokens(refresh_token)
+    try:
+        tokens = get_session_store(request).refresh_auth_tokens(refresh_token)
+    except OSError as exc:
+        logger.warning("[WebUI] 刷新令牌时写入会话文件失败: %s", exc)
+        return web.json_response(
+            {"success": False, "error": "Failed to persist session"}, status=500
+        )
     if tokens is None:
         return web.json_response(
             {"success": False, "error": "Unauthorized"}, status=401
@@ -172,7 +181,7 @@ async def refresh_handler(request: web.Request) -> Response:
         str(tokens["refresh_token"]),
         httponly=True,
         samesite="Lax",
-        max_age=SESSION_TTL_SECONDS,
+        max_age=REFRESH_TOKEN_TTL_SECONDS,
     )
     return resp
 
@@ -185,6 +194,7 @@ async def logout_handler(request: web.Request) -> Response:
     except Exception:
         data = {}
     sessions = get_session_store(request)
+    failed = False
     for token in {
         get_valid_auth_token(request),
         request.cookies.get(SESSION_COOKIE),
@@ -192,7 +202,15 @@ async def logout_handler(request: web.Request) -> Response:
         get_refresh_token(request, data),
         get_bearer_token(request),
     }:
-        sessions.revoke(token)
+        try:
+            sessions.revoke(token)
+        except OSError as exc:
+            failed = True
+            logger.warning("[WebUI] 登出时写入会话文件失败: %s", exc)
+    if failed:
+        return web.json_response(
+            {"success": False, "error": "Failed to persist session"}, status=500
+        )
     resp = web.json_response({"success": True})
     resp.del_cookie(SESSION_COOKIE)
     resp.del_cookie(TOKEN_COOKIE)
@@ -264,16 +282,23 @@ async def password_handler(request: web.Request) -> Response:
         await asyncio.to_thread(write_password)
         manager = get_config_manager()
         manager.reload()
+        # 先完成会话失效持久化，再启用新密码；失败时由 500 分支返回。
+        get_session_store(request).set_password(new_password)
         request.app[SETTINGS_APP_KEY] = WebUISettings.from_config(
             manager.load(strict=False), config_exists=True
         )
-        get_session_store(request).clear()
 
     try:
         await async_io.run_cancellation_safe(password_and_reload())
     except tomllib.TOMLDecodeError as exc:
         return web.json_response(
             {"success": False, "error": f"TOML parse error: {exc}"}, status=400
+        )
+    except OSError as exc:
+        logger.warning("[WebUI] 更新密码后写入持久化状态失败: %s", exc)
+        return web.json_response(
+            {"success": False, "error": "Failed to persist password change"},
+            status=500,
         )
 
     resp = web.json_response({"success": True, "message": "Password updated"})

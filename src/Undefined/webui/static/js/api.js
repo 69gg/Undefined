@@ -167,10 +167,16 @@ function updateAuthFromPayload(payload) {
 
 let _authRefreshRequest = null;
 
+function unauthorizedError(authFailure) {
+    const error = new Error("Unauthorized");
+    error.authFailure = !!authFailure;
+    return error;
+}
+
 async function refreshAccessToken() {
     const refreshToken = state.authRefreshToken;
     if (!refreshToken) {
-        throw new Error("Unauthorized");
+        throw unauthorizedError(false);
     }
     if (_authRefreshRequest?.token === refreshToken) {
         return _authRefreshRequest.promise;
@@ -194,8 +200,33 @@ async function refreshAccessToken() {
         // 登录或退出可能已替换会话；旧请求不能改写新令牌。
         if (state.authRefreshToken !== refreshToken) return payload;
         if (!response.ok || !updateAuthFromPayload(payload)) {
-            clearStoredAuthTokens();
-            throw new Error("Unauthorized");
+            const storedRefreshToken = readAuthStorage(
+                "undefined_auth_refresh_token",
+            );
+            if (storedRefreshToken && storedRefreshToken !== refreshToken) {
+                // 其他标签页已轮换令牌：跟随共享存储，避免清掉新令牌。
+                const adopted = updateAuthFromPayload({
+                    accessToken: readAuthStorage("undefined_auth_access_token"),
+                    refreshToken: storedRefreshToken,
+                    accessTokenExpiresAt:
+                        Number.parseInt(
+                            readAuthStorage(
+                                "undefined_auth_access_expires_at",
+                            ) || "0",
+                            10,
+                        ) || 0,
+                });
+                // 采用替换令牌后按成功处理，让调用方用新 access token 重试。
+                if (adopted) return payload;
+            }
+            // 只有服务端明确判定登录态失效时才清除令牌；
+            // 5xx 或异常响应属于可重试失败，保留令牌等待下次刷新。
+            if (response.status === 401 || response.status === 403) {
+                clearStoredAuthTokens();
+            }
+            throw unauthorizedError(
+                response.status === 401 || response.status === 403,
+            );
         }
         return payload;
     })();
@@ -215,11 +246,13 @@ async function api(path, options = {}) {
         !!state.authAccessTokenExpiresAt &&
         state.authAccessTokenExpiresAt <= Date.now() + 60_000;
 
+    let refreshFailure = null;
     if (accessExpiringSoon && method !== "OPTIONS") {
         try {
             await refreshAccessToken();
-        } catch (_error) {
-            // ignore and let request surface authorization result
+        } catch (error) {
+            // 记录失败原因，由资源请求结果决定是否降级登录态。
+            refreshFailure = error;
         }
     }
 
@@ -231,15 +264,21 @@ async function api(path, options = {}) {
     ) {
         try {
             await refreshAccessToken();
+            refreshFailure = null;
             res = await apiWithFallback(candidates, {
                 ...options,
                 _skipRefreshRetry: true,
             });
-        } catch (_error) {
+        } catch (error) {
             // refreshAccessToken 只清除仍属于失败请求的令牌。
+            refreshFailure = error;
         }
     }
     if (res.status === 401) {
+        if (refreshFailure && !refreshFailure.authFailure) {
+            // 刷新因网络或服务端故障失败：保留登录态，交回原始 401 响应。
+            return res;
+        }
         state.authenticated = false;
         refreshUI();
         throw new Error("Unauthorized");

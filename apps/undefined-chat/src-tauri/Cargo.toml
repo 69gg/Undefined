@@ -1,6 +1,6 @@
 [package]
 name = "undefined_chat"
-version = "3.18.10"
+version = "3.19.0"
 description = "Undefined native chat client"
 authors = ["Undefined contributors"]
 license = "MIT"

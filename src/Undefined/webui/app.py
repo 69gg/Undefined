@@ -17,6 +17,7 @@ from Undefined.config import (
 )
 from Undefined.utils.cors import is_allowed_cors_origin, normalize_origin
 from Undefined.utils import io as async_io
+from Undefined.utils.paths import WEBUI_SESSIONS_FILE
 from Undefined.utils.self_update import resolve_repo_root
 from .core import BotProcessController, SessionStore
 from .routes import routes
@@ -296,12 +297,14 @@ def create_app(*, redirect_to_config_once: bool = False) -> web.Application:
         middlewares=[cors_middleware, gzip_middleware, security_headers_middleware]
     )
 
-    # 初始化核心组件
-    app[SESSION_STORE_APP_KEY] = SessionStore()
-
     # 配置 WebUI 设置热重载
     config_manager = get_config_manager()
-    app[SETTINGS_APP_KEY] = load_webui_settings()
+    settings = load_webui_settings()
+    app[SETTINGS_APP_KEY] = settings
+    # 会话落盘：控制台重启后浏览器无需重新登录；密码变更时旧会话自动失效。
+    app[SESSION_STORE_APP_KEY] = SessionStore(
+        storage_path=WEBUI_SESSIONS_FILE, password=settings.password
+    )
     app[BOT_APP_KEY] = BotProcessController(
         stop_timeout_getter=lambda: app[SETTINGS_APP_KEY].stop_timeout_seconds
     )
@@ -323,9 +326,21 @@ def create_app(*, redirect_to_config_once: bool = False) -> web.Application:
         ):
             logger.info("[WebUI] 检测到 WebUI 配置变更，正在热重载设置...")
             # 本次快照已成功读取；后续外部写入不能覆盖已验证的设置。
-            app[SETTINGS_APP_KEY] = WebUISettings.from_config(
-                config, config_exists=True
-            )
+            previous = app[SETTINGS_APP_KEY]
+            updated = WebUISettings.from_config(config, config_exists=True)
+            if updated.password != previous.password:
+                try:
+                    # 先持久化作废旧会话，再启用新密码，避免旧令牌在新密码下仍可用。
+                    app[SESSION_STORE_APP_KEY].set_password(updated.password)
+                except Exception:
+                    # 内存中的旧会话已作废（fail closed）；保留旧设置，
+                    # 下一次配置变更会重试持久化，避免把新密码当作已完全生效。
+                    logger.warning(
+                        "[WebUI] 密码变更后清理旧会话失败，暂不启用新密码",
+                        exc_info=True,
+                    )
+                    return
+            app[SETTINGS_APP_KEY] = updated
 
     config_manager.subscribe(_on_config_change)
 
