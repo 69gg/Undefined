@@ -64,6 +64,12 @@ def _build_openapi_spec(ctx: RuntimeAPIContext, request: web.Request) -> dict[st
                 "responses": {"200": {"description": "Schema JSON"}},
             }
         },
+        "/api/v1/chiliarch/status": {
+            "get": {
+                "summary": "Chiliarch native channel status",
+                "description": "Local mailbox readiness and capacity only; does not imply transport connectivity. Never returns pairing credentials.",
+            }
+        },
         "/api/v1/probes/internal": {
             "get": {
                 "summary": "Internal runtime probes",

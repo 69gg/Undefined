@@ -1,0 +1,43 @@
+{
+  "type": "function",
+  "function": {
+    "name": "call",
+    "description": "使用 chiliarch 原生协作渠道。普通用户可主动联系总管、发现agent、私信/讨论、申请操作和共享文件。action=status查询本地状态（mailbox_ready不代表联网）；contact发送message；request用operation+arguments申请平台业务；get_result用原request_id查询，pending不是批准，不要换ID重发。所有有副作用操作须提供稳定client_request_id，重试保持原ID与参数。read_messages读取持久收件箱，acknowledge_messages(cursor)仅标已读；同伴read/processed用acknowledge_peer_message(message_id,state)。send_peer_message的recipient_agent_id和channel_id二选一，wake默认false，true由平台派正式任务，不在本地自行唤醒。progress只汇报当前正式任务。upload_artifact(path,members,client_request_id)是真正跨机上传；download_artifact(artifact_id,name)校验后返回attachment标签，再用send_message才能发送。不能把本地路径当成交付，不支持task_workdir。create_channel(title,members)、get_channel(channel_id,after,limit)、wait_for_tasks(waiting_for,reason)及list_task_waits均经平台校验/审批。当前逻辑用户与QQ/微信/WebUI各自独立，回信关联原聊天。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "status",
+            "contact",
+            "request",
+            "get_result",
+            "read_messages",
+            "acknowledge_messages",
+            "progress",
+            "list_agents",
+            "create_channel",
+            "list_channels",
+            "get_channel",
+            "send_peer_message",
+            "acknowledge_peer_message",
+            "get_peer_message",
+            "wait_for_tasks",
+            "list_task_waits",
+            "upload_artifact",
+            "download_artifact"
+          ]
+        },
+        "arguments": {
+          "type": "object",
+          "description": "原生操作参数。contact: message/client_request_id；request: operation/arguments/client_request_id；get_result: request_id/wait_seconds(0..30)；文件与协作参数见工具说明。成员必须为真实agent ID，不得猜测。"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

@@ -18,7 +18,6 @@ from Undefined.utils.paths import (
     HISTORY_DIR,
     WEBCHAT_CONVERSATIONS_DIR,
     WEBCHAT_MIGRATION_MARKER_FILE,
-    ensure_dir,
 )
 from Undefined.utils.xml import escape_xml_attr, escape_xml_text
 
@@ -60,13 +59,13 @@ class WebChatHistoryAdapter:
         start: int,
         end: int,
     ) -> list[dict[str, Any]]:
-        if msg_type != "private" or str(chat_id) != str(WEBCHAT_VIRTUAL_USER_ID):
+        if msg_type != "private" or str(chat_id) != str(self._store.user_id):
             return []
         return self._store.get_recent_sync(self._conversation_id, start, end)
 
     async def add_private_message(
         self,
-        user_id: int,
+        user_id: int | str,
         text_content: str,
         display_name: str = "",
         user_name: str = "",
@@ -75,7 +74,7 @@ class WebChatHistoryAdapter:
         webchat: dict[str, Any] | None = None,
     ) -> None:
         _ = message_id
-        if int(user_id) != WEBCHAT_VIRTUAL_USER_ID:
+        if str(user_id) != str(self._store.user_id):
             return
         role = "bot" if str(display_name or "").strip().lower() == "bot" else "user"
         await self._store.append_message(
@@ -95,14 +94,26 @@ class WebChatHistoryAdapter:
 class WebChatConversationStore:
     """Store WebChat conversations as one JSON file per conversation."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        directory: Path | None = None,
+        user_id: int | str = WEBCHAT_VIRTUAL_USER_ID,
+        user_name: str = WEBCHAT_VIRTUAL_USER_NAME,
+        migrate_legacy: bool = True,
+    ) -> None:
+        self.directory = (
+            directory if directory is not None else WEBCHAT_CONVERSATIONS_DIR
+        )
+        self.user_id = user_id
+        self.user_name = user_name
+        self._migrate_legacy = migrate_legacy
         self._global_lock = asyncio.Lock()
         self._migration_lock = asyncio.Lock()
         self._locks: dict[str, asyncio.Lock] = {}
         self._cache: dict[str, dict[str, Any]] = {}
         self._loaded = False
         self._title_tasks: dict[str, asyncio.Task[None]] = {}
-        ensure_dir(WEBCHAT_CONVERSATIONS_DIR)
 
     def adapter(self, conversation_id: str) -> WebChatHistoryAdapter:
         return WebChatHistoryAdapter(self, conversation_id)
@@ -120,7 +131,8 @@ class WebChatConversationStore:
             if not self._loaded:
                 await self._load_conversations_locked()
                 self._loaded = True
-        await self._migrate_legacy_once(legacy_history_manager)
+        if self._migrate_legacy:
+            await self._migrate_legacy_once(legacy_history_manager)
 
     async def ensure_default_conversation(self) -> dict[str, Any]:
         existing = await self.get_conversation(DEFAULT_WEBCHAT_CONVERSATION_ID)
@@ -168,8 +180,8 @@ class WebChatConversationStore:
             "title_status": _TITLE_STATUS_TEMPORARY,
             "created_at": now,
             "updated_at": now,
-            "virtual_user_id": WEBCHAT_VIRTUAL_USER_ID,
-            "virtual_user_name": WEBCHAT_VIRTUAL_USER_NAME,
+            "virtual_user_id": self.user_id,
+            "virtual_user_name": self.user_name,
             "messages": [],
         }
         async with self._get_lock(conv_id):
@@ -265,10 +277,10 @@ class WebChatConversationStore:
             record: dict[str, Any] = {
                 "message_id": f"msg_{uuid4().hex}",
                 "type": "private",
-                "chat_id": str(WEBCHAT_VIRTUAL_USER_ID),
-                "chat_name": WEBCHAT_VIRTUAL_USER_NAME,
-                "user_id": str(WEBCHAT_VIRTUAL_USER_ID),
-                "display_name": display_name or user_name or WEBCHAT_VIRTUAL_USER_NAME,
+                "chat_id": str(self.user_id),
+                "chat_name": self.user_name,
+                "user_id": str(self.user_id),
+                "display_name": display_name or user_name or self.user_name,
                 "timestamp": timestamp,
                 "message": str(text_content or ""),
             }
@@ -468,21 +480,21 @@ class WebChatConversationStore:
                 self._loaded = True
 
     async def _load_conversations_locked(self) -> None:
-        ensure_dir(WEBCHAT_CONVERSATIONS_DIR)
+        await io.ensure_dir(self.directory)
         self._cache.clear()
-        paths = await asyncio.to_thread(
-            lambda: sorted(WEBCHAT_CONVERSATIONS_DIR.glob("*.json"))
-        )
+        paths = await asyncio.to_thread(lambda: sorted(self.directory.glob("*.json")))
         for path in paths:
             raw = await io.read_json(path, use_lock=True)
             if not isinstance(raw, dict):
                 continue
-            conv = _normalize_conversation(raw, path.stem)
+            conv = _normalize_conversation(
+                raw, path.stem, user_id=self.user_id, user_name=self.user_name
+            )
             self._cache[str(conv["id"])] = conv
         logger.info(
             "[WebChat] 会话存储加载完成: count=%s dir=%s",
             len(self._cache),
-            WEBCHAT_CONVERSATIONS_DIR,
+            self.directory,
         )
 
     async def _migrate_legacy_once(self, legacy_history_manager: Any | None) -> None:
@@ -549,7 +561,7 @@ class WebChatConversationStore:
         return lock
 
     def _path_for(self, conversation_id: str) -> Path:
-        return WEBCHAT_CONVERSATIONS_DIR / f"{conversation_id}.json"
+        return self.directory / f"{conversation_id}.json"
 
     def _require_conversation_locked(self, conversation_id: str) -> dict[str, Any]:
         conv = self._cache.get(conversation_id)
@@ -558,7 +570,12 @@ class WebChatConversationStore:
         return conv
 
     async def _save_conversation_locked(self, conv: dict[str, Any]) -> None:
-        normalized = _normalize_conversation(conv, str(conv.get("id") or uuid4().hex))
+        normalized = _normalize_conversation(
+            conv,
+            str(conv.get("id") or uuid4().hex),
+            user_id=self.user_id,
+            user_name=self.user_name,
+        )
 
         async def commit() -> None:
             await io.write_json(
@@ -577,7 +594,7 @@ class WebChatConversationStore:
             "title_status": str(conv.get("title_status") or ""),
             "created_at": str(conv.get("created_at") or ""),
             "updated_at": str(conv.get("updated_at") or ""),
-            "virtual_user_id": WEBCHAT_VIRTUAL_USER_ID,
+            "virtual_user_id": self.user_id,
             "message_count": len(messages),
         }
 
@@ -624,7 +641,13 @@ def _messages(conv: dict[str, Any]) -> list[dict[str, Any]]:
     return messages
 
 
-def _normalize_conversation(raw: dict[str, Any], fallback_id: str) -> dict[str, Any]:
+def _normalize_conversation(
+    raw: dict[str, Any],
+    fallback_id: str,
+    *,
+    user_id: int | str = WEBCHAT_VIRTUAL_USER_ID,
+    user_name: str = WEBCHAT_VIRTUAL_USER_NAME,
+) -> dict[str, Any]:
     conv = dict(raw)
     conv["id"] = _normalize_conversation_id(str(conv.get("id") or fallback_id))
     conv["title"] = (
@@ -634,11 +657,17 @@ def _normalize_conversation(raw: dict[str, Any], fallback_id: str) -> dict[str, 
     conv["title_status"] = str(conv.get("title_status") or _TITLE_STATUS_TEMPORARY)
     conv["created_at"] = str(conv.get("created_at") or _now_iso())
     conv["updated_at"] = str(conv.get("updated_at") or conv["created_at"])
-    conv["virtual_user_id"] = WEBCHAT_VIRTUAL_USER_ID
-    conv["virtual_user_name"] = WEBCHAT_VIRTUAL_USER_NAME
+    conv["virtual_user_id"] = user_id
+    conv["virtual_user_name"] = user_name
     conversation_id = str(conv["id"])
     conv["messages"] = [
-        _normalize_history_record(item, conversation_id=conversation_id, index=index)
+        _normalize_history_record(
+            item,
+            conversation_id=conversation_id,
+            index=index,
+            user_id=user_id,
+            user_name=user_name,
+        )
         for index, item in enumerate(conv.get("messages", []))
         if isinstance(item, dict)
     ]
@@ -650,6 +679,8 @@ def _normalize_history_record(
     *,
     conversation_id: str,
     index: int,
+    user_id: int | str = WEBCHAT_VIRTUAL_USER_ID,
+    user_name: str = WEBCHAT_VIRTUAL_USER_NAME,
 ) -> dict[str, Any]:
     item = dict(record)
     item["message_id"] = _normalize_message_id(
@@ -659,10 +690,10 @@ def _normalize_history_record(
         record=item,
     )
     item["type"] = "private"
-    item["chat_id"] = str(WEBCHAT_VIRTUAL_USER_ID)
-    item["user_id"] = str(WEBCHAT_VIRTUAL_USER_ID)
-    item["chat_name"] = str(item.get("chat_name") or WEBCHAT_VIRTUAL_USER_NAME)
-    item["display_name"] = str(item.get("display_name") or WEBCHAT_VIRTUAL_USER_NAME)
+    item["chat_id"] = str(user_id)
+    item["user_id"] = str(user_id)
+    item["chat_name"] = str(item.get("chat_name") or user_name)
+    item["display_name"] = str(item.get("display_name") or user_name)
     item["timestamp"] = str(item.get("timestamp") or "")
     item["message"] = str(item.get("message", item.get("content", "")) or "")
     attachments = item.get("attachments")

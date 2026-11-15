@@ -166,6 +166,8 @@ class ClientAskLoopMixin(ClientQueueMixin):
                 pre_context["user_id"] = ctx.user_id
             if ctx.sender_id is not None:
                 pre_context["sender_id"] = ctx.sender_id
+            if ctx.logical_identity is not None:
+                pre_context["logical_identity"] = ctx.logical_identity
             pre_context["request_type"] = ctx.request_type
             pre_context["request_id"] = ctx.request_id
         if extra_context:
@@ -307,6 +309,8 @@ class ClientAskLoopMixin(ClientQueueMixin):
                 tool_context.setdefault("user_id", ctx.user_id)
             if ctx.sender_id is not None:
                 tool_context.setdefault("sender_id", ctx.sender_id)
+            if ctx.logical_identity is not None:
+                tool_context.setdefault("logical_identity", ctx.logical_identity)
             tool_context.setdefault("request_type", ctx.request_type)
             tool_context.setdefault("request_id", ctx.request_id)
 
@@ -314,6 +318,9 @@ class ClientAskLoopMixin(ClientQueueMixin):
             tool_context.update(extra_context)
 
         # 注入常用资源（用于工具执行）
+        tool_context.setdefault(
+            "chiliarch_service", getattr(self, "chiliarch_service", None)
+        )
         tool_context.setdefault("ai_client", self)
         tool_context.setdefault("runtime_config", self._get_runtime_config())
         tool_context.setdefault("_task_progress", [])

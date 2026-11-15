@@ -524,7 +524,10 @@ class HistorianWorker:
         }
         if entity_type == "user":
             frontmatter["nickname"] = effective_name
-            frontmatter["qq"] = entity_id
+            if entity_id.isdecimal():
+                frontmatter["qq"] = entity_id
+            else:
+                frontmatter["identity"] = entity_id
         else:
             frontmatter["group_name"] = effective_name
             frontmatter["group_id"] = entity_id

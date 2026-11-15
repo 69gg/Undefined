@@ -19,6 +19,9 @@ from ..domain_parsers import (
     _parse_render_cache_config,
     _parse_weixin_config,
 )
+from ..models import ChiliarchConfig
+from ..env_registry import ENV_REGISTRY
+from ..coercers import _get_value, _coerce_bool
 from ..parsers import (
     _parse_image_edit_model_config,
     _parse_image_gen_config,
@@ -43,6 +46,31 @@ def load_domains(data: dict[str, Any]) -> dict[str, Any]:
     render_cache = _parse_render_cache_config(data)
     naga = _parse_naga_config(data)
     weixin = _parse_weixin_config(data)
+    chiliarch_defaults = ChiliarchConfig()
+    chiliarch_values: dict[str, Any] = {}
+    for field_name in (
+        "state_path",
+        "logical_identity",
+        "display_name",
+        "introduction",
+    ):
+        path = ("chiliarch", field_name)
+        raw = _get_value(data, path, ENV_REGISTRY[path])
+        chiliarch_values[field_name] = (
+            str(raw) if raw is not None else getattr(chiliarch_defaults, field_name)
+        )
+    capacity = _get_value(
+        data, ("chiliarch", "max_concurrent_tasks"), "CHILIARCH_MAX_CONCURRENT_TASKS"
+    )
+    if isinstance(capacity, bool) or isinstance(capacity, float):
+        raise ValueError("chiliarch.max_concurrent_tasks 必须为正整数")
+    chiliarch = ChiliarchConfig(
+        enabled=_coerce_bool(
+            _get_value(data, ("chiliarch", "enabled"), "CHILIARCH_ENABLED"), False
+        ),
+        max_concurrent_tasks=int(capacity) if capacity is not None else 1,
+        **chiliarch_values,
+    )
     models_image_gen = _parse_image_gen_model_config(data)
     models_image_edit = _parse_image_edit_model_config(data)
     image_gen = _parse_image_gen_config(data)
@@ -64,6 +92,7 @@ def load_domains(data: dict[str, Any]) -> dict[str, Any]:
         "render_cache": render_cache,
         "naga": naga,
         "weixin": weixin,
+        "chiliarch": chiliarch,
         "image_gen": image_gen,
         "models_image_gen": models_image_gen,
         "models_image_edit": models_image_edit,

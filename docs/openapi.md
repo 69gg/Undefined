@@ -296,6 +296,15 @@ HEAD /api/v1/onebot/files/{file_id}?token=...
 - 所有 `/api/v1/automations*` 路由都遵循 Runtime API 的 `X-Undefined-API-Key` 鉴权。
 - 旧 `scheduled_tasks.json` 只在启动且尚无 `automations.json` 时一次性转为新格式；不删除旧文件、不双写。
 
+### chiliarch 原生渠道
+
+- `GET /api/v1/chiliarch/status`：本地渠道状态、普通用户身份、运行容量和活动会话数。
+- 沿用 `X-Undefined-API-Key` Runtime 鉴权；不返回配对凭证或私有 state 内容。
+- `mailbox_ready` 表示本地收件箱就绪，`transport_attempt` 表示当前尝试的传输，均不保证平台网络在线。
+- `supports_task_workdir` 始终为 `false`。渠道自身不依赖 `api.enabled`，本接口需要 Runtime API 开启。
+
+安装、配对及原生工具见 [chiliarch 接入](chiliarch.md)。
+
 ### 微信 ClawBot / iLink
 
 - `GET /api/v1/weixin`：服务、帐号连接状态和媒体能力。

@@ -40,6 +40,7 @@ from .routes import (
     system,
     tools,
     weixin,
+    chiliarch,
 )
 
 logger = logging.getLogger(__name__)
@@ -283,6 +284,7 @@ class RuntimeAPIServer:
                 ),
                 web.get("/api/v1/tools", self._tools_list_handler),
                 web.post("/api/v1/tools/invoke", self._tools_invoke_handler),
+                web.get("/api/v1/chiliarch/status", self._chiliarch_status_handler),
                 web.get("/api/v1/weixin", self._weixin_status_handler),
                 web.post("/api/v1/weixin/login", self._weixin_login_start_handler),
                 web.get(
@@ -553,6 +555,10 @@ class RuntimeAPIServer:
         return await tools.tools_invoke_handler(
             self._ctx, self._background_tasks, request
         )
+
+    # Native chiliarch channel
+    async def _chiliarch_status_handler(self, request: web.Request) -> Response:
+        return await chiliarch.status_handler(self._ctx, request)
 
     # WeChat iLink
     async def _weixin_status_handler(self, request: web.Request) -> Response:

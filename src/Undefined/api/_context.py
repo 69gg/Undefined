@@ -23,3 +23,5 @@ class RuntimeAPIContext:
     message_batcher: Any = None
     pipeline_registry: Any = None
     weixin_service: Any = None
+    chiliarch_service: Any = None
+    webchat_store: Any = None

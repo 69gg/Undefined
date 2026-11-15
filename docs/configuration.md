@@ -1274,6 +1274,21 @@ api_key = "replace-with-your-key"
 
 ---
 
+### 4.24.1 `[chiliarch]` 原生协作渠道
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `enabled` | `false` | 安装可选依赖、配对后启用 |
+| `state_path` | `data/chiliarch/client.db` | 官方 ClientStore 私有凭证与持久协议队列 |
+| `logical_identity` | `chiliarch_main` | 非数字普通用户身份；字母或下划线开头，后续仅字母、数字、下划线、连字符，最多 128 字符 |
+| `display_name` | `chiliarch 总管` | 聊天显示名与侧写名称 |
+| `introduction` | 配置示例中的 Undefined 介绍 | 心跳自我介绍，最多 4000 字符 |
+| `max_concurrent_tasks` | `1` | 正式任务与总管普通聊天共用的正整数容量 |
+
+本节均需要重启 Bot 生效。各字段支持同名大写 `CHILIARCH_*` 环境变量，TOML 优先。连接凭证只保存在 `state_path`，不放入主配置；该渠道独立于 `api.enabled`。缺依赖、未配对或 state 被其他客户端占用仅使本渠道 unavailable。
+
+总管具有独立历史和 `user:chiliarch_main` 侧写，正常经过 `end → historian`。正式续接任务复用会话，普通聊天使用持续会话；不继承 WebUI 超管。主动访问其他侧写沿用原有认知工具。安装、配对、协作工具和文件用法见 [chiliarch 接入](chiliarch.md)。
+
 ### 4.25 `[api]` Runtime API / OpenAPI
 
 | 字段 | 默认值 | 说明 |

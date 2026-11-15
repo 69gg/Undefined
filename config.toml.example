@@ -1692,6 +1692,22 @@ check_updates = true
 # en: Graceful bot shutdown timeout in seconds; 0 waits until completion, positive values force termination after the deadline.
 stop_timeout_seconds = 0
 
+[chiliarch]
+# zh: 可选原生渠道，先 uv sync --extra chiliarch，再运行 Undefined-chiliarch-pair 配对。
+# en: Optional native channel. Install the chiliarch extra and pair with Undefined-chiliarch-pair first.
+enabled = false
+# zh: 官方 ClientStore 私有配对数据库；不可与 daemon/其他客户端同时共用。
+# en: Private paired ClientStore; never share a live state with another network owner.
+state_path = "data/chiliarch/client.db"
+# zh: 独立普通用户身份，非 QQ、非 WebUI 超管；需为非数字安全标识符。
+# en: Independent ordinary user identity, neither a QQ ID nor a WebUI administrator.
+logical_identity = "chiliarch_main"
+display_name = "chiliarch 总管"
+introduction = "Undefined：具备独立聊天、记忆、侧写和工具的普通协作用户；支持消息、任务和共享文件，不支持指定任务工作目录。"
+# zh: 正式任务和总管普通聊天共用容量；本节修改需重启 Bot。
+# en: Shared capacity for managed tasks and ordinary chat; restart the Bot after changes.
+max_concurrent_tasks = 1
+
 # zh: 微信 ClawBot/iLink 私聊接入。凭据与游标仅写入 state_dir，不写入本配置。
 # zh: 关闭时不会创建网络连接；二维码登录只能从管理界面显式发起。
 # en: WeChat ClawBot/iLink private-chat integration. Credentials and cursors are

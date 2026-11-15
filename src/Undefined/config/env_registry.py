@@ -44,6 +44,17 @@ _GENERATION_MODEL_ENV_REGISTRY: Final[dict[tuple[str, ...], str]] = {
 
 # TOML 路径 → 环境变量名；供 _get_value 在 TOML 缺省时回退，以及文档/工具生成
 ENV_REGISTRY: Final[dict[tuple[str, ...], str]] = {
+    **{
+        ("chiliarch", name): f"CHILIARCH_{name.upper()}"
+        for name in (
+            "enabled",
+            "state_path",
+            "logical_identity",
+            "display_name",
+            "introduction",
+            "max_concurrent_tasks",
+        )
+    },
     ("webui", "stop_timeout_seconds"): "WEBUI_STOP_TIMEOUT_SECONDS",
     **_GENERATION_MODEL_ENV_REGISTRY,
     ("access", "allowed_group_ids"): "ALLOWED_GROUP_IDS",
