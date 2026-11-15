@@ -77,7 +77,10 @@ async def test_ai_ask_reports_queued_llm_error_when_retries_exhausted(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("raise_on_error", [False, True])
-async def test_ai_ask_retries_pre_tool_local_failure(raise_on_error: bool) -> None:
+@pytest.mark.parametrize("completes", [False, True])
+async def test_ai_ask_distinguishes_end_from_iteration_limit_after_retry(
+    raise_on_error: bool, completes: bool
+) -> None:
     client: Any = object.__new__(AIClient)
     client.runtime_config = cast(
         Any, SimpleNamespace(log_thinking=False, ai_request_max_retries=1)
@@ -117,28 +120,26 @@ async def test_ai_ask_retries_pre_tool_local_failure(raise_on_error: bool) -> No
         max_tokens=1024,
     )
     client._find_chat_config_by_name = lambda _name: client.chat_config
-    client.submit_queued_llm_call = AsyncMock(
-        side_effect=[
-            {"choices": []},
+    response = {
+        "choices": [
             {
-                "choices": [
-                    {
-                        "message": {
-                            "content": "",
-                            "tool_calls": [
-                                {
-                                    "id": "call_end",
-                                    "function": {
-                                        "name": "end",
-                                        "arguments": "{}",
-                                    },
-                                }
-                            ],
+                "message": {
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "call_tool",
+                            "function": {
+                                "name": "end" if completes else "test_tool",
+                                "arguments": "{}",
+                            },
                         }
-                    }
-                ],
-            },
-        ]
+                    ],
+                }
+            }
+        ],
+    }
+    client.submit_queued_llm_call = AsyncMock(
+        side_effect=[{"choices": []}] + [response] * (1 if completes else 999)
     )
     client._search_wrapper = None
     client._end_summary_storage = cast(Any, None)
@@ -154,10 +155,13 @@ async def test_ai_ask_retries_pre_tool_local_failure(raise_on_error: bool) -> No
         proxy_config_available=False,
     )
 
-    result = await AIClient.ask(client, "hello", raise_on_error=raise_on_error)
-
-    assert result == ""
-    assert cast(AsyncMock, client.submit_queued_llm_call).await_count == 2
+    if raise_on_error and not completes:
+        with pytest.raises(ChatExecutionError, match="达到最大迭代次数"):
+            await AIClient.ask(client, "hello", raise_on_error=True)
+    else:
+        result = await AIClient.ask(client, "hello", raise_on_error=raise_on_error)
+        assert result == ("" if completes else "达到最大迭代次数，未能完成处理")
+    assert client.submit_queued_llm_call.await_count == (2 if completes else 1000)
 
 
 @pytest.mark.parametrize("blank_content", [None, "", "\n\n", " \t\r\n"])

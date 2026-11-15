@@ -423,7 +423,14 @@ async def test_reply_returns_to_origin_after_journal_reload(
 
 
 @pytest.mark.parametrize(
-    "phase", ["before_delivery", "during_delivery", "after_delivery", "completed"]
+    "phase",
+    [
+        "before_history",
+        "after_history",
+        "during_delivery",
+        "after_delivery",
+        "completed",
+    ],
 )
 async def test_reply_recovery_resumes_only_before_delivery_starts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, phase: str
@@ -445,39 +452,71 @@ async def test_reply_recovery_resumes_only_before_delivery_starts(
         side_effect=asyncio.CancelledError if phase == "during_delivery" else None
     )
     monkeypatch.setattr(service, "_notify", notify)
-    monkeypatch.setattr(service, "_record_incoming", AsyncMock())
     put = service.journal.put
+    record_incoming = service._record_incoming
+
+    async def interrupted_record(incoming: Any, route: dict[str, Any] | None) -> None:
+        await record_incoming(incoming, route)
+        if phase == "after_history":
+            raise asyncio.CancelledError
 
     async def interrupted_put(collection: str, key: str, event: dict[str, Any]) -> None:
         if phase == "after_delivery" and event["state"] == "completed":
             raise asyncio.CancelledError
         await put(collection, key, event)
         if (
-            phase == "before_delivery"
+            phase == "before_history"
             and event.get("delivery") == "pending"
             or phase == "completed"
             and event["state"] == "completed"
         ):
             raise asyncio.CancelledError
 
-    with monkeypatch.context() as scoped:
-        scoped.setattr(service.journal, "put", interrupted_put)
-        with pytest.raises(asyncio.CancelledError):
-            await service._receive(1, envelope)
-    assert service.journal.data["cursor"] == 0
-    await service.journal.open()
-    if phase == "before_delivery":
-        notify.assert_not_awaited()
-        assert service.journal.data["events"][envelope.id]["state"] == "received"
-    elif phase != "completed":
-        assert service.journal.data["events"][envelope.id]["delivery"] == "uncertain"
-    notify.side_effect = None
-    await service._receive(1, envelope)
-    assert service.journal.data["cursor"] == 1
-    notify.assert_awaited_once()
-    await service.journal.open()
-    await service._receive(1, envelope)
-    notify.assert_awaited_once()
+    restarted = ChiliarchService(SimpleNamespace(), state_path=service.state_path)
+    monkeypatch.setattr(restarted, "_notify", notify)
+    try:
+        with monkeypatch.context() as scoped:
+            scoped.setattr(service.journal, "put", interrupted_put)
+            scoped.setattr(service, "_record_incoming", interrupted_record)
+            with pytest.raises(asyncio.CancelledError):
+                await service._receive(1, envelope)
+        assert service.journal.data["cursor"] == 0
+        await service.history.stop()
+        await restarted.journal.open()
+        if phase in {"before_history", "after_history"}:
+            notify.assert_not_awaited()
+            assert restarted.journal.data["events"][envelope.id]["state"] == "received"
+        elif phase != "completed":
+            assert (
+                restarted.journal.data["events"][envelope.id]["delivery"] == "uncertain"
+            )
+        notify.side_effect = None
+        await restarted._receive(1, envelope)
+        assert restarted.journal.data["cursor"] == 1
+        notify.assert_awaited_once()
+        await restarted.journal.open()
+        await restarted._receive(1, envelope)
+        notify.assert_awaited_once()
+        conversation = await restarted.history.get_conversation("main")
+        assert conversation is not None
+        assert len(conversation["messages"]) == 1
+        assert conversation["messages"][0]["message"] == service._incoming_text(
+            envelope
+        )
+
+        # 相同正文的新事件仍是独立消息，不能按内容去重。
+        another = protocol.Envelope(
+            type="agent.message", payload={"message": "回信"}, correlation_id="request"
+        )
+        await restarted._receive(2, another)
+        assert notify.await_count == 2
+        conversation = await restarted.history.get_conversation("main")
+        assert conversation is not None
+        assert len(conversation["messages"]) == 2
+        assert len({item["message_id"] for item in conversation["messages"]}) == 2
+    finally:
+        await service.history.stop()
+        await restarted.history.stop()
 
 
 async def test_webui_reply_targets_exact_conversation(

@@ -1175,4 +1175,6 @@ class ClientAskLoopMixin(ClientQueueMixin):
                 return ""
 
         logger.warning("[AI决策] 达到最大迭代次数，未能完成处理")
+        if raise_on_error:
+            raise ChatExecutionError("达到最大迭代次数，未能完成处理")
         return "达到最大迭代次数，未能完成处理"

@@ -705,6 +705,7 @@ class ChiliarchService:
             text_content=self._incoming_text(envelope),
             display_name="chiliarch 协作资料",
             user_name="chiliarch 协作资料",
+            message_id=f"msg_chiliarch_{_key(str(envelope.id))}",
         )
 
     async def _notify(self, origin: dict[str, Any], message: str) -> None:

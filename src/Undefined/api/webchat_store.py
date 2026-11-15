@@ -268,14 +268,24 @@ class WebChatConversationStore:
         attachments: list[dict[str, str]] | None = None,
         references: list[dict[str, Any]] | None = None,
         webchat: dict[str, Any] | None = None,
+        message_id: str | None = None,
     ) -> dict[str, Any]:
+        """追加消息；指定已有 message_id 时返回原记录，避免重复写入。"""
         conv_id = _normalize_conversation_id(conversation_id)
         async with self._get_lock(conv_id):
             conv = _copy_json(self._require_conversation_locked(conv_id))
+            if message_id is not None:
+                if message_id != _normalize_message_id(
+                    message_id, conversation_id=conv_id, index=0, record={}
+                ):
+                    raise ValueError("无效的消息 ID")
+                for existing in _messages(conv):
+                    if existing.get("message_id") == message_id:
+                        return _copy_json(existing)
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             normalized_role = "bot" if role == "bot" else "user"
             record: dict[str, Any] = {
-                "message_id": f"msg_{uuid4().hex}",
+                "message_id": message_id or f"msg_{uuid4().hex}",
                 "type": "private",
                 "chat_id": str(self.user_id),
                 "chat_name": self.user_name,
