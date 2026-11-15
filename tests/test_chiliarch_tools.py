@@ -14,7 +14,6 @@ from Undefined.api import RuntimeAPIContext, RuntimeAPIServer
 from Undefined.chiliarch import ChiliarchService
 from Undefined.chiliarch.pair import pair
 from Undefined.config import Config
-from Undefined.config.models import ChiliarchConfig
 from Undefined.skills.toolsets.chiliarch.call.handler import execute
 
 
@@ -31,7 +30,7 @@ async def test_tool_passes_origin_and_retains_pending_request_id() -> None:
     assert "secret" not in await execute({"action": "status"}, context)
 
 
-async def test_missing_optional_dependency_does_not_break_runtime(
+async def test_damaged_installation_does_not_break_other_channels(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     original = importlib.import_module
@@ -42,10 +41,9 @@ async def test_missing_optional_dependency_does_not_break_runtime(
         return original(name, package)
 
     monkeypatch.setattr(importlib, "import_module", missing)
-    service = ChiliarchService(
-        ChiliarchConfig(enabled=True, state_path=str(tmp_path / "client.db")),
-        SimpleNamespace(),
-    )
+    state = tmp_path / "client.db"
+    state.touch()
+    service = ChiliarchService(SimpleNamespace(), state_path=state)
     await service.start()
     assert service.status()["reason"] == "ModuleNotFoundError"
     assert not service.status()["mailbox_ready"]
@@ -55,10 +53,15 @@ async def test_missing_optional_dependency_does_not_break_runtime(
 async def test_pair_reuses_native_credentials_and_never_declares_workdir(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    native = pytest.importorskip("chiliarch.client")
-    operation = AsyncMock()
-    monkeypatch.setattr(native.AgentClient, "pair", operation)
+    native = importlib.import_module("chiliarch.client")
     state = tmp_path / "new.db"
+
+    async def persist(*args: Any, **kwargs: Any) -> None:
+        assert not state.exists()
+        args[4].write_bytes(b"paired credential")
+
+    operation = AsyncMock(side_effect=persist)
+    monkeypatch.setattr(native.AgentClient, "pair", operation)
     await pair(
         "http://example.invalid",
         "test-code",
@@ -68,7 +71,9 @@ async def test_pair_reuses_native_credentials_and_never_declares_workdir(
         "介绍",
     )
     operation.assert_awaited_once()
-    assert operation.call_args.args[4] == state
+    assert operation.call_args.args[4] != state
+    assert state.read_bytes() == b"paired credential"
+    assert not operation.call_args.args[4].exists()
     assert "chiliarch.tasks" in operation.call_args.kwargs["capabilities"]
     assert "chiliarch.task_workdir" not in operation.call_args.kwargs["capabilities"]
     state.write_bytes(b"existing credential")
@@ -100,7 +105,9 @@ async def test_status_route_uses_runtime_auth_and_openapi(
         command_dispatcher=None,
         queue_manager=None,
         history_manager=None,
-        chiliarch_service=ChiliarchService(ChiliarchConfig(), SimpleNamespace()),
+        chiliarch_service=ChiliarchService(
+            SimpleNamespace(), state_path=tmp_path / "unpaired.db"
+        ),
     )
     server = RuntimeAPIServer(ctx, host="127.0.0.1", port=0)
     async with TestClient(TestServer(server._create_app())) as client:

@@ -479,7 +479,7 @@ async def main() -> None:
         pipeline_registry=handler.pipeline_registry,
         weixin_service=weixin_service,
     )
-    chiliarch_service = ChiliarchService(config.chiliarch, runtime_api_context)
+    chiliarch_service = ChiliarchService(runtime_api_context)
     runtime_api_context.chiliarch_service = chiliarch_service
     setattr(ai, "chiliarch_service", chiliarch_service)
 

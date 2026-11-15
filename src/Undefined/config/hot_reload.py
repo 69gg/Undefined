@@ -22,7 +22,6 @@ logger = logging.getLogger(__name__)
 
 
 _RESTART_REQUIRED_KEYS: set[str] = {
-    "chiliarch",
     "log_level",
     "log_file_path",
     "log_max_size",

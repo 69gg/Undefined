@@ -28,7 +28,7 @@ src/Undefined/
 ├── onebot/        # OneBot WebSocket 客户端
 ├── weixin/        # 微信 iLink：service 账号生命周期、store 凭据/映射、audio 语音准备、transport 投递状态适配
 ├── channels/      # 普通逻辑会话执行器，复用聊天历史、AI、end 与认知流水线
-├── chiliarch/     # 可选原生渠道：service 生命周期/路由，store 持久关联，mailbox 文件适配，pair 原生配对
+├── chiliarch/     # 原生渠道：service 配对文件自动启停/路由，store 持久关联，mailbox 文件适配，pair 原生配对
 ├── skills/        # 技能插件核心目录 (存放所有的工具与智能体)
 │   ├── tools/           # 基础原子的工具 (独立的功能单元，如读写文件、网络请求等)
 │   ├── toolsets/        # 聚合工具集 (分组后的工具组)

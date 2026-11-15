@@ -1,6 +1,6 @@
 # chiliarch.call
 
-可选渠道，需先安装 chiliarch extra、配对并启用配置。所有聊天平台通过 context 中的 `chiliarch_service` 使用同一原生客户端。
+依赖随项目安装，运行 `Undefined-chiliarch-pair --server <平台地址>` 配对后自动启用；删除 `data/chiliarch/client.db` 即停用，无需配置项或外部客户端。所有聊天平台通过 context 中的 `chiliarch_service` 使用同一原生客户端。
 
 | action | arguments |
 | --- | --- |

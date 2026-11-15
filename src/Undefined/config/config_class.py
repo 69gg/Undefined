@@ -15,7 +15,6 @@ from .models import (
     APIConfig,
     AutomationsConfig,
     ChatModelConfig,
-    ChiliarchConfig,
     CognitiveConfig,
     EmbeddingFeatureOverride,
     EmbeddingModelConfig,
@@ -159,7 +158,6 @@ class Config:
     webui_stop_timeout_seconds: int
     api: APIConfig
     weixin: WeixinConfig
-    chiliarch: ChiliarchConfig
     # Code Delivery Agent
     code_delivery_enabled: bool
     code_delivery_task_root: str

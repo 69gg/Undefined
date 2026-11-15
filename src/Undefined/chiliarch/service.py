@@ -18,15 +18,20 @@ from Undefined.attachments import (
     scope_from_context,
 )
 from Undefined.channels.session import run_logical_chat
-from Undefined.config.models import ChiliarchConfig
 from Undefined.utils import io
 from Undefined.utils.message_targets import DeliveryAddress, parse_delivery_address
+from Undefined.utils.paths import DATA_DIR
 
 from .mailbox import RoutedMailbox
 from .store import ChannelJournal
 
 logger = logging.getLogger(__name__)
 Progress = Callable[[float, str], Awaitable[None]]
+DEFAULT_STATE_PATH = DATA_DIR / "chiliarch" / "client.db"
+LOGICAL_IDENTITY = "chiliarch_main"
+DISPLAY_NAME = "chiliarch 总管"
+MAX_CONCURRENT_TASKS = 1
+_PAIR_CHECK_SECONDS = 1.0
 
 
 def _key(value: str) -> str:
@@ -69,16 +74,15 @@ def capture_origin(context: dict[str, Any]) -> dict[str, Any]:
 
 
 class ChiliarchService:
-    def __init__(self, config: ChiliarchConfig, runtime: Any) -> None:
-        self.config = config
+    def __init__(self, runtime: Any, *, state_path: Path = DEFAULT_STATE_PATH) -> None:
         self.runtime = runtime
-        self.state_path = Path(config.state_path).expanduser().resolve()
+        self.state_path = state_path.expanduser().resolve()
         self.directory = self.state_path.with_name(self.state_path.name + ".undefined")
         self.journal = ChannelJournal(self.directory / "journal.json")
         self.history = WebChatConversationStore(
             directory=self.directory / "conversations",
-            user_id=config.logical_identity,
-            user_name=config.display_name,
+            user_id=LOGICAL_IDENTITY,
+            user_name=DISPLAY_NAME,
             migrate_legacy=False,
         )
         self.client: Any = None
@@ -86,9 +90,10 @@ class ChiliarchService:
         self._mailbox_type: Any = None
         self._task: asyncio.Task[None] | None = None
         self._started = asyncio.Event()
-        self._state = "disabled" if not config.enabled else "stopped"
+        self._paired = False
+        self._state = "disabled"
         self._reason: str | None = None
-        self._capacity = asyncio.Semaphore(config.max_concurrent_tasks)
+        self._capacity = asyncio.Semaphore(MAX_CONCURRENT_TASKS)
         self._conversation_locks: dict[str, asyncio.Lock] = {}
         self._download_locks: dict[str, asyncio.Lock] = {}
         self._local_tasks: dict[str, asyncio.Task[None]] = {}
@@ -99,21 +104,22 @@ class ChiliarchService:
     def status(self) -> dict[str, Any]:
         """ready 只表示本地收件箱就绪；不推断网络在线或泄露配对凭证。"""
         return {
-            "enabled": self.config.enabled,
+            "enabled": self._paired,
             "state": self._state,
             "reason": self._reason,
             "mailbox_ready": self._ready(),
             "transport_attempt": getattr(self.client, "transport", None),
-            "logical_identity": self.config.logical_identity,
-            "display_name": self.config.display_name,
+            "logical_identity": LOGICAL_IDENTITY,
+            "display_name": DISPLAY_NAME,
             "active_sessions": len(self._active),
-            "capacity": self.config.max_concurrent_tasks,
+            "capacity": MAX_CONCURRENT_TASKS,
             "supports_task_workdir": False,
         }
 
     def _ready(self) -> bool:
         return bool(
             self.client is not None
+            and self._paired
             and self.client.ready.is_set()
             and not self._stopping
         )
@@ -129,17 +135,41 @@ class ChiliarchService:
         }
 
     async def start(self) -> None:
-        if not self.config.enabled or self._task is not None:
+        if self._task is not None:
             return
         self._stopping = False
         self._started.clear()
-        self._task = asyncio.create_task(self._run(), name="chiliarch.channel")
+        self._task = asyncio.create_task(self._watch(), name="chiliarch.channel")
         await self._started.wait()
+
+    async def _watch(self) -> None:
+        """配对文件是唯一开关；运行中配对和删除均无需重启或修改主配置。"""
+        try:
+            while not self._stopping:
+                self._paired = await io.is_file(self.state_path)
+                if self._paired:
+                    await self._run()
+                    # 吊销或协议拒绝需要处理身份/协议，不能反复尝试或自行重新配对。
+                    if self._reason in {"CredentialRejected", "ProtocolRejected"}:
+                        await self._wait_for_unpair()
+                else:
+                    self._state = "disabled"
+                    self._reason = None
+                    self._started.set()
+                await asyncio.sleep(_PAIR_CHECK_SECONDS)
+        finally:
+            self._started.set()
+
+    async def _wait_for_unpair(self) -> None:
+        while await io.is_file(self.state_path):
+            await asyncio.sleep(_PAIR_CHECK_SECONDS)
+        self._paired = False
 
     async def _run(self) -> None:
         network: asyncio.Task[None] | None = None
         listener: asyncio.Task[None] | None = None
         ready: asyncio.Task[bool] | None = None
+        unpaired: asyncio.Task[None] | None = None
         owner: Any = None
         owned = False
         try:
@@ -156,18 +186,29 @@ class ChiliarchService:
             self.client = await native.AgentClient.from_state(
                 self.state_path,
                 self._handle_task,
-                max_concurrent_tasks=self.config.max_concurrent_tasks,
+                max_concurrent_tasks=MAX_CONCURRENT_TASKS,
                 runtime_metadata=self.runtime_metadata,
-                introduction=self.config.introduction,
             )
+            await self.client.store.open()
+            try:
+                identity = await self.client.store.identity()
+            finally:
+                await self.client.store.close()
+            # 重新配对可以更换平台或 agent；旧回信关联不能进入新的身份。
+            namespace = _key(self.client.server_url + ":" + str(identity["agent_id"]))
+            self.journal = ChannelJournal(self.directory / namespace / "journal.json")
+            unpaired = asyncio.create_task(self._wait_for_unpair())
             await self.journal.open()
             await self.history.ensure_ready()
             await self.history.create_conversation(conversation_id="main")
             network = asyncio.create_task(self.client.run(), name="chiliarch.native")
             ready = asyncio.create_task(self.client.ready.wait())
             done, _ = await asyncio.wait(
-                {network, ready}, return_when=asyncio.FIRST_COMPLETED
+                {network, ready, unpaired}, return_when=asyncio.FIRST_COMPLETED
             )
+            if unpaired in done:
+                unpaired.result()
+                return
             if network in done:
                 network.result()
                 raise RuntimeError("native client stopped before mailbox readiness")
@@ -182,7 +223,7 @@ class ChiliarchService:
             self._started.set()
             listener = asyncio.create_task(self._listen(), name="chiliarch.inbox")
             done, _ = await asyncio.wait(
-                {network, listener}, return_when=asyncio.FIRST_COMPLETED
+                {network, listener, unpaired}, return_when=asyncio.FIRST_COMPLETED
             )
             for finished in done:
                 finished.result()
@@ -199,16 +240,29 @@ class ChiliarchService:
                 self.client.stop()
             tasks: list[asyncio.Task[Any]] = [*self._local_tasks.values()]
             tasks.extend(
-                item for item in (listener, ready, network) if item is not None
+                item
+                for item in (listener, ready, network, unpaired)
+                if item is not None
             )
             for task in tasks:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
             await self.history.stop()
-            if owned:
-                await owner.__aexit__(None, None, None)
-            if self._state != "unavailable":
-                self._state = "stopped"
+            try:
+                self.client = None
+                self._paired = await io.is_file(self.state_path)
+                if not self._paired:
+                    if owned:
+                        # 删除主文件后可能残留旧 WAL，新配对不能重放旧收件。
+                        for suffix in ("-wal", "-shm"):
+                            await io.delete_file(Path(f"{self.state_path}{suffix}"))
+                    self._state = "disabled"
+                    self._reason = None
+                elif self._state != "unavailable":
+                    self._state = "stopped"
+            finally:
+                if owned:
+                    await owner.__aexit__(None, None, None)
 
     def stop_accepting_messages(self) -> None:
         self._stopping = True
@@ -222,9 +276,7 @@ class ChiliarchService:
 
     def _require_ready(self) -> None:
         if not self._ready():
-            raise RuntimeError(
-                "chiliarch 渠道收件箱不可用；检查可选依赖、配对状态和渠道状态"
-            )
+            raise RuntimeError("chiliarch 渠道收件箱不可用；检查配对文件和渠道状态")
 
     async def _enqueue_route(self, route: dict[str, Any]) -> str:
         envelope = self._protocol.Envelope.model_validate(route["envelope"])
@@ -438,7 +490,7 @@ class ChiliarchService:
             active_id = task_id or "chat:" + str(uuid4())
             self._active.add(active_id)
             context = {
-                "logical_identity": self.config.logical_identity,
+                "logical_identity": LOGICAL_IDENTITY,
                 "logical_conversation_id": conversation_id,
                 "chiliarch_task_id": task_id,
             }
@@ -458,8 +510,8 @@ class ChiliarchService:
                 await run_logical_chat(
                     self.runtime,
                     store=self.history,
-                    identity=self.config.logical_identity,
-                    display_name=self.config.display_name,
+                    identity=LOGICAL_IDENTITY,
+                    display_name=DISPLAY_NAME,
                     conversation_id=conversation_id,
                     text=text,
                     send_output=output,

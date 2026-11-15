@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import importlib
 import json
 from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
@@ -18,14 +19,11 @@ from Undefined.attachments import AttachmentRegistry
 from Undefined.chiliarch import ChiliarchService
 from Undefined.chiliarch.service import capture_origin
 from Undefined.config import Config
-from Undefined.config.models import ChiliarchConfig
 from Undefined.context import RequestContext
 from Undefined.utils import io
 
-native = pytest.importorskip(
-    "chiliarch.client", reason="原生渠道测试需要 uv sync --extra chiliarch"
-)
-protocol = pytest.importorskip("chiliarch.protocol")
+native = importlib.import_module("chiliarch.client")
+protocol = importlib.import_module("chiliarch.protocol")
 
 
 class FakeAI:
@@ -67,6 +65,7 @@ async def channel(
             await asyncio.sleep(0.01)
 
     monkeypatch.setattr(native.AgentClient, "_ws", transport)
+    monkeypatch.setattr("Undefined.chiliarch.service._PAIR_CHECK_SECONDS", 0.01)
     state = tmp_path / "paired.db"
     store = native.ClientStore(state)
     await store.open()
@@ -89,9 +88,7 @@ async def channel(
         sender=SimpleNamespace(send_address_message=AsyncMock()),
         scheduler=None,
     )
-    service = ChiliarchService(
-        ChiliarchConfig(enabled=True, state_path=str(state)), runtime
-    )
+    service = ChiliarchService(runtime, state_path=state)
     runtime.chiliarch_service = service
     await service.start()
     assert service.status()["mailbox_ready"]
@@ -111,19 +108,110 @@ async def deliver(
 
 async def test_disabled_and_unpaired_are_isolated(tmp_path: Path) -> None:
     runtime = SimpleNamespace()
-    disabled = ChiliarchService(
-        ChiliarchConfig(state_path=str(tmp_path / "off.db")), runtime
-    )
+    disabled = ChiliarchService(runtime, state_path=tmp_path / "off.db")
     await disabled.start()
     assert disabled.status()["state"] == "disabled"
     assert not disabled.directory.exists()
-    missing = ChiliarchService(
-        ChiliarchConfig(enabled=True, state_path=str(tmp_path / "missing.db")), runtime
-    )
+    missing = ChiliarchService(runtime, state_path=tmp_path / "missing.db")
     await missing.start()
-    assert missing.status()["state"] == "unavailable"
+    assert missing.status()["state"] == "disabled"
     assert not missing.status()["mailbox_ready"]
     await missing.stop()
+    await disabled.stop()
+
+
+async def test_pair_file_appearing_enables_running_bot_without_config(
+    channel: ChiliarchService, tmp_path: Path
+) -> None:
+    state = tmp_path / "later.db"
+    service = ChiliarchService(channel.runtime, state_path=state)
+    await service.start()
+    try:
+        assert service.status()["state"] == "disabled"
+        assert not state.exists() and not service.directory.exists()
+        pending = tmp_path / "later.pairing"
+        store = native.ClientStore(pending)
+        await store.open()
+        try:
+            await store.save_identity(await channel.client.store.identity())
+        finally:
+            await store.close()
+        await io.move_path(pending, state)
+        await eventually(lambda: service.status()["state"] == "running")
+        assert service.status()["enabled"]
+        await deliver(service, "agent.message", {"message": "配对后直接聊天"})
+        await eventually(lambda: len(channel.runtime.ai.calls) == 1)
+        assert channel.runtime.ai.calls[0]["identity"] == "chiliarch_main"
+    finally:
+        await service.stop()
+
+
+async def test_deleting_pair_file_stops_connection_and_inflight_work(
+    channel: ChiliarchService,
+) -> None:
+    entered = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def slow(question: str, kwargs: dict[str, Any]) -> str:
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+            return "unreachable"
+        finally:
+            cancelled.set()
+
+    channel.runtime.ai.handler = slow
+    await deliver(
+        channel, "task.dispatch", {"task_id": "unpair", "instruction": "等待"}
+    )
+    await entered.wait()
+    client = channel.client
+    await io.delete_file(channel.state_path)
+    await eventually(lambda: channel.status()["state"] == "disabled")
+    assert cancelled.is_set()
+    assert client.stop_event.is_set() and not client.ready.is_set()
+    assert client.store.connection is None and channel.client is None
+    assert not channel.status()["enabled"]
+    assert channel.history.directory.exists()
+    await asyncio.sleep(0.05)
+    assert not channel.state_path.exists()
+    assert not Path(f"{channel.state_path}-wal").exists()
+    assert not Path(f"{channel.state_path}-shm").exists()
+    assert len(channel.runtime.ai.calls) == 1
+
+
+async def test_repair_enables_again_without_replaying_old_routes(
+    channel: ChiliarchService,
+) -> None:
+    await deliver(channel, "agent.message", {"message": "保存聊天"})
+    await eventually(lambda: len(channel.runtime.ai.calls) == 1)
+    await eventually(lambda: not channel._active)
+    old_journal = channel.journal.path
+    await channel.journal.put("routes", "old-only", {"state": "prepared"})
+    await io.delete_file(channel.state_path)
+    await eventually(lambda: channel.status()["state"] == "disabled")
+    pending = channel.state_path.with_suffix(".pairing")
+    store = native.ClientStore(pending)
+    await store.open()
+    try:
+        await store.save_identity(
+            {
+                "server_url": "https://new-platform.invalid",
+                "credential": "new-test-credential",
+                "agent_id": "new-agent",
+            }
+        )
+    finally:
+        await store.close()
+    await io.move_path(pending, channel.state_path)
+    await eventually(lambda: channel.status()["state"] == "running")
+    assert channel.journal.path != old_journal
+    assert channel.journal.data["routes"] == {}
+    assert channel.journal.data["cursor"] == 0
+    assert old_journal.exists()
+    history = await channel.history.get_conversation("main")
+    assert history and history["messages"][0]["message"] == "保存聊天"
+    assert len(channel.runtime.ai.calls) == 1
 
 
 async def test_plain_supervisor_message_uses_normal_identity_once(
@@ -382,7 +470,7 @@ async def test_peer_message_does_not_wake_local_ai(channel: ChiliarchService) ->
 async def test_restart_marks_running_work_interrupted_and_owner_exclusive(
     channel: ChiliarchService,
 ) -> None:
-    second = ChiliarchService(channel.config, channel.runtime)
+    second = ChiliarchService(channel.runtime, state_path=channel.state_path)
     await second.start()
     assert second.status()["state"] == "unavailable"
     await second.stop()
@@ -467,6 +555,10 @@ async def test_native_transport_falls_back_and_revocation_clears_ready(
     assert channel.status()["reason"] == "CredentialRejected"
     assert "secret" not in json.dumps(channel.status())
     await eventually(lambda: not channel.status()["mailbox_ready"])
+    await asyncio.sleep(0.05)
+    assert calls == ["ws", "sse", "poll"]
+    await io.delete_file(channel.state_path)
+    await eventually(lambda: channel.status()["state"] == "disabled")
 
 
 def test_capture_origin_does_not_reinterpret_internal_identity() -> None:

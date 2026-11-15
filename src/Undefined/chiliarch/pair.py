@@ -8,14 +8,18 @@ import getpass
 import importlib
 import socket
 from pathlib import Path
+from uuid import uuid4
 
-from Undefined.config.models import ChiliarchConfig
 from Undefined.utils import io
+
+from .service import DEFAULT_STATE_PATH
+
+DEFAULT_INTRODUCTION = "Undefined：具备独立聊天、记忆、侧写和工具的普通协作用户；支持消息、任务和共享文件，不支持指定任务工作目录。"
 
 
 async def pair(
     server_url: str,
-    code: str,
+    code: str | None,
     name: str,
     machine: str,
     state: Path,
@@ -26,40 +30,59 @@ async def pair(
     state = state.expanduser().resolve()
     async with adapter.connection_owner(state):
         if await io.exists(state):
-            raise ValueError("state 已存在，请选择新文件，避免覆盖凭证和持久任务")
-        await native.AgentClient.pair(
-            server_url,
-            code,
-            name,
-            machine,
-            state,
-            capabilities=[
-                "chiliarch.tasks",
-                "chiliarch.contacts",
-                "chiliarch.requests",
-                "adapter.undefined",
-            ],
-            introduction=introduction,
-        )
+            raise ValueError("state 已存在，删除配对文件并等待渠道停用后才能重新配对")
+        for suffix in ("-wal", "-shm"):
+            await io.delete_file(Path(f"{state}{suffix}"))
+        # 凭证写完并关闭 SQLite 后才发布正式文件，避免运行中的渠道读到半份配对。
+        pending = state.with_name(f".{state.name}.{uuid4().hex}.pairing")
+        try:
+            # 复用官方 URL 校验，不能先兑换注册码再发现地址格式无效。
+            native.AgentClient(server_url, "", pending, introduction=introduction)
+            pairing_code = (
+                code
+                if code is not None
+                else await asyncio.to_thread(getpass.getpass, "一次性注册码: ")
+            )
+
+            async def exchange_and_publish() -> None:
+                await native.AgentClient.pair(
+                    server_url,
+                    pairing_code,
+                    name,
+                    machine,
+                    pending,
+                    capabilities=[
+                        "chiliarch.tasks",
+                        "chiliarch.contacts",
+                        "chiliarch.requests",
+                        "adapter.undefined",
+                    ],
+                    introduction=introduction,
+                )
+                await io.move_path(pending, state)
+
+            # 注册码只能兑换一次，取消也要先保存已兑换的凭证。
+            await io.run_cancellation_safe(exchange_and_publish())
+        finally:
+            for path in (pending, Path(f"{pending}-wal"), Path(f"{pending}-shm")):
+                await io.delete_file(path)
 
 
 def run() -> None:
-    defaults = ChiliarchConfig()
     parser = argparse.ArgumentParser(description="配对 Undefined chiliarch 原生渠道")
     parser.add_argument("--server", required=True)
-    parser.add_argument("--name", required=True)
-    parser.add_argument("--state", type=Path, default=Path(defaults.state_path))
+    parser.add_argument("--name", default="Undefined")
     parser.add_argument("--machine", default=socket.gethostname())
-    parser.add_argument("--introduction", default=defaults.introduction)
+    parser.add_argument("--introduction", default=DEFAULT_INTRODUCTION)
     args = parser.parse_args()
     try:
         asyncio.run(
             pair(
                 args.server,
-                getpass.getpass("一次性注册码: "),
+                None,
                 args.name,
                 args.machine,
-                args.state,
+                DEFAULT_STATE_PATH,
                 args.introduction,
             )
         )
@@ -67,6 +90,8 @@ def run() -> None:
         # 参数或网络异常可能包含密钥，只展示类型与恢复方式。
         parser.exit(
             1,
-            f"配对未完成（{type(exc).__name__}）。检查可选依赖、地址、注册码及state是否已存在。\n",
+            f"配对未完成（{type(exc).__name__}）。检查平台地址、注册码及配对文件是否已存在。\n",
         )
-    print(f"配对完成，凭证保存在 {args.state.resolve()}；启动 Undefined 接管该state。")
+    print(
+        f"配对完成：{DEFAULT_STATE_PATH.resolve()}。Undefined 会自动检测并接入，无需修改配置。"
+    )

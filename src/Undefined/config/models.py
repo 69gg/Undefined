@@ -714,26 +714,3 @@ class WeixinConfig:
     privileged_confirmation_ttl_seconds: float = 300.0
     pending_max_records: int = 100
     audit_max_records: int = 1000
-
-
-@dataclass
-class ChiliarchConfig:
-    """独立普通用户的原生 chiliarch 渠道，连接和身份变更需要重启。"""
-
-    enabled: bool = False
-    state_path: str = "data/chiliarch/client.db"
-    logical_identity: str = "chiliarch_main"
-    display_name: str = "chiliarch 总管"
-    introduction: str = "Undefined：具备独立聊天、记忆、侧写和工具的普通协作用户；支持消息、任务和共享文件，不支持指定任务工作目录。"
-    max_concurrent_tasks: int = 1
-
-    def __post_init__(self) -> None:
-        from Undefined.context import validate_logical_identity
-
-        validate_logical_identity(self.logical_identity)
-        if type(self.max_concurrent_tasks) is not int or self.max_concurrent_tasks < 1:
-            raise ValueError("chiliarch.max_concurrent_tasks 必须为正整数")
-        if not self.state_path.strip() or not self.display_name.strip():
-            raise ValueError("chiliarch state_path/display_name 不能为空")
-        if len(self.introduction) > 4000:
-            raise ValueError("chiliarch.introduction 最多4000字符")

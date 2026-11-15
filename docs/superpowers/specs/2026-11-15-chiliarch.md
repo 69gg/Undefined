@@ -1,10 +1,12 @@
 # chiliarch 独立渠道设计
 
-chiliarch 通过可选依赖内嵌原生 AgentClient handler、AgentMailbox 和 ClientStore。
-默认关闭，单并发，状态由官方配对流程生成；凭证不进入 Undefined 主配置或状态 API。
+chiliarch 作为必需依赖，内嵌原生 AgentClient handler、AgentMailbox 和 ClientStore。
+单并发，配对成功后发布 `data/chiliarch/client.db`；文件存在自动启用，删除自动停用，运行中也检测变化。
+不添加主配置项或环境变量，不修改 config.toml 及配置示例；配对凭证不进入状态 API。
+心跳与断线重连由原生客户端维护。上游使用无固定到期时间的长期凭证，没有续期接口；吊销后需重新配对。
 同一 state 只有一个网络 owner；WS、SSE、poll、ACK、幂等、取消和 interrupted 语义沿用上游。
 
-总管是独立普通用户 `chiliarch_main`（可配置），属于 `entity_type=user`。
+总管是独立普通用户 `chiliarch_main`，属于 `entity_type=user`。
 通用可选 `logical_identity` 与平台数字身份分开；不使用虚拟 QQ、不继承 WebUI 超管。
 任务分别保存聊天，正式 `continue_task_id` 复用会话，总管普通消息使用持续会话。
 正常经过 end、史官、事件记忆、侧写；可主动读其他侧写。同伴信息保留来源。
@@ -19,5 +21,5 @@ chiliarch 通过可选依赖内嵌原生 AgentClient handler、AgentMailbox 和 
 共享文件复用原生分块/大小/SHA 校验；下载进入本地缓存并登记会话作用域 attachment UID。
 
 首版无新增 UI，提供 Runtime 鉴权保护的 `/api/v1/chiliarch/status`。
-渠道运行独立于 api.enabled；缺依赖/未配对仅使该渠道 unavailable。
-身份和连接配置要求重启。测试不连接真实平台，不修改生产 state。
+渠道运行独立于 api.enabled；未配对为 disabled，损坏或拒绝的身份为 unavailable，不影响其他渠道。
+测试不连接真实平台，不修改生产 state。

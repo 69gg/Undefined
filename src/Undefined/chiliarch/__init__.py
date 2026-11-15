@@ -1,4 +1,4 @@
-"""可选的 chiliarch 原生协作渠道。"""
+"""通过配对文件自动启停的 chiliarch 原生协作渠道。"""
 
 from .service import ChiliarchService
 
