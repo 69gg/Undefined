@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import getpass
 import importlib
+import logging
 import socket
 from pathlib import Path
 from uuid import uuid4
@@ -13,6 +14,8 @@ from uuid import uuid4
 from Undefined.utils import io
 
 from .service import DEFAULT_STATE_PATH
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_INTRODUCTION = "Undefined：具备独立聊天、记忆、侧写和工具的普通协作用户；支持消息、任务和共享文件，不支持指定任务工作目录。"
 
@@ -35,6 +38,8 @@ async def pair(
             await io.delete_file(Path(f"{state}{suffix}"))
         # 凭证写完并关闭 SQLite 后才发布正式文件，避免运行中的渠道读到半份配对。
         pending = state.with_name(f".{state.name}.{uuid4().hex}.pairing")
+        exchanged = False
+        published = False
         try:
             # 复用官方 URL 校验，不能先兑换注册码再发现地址格式无效。
             native.AgentClient(server_url, "", pending, introduction=introduction)
@@ -45,6 +50,7 @@ async def pair(
             )
 
             async def exchange_and_publish() -> None:
+                nonlocal exchanged, published
                 await native.AgentClient.pair(
                     server_url,
                     pairing_code,
@@ -59,13 +65,21 @@ async def pair(
                     ],
                     introduction=introduction,
                 )
+                exchanged = True
                 await io.move_path(pending, state)
+                published = True
 
             # 注册码只能兑换一次，取消也要先保存已兑换的凭证。
             await io.run_cancellation_safe(exchange_and_publish())
         finally:
-            for path in (pending, Path(f"{pending}-wal"), Path(f"{pending}-shm")):
-                await io.delete_file(path)
+            if not exchanged or published:
+                for path in (pending, Path(f"{pending}-wal"), Path(f"{pending}-shm")):
+                    await io.delete_file(path)
+            else:
+                logger.warning(
+                    "[chiliarch] 配对文件发布失败，已兑换凭证及 SQLite 附属文件保留在 %s",
+                    pending,
+                )
 
 
 def run() -> None:

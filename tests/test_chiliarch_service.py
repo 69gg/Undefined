@@ -15,6 +15,7 @@ import pytest
 
 from Undefined.api import RuntimeAPIContext
 from Undefined.api.webchat_store import WebChatConversationStore
+from Undefined.ai.client.ask_loop import ChatExecutionError
 from Undefined.attachments import AttachmentRegistry
 from Undefined.chiliarch import ChiliarchService
 from Undefined.chiliarch.service import capture_origin
@@ -275,6 +276,41 @@ async def test_tasks_continue_and_reject_workdir(channel: ChiliarchService) -> N
     assert channel.runtime_metadata()["supports_task_workdir"] is False
 
 
+@pytest.mark.parametrize("model_fails", [False, True])
+async def test_task_distinguishes_execution_failure_from_empty_end(
+    channel: ChiliarchService, model_fails: bool
+) -> None:
+    async def ask(question: str, kwargs: dict[str, Any]) -> str:
+        assert kwargs["raise_on_error"] is True
+        if model_fails:
+            raise ChatExecutionError("upstream-secret")
+        return ""
+
+    channel.runtime.ai.handler = ask
+    await deliver(channel, "task.dispatch", {"task_id": "empty", "instruction": "处理"})
+    expected = "failed" if model_fails else "completed"
+    async with asyncio.timeout(5):
+        while not any(
+            state == expected and envelope.payload["task_id"] == "empty"
+            for state, envelope in await channel.client.store.tasks()
+        ):
+            await asyncio.sleep(0.01)
+    status = next(
+        envelope.payload
+        for envelope in await channel.client.store.pending()
+        if envelope.type == "task.status" and envelope.payload["status"] == expected
+    )
+    if model_fails:
+        assert status["error"] == "Undefined 聊天执行失败"
+        assert "upstream-secret" not in json.dumps(status)
+    else:
+        assert status["result"]["reply"] == ""
+    assert not channel._progress
+    assert not any(
+        e.type == "agent.contact" for e in await channel.client.store.pending()
+    )
+
+
 async def test_cancel_before_dispatch_and_inflight_cleanup(
     channel: ChiliarchService,
 ) -> None:
@@ -384,6 +420,64 @@ async def test_reply_returns_to_origin_after_journal_reload(
         == address
     )
     assert not channel.runtime.ai.calls
+
+
+@pytest.mark.parametrize(
+    "phase", ["before_delivery", "during_delivery", "after_delivery", "completed"]
+)
+async def test_reply_recovery_resumes_only_before_delivery_starts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, phase: str
+) -> None:
+    service = ChiliarchService(SimpleNamespace(), state_path=tmp_path / "client.db")
+    await service.journal.open()
+    await service.journal.put(
+        "routes",
+        "request",
+        {
+            "id": "request",
+            "origin": {"kind": "physical", "address": "qq:123"},
+        },
+    )
+    envelope = protocol.Envelope(
+        type="agent.message", payload={"message": "回信"}, correlation_id="request"
+    )
+    notify = AsyncMock(
+        side_effect=asyncio.CancelledError if phase == "during_delivery" else None
+    )
+    monkeypatch.setattr(service, "_notify", notify)
+    monkeypatch.setattr(service, "_record_incoming", AsyncMock())
+    put = service.journal.put
+
+    async def interrupted_put(collection: str, key: str, event: dict[str, Any]) -> None:
+        if phase == "after_delivery" and event["state"] == "completed":
+            raise asyncio.CancelledError
+        await put(collection, key, event)
+        if (
+            phase == "before_delivery"
+            and event.get("delivery") == "pending"
+            or phase == "completed"
+            and event["state"] == "completed"
+        ):
+            raise asyncio.CancelledError
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(service.journal, "put", interrupted_put)
+        with pytest.raises(asyncio.CancelledError):
+            await service._receive(1, envelope)
+    assert service.journal.data["cursor"] == 0
+    await service.journal.open()
+    if phase == "before_delivery":
+        notify.assert_not_awaited()
+        assert service.journal.data["events"][envelope.id]["state"] == "received"
+    elif phase != "completed":
+        assert service.journal.data["events"][envelope.id]["delivery"] == "uncertain"
+    notify.side_effect = None
+    await service._receive(1, envelope)
+    assert service.journal.data["cursor"] == 1
+    notify.assert_awaited_once()
+    await service.journal.open()
+    await service._receive(1, envelope)
+    notify.assert_awaited_once()
 
 
 async def test_webui_reply_targets_exact_conversation(

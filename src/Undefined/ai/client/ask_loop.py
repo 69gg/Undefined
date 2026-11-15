@@ -42,6 +42,10 @@ from Undefined.utils.tool_calls import (
 logger = logging.getLogger(__name__)
 
 
+class ChatExecutionError(RuntimeError):
+    """聊天执行失败，与 end 工具正常返回的空文本区分。"""
+
+
 def _webchat_agent_path(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
@@ -135,6 +139,7 @@ class ClientAskLoopMixin(ClientQueueMixin):
         onebot_client: Any = None,
         scheduler: Any = None,
         extra_context: dict[str, Any] | None = None,
+        raise_on_error: bool = False,
     ) -> str:
         """发送问题给 AI 并获取回复 (支持工具调用和迭代)
 
@@ -152,6 +157,7 @@ class ClientAskLoopMixin(ClientQueueMixin):
             onebot_client: OneBot 客户端实例
             scheduler: 自动化服务实例
             extra_context: 额外的上下文负载
+            raise_on_error: 重试耗尽后抛出执行失败信号，默认保留静默结束行为
 
         返回:
             AI 生成的最终文本回复
@@ -1157,6 +1163,8 @@ class ClientAskLoopMixin(ClientQueueMixin):
                     )
                     await emit_webchat_stage("retrying_model", str(exc))
                     continue
+                if raise_on_error:
+                    raise ChatExecutionError("AI 聊天执行失败") from exc
                 logger.exception(
                     "[chat.suppressed_error] model=%s lane=%s iteration=%s error=%s",
                     effective_chat_config.model_name,

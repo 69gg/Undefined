@@ -25,6 +25,7 @@ from Undefined.cognitive.service.helpers import (
     _serialize_profile_markdown,
 )
 from Undefined.cognitive.vector_store_compat import call_vector_store_method
+from Undefined.cognitive.profile_storage import ProfileStorage
 from Undefined.config.models import HISTORIAN_MIN_POLL_INTERVAL_SECONDS
 from Undefined.cognitive.job_queue import QueuedJob
 from Undefined.cognitive.historian.scheduling import (
@@ -864,21 +865,22 @@ class HistorianWorker:
                 if tc_name == "read_profile":
                     rp_et = str(tc_args.get("entity_type", "")).strip()
                     rp_eid = str(tc_args.get("entity_id", "")).strip()
-                    if (
-                        rp_et not in {"user", "group"}
-                        or not rp_eid
-                        or not rp_eid.isalnum()
-                    ):
+                    try:
+                        ProfileStorage._validate_entity(rp_et, rp_eid)
+                    except ValueError:
                         tc_content = "错误：entity_type 或 entity_id 无效"
-                    elif (rp_et, rp_eid) == (entity_type, entity_id):
-                        tc_content = profile_snapshot
                     else:
-                        profile_text = await self._profile_storage.read_profile(
-                            rp_et, rp_eid
-                        )
-                        tc_content = (
-                            profile_text if profile_text is not None else "（暂无侧写）"
-                        )
+                        if (rp_et, rp_eid) == (entity_type, entity_id):
+                            tc_content = profile_snapshot
+                        else:
+                            profile_text = await self._profile_storage.read_profile(
+                                rp_et, rp_eid
+                            )
+                            tc_content = (
+                                profile_text
+                                if profile_text is not None
+                                else "（暂无侧写）"
+                            )
                     logger.info(
                         "[史官] 任务 %s read_profile: %s:%s len=%s",
                         event_id,
@@ -893,11 +895,9 @@ class HistorianWorker:
                 elif tc_name == "update_profile":
                     up_et = str(tc_args.get("entity_type", entity_type)).strip()
                     up_eid = str(tc_args.get("entity_id", entity_id)).strip()
-                    if (
-                        up_et not in {"user", "group"}
-                        or not up_eid
-                        or not up_eid.isalnum()
-                    ):
+                    try:
+                        ProfileStorage._validate_entity(up_et, up_eid)
+                    except ValueError:
                         tool_results.append(
                             {
                                 "role": "tool",

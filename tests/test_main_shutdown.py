@@ -143,6 +143,59 @@ async def test_run_until_shutdown_keeps_onebot_alive_for_drain() -> None:
     assert onebot.cancelled is True
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stop_before_connection", [False, True])
+async def test_channel_startup_waits_for_live_onebot(
+    monkeypatch: pytest.MonkeyPatch, stop_before_connection: bool
+) -> None:
+    onebot = OneBotClient("ws://isolated.invalid")
+    socket = _ReplyWebSocket()
+    connecting = asyncio.Event()
+    allow_connection = asyncio.Event()
+    started = asyncio.Event()
+    shutdown = asyncio.Event()
+
+    async def connect() -> None:
+        connecting.set()
+        await allow_connection.wait()
+        onebot.ws = cast(Any, socket)
+
+    async def start_channel() -> None:
+        assert onebot._running
+        response = await onebot.send_private_message(123, "恢复回信")
+        assert response["status"] == "ok"
+        started.set()
+
+    startup = AsyncMock(side_effect=start_channel)
+    monkeypatch.setattr(onebot, "connect", connect)
+    waiting = asyncio.create_task(
+        _run_until_shutdown(onebot, shutdown, logger, on_connected=startup)
+    )
+    connection: asyncio.Task[None] | None = None
+    try:
+        await asyncio.wait_for(connecting.wait(), 1)
+        startup.assert_not_awaited()
+        if not stop_before_connection:
+            allow_connection.set()
+            await asyncio.wait_for(started.wait(), 1)
+            startup.assert_awaited_once()
+            assert len(socket.sent) == 1
+        shutdown.set()
+        connection = await asyncio.wait_for(waiting, 1)
+        assert not connection.done()
+        if stop_before_connection:
+            allow_connection.set()
+            await asyncio.wait_for(socket.receiving.wait(), 1)
+            startup.assert_not_awaited()
+    finally:
+        waiting.cancel()
+        if connection is not None:
+            connection.cancel()
+            await asyncio.gather(connection, return_exceptions=True)
+        await asyncio.gather(waiting, return_exceptions=True)
+        await onebot.disconnect()
+
+
 class _ReplyWebSocket:
     close_code: int | None = None
 

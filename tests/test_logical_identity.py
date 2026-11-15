@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -19,8 +20,9 @@ from Undefined.skills.tools.end.handler import execute as end
 from Undefined.skills.toolsets.messages.send_message.handler import execute as send
 
 
+@pytest.mark.parametrize("history_fails", [False, True])
 async def test_logical_chat_uses_normal_end_and_independent_profile(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, history_fails: bool
 ) -> None:
     queue = SimpleNamespace(enqueue=AsyncMock(return_value="job"))
     cognitive = CognitiveService(
@@ -47,6 +49,17 @@ async def test_logical_chat_uses_normal_end_and_independent_profile(
         user_name="总管",
     )
     output = AsyncMock()
+    if history_fails:
+        append = store.append_message
+
+        async def append_with_failed_bot_history(
+            conversation_id: str, **kwargs: Any
+        ) -> dict[str, Any]:
+            if kwargs["role"] == "bot":
+                raise OSError("history unavailable after delivery")
+            return await append(conversation_id, **kwargs)
+
+        monkeypatch.setattr(store, "append_message", append_with_failed_bot_history)
 
     async def ask(question: str, **kwargs: Any) -> str:
         ctx = RequestContext.require()
@@ -61,10 +74,12 @@ async def test_logical_chat_uses_normal_end_and_independent_profile(
         assert not context.get("webui_session")
         assert "之前的事实" in str(kwargs["recent_messages_snapshot"])
         assert await send({"message": "记住了"}, context) == "消息已排队"
+        assert ctx.get_resources()["message_sent_this_turn"] is True
         assert (
             await end({"observations": ["chiliarch_main 正在协调项目"]}, context)
             == "对话已结束"
         )
+        assert context["conversation_ended"] is True
         return ""
 
     runtime = SimpleNamespace(
@@ -174,3 +189,108 @@ async def test_historian_profile_keeps_real_identity(
     assert content and f"{field}:" in content
     if field == "identity":
         assert "qq:" not in content
+
+
+@pytest.mark.parametrize("identity", ["chiliarch_main", "agent-with.dots"])
+@pytest.mark.parametrize("explicit_target", [False, True])
+async def test_historian_merge_accepts_storage_ids_and_keeps_target_boundary(
+    tmp_path: Path, identity: str, explicit_target: bool
+) -> None:
+    storage = ProfileStorage(tmp_path)
+    snapshot = "目标旧侧写"
+    await storage.write_profile("user", identity, snapshot)
+    await storage.write_profile("user", "other_peer", "其他用户侧写")
+
+    def tool(call_id: str, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "id": call_id,
+            "function": {"name": name, "arguments": json.dumps(arguments)},
+        }
+
+    update: dict[str, Any] = {
+        "summary": "已合并的新事实",
+        "evaluation": "协作有序",
+        "roast": "总在安排下一件事",
+    }
+    if explicit_target:
+        update.update(entity_type="user", entity_id=identity)
+    reads = [
+        tool("self", "read_profile", {"entity_type": "user", "entity_id": identity}),
+        tool(
+            "peer", "read_profile", {"entity_type": "user", "entity_id": "other_peer"}
+        ),
+        tool(
+            "bad-read",
+            "read_profile",
+            {"entity_type": "user", "entity_id": "../escape"},
+        ),
+        tool(
+            "bad-write",
+            "update_profile",
+            {"entity_type": "user", "entity_id": "../escape"},
+        ),
+        tool(
+            "wrong-target",
+            "update_profile",
+            {"entity_type": "user", "entity_id": "other_peer"},
+        ),
+    ]
+    submit = AsyncMock(
+        side_effect=[
+            {"choices": [{"message": {"tool_calls": reads}}]},
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "tool_calls": [tool("update", "update_profile", update)]
+                        }
+                    }
+                ]
+            },
+        ]
+    )
+    worker = HistorianWorker(
+        ai_client=cast(
+            Any,
+            SimpleNamespace(agent_config=object(), submit_background_llm_call=submit),
+        ),
+        config_getter=lambda: SimpleNamespace(),
+        vector_store=SimpleNamespace(
+            embed_query=AsyncMock(return_value=[0.1]),
+            query_events=AsyncMock(return_value=[]),
+            upsert_profile=AsyncMock(),
+        ),
+        job_queue=None,
+        profile_storage=storage,
+    )
+    assert await worker._merge_profile_target(
+        job={
+            "observations": ["协作事实"],
+            "request_type": "private",
+            "sender_id": identity,
+        },
+        canonical="协作事实",
+        event_id="merge",
+        target={
+            "entity_type": "user",
+            "entity_id": identity,
+            "perspective": "sender",
+            "preferred_name": "总管",
+        },
+        target_index=1,
+        target_count=1,
+    )
+    results = {
+        message["tool_call_id"]: message["content"]
+        for message in submit.call_args_list[1].kwargs["messages"]
+        if message.get("role") == "tool"
+    }
+    assert results["self"] == snapshot
+    assert results["peer"] == "其他用户侧写"
+    assert "无效" in results["bad-read"]
+    assert "无效" in results["bad-write"]
+    assert "只能更新本次目标实体" in results["wrong-target"]
+    content = await storage.read_profile("user", identity)
+    assert content and "已合并的新事实" in content
+    assert "identity:" in content and "qq:" not in content
+    assert await storage.read_profile("user", "other_peer") == "其他用户侧写"

@@ -42,6 +42,7 @@ async def test_reconnect_preserves_inflight_handler_without_waiting(
     finished = asyncio.Event()
     reconnected = asyncio.Event()
     connections = 0
+    connected_callbacks: list[int] = []
 
     async def handler(data: dict[str, Any]) -> None:
         started.set()
@@ -59,10 +60,16 @@ async def test_reconnect_preserves_inflight_handler_without_waiting(
     monkeypatch.setattr(client, "connect", connect)
     pending: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
     client._pending_responses["waiting"] = pending
-    running = asyncio.create_task(client.run_with_reconnect(reconnect_interval=0))
+    running = asyncio.create_task(
+        client.run_with_reconnect(
+            reconnect_interval=0,
+            on_connected=lambda: connected_callbacks.append(connections),
+        )
+    )
     try:
         await asyncio.wait_for(reconnected.wait(), 1)
         assert connections == 2
+        assert connected_callbacks == [1, 2]
         assert len(client._tasks) == 1
         assert not finished.is_set()
         assert isinstance(pending.exception(), ConnectionError)

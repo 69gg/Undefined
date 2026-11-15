@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from Undefined.ai.client import AIClient, MISSING_TOOL_CALL_RETRY_HINT
+from Undefined.ai.client.ask_loop import ChatExecutionError
 from Undefined.ai.queue_budget import compute_queued_llm_timeout_seconds
 from Undefined.config.models import (
     AgentModelConfig,
@@ -21,10 +22,14 @@ from Undefined.skills.agents.runner import run_agent_with_tools
 
 
 @pytest.mark.asyncio
-async def test_ai_ask_suppresses_queued_llm_error_when_retries_exhausted() -> None:
+@pytest.mark.parametrize("raise_on_error", [False, True])
+@pytest.mark.parametrize("retries", [0, 1])
+async def test_ai_ask_reports_queued_llm_error_when_retries_exhausted(
+    raise_on_error: bool, retries: int
+) -> None:
     client: Any = object.__new__(AIClient)
     client.runtime_config = cast(
-        Any, SimpleNamespace(log_thinking=False, ai_request_max_retries=0)
+        Any, SimpleNamespace(log_thinking=False, ai_request_max_retries=retries)
     )
     client._prompt_builder = cast(
         Any,
@@ -61,13 +66,18 @@ async def test_ai_ask_suppresses_queued_llm_error_when_retries_exhausted() -> No
         proxy_config_available=False,
     )
 
-    result = await AIClient.ask(client, "hello")
-
-    assert result == ""
+    if raise_on_error:
+        with pytest.raises(ChatExecutionError) as caught:
+            await AIClient.ask(client, "hello", raise_on_error=True)
+        assert isinstance(caught.value.__cause__, RuntimeError)
+    else:
+        assert await AIClient.ask(client, "hello") == ""
+    assert client.submit_queued_llm_call.await_count == retries + 1
 
 
 @pytest.mark.asyncio
-async def test_ai_ask_retries_pre_tool_local_failure() -> None:
+@pytest.mark.parametrize("raise_on_error", [False, True])
+async def test_ai_ask_retries_pre_tool_local_failure(raise_on_error: bool) -> None:
     client: Any = object.__new__(AIClient)
     client.runtime_config = cast(
         Any, SimpleNamespace(log_thinking=False, ai_request_max_retries=1)
@@ -144,7 +154,7 @@ async def test_ai_ask_retries_pre_tool_local_failure() -> None:
         proxy_config_available=False,
     )
 
-    result = await AIClient.ask(client, "hello")
+    result = await AIClient.ask(client, "hello", raise_on_error=raise_on_error)
 
     assert result == ""
     assert cast(AsyncMock, client.submit_queued_llm_call).await_count == 2

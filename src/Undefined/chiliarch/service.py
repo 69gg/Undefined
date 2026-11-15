@@ -18,6 +18,7 @@ from Undefined.attachments import (
     scope_from_context,
 )
 from Undefined.channels.session import run_logical_chat
+from Undefined.ai.client.ask_loop import ChatExecutionError
 from Undefined.utils import io
 from Undefined.utils.message_targets import DeliveryAddress, parse_delivery_address
 from Undefined.utils.paths import DATA_DIR
@@ -468,6 +469,9 @@ class ChiliarchService:
                 )
             result = await self._chat(conversation_id, text, task_id=task_id)
             return {"reply": result, "conversation_id": conversation_id}
+        except ChatExecutionError as exc:
+            native = importlib.import_module("chiliarch.client")
+            raise native.TaskExecutionError("Undefined 聊天执行失败") from exc
         finally:
             self._progress.pop(task_id, None)
 
@@ -615,7 +619,7 @@ class ChiliarchService:
         if event["state"] == "queued":
             self._start_local(event_id)
         elif event["state"] == "received":
-            event = {**event, "state": "processing"}
+            event = {**event, "state": "processing", "delivery": "pending"}
             await self.journal.put("events", event_id, event)
             if route is None or route.get("notify", True):
                 await self._record_incoming(envelope, route)

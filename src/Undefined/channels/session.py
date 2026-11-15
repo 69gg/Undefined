@@ -4,11 +4,15 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from datetime import datetime
+import logging
 from typing import Any
 
 from Undefined.api.webchat_store import WebChatConversationStore
 from Undefined.context import RequestContext, validate_logical_identity
+from Undefined.utils.message_turn import mark_message_sent_this_turn
 from Undefined.utils.xml import escape_xml_attr, escape_xml_text
+
+logger = logging.getLogger(__name__)
 
 
 async def run_logical_chat(
@@ -44,14 +48,20 @@ async def run_logical_chat(
 
     async def output(message: str) -> None:
         await send_output(message)
-        await store.append_message(
-            conversation_id,
-            role="bot",
-            text_content=message,
-            display_name="Bot",
-            user_name="Bot",
-        )
         outputs.append(message)
+        mark_message_sent_this_turn()
+        try:
+            await store.append_message(
+                conversation_id,
+                role="bot",
+                text_content=message,
+                display_name="Bot",
+                user_name="Bot",
+            )
+        except OSError as exc:
+            logger.warning(
+                "[逻辑聊天] 消息已交付，历史保存失败: %s", type(exc).__name__
+            )
 
     async def send(message: str, reply_to: int | None = None) -> None:
         await output(message)
@@ -110,6 +120,7 @@ async def run_logical_chat(
             onebot_client=runtime.onebot,
             scheduler=runtime.scheduler,
             extra_context=context,
+            raise_on_error=True,
         )
     final = str(result or "").strip()
     if final:

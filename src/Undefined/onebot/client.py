@@ -1076,7 +1076,12 @@ class OneBotClient:
         except Exception as e:
             logger.exception(f"处理消息时出错: {e}")
 
-    async def run_with_reconnect(self, reconnect_interval: float = 5.0) -> None:
+    async def run_with_reconnect(
+        self,
+        reconnect_interval: float = 5.0,
+        *,
+        on_connected: Callable[[], None] | None = None,
+    ) -> None:
         """带自动重连的运行"""
         self._should_stop = False
         reconnect_count = 0
@@ -1090,6 +1095,8 @@ class OneBotClient:
                         )
                     await self.connect()
                     reconnect_count = 0  # 连接成功重置计数
+                    if on_connected is not None:
+                        on_connected()
                     await self.run()
                 except websockets.ConnectionClosed as e:
                     logger.warning(f"[WebSocket] 连接已断开: {e}")

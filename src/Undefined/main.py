@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 import logging
 import signal
 import time
@@ -517,14 +518,14 @@ async def main() -> None:
                 "/naga 命令和 /api/v1/naga/* 端点都不会可用"
             )
 
-    # API 启用时先建立 WebChat 存储，再消费跨重启回信；API 关闭时仍启动渠道。
-    await chiliarch_service.start()
-
     shutdown_guard = install_shutdown_signal_handlers(logger)
     onebot_run_task: asyncio.Task[None] | None = None
     try:
         onebot_run_task = await _run_until_shutdown(
-            onebot, shutdown_guard.event, logger
+            onebot,
+            shutdown_guard.event,
+            logger,
+            on_connected=chiliarch_service.start,
         )
     except KeyboardInterrupt:
         # 仅在信号处理器注册全部失败（如非主线程运行）时才会走到这里；
@@ -714,11 +715,41 @@ async def _run_until_shutdown(
     onebot: OneBotClient,
     shutdown_event: asyncio.Event,
     logger: logging.Logger,
+    *,
+    on_connected: Callable[[], Awaitable[None]] | None = None,
 ) -> asyncio.Task[None]:
     """等待停机条件；返回仍可收发的连接任务，由调用方在排空后关闭。"""
-    run_task = asyncio.create_task(onebot.run_with_reconnect(), name="onebot-run")
+    connected = asyncio.Event()
+    run_task = asyncio.create_task(
+        onebot.run_with_reconnect(on_connected=connected.set)
+        if on_connected is not None
+        else onebot.run_with_reconnect(),
+        name="onebot-run",
+    )
+    startup_task: asyncio.Task[None] | None = None
+    if on_connected is not None:
+
+        async def start_after_connection() -> None:
+            await connected.wait()
+            await on_connected()
+
+        startup_task = asyncio.create_task(
+            start_after_connection(), name="connected-startup"
+        )
     stop_task = asyncio.create_task(shutdown_event.wait(), name="shutdown-wait")
     try:
+        if startup_task is not None:
+            done, _pending = await asyncio.wait(
+                {run_task, stop_task, startup_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if startup_task in done:
+                startup_task.result()
+            if run_task in done:
+                run_task.result()
+                return run_task
+            if stop_task in done:
+                return run_task
         done, _pending = await asyncio.wait(
             {run_task, stop_task},
             return_when=asyncio.FIRST_COMPLETED,
@@ -735,10 +766,13 @@ async def _run_until_shutdown(
         raise
     finally:
         stop_task.cancel()
-        try:
-            await stop_task
-        except asyncio.CancelledError:
-            pass
+        if startup_task is not None:
+            startup_task.cancel()
+        await asyncio.gather(
+            stop_task,
+            *([startup_task] if startup_task is not None else []),
+            return_exceptions=True,
+        )
 
 
 def run() -> None:

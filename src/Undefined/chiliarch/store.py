@@ -32,7 +32,9 @@ class ChannelJournal:
             self.data.update(raw)
         for event in self.data["events"].values():
             if event.get("state") == "processing":
-                event["state"] = "interrupted"
+                event["state"] = (
+                    "received" if event.get("delivery") == "pending" else "interrupted"
+                )
             if event.get("delivery") == "processing":
                 event["delivery"] = "uncertain"
         await self.update(lambda data: None)

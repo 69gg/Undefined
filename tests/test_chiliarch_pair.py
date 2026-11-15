@@ -67,6 +67,7 @@ async def test_failed_pair_does_not_enable_channel_or_leave_partial_identity(
         assert isinstance(pending, Path)
         pending.write_bytes(b"partial")
         Path(f"{pending}-wal").write_bytes(b"partial")
+        Path(f"{pending}-shm").write_bytes(b"partial")
         raise RuntimeError("credential=secret")
 
     monkeypatch.setattr(native.AgentClient, "pair", AsyncMock(side_effect=fail))
@@ -76,6 +77,36 @@ async def test_failed_pair_does_not_enable_channel_or_leave_partial_identity(
         )
     assert not state.exists()
     assert not list(tmp_path.glob("*.pairing*"))
+
+
+async def test_publish_failure_keeps_redeemed_database_and_sidecars(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    module = importlib.import_module("Undefined.chiliarch.pair")
+    state = tmp_path / "client.db"
+    pending: Path | None = None
+
+    async def exchange(*args: object, **kwargs: object) -> None:
+        nonlocal pending
+        assert isinstance(args[4], Path)
+        pending = args[4]
+        pending.write_bytes(b"redeemed-secret")
+        Path(f"{pending}-wal").write_bytes(b"credential WAL")
+        Path(f"{pending}-shm").write_bytes(b"credential shared memory")
+
+    monkeypatch.setattr(native.AgentClient, "pair", AsyncMock(side_effect=exchange))
+    monkeypatch.setattr(module.io, "move_path", AsyncMock(side_effect=OSError("full")))
+    with pytest.raises(OSError, match="full"):
+        await pair(
+            "https://platform.invalid", "code", "Undefined", "host", state, "介绍"
+        )
+    assert not state.exists()
+    assert pending is not None
+    assert pending.read_bytes() == b"redeemed-secret"
+    assert Path(f"{pending}-wal").read_bytes() == b"credential WAL"
+    assert Path(f"{pending}-shm").read_bytes() == b"credential shared memory"
+    assert str(pending) in caplog.text
+    assert "redeemed-secret" not in caplog.text
 
 
 async def test_existing_pair_file_is_rejected_before_prompting_or_network(
