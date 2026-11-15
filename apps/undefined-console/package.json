@@ -30,6 +30,6 @@
 		"@biomejs/biome": "2.5.10",
 		"@tauri-apps/cli": "^2.3.1",
 		"typescript": "^5.7.3",
-		"vite": "^6.4.3"
+		"vite": "^6.4.6"
 	}
 }
