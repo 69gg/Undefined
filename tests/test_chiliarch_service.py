@@ -21,6 +21,7 @@ from Undefined.chiliarch import ChiliarchService
 from Undefined.chiliarch.service import capture_origin
 from Undefined.config import Config
 from Undefined.context import RequestContext
+from Undefined.onebot.client import OneBotDeliveryUncertainError
 from Undefined.utils import io
 
 native = importlib.import_module("chiliarch.client")
@@ -81,7 +82,7 @@ async def channel(
     ai = FakeAI()
     runtime = RuntimeAPIContext(
         config_getter=lambda: ai.runtime_config,
-        onebot=SimpleNamespace(),
+        onebot=SimpleNamespace(connection_status=lambda: {"connected": True}),
         ai=ai,
         command_dispatcher=None,
         queue_manager=None,
@@ -422,6 +423,115 @@ async def test_reply_returns_to_origin_after_journal_reload(
     assert not channel.runtime.ai.calls
 
 
+@pytest.mark.parametrize("address", ["qq:123", "group:123"])
+@pytest.mark.parametrize("restart", [False, True])
+async def test_reply_waits_for_onebot_reconnect_without_starting_delivery(
+    channel: ChiliarchService,
+    monkeypatch: pytest.MonkeyPatch,
+    address: str,
+    restart: bool,
+) -> None:
+    connected = False
+    checked = asyncio.Event()
+
+    def connection_status() -> dict[str, bool]:
+        checked.set()
+        return {"connected": connected}
+
+    async def send(target: Any, message: str) -> None:
+        if not connected:
+            raise RuntimeError("WebSocket 未连接")
+
+    monkeypatch.setattr(channel.runtime.onebot, "connection_status", connection_status)
+    sender = channel.runtime.sender.send_address_message
+    sender.side_effect = send
+    result = await channel.invoke(
+        "contact",
+        {"message": "询问", "client_request_id": address},
+        {"address": address},
+    )
+    envelope = await deliver(
+        channel,
+        "agent.message",
+        {"message": "断线期间的回信"},
+        correlation_id=result["message_id"],
+    )
+    try:
+        await eventually(lambda: checked.is_set() or sender.await_count > 0)
+        sender.assert_not_awaited()
+        event = channel.journal.data["events"][envelope.id]
+        assert event["state"] == "processing" and event["delivery"] == "pending"
+        assert channel.journal.data["cursor"] < event["seq"]
+        if restart:
+            await channel.stop()
+            checked.clear()
+            await channel.start()
+            await eventually(checked.is_set)
+            sender.assert_not_awaited()
+        connected = True
+        await eventually(
+            lambda: channel.journal.data["events"][envelope.id]["state"] == "completed"
+        )
+        sender.assert_awaited_once()
+        assert channel.journal.data["events"][envelope.id]["delivery"] == "delivered"
+        conversation = await channel.history.get_conversation("main")
+        assert conversation is not None and len(conversation["messages"]) == 1
+    finally:
+        connected = True
+
+
+async def test_weixin_reply_does_not_wait_for_onebot(channel: ChiliarchService) -> None:
+    channel.runtime.onebot.connection_status = lambda: {"connected": False}
+    result = await channel.invoke(
+        "contact",
+        {"message": "询问", "client_request_id": "weixin-offline-onebot"},
+        {"address": "wechat:123"},
+    )
+    envelope = await deliver(
+        channel,
+        "agent.message",
+        {"message": "微信回信"},
+        correlation_id=result["message_id"],
+    )
+    await eventually(
+        lambda: (
+            channel.journal.data["events"].get(envelope.id, {}).get("state")
+            == "completed"
+        )
+    )
+    channel.runtime.sender.send_address_message.assert_awaited_once()
+    assert channel.journal.data["events"][envelope.id]["delivery"] == "delivered"
+
+
+async def test_uncertain_onebot_delivery_is_not_retried(
+    channel: ChiliarchService,
+) -> None:
+    sender = channel.runtime.sender.send_address_message
+    sender.side_effect = OneBotDeliveryUncertainError("send_private_msg", "连接中断")
+    result = await channel.invoke(
+        "contact",
+        {"message": "询问", "client_request_id": "uncertain-delivery"},
+        {"address": "qq:123"},
+    )
+    envelope = await deliver(
+        channel,
+        "agent.message",
+        {"message": "回信"},
+        correlation_id=result["message_id"],
+    )
+    await eventually(
+        lambda: (
+            channel.journal.data["events"].get(envelope.id, {}).get("state")
+            == "completed"
+        )
+    )
+    event = channel.journal.data["events"][envelope.id]
+    assert event["delivery"] == "uncertain"
+    await channel.journal.open()
+    await channel._receive(event["seq"], envelope)
+    sender.assert_awaited_once()
+
+
 @pytest.mark.parametrize(
     "phase",
     [
@@ -435,7 +545,10 @@ async def test_reply_returns_to_origin_after_journal_reload(
 async def test_reply_recovery_resumes_only_before_delivery_starts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, phase: str
 ) -> None:
-    service = ChiliarchService(SimpleNamespace(), state_path=tmp_path / "client.db")
+    runtime = SimpleNamespace(
+        onebot=SimpleNamespace(connection_status=lambda: {"connected": True})
+    )
+    service = ChiliarchService(runtime, state_path=tmp_path / "client.db")
     await service.journal.open()
     await service.journal.put(
         "routes",
@@ -472,7 +585,7 @@ async def test_reply_recovery_resumes_only_before_delivery_starts(
         ):
             raise asyncio.CancelledError
 
-    restarted = ChiliarchService(SimpleNamespace(), state_path=service.state_path)
+    restarted = ChiliarchService(runtime, state_path=service.state_path)
     monkeypatch.setattr(restarted, "_notify", notify)
     try:
         with monkeypatch.context() as scoped:

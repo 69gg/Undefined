@@ -33,6 +33,7 @@ LOGICAL_IDENTITY = "chiliarch_main"
 DISPLAY_NAME = "chiliarch 总管"
 MAX_CONCURRENT_TASKS = 1
 _PAIR_CHECK_SECONDS = 1.0
+_INBOX_POLL_SECONDS = 0.2
 
 
 def _key(value: str) -> str:
@@ -565,7 +566,7 @@ class ChiliarchService:
             )
             for seq, envelope in messages:
                 await self._receive(seq, envelope)
-            await asyncio.sleep(0.2)
+            await asyncio.sleep(_INBOX_POLL_SECONDS)
 
     def _route_for(self, envelope: Any) -> dict[str, Any] | None:
         candidates = [
@@ -628,6 +629,11 @@ class ChiliarchService:
                 and route.get("notify", True)
                 and route["origin"].get("kind") != "logical"
             ):
+                address, _ = parse_delivery_address(route["origin"].get("address"))
+                if address is not None and address.channel in {"qq", "group"}:
+                    # 等待时仍为 pending，取消或重启可以恢复；发起投递后不重放。
+                    while not self.runtime.onebot.connection_status()["connected"]:
+                        await asyncio.sleep(_INBOX_POLL_SECONDS)
                 event["delivery"] = "processing"
                 await self.journal.put("events", event_id, event)
                 try:
