@@ -99,6 +99,8 @@ class ChiliarchService:
         self._conversation_locks: dict[str, asyncio.Lock] = {}
         self._download_locks: dict[str, asyncio.Lock] = {}
         self._local_tasks: dict[str, asyncio.Task[None]] = {}
+        self._delivery_tasks: dict[str, asyncio.Task[None]] = {}
+        self._delivery_locks: dict[str, asyncio.Lock] = {}
         self._active: set[str] = set()
         self._progress: dict[str, Progress] = {}
         self._stopping = False
@@ -217,9 +219,21 @@ class ChiliarchService:
             for route in list(self.journal.data["routes"].values()):
                 if route["state"] == "prepared":
                     await self._enqueue_route(route)
-            for event_id, event in list(self.journal.data["events"].items()):
+            for event_id, event in sorted(
+                self.journal.data["events"].items(), key=lambda item: item[1]["seq"]
+            ):
                 if event.get("state") == "queued":
                     self._start_local(event_id)
+                elif (
+                    event.get("state") == "received"
+                    and event.get("delivery") == "pending"
+                    and event["seq"] <= self.journal.data["cursor"]
+                ):
+                    # 游标已前进的回信不会再从收件箱读到，单独恢复未开始的投递。
+                    self._start_delivery(
+                        event_id,
+                        self._protocol.Envelope.model_validate(event["envelope"]),
+                    )
             self._state = "running"
             self._reason = None
             self._started.set()
@@ -240,7 +254,10 @@ class ChiliarchService:
             self._started.set()
             if self.client is not None:
                 self.client.stop()
-            tasks: list[asyncio.Task[Any]] = [*self._local_tasks.values()]
+            tasks: list[asyncio.Task[Any]] = [
+                *self._local_tasks.values(),
+                *self._delivery_tasks.values(),
+            ]
             tasks.extend(
                 item
                 for item in (listener, ready, network, unpaired)
@@ -249,6 +266,8 @@ class ChiliarchService:
             for task in tasks:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
+            self._delivery_tasks.clear()
+            self._delivery_locks.clear()
             await self.history.stop()
             try:
                 self.client = None
@@ -561,6 +580,11 @@ class ChiliarchService:
 
     async def _listen(self) -> None:
         while not self._stopping:
+            for event_id, task in list(self._delivery_tasks.items()):
+                if task.done():
+                    # 将落盘等异常交回渠道生命周期处理，避免后台任务静默丢失。
+                    task.result()
+                    self._delivery_tasks.pop(event_id)
             messages = await self.client.store.messages(
                 int(self.journal.data["cursor"]), 100
             )
@@ -629,22 +653,41 @@ class ChiliarchService:
                 and route.get("notify", True)
                 and route["origin"].get("kind") != "logical"
             ):
-                address, _ = parse_delivery_address(route["origin"].get("address"))
-                if address is not None and address.channel in {"qq", "group"}:
-                    # 等待时仍为 pending，取消或重启可以恢复；发起投递后不重放。
-                    while not self.runtime.onebot.connection_status()["connected"]:
-                        await asyncio.sleep(_INBOX_POLL_SECONDS)
-                event["delivery"] = "processing"
+                self._start_delivery(event_id, envelope)
+            else:
+                event["state"] = "completed"
                 await self.journal.put("events", event_id, event)
-                try:
-                    await self._notify(route["origin"], self._incoming_text(envelope))
-                    event["delivery"] = "delivered"
-                except Exception as exc:
-                    event["delivery"] = "uncertain"
-                    event["delivery_error"] = type(exc).__name__
+        await self.journal.update(lambda data: data.__setitem__("cursor", seq))
+
+    def _start_delivery(self, event_id: str, envelope: Any) -> None:
+        if event_id not in self._delivery_tasks and not self._stopping:
+            self._delivery_tasks[event_id] = asyncio.create_task(
+                self._deliver(event_id, envelope), name="chiliarch.reply." + event_id
+            )
+
+    async def _deliver(self, event_id: str, envelope: Any) -> None:
+        origin = self.journal.data["events"][event_id]["origin"]
+        lock = self._delivery_locks.setdefault(_origin_key(origin), asyncio.Lock())
+        async with lock:
+            address, _ = parse_delivery_address(origin.get("address"))
+            if address is not None and address.channel in {"qq", "group"}:
+                # 等待只占用当前原会话的投递任务，收件与其他渠道继续推进。
+                while not self.runtime.onebot.connection_status()["connected"]:
+                    await asyncio.sleep(_INBOX_POLL_SECONDS)
+            event = {
+                **self.journal.data["events"][event_id],
+                "state": "processing",
+                "delivery": "processing",
+            }
+            await self.journal.put("events", event_id, event)
+            try:
+                await self._notify(origin, self._incoming_text(envelope))
+                event["delivery"] = "delivered"
+            except Exception as exc:
+                event["delivery"] = "uncertain"
+                event["delivery_error"] = type(exc).__name__
             event["state"] = "completed"
             await self.journal.put("events", event_id, event)
-        await self.journal.update(lambda data: data.__setitem__("cursor", seq))
 
     def _start_local(self, event_id: str) -> None:
         if event_id not in self._local_tasks and not self._stopping:

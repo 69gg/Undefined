@@ -461,7 +461,7 @@ async def test_reply_waits_for_onebot_reconnect_without_starting_delivery(
         sender.assert_not_awaited()
         event = channel.journal.data["events"][envelope.id]
         assert event["state"] == "processing" and event["delivery"] == "pending"
-        assert channel.journal.data["cursor"] < event["seq"]
+        await eventually(lambda: channel.journal.data["cursor"] >= event["seq"])
         if restart:
             await channel.stop()
             checked.clear()
@@ -503,6 +503,104 @@ async def test_weixin_reply_does_not_wait_for_onebot(channel: ChiliarchService) 
     assert channel.journal.data["events"][envelope.id]["delivery"] == "delivered"
 
 
+@pytest.mark.parametrize("restart", [False, True])
+async def test_waiting_onebot_replies_do_not_block_later_inbox_events(
+    channel: ChiliarchService, restart: bool
+) -> None:
+    connected = False
+    channel.runtime.onebot.connection_status = lambda: {"connected": connected}
+    sender = channel.runtime.sender.send_address_message
+
+    async def send(address: Any, message: str) -> None:
+        if address.channel in {"qq", "group"}:
+            assert connected
+
+    sender.side_effect = send
+    pending: list[Any] = []
+    for address in ("qq:123", "group:456"):
+        result = await channel.invoke(
+            "contact",
+            {"message": "询问", "client_request_id": address},
+            {"address": address},
+        )
+        pending.append(
+            await deliver(
+                channel,
+                "agent.message",
+                {"message": address + "回信"},
+                correlation_id=result["message_id"],
+            )
+        )
+    result = await channel.invoke(
+        "contact",
+        {"message": "询问", "client_request_id": "later-weixin"},
+        {"address": "wechat:789"},
+    )
+    weixin = await deliver(
+        channel,
+        "agent.message",
+        {"message": "后续微信回信"},
+        correlation_id=result["message_id"],
+    )
+    chat = await deliver(channel, "agent.message", {"message": "继续聊天"})
+    active = channel
+    restarted: ChiliarchService | None = None
+    try:
+        await eventually(
+            lambda: (
+                channel.journal.data["events"].get(chat.id, {}).get("state")
+                == "completed"
+                and channel.journal.data["events"].get(weixin.id, {}).get("delivery")
+                == "delivered"
+            )
+        )
+        assert len(channel.runtime.ai.calls) == 1
+        sender.assert_awaited_once()
+        assert sender.call_args.args[0].canonical == "wechat:789"
+        cursor = channel.journal.data["cursor"]
+        for envelope in pending:
+            event = channel.journal.data["events"][envelope.id]
+            assert event["delivery"] == "pending"
+            assert cursor > event["seq"]
+        if restart:
+            await channel.stop()
+            restarted = ChiliarchService(channel.runtime, state_path=channel.state_path)
+            channel.runtime.chiliarch_service = restarted
+            await restarted.start()
+            active = restarted
+            chat = await deliver(active, "agent.message", {"message": "重启后继续聊天"})
+            await eventually(
+                lambda: (
+                    active.journal.data["events"].get(chat.id, {}).get("state")
+                    == "completed"
+                )
+            )
+            assert len(channel.runtime.ai.calls) == 2
+            sender.assert_awaited_once()
+        connected = True
+        await eventually(
+            lambda: all(
+                active.journal.data["events"][envelope.id]["delivery"] == "delivered"
+                for envelope in pending
+            )
+        )
+        assert sender.await_count == 3
+        history = await active.history.get_conversation("main")
+        assert history is not None
+        for envelope in pending:
+            assert (
+                sum(
+                    message["message"] == active._incoming_text(envelope)
+                    for message in history["messages"]
+                )
+                == 1
+            )
+    finally:
+        connected = True
+        if restarted is not None:
+            await restarted.stop()
+
+
 async def test_uncertain_onebot_delivery_is_not_retried(
     channel: ChiliarchService,
 ) -> None:
@@ -530,6 +628,117 @@ async def test_uncertain_onebot_delivery_is_not_retried(
     await channel.journal.open()
     await channel._receive(event["seq"], envelope)
     sender.assert_awaited_once()
+
+
+@pytest.mark.parametrize("restart", [False, True])
+async def test_reply_delivery_preserves_origin_order_without_blocking_chat(
+    channel: ChiliarchService, restart: bool
+) -> None:
+    connected = False
+    channel.runtime.onebot.connection_status = lambda: {"connected": connected}
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    started: list[str] = []
+
+    async def send(address: Any, message: str) -> None:
+        started.append(message)
+        if len(started) == 1:
+            entered.set()
+            await release.wait()
+
+    channel.runtime.sender.send_address_message.side_effect = send
+    result = await channel.invoke(
+        "contact",
+        {"message": "询问", "client_request_id": "ordered-replies"},
+        {"address": "qq:123"},
+    )
+    replies = [
+        await deliver(
+            channel,
+            "agent.message",
+            {"message": message},
+            correlation_id=result["message_id"],
+        )
+        for message in ("第一条回信", "第二条回信")
+    ]
+    try:
+        await eventually(
+            lambda: all(
+                reply.id in channel.journal.data["events"]
+                and channel.journal.data["cursor"]
+                >= channel.journal.data["events"][reply.id]["seq"]
+                for reply in replies
+            )
+        )
+        if restart:
+            await channel.stop()
+            await channel.start()
+        connected = True
+        await eventually(entered.is_set)
+        chat = await deliver(
+            channel, "agent.message", {"message": "回信投递中继续聊天"}
+        )
+        await eventually(
+            lambda: (
+                channel.journal.data["events"].get(chat.id, {}).get("state")
+                == "completed"
+            )
+        )
+        assert started == [channel._incoming_text(replies[0])]
+        release.set()
+        await eventually(
+            lambda: all(
+                channel.journal.data["events"][reply.id]["delivery"] == "delivered"
+                for reply in replies
+            )
+        )
+        assert started == [channel._incoming_text(reply) for reply in replies]
+    finally:
+        connected = True
+        release.set()
+
+
+@pytest.mark.parametrize("phase", ["before_delivery", "after_delivery"])
+async def test_delivery_persistence_error_recovers_without_replaying_started_send(
+    channel: ChiliarchService, monkeypatch: pytest.MonkeyPatch, phase: str
+) -> None:
+    old_journal = channel.journal
+    put = old_journal.put
+    failed = asyncio.Event()
+
+    async def fail_once(collection: str, key: str, event: dict[str, Any]) -> None:
+        delivery = "processing" if phase == "before_delivery" else "delivered"
+        if not failed.is_set() and event.get("delivery") == delivery:
+            failed.set()
+            raise OSError("journal write failed")
+        await put(collection, key, event)
+
+    monkeypatch.setattr(old_journal, "put", fail_once)
+    result = await channel.invoke(
+        "contact",
+        {"message": "询问", "client_request_id": "delivery-journal-error"},
+        {"address": "qq:123"},
+    )
+    envelope = await deliver(
+        channel,
+        "agent.message",
+        {"message": "回信"},
+        correlation_id=result["message_id"],
+    )
+    await eventually(
+        lambda: (
+            failed.is_set()
+            and channel.journal is not old_journal
+            and channel.status()["state"] == "running"
+        )
+    )
+    expected = "delivered" if phase == "before_delivery" else "uncertain"
+    await eventually(
+        lambda: channel.journal.data["events"][envelope.id]["delivery"] == expected
+    )
+    channel.runtime.sender.send_address_message.assert_awaited_once()
+    history = await channel.history.get_conversation("main")
+    assert history is not None and len(history["messages"]) == 1
 
 
 @pytest.mark.parametrize(
@@ -593,7 +802,10 @@ async def test_reply_recovery_resumes_only_before_delivery_starts(
             scoped.setattr(service, "_record_incoming", interrupted_record)
             with pytest.raises(asyncio.CancelledError):
                 await service._receive(1, envelope)
-        assert service.journal.data["cursor"] == 0
+                await service._delivery_tasks[envelope.id]
+        assert service.journal.data["cursor"] == (
+            0 if phase in {"before_history", "after_history"} else 1
+        )
         await service.history.stop()
         await restarted.journal.open()
         if phase in {"before_history", "after_history"}:
@@ -605,6 +817,8 @@ async def test_reply_recovery_resumes_only_before_delivery_starts(
             )
         notify.side_effect = None
         await restarted._receive(1, envelope)
+        if envelope.id in restarted._delivery_tasks:
+            await restarted._delivery_tasks[envelope.id]
         assert restarted.journal.data["cursor"] == 1
         notify.assert_awaited_once()
         await restarted.journal.open()
@@ -622,12 +836,17 @@ async def test_reply_recovery_resumes_only_before_delivery_starts(
             type="agent.message", payload={"message": "回信"}, correlation_id="request"
         )
         await restarted._receive(2, another)
+        await restarted._delivery_tasks[another.id]
         assert notify.await_count == 2
         conversation = await restarted.history.get_conversation("main")
         assert conversation is not None
         assert len(conversation["messages"]) == 2
         assert len({item["message_id"] for item in conversation["messages"]}) == 2
     finally:
+        tasks = [*service._delivery_tasks.values(), *restarted._delivery_tasks.values()]
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
         await service.history.stop()
         await restarted.history.stop()
 

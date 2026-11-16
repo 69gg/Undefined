@@ -27,6 +27,6 @@ rm data/chiliarch/client.db
 
 聊天历史、业务关联和下载缓存保留在相邻的 `client.db.undefined/` 中。配对文件包含凭证，不要共享；同一文件只由 Undefined 使用。
 
-总管普通消息使用持续聊天，正式任务分别保存会话；中断的任务不会自动重做。模型调用重试耗尽或达到工具迭代上限会将任务标为失败，正常调用 `end` 即使没有回复正文也算成功。QQ、微信和 WebUI 也可通过 [chiliarch.call 工具](../src/Undefined/skills/toolsets/chiliarch/README.md) 联系总管，关联回信返回原聊天。渠道在 OneBot 连接建立后开始监听；运行中 OneBot 断线时，QQ 和群聊回信在开始投递前等待重连。重启会恢复尚未开始投递的回信，同一事件只写入一条历史，已送达或投递结果不确定的回信不会自动重发。任务不能改变 Undefined 的工作目录。
+总管普通消息使用持续聊天，正式任务分别保存会话；中断的任务不会自动重做。模型调用重试耗尽或达到工具迭代上限会将任务标为失败，正常调用 `end` 即使没有回复正文也算成功。QQ、微信和 WebUI 也可通过 [chiliarch.call 工具](../src/Undefined/skills/toolsets/chiliarch/README.md) 联系总管，关联回信返回原聊天。渠道在 OneBot 连接建立后开始监听；运行中 OneBot 断线时，QQ 和群聊回信在独立投递任务中等待重连，不阻塞后续收件、微信回信和总管聊天，同一原会话的回信保持顺序。重启会恢复尚未开始投递的回信，同一事件只写入一条历史，已送达或投递结果不确定的回信不会自动重发。任务不能改变 Undefined 的工作目录。
 
 需要排查连接时，可通过已有 Runtime API 鉴权调用 `GET /api/v1/chiliarch/status`；`mailbox_ready` 表示本地收件箱就绪。
