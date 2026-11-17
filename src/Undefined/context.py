@@ -8,6 +8,7 @@ from typing import Any, Optional
 import uuid
 from datetime import datetime
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +16,15 @@ logger = logging.getLogger(__name__)
 _request_context: ContextVar[Optional["RequestContext"]] = ContextVar(
     "request_context", default=None
 )
+
+
+def validate_logical_identity(value: str) -> str:
+    """Validate a stable, non-numeric identity usable as a profile filename."""
+    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]{0,127}", value) is None:
+        raise ValueError(
+            "logical_identity 必须为以字母或下划线开头的安全标识符（最多128字符）"
+        )
+    return value
 
 
 class RequestContext:
@@ -38,6 +48,7 @@ class RequestContext:
         group_id: Optional[int] = None,
         user_id: Optional[int] = None,
         sender_id: Optional[int] = None,
+        logical_identity: str | None = None,
         **metadata: Any,
     ):
         # 核心ID
@@ -49,6 +60,11 @@ class RequestContext:
         self.group_id = group_id
         self.user_id = user_id
         self.sender_id = sender_id
+        self.logical_identity = (
+            validate_logical_identity(logical_identity)
+            if logical_identity is not None
+            else None
+        )
 
         # 元数据
         self.metadata = metadata

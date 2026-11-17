@@ -1274,6 +1274,10 @@ api_key = "replace-with-your-key"
 
 ---
 
+### 4.24.1 chiliarch 原生协作渠道
+
+chiliarch 没有主配置项，也不读取 `CHILIARCH_*` 环境变量。配对文件 `data/chiliarch/client.db` 存在时自动启用，删除后自动停用；运行中也会检测变化，独立于 `api.enabled`。配对不修改 `config.toml`。接入步骤见 [chiliarch](chiliarch.md)。
+
 ### 4.25 `[api]` Runtime API / OpenAPI
 
 | 字段 | 默认值 | 说明 |

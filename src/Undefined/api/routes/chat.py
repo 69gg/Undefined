@@ -400,6 +400,7 @@ class ChatJobManager:
         self._closing = False
         self._title_schedule_lock = asyncio.Lock()
         self.conversation_store = WebChatConversationStore()
+        ctx.webchat_store = self.conversation_store
 
     def begin_shutdown(self) -> None:
         """立即关闭任务创建入口，已有任务由 stop 收尾。"""

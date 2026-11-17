@@ -547,6 +547,14 @@ class PromptBuilder:
                     str(extra_context.get("sender_id", "")) if extra_context else None
                 )
             )
+            logical_identity = (
+                ctx.logical_identity
+                if ctx and ctx.logical_identity
+                else str((extra_context or {}).get("logical_identity") or "")
+            )
+            if logical_identity:
+                resolved_user_id = logical_identity
+                resolved_sender_id = logical_identity
             resolved_request_type = (
                 str(ctx.request_type).strip()
                 if ctx and ctx.request_type

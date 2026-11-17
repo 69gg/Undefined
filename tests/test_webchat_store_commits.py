@@ -69,6 +69,7 @@ async def _mutate(
             text_content="new message",
             display_name="system",
             user_name="system",
+            message_id="msg_retry",
         )
     if operation == "delete":
         return await store.delete_conversation("existing")
@@ -203,6 +204,80 @@ async def test_cancelled_conversation_commit_finishes_before_unlocking(
         await asyncio.gather(writing, return_exceptions=True)
         if reader is not None:
             await asyncio.gather(reader, return_exceptions=True)
+        await store.stop()
+
+
+@pytest.mark.asyncio
+async def test_message_id_deduplicates_concurrent_appends_and_survives_restart(
+    tmp_path: Path,
+) -> None:
+    directory = tmp_path / "conversations"
+    store = webchat_store.WebChatConversationStore(
+        directory=directory, migrate_legacy=False
+    )
+    restarted = webchat_store.WebChatConversationStore(
+        directory=directory, migrate_legacy=False
+    )
+
+    async def append(
+        target: webchat_store.WebChatConversationStore, message_id: str | None
+    ) -> dict[str, Any]:
+        return await target.append_message(
+            "existing",
+            role="user",
+            text_content="same text",
+            display_name="system",
+            user_name="system",
+            message_id=message_id,
+        )
+
+    try:
+        await store.create_conversation(conversation_id="existing")
+        records = await asyncio.gather(*(append(store, "msg_event") for _ in range(5)))
+        assert {record["message_id"] for record in records} == {"msg_event"}
+        assert all(record["message"] == "same text" for record in records)
+        before_restart = await store.get_conversation("existing")
+        assert before_restart is not None
+        assert len(before_restart["messages"]) == 1
+        await store.stop()
+        await restarted.ensure_ready()
+        assert await append(restarted, "msg_event") == before_restart["messages"][0]
+        assert await restarted.get_conversation("existing") == before_restart
+        await append(restarted, "msg_another")
+        await append(restarted, None)
+        await append(restarted, None)
+        conversation = await restarted.get_conversation("existing")
+        assert conversation is not None
+        assert len(conversation["messages"]) == 4
+        assert len({item["message_id"] for item in conversation["messages"]}) == 4
+    finally:
+        await store.stop()
+        await restarted.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("message_id", ["", "msg:invalid", "m" * 97])
+async def test_explicit_message_id_must_survive_storage_normalization(
+    tmp_path: Path, message_id: str
+) -> None:
+    store = webchat_store.WebChatConversationStore(
+        directory=tmp_path / "conversations", migrate_legacy=False
+    )
+    try:
+        await store.create_conversation(conversation_id="existing")
+        with pytest.raises(ValueError, match="消息 ID"):
+            await store.append_message(
+                "existing",
+                role="user",
+                text_content="message",
+                display_name="system",
+                user_name="system",
+                message_id=message_id,
+            )
+        conversation = await store.get_conversation("existing")
+        assert conversation is not None
+        assert not conversation["messages"]
+    finally:
         await store.stop()
 
 

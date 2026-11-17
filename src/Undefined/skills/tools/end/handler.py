@@ -188,7 +188,12 @@ def _build_historian_recent_messages(
         chat_id = str(context.get("group_id") or "").strip()
         msg_type = "group"
     elif request_type == "private":
-        chat_id = str(context.get("user_id") or context.get("sender_id") or "").strip()
+        chat_id = str(
+            context.get("logical_identity")
+            or context.get("user_id")
+            or context.get("sender_id")
+            or ""
+        ).strip()
         msg_type = "private"
     else:
         return []

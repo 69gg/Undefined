@@ -76,6 +76,21 @@ async def execute(args: Dict[str, Any], context: Dict[str, Any]) -> str:
         logger.warning("[发送消息] 收到空消息请求")
         return "消息内容不能为空"
 
+    if context.get("logical_identity") and not any(
+        args.get(key) is not None
+        for key in ("address", "target_type", "target_id", "group_id", "user_id")
+    ):
+        session_send = context.get("session_send_callback")
+        if not callable(session_send):
+            return "发送失败：当前逻辑会话不可用"
+        try:
+            await session_send(message)
+        except Exception as exc:
+            logger.warning("[逻辑会话] 发送失败: %s", type(exc).__name__)
+            return "发送失败：当前逻辑会话输出失败"
+        mark_message_sent(context)
+        return "消息已排队"
+
     attachment_registry = context.get("attachment_registry")
     scope_key = scope_from_context(context)
     try:

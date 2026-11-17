@@ -65,6 +65,8 @@ def build_attachment_scope(
     user_id: Any = None,
     request_type: str | None = None,
     webui_session: bool = False,
+    logical_identity: str | None = None,
+    logical_conversation_id: str | None = None,
 ) -> str | None:
     """构建附件可见性作用域键。
 
@@ -77,6 +79,10 @@ def build_attachment_scope(
     Returns:
         形如 ``group:123`` / ``private:456`` / ``webui`` 的键，无法推断时返回 ``None``。
     """
+    if logical_identity:
+        return (
+            f"logical:{logical_identity}:{logical_conversation_id or logical_identity}"
+        )
     if webui_session:
         return "webui"
 
@@ -103,6 +109,9 @@ def scope_from_context(context: Mapping[str, Any] | None) -> str | None:
         user_id=context.get("user_id"),
         request_type=str(context.get("request_type", "") or ""),
         webui_session=bool(context.get("webui_session", False)),
+        logical_identity=str(context.get("logical_identity") or "") or None,
+        logical_conversation_id=str(context.get("logical_conversation_id") or "")
+        or None,
     )
 
 

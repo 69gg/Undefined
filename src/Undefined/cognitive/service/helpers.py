@@ -230,7 +230,10 @@ def _build_profile_vector_payload(
     }
     if entity_type == "user":
         metadata["nickname"] = effective_name
-        metadata["qq"] = entity_id
+        if entity_id.isdecimal():
+            metadata["qq"] = entity_id
+        else:
+            metadata["identity"] = entity_id
     else:
         metadata["group_name"] = effective_name
         metadata["group_id"] = entity_id

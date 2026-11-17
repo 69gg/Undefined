@@ -42,6 +42,22 @@ class _RecordingCognitiveService:
         return "【认知记忆上下文】\n用户最近在排查缓存命中问题。"
 
 
+async def test_logical_identity_recall_uses_same_profile_as_end() -> None:
+    from Undefined.context import RequestContext
+
+    cognitive = _RecordingCognitiveService()
+    builder = _make_builder_with_cognitive_service(cognitive)
+    async with RequestContext(
+        request_type="private", logical_identity="chiliarch_main"
+    ):
+        await builder.build_messages(
+            "你好", extra_context={"logical_identity": "chiliarch_main"}
+        )
+    assert cognitive.last_kwargs is not None
+    assert cognitive.last_kwargs["sender_id"] == "chiliarch_main"
+    assert cognitive.last_kwargs["user_id"] == "chiliarch_main"
+
+
 @dataclass
 class _FakeAnthropicSkill:
     name: str

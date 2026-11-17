@@ -136,7 +136,11 @@ class CognitiveService:
                 frontmatter["updated_at"] = datetime.now().isoformat()
                 if normalized_entity_type == "user":
                     frontmatter["nickname"] = normalized_name
-                    frontmatter["qq"] = normalized_entity_id
+                    if normalized_entity_id.isdecimal():
+                        frontmatter["qq"] = normalized_entity_id
+                    else:
+                        frontmatter.pop("qq", None)
+                        frontmatter["identity"] = normalized_entity_id
                 else:
                     frontmatter["group_name"] = normalized_name
                     frontmatter["group_id"] = normalized_entity_id
@@ -606,6 +610,14 @@ class CognitiveService:
             if ctx
             else str(context.get("sender_id") or context.get("user_id", "") or "")
         )
+        logical_identity = (
+            ctx.logical_identity
+            if ctx and ctx.logical_identity
+            else str(context.get("logical_identity") or "")
+        )
+        if logical_identity:
+            user_id = logical_identity
+            sender_id = logical_identity
         request_type = (
             str(ctx.request_type)
             if ctx and ctx.request_type

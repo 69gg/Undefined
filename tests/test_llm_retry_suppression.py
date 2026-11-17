@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from Undefined.ai.client import AIClient, MISSING_TOOL_CALL_RETRY_HINT
+from Undefined.ai.client.ask_loop import ChatExecutionError
 from Undefined.ai.queue_budget import compute_queued_llm_timeout_seconds
 from Undefined.config.models import (
     AgentModelConfig,
@@ -21,10 +22,14 @@ from Undefined.skills.agents.runner import run_agent_with_tools
 
 
 @pytest.mark.asyncio
-async def test_ai_ask_suppresses_queued_llm_error_when_retries_exhausted() -> None:
+@pytest.mark.parametrize("raise_on_error", [False, True])
+@pytest.mark.parametrize("retries", [0, 1])
+async def test_ai_ask_reports_queued_llm_error_when_retries_exhausted(
+    raise_on_error: bool, retries: int
+) -> None:
     client: Any = object.__new__(AIClient)
     client.runtime_config = cast(
-        Any, SimpleNamespace(log_thinking=False, ai_request_max_retries=0)
+        Any, SimpleNamespace(log_thinking=False, ai_request_max_retries=retries)
     )
     client._prompt_builder = cast(
         Any,
@@ -61,13 +66,21 @@ async def test_ai_ask_suppresses_queued_llm_error_when_retries_exhausted() -> No
         proxy_config_available=False,
     )
 
-    result = await AIClient.ask(client, "hello")
-
-    assert result == ""
+    if raise_on_error:
+        with pytest.raises(ChatExecutionError) as caught:
+            await AIClient.ask(client, "hello", raise_on_error=True)
+        assert isinstance(caught.value.__cause__, RuntimeError)
+    else:
+        assert await AIClient.ask(client, "hello") == ""
+    assert client.submit_queued_llm_call.await_count == retries + 1
 
 
 @pytest.mark.asyncio
-async def test_ai_ask_retries_pre_tool_local_failure() -> None:
+@pytest.mark.parametrize("raise_on_error", [False, True])
+@pytest.mark.parametrize("completes", [False, True])
+async def test_ai_ask_distinguishes_end_from_iteration_limit_after_retry(
+    raise_on_error: bool, completes: bool
+) -> None:
     client: Any = object.__new__(AIClient)
     client.runtime_config = cast(
         Any, SimpleNamespace(log_thinking=False, ai_request_max_retries=1)
@@ -107,28 +120,26 @@ async def test_ai_ask_retries_pre_tool_local_failure() -> None:
         max_tokens=1024,
     )
     client._find_chat_config_by_name = lambda _name: client.chat_config
-    client.submit_queued_llm_call = AsyncMock(
-        side_effect=[
-            {"choices": []},
+    response = {
+        "choices": [
             {
-                "choices": [
-                    {
-                        "message": {
-                            "content": "",
-                            "tool_calls": [
-                                {
-                                    "id": "call_end",
-                                    "function": {
-                                        "name": "end",
-                                        "arguments": "{}",
-                                    },
-                                }
-                            ],
+                "message": {
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "call_tool",
+                            "function": {
+                                "name": "end" if completes else "test_tool",
+                                "arguments": "{}",
+                            },
                         }
-                    }
-                ],
-            },
-        ]
+                    ],
+                }
+            }
+        ],
+    }
+    client.submit_queued_llm_call = AsyncMock(
+        side_effect=[{"choices": []}] + [response] * (1 if completes else 999)
     )
     client._search_wrapper = None
     client._end_summary_storage = cast(Any, None)
@@ -144,10 +155,13 @@ async def test_ai_ask_retries_pre_tool_local_failure() -> None:
         proxy_config_available=False,
     )
 
-    result = await AIClient.ask(client, "hello")
-
-    assert result == ""
-    assert cast(AsyncMock, client.submit_queued_llm_call).await_count == 2
+    if raise_on_error and not completes:
+        with pytest.raises(ChatExecutionError, match="达到最大迭代次数"):
+            await AIClient.ask(client, "hello", raise_on_error=True)
+    else:
+        result = await AIClient.ask(client, "hello", raise_on_error=raise_on_error)
+        assert result == ("" if completes else "达到最大迭代次数，未能完成处理")
+    assert client.submit_queued_llm_call.await_count == (2 if completes else 1000)
 
 
 @pytest.mark.parametrize("blank_content", [None, "", "\n\n", " \t\r\n"])

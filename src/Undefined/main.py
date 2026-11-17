@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 import logging
 import signal
 import time
@@ -27,6 +28,7 @@ from Undefined.onebot import OneBotClient
 from Undefined.api import RuntimeAPIContext, RuntimeAPIServer
 from Undefined.token_usage_storage import TokenUsageStorage
 from Undefined.weixin import WeixinService
+from Undefined.chiliarch import ChiliarchService
 from Undefined.utils.paths import (
     CACHE_DIR,
     DATA_DIR,
@@ -187,6 +189,7 @@ async def main() -> None:
     retrieval_registry = None
     runtime_api_server: RuntimeAPIServer | None = None
     weixin_service: WeixinService | None = None
+    chiliarch_service: ChiliarchService | None = None
     _reranker: Any = None
     try:
         init_start = time.perf_counter()
@@ -460,6 +463,27 @@ async def main() -> None:
     if weixin_service is not None:
         await weixin_service.start()
 
+    runtime_api_context = RuntimeAPIContext(
+        config_getter=lambda: get_config(strict=False),
+        onebot=onebot,
+        ai=ai,
+        command_dispatcher=handler.command_dispatcher,
+        queue_manager=handler.queue_manager,
+        history_manager=handler.history_manager,
+        sender=handler.sender,
+        scheduler=handler.ai_coordinator.scheduler,
+        cognitive_service=cognitive_service,
+        cognitive_job_queue=job_queue,
+        meme_service=meme_service,
+        naga_store=None,
+        message_batcher=handler.message_batcher,
+        pipeline_registry=handler.pipeline_registry,
+        weixin_service=weixin_service,
+    )
+    chiliarch_service = ChiliarchService(runtime_api_context)
+    runtime_api_context.chiliarch_service = chiliarch_service
+    setattr(ai, "chiliarch_service", chiliarch_service)
+
     if config.api.enabled:
         # Naga 外部网关集成（需同时开启 nagaagent_mode_enabled 和 naga.enabled）
         naga_store = None
@@ -471,23 +495,7 @@ async def main() -> None:
             handler.command_dispatcher.naga_store = naga_store
             logger.info("[Naga] 绑定存储已加载")
 
-        runtime_api_context = RuntimeAPIContext(
-            config_getter=lambda: get_config(strict=False),
-            onebot=onebot,
-            ai=ai,
-            command_dispatcher=handler.command_dispatcher,
-            queue_manager=handler.queue_manager,
-            history_manager=handler.history_manager,
-            sender=handler.sender,
-            scheduler=handler.ai_coordinator.scheduler,
-            cognitive_service=cognitive_service,
-            cognitive_job_queue=job_queue,
-            meme_service=meme_service,
-            naga_store=naga_store,
-            message_batcher=handler.message_batcher,
-            pipeline_registry=handler.pipeline_registry,
-            weixin_service=weixin_service,
-        )
+        runtime_api_context.naga_store = naga_store
         runtime_api_server = RuntimeAPIServer(
             runtime_api_context,
             host=config.api.host,
@@ -514,7 +522,10 @@ async def main() -> None:
     onebot_run_task: asyncio.Task[None] | None = None
     try:
         onebot_run_task = await _run_until_shutdown(
-            onebot, shutdown_guard.event, logger
+            onebot,
+            shutdown_guard.event,
+            logger,
+            on_connected=chiliarch_service.start,
         )
     except KeyboardInterrupt:
         # 仅在信号处理器注册全部失败（如非主线程运行）时才会走到这里；
@@ -530,6 +541,7 @@ async def main() -> None:
                 handler,
                 runtime_api_server=runtime_api_server,
                 weixin_service=weixin_service,
+                chiliarch_service=chiliarch_service,
                 meme_worker=meme_worker,
                 historian_worker=historian_worker,
                 logger=logger,
@@ -557,14 +569,19 @@ async def _close_message_runtime(
     meme_worker: MemeWorker | None,
     historian_worker: HistorianWorker | None,
     logger: logging.Logger,
+    chiliarch_service: ChiliarchService | None = None,
 ) -> None:
     """先关闭新接入并排空已接受任务，最后释放回复所依赖的传输资源。"""
     onebot.stop_accepting_messages()
+    if chiliarch_service is not None:
+        chiliarch_service.stop_accepting_messages()
     if weixin_service is not None:
         weixin_service.stop_accepting_messages()
     if runtime_api_server is not None:
         runtime_api_server.begin_shutdown()
     try:
+        if chiliarch_service is not None:
+            await chiliarch_service.stop()
         if runtime_api_server is not None:
             await runtime_api_server.drain_requests()
         await onebot.drain_message_tasks()
@@ -698,11 +715,41 @@ async def _run_until_shutdown(
     onebot: OneBotClient,
     shutdown_event: asyncio.Event,
     logger: logging.Logger,
+    *,
+    on_connected: Callable[[], Awaitable[None]] | None = None,
 ) -> asyncio.Task[None]:
     """等待停机条件；返回仍可收发的连接任务，由调用方在排空后关闭。"""
-    run_task = asyncio.create_task(onebot.run_with_reconnect(), name="onebot-run")
+    connected = asyncio.Event()
+    run_task = asyncio.create_task(
+        onebot.run_with_reconnect(on_connected=connected.set)
+        if on_connected is not None
+        else onebot.run_with_reconnect(),
+        name="onebot-run",
+    )
+    startup_task: asyncio.Task[None] | None = None
+    if on_connected is not None:
+
+        async def start_after_connection() -> None:
+            await connected.wait()
+            await on_connected()
+
+        startup_task = asyncio.create_task(
+            start_after_connection(), name="connected-startup"
+        )
     stop_task = asyncio.create_task(shutdown_event.wait(), name="shutdown-wait")
     try:
+        if startup_task is not None:
+            done, _pending = await asyncio.wait(
+                {run_task, stop_task, startup_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if startup_task in done:
+                startup_task.result()
+            if run_task in done:
+                run_task.result()
+                return run_task
+            if stop_task in done:
+                return run_task
         done, _pending = await asyncio.wait(
             {run_task, stop_task},
             return_when=asyncio.FIRST_COMPLETED,
@@ -719,10 +766,13 @@ async def _run_until_shutdown(
         raise
     finally:
         stop_task.cancel()
-        try:
-            await stop_task
-        except asyncio.CancelledError:
-            pass
+        if startup_task is not None:
+            startup_task.cancel()
+        await asyncio.gather(
+            stop_task,
+            *([startup_task] if startup_task is not None else []),
+            return_exceptions=True,
+        )
 
 
 def run() -> None:

@@ -27,16 +27,19 @@ src/Undefined/
 ├── jm/            # 禁漫（JM / 18comic）车号解析、关键词搜索、逐章 PDF 下载合成与 zip 打包
 ├── onebot/        # OneBot WebSocket 客户端
 ├── weixin/        # 微信 iLink：service 账号生命周期、store 凭据/映射、audio 语音准备、transport 投递状态适配
+├── channels/      # 普通逻辑会话执行器，复用聊天历史、AI、end 与认知流水线
+├── chiliarch/     # 原生渠道：service 配对文件自动启停/路由，store 持久关联，mailbox 文件适配，pair 原生配对
 ├── skills/        # 技能插件核心目录 (存放所有的工具与智能体)
 │   ├── tools/           # 基础原子的工具 (独立的功能单元，如读写文件、网络请求等)
 │   ├── toolsets/        # 聚合工具集 (分组后的工具组)
 │   │   └── cognitive/   # 认知记忆主动暴露工具 (search_events, get_profile 等)
+│   │                   # chiliarch/call 提供跨平台原生协作工具（依赖从 context 注入）
 │   ├── agents/          # 智能体 (含 runner/ 通用循环子包)
 │   ├── commands/        # 中心化斜杠指令系统 (实现如 /help, /stats, /admin 等平台功能)
 │   ├── pipelines/     # 自动提取管线 (bilibili / bilibili_opus / arxiv / github / jm 等)
 │   └── anthropic_skills/# Anthropic 协议集成的外部 Skills (兼容 SKILL.md 格式)
 ├── api/           # Management API + Runtime API
-│   ├── routes/    # 路由子模块 (chat, tools, naga/, system, memes, memory, cognitive, health)
+│   ├── routes/    # 路由子模块 (chat, tools, naga/, system, memes, memory, cognitive, health, chiliarch)
 │   ├── app.py     # aiohttp 服务主入口 (薄包装委派到 routes/)
 │   └── _openapi.py # OpenAPI 文档生成
 ├── memes/         # 表情包库 (service + ingest/ + search/ + store + vector_store)

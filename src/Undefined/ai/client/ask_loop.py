@@ -42,6 +42,10 @@ from Undefined.utils.tool_calls import (
 logger = logging.getLogger(__name__)
 
 
+class ChatExecutionError(RuntimeError):
+    """聊天执行失败，与 end 工具正常返回的空文本区分。"""
+
+
 def _webchat_agent_path(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
@@ -135,6 +139,7 @@ class ClientAskLoopMixin(ClientQueueMixin):
         onebot_client: Any = None,
         scheduler: Any = None,
         extra_context: dict[str, Any] | None = None,
+        raise_on_error: bool = False,
     ) -> str:
         """发送问题给 AI 并获取回复 (支持工具调用和迭代)
 
@@ -152,6 +157,7 @@ class ClientAskLoopMixin(ClientQueueMixin):
             onebot_client: OneBot 客户端实例
             scheduler: 自动化服务实例
             extra_context: 额外的上下文负载
+            raise_on_error: 重试耗尽后抛出执行失败信号，默认保留静默结束行为
 
         返回:
             AI 生成的最终文本回复
@@ -166,6 +172,8 @@ class ClientAskLoopMixin(ClientQueueMixin):
                 pre_context["user_id"] = ctx.user_id
             if ctx.sender_id is not None:
                 pre_context["sender_id"] = ctx.sender_id
+            if ctx.logical_identity is not None:
+                pre_context["logical_identity"] = ctx.logical_identity
             pre_context["request_type"] = ctx.request_type
             pre_context["request_id"] = ctx.request_id
         if extra_context:
@@ -307,6 +315,8 @@ class ClientAskLoopMixin(ClientQueueMixin):
                 tool_context.setdefault("user_id", ctx.user_id)
             if ctx.sender_id is not None:
                 tool_context.setdefault("sender_id", ctx.sender_id)
+            if ctx.logical_identity is not None:
+                tool_context.setdefault("logical_identity", ctx.logical_identity)
             tool_context.setdefault("request_type", ctx.request_type)
             tool_context.setdefault("request_id", ctx.request_id)
 
@@ -314,6 +324,9 @@ class ClientAskLoopMixin(ClientQueueMixin):
             tool_context.update(extra_context)
 
         # 注入常用资源（用于工具执行）
+        tool_context.setdefault(
+            "chiliarch_service", getattr(self, "chiliarch_service", None)
+        )
         tool_context.setdefault("ai_client", self)
         tool_context.setdefault("runtime_config", self._get_runtime_config())
         tool_context.setdefault("_task_progress", [])
@@ -1150,6 +1163,8 @@ class ClientAskLoopMixin(ClientQueueMixin):
                     )
                     await emit_webchat_stage("retrying_model", str(exc))
                     continue
+                if raise_on_error:
+                    raise ChatExecutionError("AI 聊天执行失败") from exc
                 logger.exception(
                     "[chat.suppressed_error] model=%s lane=%s iteration=%s error=%s",
                     effective_chat_config.model_name,
@@ -1160,4 +1175,6 @@ class ClientAskLoopMixin(ClientQueueMixin):
                 return ""
 
         logger.warning("[AI决策] 达到最大迭代次数，未能完成处理")
+        if raise_on_error:
+            raise ChatExecutionError("达到最大迭代次数，未能完成处理")
         return "达到最大迭代次数，未能完成处理"
